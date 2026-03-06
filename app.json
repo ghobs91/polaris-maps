@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Polaris Maps",
+    "slug": "polaris-maps",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "polaris-maps",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.polarismaps.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Polaris Maps needs your location to show your position on the map and provide navigation directions.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Polaris Maps uses your location in the background to contribute anonymous traffic data to the P2P network.",
+        "NSCameraUsageDescription": "Polaris Maps uses the camera to capture street-level imagery for the community."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.polarismaps.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Polaris Maps uses your location in the background to contribute anonymous traffic data."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Polaris Maps uses the camera to capture street-level imagery."
+        }
+      ],
+      "expo-sqlite"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    }
+  }
+}
