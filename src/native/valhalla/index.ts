@@ -47,8 +47,11 @@ function mapNativeRoute(native: NativeValhallaRoute): ValhallaRoute {
   };
 }
 
+const isAvailable = NativePolarisValhalla != null;
+
 export async function initialize(config: ValhallaConfig): Promise<void> {
-  return NativePolarisValhalla.initialize(config);
+  if (!isAvailable) return;
+  return NativePolarisValhalla!.initialize(config);
 }
 
 export async function computeRoute(
@@ -56,7 +59,8 @@ export async function computeRoute(
   costing: CostingModel,
   options?: RouteOptions,
 ): Promise<ValhallaRoute[]> {
-  const results = await NativePolarisValhalla.computeRoute(waypoints, costing, options);
+  if (!isAvailable) return [];
+  const results = await NativePolarisValhalla!.computeRoute(waypoints, costing, options);
   return results.map(mapNativeRoute);
 }
 
@@ -65,12 +69,14 @@ export async function reroute(
   destination: Waypoint,
   costing: CostingModel,
 ): Promise<ValhallaRoute> {
-  const result = await NativePolarisValhalla.reroute(currentPosition, destination, costing);
+  if (!isAvailable) throw new Error('PolarisValhalla native module is not available');
+  const result = await NativePolarisValhalla!.reroute(currentPosition, destination, costing);
   return mapNativeRoute(result);
 }
 
 export async function updateTrafficSpeeds(speeds: Record<string, number>): Promise<void> {
-  return NativePolarisValhalla.updateTrafficSpeeds(speeds);
+  if (!isAvailable) return;
+  return NativePolarisValhalla!.updateTrafficSpeeds(speeds);
 }
 
 export function hasCoverage(bounds: {
@@ -79,15 +85,18 @@ export function hasCoverage(bounds: {
   minLng: number;
   maxLng: number;
 }): boolean {
-  return NativePolarisValhalla.hasCoverage(bounds);
+  if (!isAvailable) return false;
+  return NativePolarisValhalla!.hasCoverage(bounds);
 }
 
 export async function getLoadedRegions(): Promise<
   Array<{ regionId: string; tilePath: string; sizeBytes: number }>
 > {
-  return NativePolarisValhalla.getLoadedRegions();
+  if (!isAvailable) return [];
+  return NativePolarisValhalla!.getLoadedRegions();
 }
 
 export async function dispose(): Promise<void> {
-  return NativePolarisValhalla.dispose();
+  if (!isAvailable) return;
+  return NativePolarisValhalla!.dispose();
 }

@@ -1,8 +1,33 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { getTileServerBaseUrl } from '../../native/tileServer';
+
+// Fallback OSM raster style used when the local tile server is unavailable
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const OSM_FALLBACK_STYLE: any = {
+  version: 8,
+  name: 'OSM Raster',
+  sources: {
+    osm: {
+      type: 'raster',
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      attribution: '&copy; OpenStreetMap contributors',
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: 'osm-tiles',
+      type: 'raster',
+      source: 'osm',
+      minzoom: 0,
+      maxzoom: 22,
+    },
+  ],
+};
 
 interface MapViewProps {
   routeGeometry?: string;
@@ -11,9 +36,39 @@ interface MapViewProps {
 
 export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
   const mapRef = useRef<any>(null);
-  const { viewport, setViewport, tileServerPort } = useMapStore();
+  const cameraRef = useRef<any>(null);
+  const tileServerPort = useMapStore((s) => s.tileServerPort);
+  const viewport = useMapStore((s) => s.viewport);
+  // Track the last programmatic viewport change to fly to
+  const lastProgrammaticMove = useRef(0);
 
-  const styleUrl = tileServerPort ? `${getTileServerBaseUrl()}/style.json` : undefined;
+  const styleUrl = tileServerPort ? `${getTileServerBaseUrl()}/style.json` : OSM_FALLBACK_STYLE;
+
+  // Listen for programmatic viewport changes (locate, search select) and fly to them
+  useEffect(() => {
+    const unsub = useMapStore.subscribe((state, prev) => {
+      if (state.viewport !== prev.viewport && cameraRef.current) {
+        // Only animate if this is a programmatic change (zoom/lat/lng changed materially)
+        const v = state.viewport;
+        const p = prev.viewport;
+        const latChanged = Math.abs(v.lat - p.lat) > 0.0001;
+        const lngChanged = Math.abs(v.lng - p.lng) > 0.0001;
+        const zoomChanged = Math.abs(v.zoom - p.zoom) >= 0.5;
+        if (latChanged || lngChanged || zoomChanged) {
+          lastProgrammaticMove.current = Date.now();
+          cameraRef.current.setCamera({
+            centerCoordinate: [v.lng, v.lat],
+            zoomLevel: v.zoom,
+            heading: v.bearing,
+            pitch: v.pitch,
+            animationDuration: 500,
+            animationMode: 'flyTo',
+          });
+        }
+      }
+    });
+    return unsub;
+  }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handlePress = useCallback(
@@ -24,35 +79,17 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
     [onMapPress],
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleRegionDidChange = useCallback(
-    (event: any) => {
-      const [lng, lat] = event.geometry.coordinates as [number, number];
-      setViewport({
-        lat,
-        lng,
-        zoom: event.properties.zoomLevel,
-        bearing: event.properties.heading,
-        pitch: event.properties.pitch,
-      });
-    },
-    [setViewport],
-  );
-
   return (
     <View style={styles.container}>
-      <MapLibreGL.MapView
-        ref={mapRef}
-        style={styles.map}
-        mapStyle={styleUrl}
-        onPress={handlePress}
-        onRegionDidChange={handleRegionDidChange}
-      >
+      <MapLibreGL.MapView ref={mapRef} style={styles.map} mapStyle={styleUrl} onPress={handlePress}>
         <MapLibreGL.Camera
-          zoomLevel={viewport.zoom}
-          centerCoordinate={[viewport.lng, viewport.lat]}
-          heading={viewport.bearing}
-          pitch={viewport.pitch}
+          ref={cameraRef}
+          defaultSettings={{
+            centerCoordinate: [viewport.lng, viewport.lat],
+            zoomLevel: viewport.zoom,
+            heading: viewport.bearing,
+            pitch: viewport.pitch,
+          }}
         />
 
         <MapLibreGL.UserLocation visible />
