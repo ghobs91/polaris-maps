@@ -171,9 +171,7 @@ async function downloadViaHttp(
   const geocodingUrl = await resolveUrl(region.id, 'geocoding.db');
 
   if (!routingUrl) {
-    throw new Error(
-      'Routing data is not available for this region. Generate region data with scripts/generate-region-data.sh and serve it, or configure GitHub Releases.',
-    );
+    throw new Error('Region data is not yet available for download. Please try again later.');
   }
 
   // Stage 1: Download PMTiles

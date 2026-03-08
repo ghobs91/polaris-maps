@@ -27,4 +27,4 @@ export const DATA_BASE_URL: string | null = null;
  *
  * Set to null to disable GitHub Releases as a source.
  */
-export const GITHUB_DATA_REPO: 'ghobs91/polaris-maps' | null = null;
+export const GITHUB_DATA_REPO: string | null = 'ghobs91/polaris-maps';
