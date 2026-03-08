@@ -30,7 +30,8 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       routing_size_bytes INTEGER,
       geocoding_size_bytes INTEGER,
       downloaded_at INTEGER,
-      last_updated INTEGER
+      last_updated INTEGER,
+      drive_key TEXT
     );
 
     CREATE TABLE IF NOT EXISTS map_tiles (
@@ -180,6 +181,13 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_imagery_geohash ON street_imagery (geohash8, bearing);
     CREATE INDEX IF NOT EXISTS idx_imagery_author ON street_imagery (author_pubkey);
   `);
+
+  // Migration: add drive_key column for existing databases
+  try {
+    await database.execAsync(`ALTER TABLE regions ADD COLUMN drive_key TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 }
 
 export async function closeDatabase(): Promise<void> {

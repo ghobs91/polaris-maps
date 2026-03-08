@@ -463,6 +463,7 @@ export async function seedCatalog(): Promise<void> {
         geocodingSizeBytes: entry.geocodingSizeBytes,
         downloadedAt: existing?.downloadedAt ?? null,
         lastUpdated: Math.floor(Date.now() / 1000),
+        driveKey: existing?.driveKey ?? null,
       };
 
       await upsertRegion(region);

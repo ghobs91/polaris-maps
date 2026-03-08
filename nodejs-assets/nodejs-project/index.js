@@ -39,6 +39,19 @@ channel.addListener('message', async (msg) => {
       case 'status':
         handleStatus(command);
         break;
+      // Hyperdrive commands
+      case 'hd-seed':
+        await handleHdSeed(command);
+        break;
+      case 'hd-download':
+        await handleHdDownload(command);
+        break;
+      case 'hd-status':
+        handleHdStatus(command);
+        break;
+      case 'hd-unseed':
+        await handleHdUnseed(command);
+        break;
       default:
         sendError(command.requestId, `Unknown command: ${command.type}`);
     }
@@ -152,6 +165,216 @@ function onIncomingMessage(topic, payload) {
       payload: Array.from(payload),
     }),
   );
+}
+
+// --- Hyperdrive: P2P region data seeding & downloading ---
+
+const Hyperswarm = require('hyperswarm');
+const Hyperdrive = require('hyperdrive');
+const Corestore = require('corestore');
+
+let swarm = null;
+const seededDrives = new Map(); // regionId -> { drive, discovery }
+
+function getCorestorePath() {
+  // Use app documents dir; nodejs-mobile has access to the same FS
+  return path.join(require('os').homedir(), '.polaris-corestore');
+}
+
+function ensureSwarm() {
+  if (swarm) return swarm;
+  swarm = new Hyperswarm();
+  swarm.on('connection', (conn, info) => {
+    // Replicate all corestores over this connection
+    for (const { drive } of seededDrives.values()) {
+      drive.corestore.replicate(conn);
+    }
+  });
+  return swarm;
+}
+
+/**
+ * Seed a region: import local files into a Hyperdrive, join the swarm.
+ * Returns the drive's discovery key (hex) for other peers to find it.
+ *
+ * Command: { type: 'hd-seed', regionId, filesDir, requestId }
+ * filesDir contains: tiles.pmtiles, routing/ (dir), geocoding.db
+ */
+async function handleHdSeed(command) {
+  const { regionId, filesDir, requestId } = command;
+  try {
+    if (seededDrives.has(regionId)) {
+      const existing = seededDrives.get(regionId);
+      return sendResponse(requestId, {
+        type: 'hd-seed-result',
+        discoveryKey: existing.drive.discoveryKey.toString('hex'),
+        key: existing.drive.key.toString('hex'),
+      });
+    }
+
+    const storePath = path.join(getCorestorePath(), regionId);
+    const store = new Corestore(storePath);
+    const drive = new Hyperdrive(store);
+    await drive.ready();
+
+    // Import region files into the drive
+    const filesToImport = [];
+    collectFiles(filesDir, filesDir, filesToImport);
+
+    for (const { relativePath, absolutePath } of filesToImport) {
+      const content = fs.readFileSync(absolutePath);
+      await drive.put(relativePath, content);
+    }
+
+    // Join swarm to make this drive discoverable
+    const sw = ensureSwarm();
+    const discovery = sw.join(drive.discoveryKey);
+    await discovery.flushed();
+
+    seededDrives.set(regionId, { drive, discovery, store });
+
+    console.log(`[Hyperdrive] Seeding ${regionId} — key: ${drive.key.toString('hex').slice(0, 16)}…`);
+
+    sendResponse(requestId, {
+      type: 'hd-seed-result',
+      discoveryKey: drive.discoveryKey.toString('hex'),
+      key: drive.key.toString('hex'),
+    });
+  } catch (err) {
+    sendError(requestId, err.message || String(err));
+  }
+}
+
+/**
+ * Download a region from a known drive key (hex string).
+ * Writes files to destDir.
+ *
+ * Command: { type: 'hd-download', driveKey, destDir, requestId }
+ */
+async function handleHdDownload(command) {
+  const { driveKey, destDir, requestId } = command;
+  try {
+    const storePath = path.join(getCorestorePath(), '_dl_' + driveKey.slice(0, 16));
+    const store = new Corestore(storePath);
+    const drive = new Hyperdrive(store, Buffer.from(driveKey, 'hex'));
+    await drive.ready();
+
+    // Join swarm to find peers that seed this drive
+    const sw = ensureSwarm();
+
+    sw.on('connection', (conn) => {
+      drive.corestore.replicate(conn);
+    });
+
+    const discovery = sw.join(drive.discoveryKey);
+    await discovery.flushed();
+
+    // Wait for initial peer connection (timeout 30s)
+    const peerFound = await Promise.race([
+      new Promise((resolve) => {
+        if (drive.core.peers.length > 0) return resolve(true);
+        sw.once('connection', () => resolve(true));
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(false), 30_000)),
+    ]);
+
+    if (!peerFound) {
+      await discovery.destroy();
+      await store.close();
+      return sendError(requestId, 'No peers found for this drive');
+    }
+
+    // Download all files from the drive
+    fs.mkdirSync(destDir, { recursive: true });
+    let totalBytes = 0;
+
+    for await (const entry of drive.list('/')) {
+      const filePath = path.join(destDir, entry.key);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+      const content = await drive.get(entry.key);
+      if (content) {
+        fs.writeFileSync(filePath, content);
+        totalBytes += content.length;
+
+        // Report progress
+        channel.send(JSON.stringify({
+          type: 'hd-download-progress',
+          requestId,
+          file: entry.key,
+          bytes: content.length,
+          totalBytes,
+        }));
+      }
+    }
+
+    // Clean up download-side store
+    await discovery.destroy();
+    await store.close();
+
+    sendResponse(requestId, {
+      type: 'hd-download-result',
+      totalBytes,
+    });
+  } catch (err) {
+    sendError(requestId, err.message || String(err));
+  }
+}
+
+/**
+ * Stop seeding a region and release resources.
+ *
+ * Command: { type: 'hd-unseed', regionId, requestId }
+ */
+async function handleHdUnseed(command) {
+  const { regionId, requestId } = command;
+  try {
+    const entry = seededDrives.get(regionId);
+    if (entry) {
+      await entry.discovery.destroy();
+      await entry.store.close();
+      seededDrives.delete(regionId);
+    }
+    sendResponse(requestId, { type: 'response', success: true });
+  } catch (err) {
+    sendError(requestId, err.message || String(err));
+  }
+}
+
+/**
+ * Return status for all seeded drives.
+ *
+ * Command: { type: 'hd-status', requestId }
+ */
+function handleHdStatus(command) {
+  const drives = [];
+  for (const [regionId, { drive }] of seededDrives) {
+    drives.push({
+      regionId,
+      key: drive.key.toString('hex'),
+      discoveryKey: drive.discoveryKey.toString('hex'),
+      peers: drive.core.peers ? drive.core.peers.length : 0,
+    });
+  }
+  sendResponse(command.requestId, {
+    type: 'hd-status-result',
+    drives,
+    swarmConnections: swarm ? swarm.connections.size : 0,
+  });
+}
+
+/** Recursively collect files from a directory. */
+function collectFiles(baseDir, currentDir, result) {
+  const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const abs = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      collectFiles(baseDir, abs, result);
+    } else {
+      const rel = '/' + path.relative(baseDir, abs);
+      result.push({ relativePath: rel, absolutePath: abs });
+    }
+  }
 }
 
 initWaku().catch(console.error);

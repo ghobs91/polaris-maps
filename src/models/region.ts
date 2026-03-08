@@ -17,6 +17,7 @@ export interface Region {
   geocodingSizeBytes: number | null;
   downloadedAt: number | null;
   lastUpdated: number | null;
+  driveKey: string | null;
 }
 
 export type RegionDownloadStatus = 'none' | 'downloading' | 'complete' | 'failed';

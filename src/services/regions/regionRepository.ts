@@ -40,8 +40,8 @@ export async function upsertRegion(region: Region): Promise<void> {
        id, name, bounds_min_lat, bounds_max_lat, bounds_min_lng, bounds_max_lng,
        pmtiles_tx_id, routing_graph_tx_id, geocoding_db_tx_id, version,
        download_status, tiles_size_bytes, routing_size_bytes, geocoding_size_bytes,
-       downloaded_at, last_updated
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       downloaded_at, last_updated, drive_key
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       region.id,
       region.name,
@@ -59,6 +59,7 @@ export async function upsertRegion(region: Region): Promise<void> {
       region.geocodingSizeBytes,
       region.downloadedAt,
       region.lastUpdated,
+      region.driveKey,
     ],
   );
 }
@@ -101,6 +102,7 @@ interface RegionRow {
   geocoding_size_bytes: number | null;
   downloaded_at: number | null;
   last_updated: number | null;
+  drive_key: string | null;
 }
 
 function rowToRegion(row: RegionRow): Region {
@@ -123,5 +125,6 @@ function rowToRegion(row: RegionRow): Region {
     geocodingSizeBytes: row.geocoding_size_bytes,
     downloadedAt: row.downloaded_at,
     lastUpdated: row.last_updated,
+    driveKey: row.drive_key ?? null,
   };
 }
