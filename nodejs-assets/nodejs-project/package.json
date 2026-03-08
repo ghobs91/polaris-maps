@@ -1,0 +1,19 @@
+{
+  "name": "nodejs-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "corestore": "^7.9.0",
+    "hypercore": "^11.27.7",
+    "hyperdrive": "^13.3.0",
+    "hyperswarm": "^4.17.0"
+  }
+}

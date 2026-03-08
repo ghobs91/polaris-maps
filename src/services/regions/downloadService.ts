@@ -3,6 +3,7 @@ import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { isStorageAvailable } from '../sync/resourceManager';
 import { extractTar } from '../../utils/archiveExtract';
+import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
 import { DATA_BASE_URL, ARWEAVE_GATEWAY, GITHUB_DATA_REPO } from '../../constants/config';
 import type { Region } from '../../models/region';
 
@@ -55,16 +56,6 @@ type ProgressCallback = (progress: DownloadProgress) => void;
 const activeDownloads = new Map<string, FileSystem.DownloadResumable>();
 
 export async function downloadRegion(region: Region, onProgress?: ProgressCallback): Promise<void> {
-  const tilesUrl = await resolveUrl(region.id, 'tiles.pmtiles', region.pmtilesTxId);
-  const routingUrl = await resolveUrl(region.id, 'routing.tar', region.routingGraphTxId);
-  const geocodingUrl = await resolveUrl(region.id, 'geocoding.db', region.geocodingDbTxId);
-
-  if (!routingUrl) {
-    throw new Error(
-      'Routing data is not available for this region. Generate region data with scripts/generate-region-data.sh and serve it, or publish to Arweave.',
-    );
-  }
-
   const destDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
   await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
 
@@ -78,69 +69,13 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
   ]);
 
   try {
-    // Stage 1: Download PMTiles
-    onProgress?.({
-      regionId: region.id,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      percent: 0,
-      stage: 'tiles',
-    });
+    // Try P2P download first if a drive key is known
+    const peerSuccess = region.driveKey
+      ? await tryPeerDownload(region, destDir, onProgress)
+      : false;
 
-    if (tilesUrl) {
-      await downloadFile(tilesUrl, `${destDir}tiles.pmtiles`, region.id, (downloaded, total) => {
-        onProgress?.({
-          regionId: region.id,
-          totalBytes: total,
-          downloadedBytes: downloaded,
-          percent: total > 0 ? (downloaded / total) * 33 : 0,
-          stage: 'tiles',
-        });
-      });
-    }
-
-    // Stage 2: Download Valhalla routing graph
-    onProgress?.({
-      regionId: region.id,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      percent: 33,
-      stage: 'routing',
-    });
-
-    await downloadFile(routingUrl, `${destDir}routing.tar`, region.id, (downloaded, total) => {
-      onProgress?.({
-        regionId: region.id,
-        totalBytes: total,
-        downloadedBytes: downloaded,
-        percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
-        stage: 'routing',
-      });
-    });
-
-    // Extract the Valhalla graph tiles from the tar archive
-    await extractTar(`${destDir}routing.tar`, `${destDir}routing/`);
-    await FileSystem.deleteAsync(`${destDir}routing.tar`, { idempotent: true });
-
-    // Stage 3: Download geocoding database
-    onProgress?.({
-      regionId: region.id,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      percent: 66,
-      stage: 'geocoding',
-    });
-
-    if (geocodingUrl) {
-      await downloadFile(geocodingUrl, `${destDir}geocoding.db`, region.id, (downloaded, total) => {
-        onProgress?.({
-          regionId: region.id,
-          totalBytes: total,
-          downloadedBytes: downloaded,
-          percent: 66 + (total > 0 ? (downloaded / total) * 34 : 0),
-          stage: 'geocoding',
-        });
-      });
+    if (!peerSuccess) {
+      await downloadViaHttp(region, destDir, onProgress);
     }
 
     // Calculate total size
@@ -161,6 +96,11 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       downloadedBytes: totalSize,
       percent: 100,
       stage: 'complete',
+    });
+
+    // Auto-seed the downloaded region so other peers can fetch from us
+    autoSeedRegion(region.id, destDir, db).catch(() => {
+      // Non-fatal — seeding failure shouldn't affect the download result
     });
   } catch (error) {
     await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
@@ -184,6 +124,139 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
   }
 }
 
+/** Attempt to download region data from P2P peers. Returns true if successful. */
+async function tryPeerDownload(
+  region: Region,
+  destDir: string,
+  onProgress?: ProgressCallback,
+): Promise<boolean> {
+  if (!region.driveKey) return false;
+  try {
+    onProgress?.({
+      regionId: region.id,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      percent: 0,
+      stage: 'tiles',
+    });
+
+    await downloadFromPeers(region.driveKey, destDir, (_file, _bytes, totalBytes) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes,
+        downloadedBytes: totalBytes,
+        percent: Math.min(99, totalBytes > 0 ? 50 : 0),
+        stage: 'tiles',
+      });
+    });
+
+    // Hyperdrive download puts files directly — check routing needs extraction
+    const routingTar = `${destDir}routing.tar`;
+    const tarInfo = await FileSystem.getInfoAsync(routingTar);
+    if (tarInfo.exists) {
+      await extractTar(routingTar, `${destDir}routing/`);
+      await FileSystem.deleteAsync(routingTar, { idempotent: true });
+    }
+
+    return true;
+  } catch {
+    // P2P failed — fall through to HTTP
+    return false;
+  }
+}
+
+/** Download region data via HTTP (Arweave > GitHub Releases > DATA_BASE_URL). */
+async function downloadViaHttp(
+  region: Region,
+  destDir: string,
+  onProgress?: ProgressCallback,
+): Promise<void> {
+  const tilesUrl = await resolveUrl(region.id, 'tiles.pmtiles', region.pmtilesTxId);
+  const routingUrl = await resolveUrl(region.id, 'routing.tar', region.routingGraphTxId);
+  const geocodingUrl = await resolveUrl(region.id, 'geocoding.db', region.geocodingDbTxId);
+
+  if (!routingUrl) {
+    throw new Error(
+      'Routing data is not available for this region. Generate region data with scripts/generate-region-data.sh and serve it, or publish to Arweave.',
+    );
+  }
+
+  // Stage 1: Download PMTiles
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: 0,
+    downloadedBytes: 0,
+    percent: 0,
+    stage: 'tiles',
+  });
+
+  if (tilesUrl) {
+    await downloadFile(tilesUrl, `${destDir}tiles.pmtiles`, region.id, (downloaded, total) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: total,
+        downloadedBytes: downloaded,
+        percent: total > 0 ? (downloaded / total) * 33 : 0,
+        stage: 'tiles',
+      });
+    });
+  }
+
+  // Stage 2: Download Valhalla routing graph
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: 0,
+    downloadedBytes: 0,
+    percent: 33,
+    stage: 'routing',
+  });
+
+  await downloadFile(routingUrl, `${destDir}routing.tar`, region.id, (downloaded, total) => {
+    onProgress?.({
+      regionId: region.id,
+      totalBytes: total,
+      downloadedBytes: downloaded,
+      percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
+      stage: 'routing',
+    });
+  });
+
+  // Extract the Valhalla graph tiles from the tar archive
+  await extractTar(`${destDir}routing.tar`, `${destDir}routing/`);
+  await FileSystem.deleteAsync(`${destDir}routing.tar`, { idempotent: true });
+
+  // Stage 3: Download geocoding database
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: 0,
+    downloadedBytes: 0,
+    percent: 66,
+    stage: 'geocoding',
+  });
+
+  if (geocodingUrl) {
+    await downloadFile(geocodingUrl, `${destDir}geocoding.db`, region.id, (downloaded, total) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: total,
+        downloadedBytes: downloaded,
+        percent: 66 + (total > 0 ? (downloaded / total) * 34 : 0),
+        stage: 'geocoding',
+      });
+    });
+  }
+}
+
+/** Seed a downloaded region in the background and persist the drive key. */
+async function autoSeedRegion(
+  regionId: string,
+  filesDir: string,
+  db: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<void> {
+  const { key } = await seedRegion(regionId, filesDir);
+  await db.runAsync('UPDATE regions SET drive_key = ? WHERE id = ?', [key, regionId]);
+}
+
 export function cancelDownload(regionId: string): void {
   const resumable = activeDownloads.get(regionId);
   if (resumable) {
@@ -193,6 +266,9 @@ export function cancelDownload(regionId: string): void {
 }
 
 export async function deleteRegionData(regionId: string): Promise<void> {
+  // Stop seeding this region via Hyperdrive
+  unseedRegion(regionId).catch(() => {});
+
   const destDir = `${FileSystem.documentDirectory}regions/${regionId}/`;
   const info = await FileSystem.getInfoAsync(destDir);
   if (info.exists) {
@@ -201,7 +277,7 @@ export async function deleteRegionData(regionId: string): Promise<void> {
 
   const db = await getDatabase();
   await db.runAsync(
-    'UPDATE regions SET download_status = ?, downloaded_at = NULL, last_updated = ? WHERE id = ?',
+    'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
 }
