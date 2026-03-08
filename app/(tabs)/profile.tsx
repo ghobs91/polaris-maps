@@ -7,11 +7,14 @@ import { joinNetwork, getLocalNode } from '../../src/services/sync/peerService';
 import { getActiveFeeds } from '../../src/services/sync/feedSyncService';
 import { NodeDashboard } from '../../src/components/dashboard';
 import { Button, ErrorBoundary } from '../../src/components/common';
-import { colors, spacing, typography } from '../../src/constants/theme';
+import { spacing, typography } from '../../src/constants/theme';
+import { useTheme } from '../../src/contexts/ThemeContext';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
   const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode, setSyncingFeeds } =
     usePeerStore();
   const [refreshing, setRefreshing] = React.useState(false);
@@ -76,15 +79,16 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg },
-  heading: { ...typography.h1, color: colors.text, marginBottom: spacing.xs },
-  pubkey: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    fontFamily: 'monospace',
-    marginBottom: spacing.lg,
-  },
-  actions: { marginTop: spacing.xl, gap: spacing.sm },
-});
+const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    content: { padding: spacing.lg },
+    heading: { ...typography.h1, color: colors.text, marginBottom: spacing.xs },
+    pubkey: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      fontFamily: 'monospace',
+      marginBottom: spacing.lg,
+    },
+    actions: { marginTop: spacing.xl, gap: spacing.sm },
+  });

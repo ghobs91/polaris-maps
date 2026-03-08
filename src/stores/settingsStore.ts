@@ -14,16 +14,20 @@ interface PermissionPreferences {
   imagerySharingEnabled: boolean;
 }
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+
 interface SettingsState {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
+  themeMode: ThemeMode;
   setResourceLimits: (limits: Partial<ResourceLimits>) => void;
   setPermissions: (prefs: Partial<PermissionPreferences>) => void;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
 const STORAGE_KEY = 'settings';
 
-function loadSettings(): { resourceLimits: ResourceLimits; permissions: PermissionPreferences } {
+function loadSettings(): { resourceLimits: ResourceLimits; permissions: PermissionPreferences; themeMode: ThemeMode } {
   const raw = storage.getString(STORAGE_KEY);
   if (raw) {
     try {
@@ -44,12 +48,14 @@ function loadSettings(): { resourceLimits: ResourceLimits; permissions: Permissi
       poiContributionsEnabled: true,
       imagerySharingEnabled: false,
     },
+    themeMode: 'system',
   };
 }
 
 function persistSettings(state: {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
+  themeMode: ThemeMode;
 }) {
   storage.set(STORAGE_KEY, JSON.stringify(state));
 }
@@ -61,12 +67,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     setResourceLimits: (limits) => {
       const updated = { ...get().resourceLimits, ...limits };
       set({ resourceLimits: updated });
-      persistSettings({ resourceLimits: updated, permissions: get().permissions });
+      persistSettings({ resourceLimits: updated, permissions: get().permissions, themeMode: get().themeMode });
     },
     setPermissions: (prefs) => {
       const updated = { ...get().permissions, ...prefs };
       set({ permissions: updated });
-      persistSettings({ resourceLimits: get().resourceLimits, permissions: updated });
+      persistSettings({ resourceLimits: get().resourceLimits, permissions: updated, themeMode: get().themeMode });
+    },
+    setThemeMode: (mode) => {
+      set({ themeMode: mode });
+      persistSettings({ resourceLimits: get().resourceLimits, permissions: get().permissions, themeMode: mode });
     },
   };
 });

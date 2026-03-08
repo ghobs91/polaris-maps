@@ -3,6 +3,7 @@ import MapLibreGL from '@maplibre/maplibre-react-native';
 import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { getTileServerBaseUrl } from '../../native/tileServer';
+import { colors } from '../../constants/theme';
 
 // Fallback OSM raster style used when the local tile server is unavailable
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +40,7 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
   const cameraRef = useRef<any>(null);
   const tileServerPort = useMapStore((s) => s.tileServerPort);
   const viewport = useMapStore((s) => s.viewport);
+  const selectedLocation = useMapStore((s) => s.selectedLocation);
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
 
@@ -93,6 +95,30 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
         />
 
         <MapLibreGL.UserLocation visible />
+
+        {selectedLocation && (
+          <MapLibreGL.ShapeSource
+            id="selectedLocation"
+            shape={{
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'Point',
+                coordinates: [selectedLocation.lng, selectedLocation.lat],
+              },
+            }}
+          >
+            <MapLibreGL.CircleLayer
+              id="selectedLocationPin"
+              style={{
+                circleRadius: 10,
+                circleColor: colors.primary,
+                circleStrokeWidth: 3,
+                circleStrokeColor: colors.white,
+              }}
+            />
+          </MapLibreGL.ShapeSource>
+        )}
 
         {routeGeometry && (
           <MapLibreGL.ShapeSource

@@ -10,6 +10,7 @@ import type { Region } from '../../src/models/region';
 export default function OfflineRegionsScreen() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadRegions = useCallback(async () => {
     setLoading(true);
@@ -35,9 +36,14 @@ export default function OfflineRegionsScreen() {
           {
             text: 'Delete',
             style: 'destructive',
-            onPress: async () => {
-              await deleteRegionData(region.id);
-              loadRegions();
+            onPress: () => {
+              setDeletingId(region.id);
+              deleteRegionData(region.id)
+                .then(() => loadRegions())
+                .catch((err) =>
+                  Alert.alert('Delete Failed', err instanceof Error ? err.message : 'Unknown error'),
+                )
+                .finally(() => setDeletingId(null));
             },
           },
         ],
@@ -71,7 +77,12 @@ export default function OfflineRegionsScreen() {
         <FlatList
           data={regions}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <RegionCard region={item} onDelete={handleDelete} />}
+          renderItem={({ item }) => (
+            <RegionCard
+              region={item}
+              onDelete={deletingId === item.id ? undefined : handleDelete}
+            />
+          )}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.center}>

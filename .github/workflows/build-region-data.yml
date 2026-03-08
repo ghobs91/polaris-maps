@@ -1,0 +1,237 @@
+name: Build Region Map Data
+
+# Builds Valhalla routing tiles, PMTiles, and geocoding databases from
+# OpenStreetMap data (via Geofabrik) and publishes them to GitHub Releases.
+# The Polaris Maps app downloads these assets automatically when Arweave
+# hasn't been seeded yet.
+#
+# Runs:
+#   - Weekly (Sunday midnight UTC) to pick up OSM updates
+#   - On manual trigger (workflow_dispatch) with optional region filter
+#   - On push to main that modifies the catalog or CI config
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'Region ID to build (leave blank for all)'
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - 'src/services/regions/catalogService.ts'
+      - '.github/workflows/build-region-data.yml'
+
+jobs:
+  build:
+    name: Build ${{ matrix.region.id }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    strategy:
+      fail-fast: false
+      matrix:
+        region:
+          - id: us-ny-new-york
+            name: New York Metro
+            geofabrik: https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf
+            # Bounding box for clip (minLon,minLat,maxLon,maxLat)
+            bbox: -74.3,40.4,-73.7,41.0
+          - id: us-ca-los-angeles
+            name: Los Angeles
+            geofabrik: https://download.geofabrik.de/north-america/us/california-latest.osm.pbf
+            bbox: -118.7,33.7,-117.9,34.4
+          - id: us-ca-san-francisco
+            name: San Francisco Bay Area
+            geofabrik: https://download.geofabrik.de/north-america/us/california-latest.osm.pbf
+            bbox: -122.6,37.2,-121.5,38.0
+          - id: us-il-chicago
+            name: Chicago
+            geofabrik: https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
+            bbox: -88.0,41.6,-87.5,42.1
+          - id: us-tx-houston
+            name: Houston
+            geofabrik: https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf
+            bbox: -95.6,29.5,-95.0,30.1
+          - id: us-wa-seattle
+            name: Seattle
+            geofabrik: https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf
+            bbox: -122.5,47.3,-122.1,47.8
+          - id: gb-england-london
+            name: London
+            geofabrik: https://download.geofabrik.de/europe/great-britain/england-latest.osm.pbf
+            bbox: -0.5,51.3,0.3,51.7
+          - id: de-berlin
+            name: Berlin
+            geofabrik: https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
+            bbox: 13.1,52.3,13.7,52.7
+
+    steps:
+      - name: Skip if region filter set and doesn't match
+        if: ${{ github.event.inputs.region != '' && github.event.inputs.region != matrix.region.id }}
+        run: echo "Skipping ${{ matrix.region.id }}" && exit 0
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y osmium-tool python3 python3-pip curl
+          pip3 install osmium --quiet
+          # Planetiler for PMTiles generation
+          PLANETILER_VERSION="0.8.3"
+          curl -fsSL -o /usr/local/bin/planetiler.jar \
+            "https://github.com/onthegomap/planetiler/releases/download/v${PLANETILER_VERSION}/planetiler.jar"
+          java -version
+          # Valhalla via Docker (pulled separately per step to allow caching)
+          docker pull ghcr.io/valhalla/valhalla:latest
+
+      - name: Download OSM extract
+        run: |
+          mkdir -p work/${{ matrix.region.id }}
+          echo "Downloading ${{ matrix.region.name }} extract..."
+          curl -fSL -o work/${{ matrix.region.id }}/region.osm.pbf "${{ matrix.region.geofabrik }}"
+          echo "Download size: $(du -h work/${{ matrix.region.id }}/region.osm.pbf | cut -f1)"
+
+      - name: Clip extract to bounding box
+        run: |
+          osmium extract \
+            --bbox "${{ matrix.region.bbox }}" \
+            --strategy simple \
+            --output work/${{ matrix.region.id }}/clipped.osm.pbf \
+            work/${{ matrix.region.id }}/region.osm.pbf
+          rm -f work/${{ matrix.region.id }}/region.osm.pbf
+          echo "Clipped size: $(du -h work/${{ matrix.region.id }}/clipped.osm.pbf | cut -f1)"
+
+      - name: Generate PMTiles
+        run: |
+          java -Xmx6g -jar /usr/local/bin/planetiler.jar \
+            --osm-path=work/${{ matrix.region.id }}/clipped.osm.pbf \
+            --output=work/${{ matrix.region.id }}/tiles.pmtiles \
+            --force \
+            --download
+          echo "PMTiles size: $(du -h work/${{ matrix.region.id }}/tiles.pmtiles | cut -f1)"
+
+      - name: Build Valhalla routing tiles
+        run: |
+          mkdir -p work/${{ matrix.region.id }}/valhalla_tiles
+          # Generate Valhalla config
+          docker run --rm \
+            -v ${{ github.workspace }}/work/${{ matrix.region.id }}:/data \
+            ghcr.io/valhalla/valhalla:latest \
+            valhalla_build_config \
+              --mjolnir-tile-dir /data/valhalla_tiles \
+              --mjolnir-tile-extract /data/valhalla_tiles.tar \
+              --mjolnir-timezone /data/valhalla_tiles/timezones.sqlite \
+              --mjolnir-admin /data/valhalla_tiles/admins.sqlite \
+            > work/${{ matrix.region.id }}/valhalla.json
+          # Build tiles
+          docker run --rm \
+            -v ${{ github.workspace }}/work/${{ matrix.region.id }}:/data \
+            ghcr.io/valhalla/valhalla:latest \
+            valhalla_build_tiles \
+              -c /data/valhalla.json \
+              /data/clipped.osm.pbf
+          # Package as tar (not gzip — app tar extractor handles plain tar)
+          tar -cf work/${{ matrix.region.id }}/routing.tar \
+            -C work/${{ matrix.region.id }}/valhalla_tiles .
+          echo "Routing tar size: $(du -h work/${{ matrix.region.id }}/routing.tar | cut -f1)"
+
+      - name: Generate geocoding database
+        run: |
+          python3 - \
+            "work/${{ matrix.region.id }}/clipped.osm.pbf" \
+            "work/${{ matrix.region.id }}/geocoding.db" \
+            <<'PYEOF'
+          import sys, sqlite3, osmium
+
+          pbf_path, db_path = sys.argv[1], sys.argv[2]
+          db = sqlite3.connect(db_path)
+          db.execute("PRAGMA journal_mode=WAL")
+          db.executescript("""
+              CREATE TABLE IF NOT EXISTS geocoding_data (
+                  id INTEGER PRIMARY KEY, type TEXT NOT NULL, housenumber TEXT,
+                  street TEXT, city TEXT, state TEXT, postcode TEXT, country TEXT,
+                  lat REAL NOT NULL, lng REAL NOT NULL
+              );
+              CREATE VIRTUAL TABLE IF NOT EXISTS geocoding_entries USING fts5(
+                  text, type, housenumber, street, city, state, postcode, country,
+                  content='geocoding_data', content_rowid='id'
+              );
+          """)
+
+          class Handler(osmium.SimpleHandler):
+              def __init__(self, db):
+                  super().__init__()
+                  self.db = db
+                  self.count = 0
+                  self.batch = []
+              def flush(self):
+                  if not self.batch: return
+                  self.db.executemany(
+                      "INSERT INTO geocoding_data (type,housenumber,street,city,state,postcode,country,lat,lng) VALUES (?,?,?,?,?,?,?,?,?)",
+                      self.batch)
+                  self.db.executemany(
+                      "INSERT INTO geocoding_entries(rowid,text,type,housenumber,street,city,state,postcode,country) SELECT id, COALESCE(housenumber,'')||' '||COALESCE(street,'')|| ', '||COALESCE(city,''), type, housenumber, street, city, state, postcode, country FROM geocoding_data ORDER BY id DESC LIMIT ?",
+                      [(len(self.batch),)])
+                  self.batch = []
+                  self.db.commit()
+              def _add(self, tags, lat, lng):
+                  s = tags.get('addr:street'); n = tags.get('name')
+                  if not s and not n: return
+                  self.batch.append(('address' if s else 'place', tags.get('addr:housenumber'), s or n,
+                      tags.get('addr:city') or tags.get('addr:suburb'), tags.get('addr:state'),
+                      tags.get('addr:postcode'), tags.get('addr:country'), lat, lng))
+                  self.count += 1
+                  if len(self.batch) >= 5000: self.flush()
+              def node(self, n):
+                  if n.tags.get('addr:street') or (n.tags.get('name') and n.tags.get('amenity')):
+                      self._add(n.tags, n.location.lat, n.location.lon)
+              def way(self, w):
+                  if w.tags.get('addr:street') or (w.tags.get('name') and w.tags.get('building')):
+                      try: self._add(w.tags, w.nodes[0].lat, w.nodes[0].lon)
+                      except: pass
+
+          h = Handler(db)
+          h.apply_file(pbf_path, locations=True)
+          h.flush()
+          db.execute("INSERT INTO geocoding_entries(geocoding_entries) VALUES('optimize')")
+          db.commit()
+          db.close()
+          print(f"Indexed {h.count} entries.")
+          PYEOF
+          echo "Geocoding DB size: $(du -h work/${{ matrix.region.id }}/geocoding.db | cut -f1)"
+
+      - name: Create or update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="map-data-$(date +%Y-%m)"
+          ASSET_PREFIX="${{ matrix.region.id }}"
+
+          # Create release if it doesn't exist
+          gh release view "$TAG" --repo "${{ github.repository }}" 2>/dev/null || \
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "Map Data $(date +%B\ %Y)" \
+              --notes "Auto-generated map data from OpenStreetMap via Geofabrik. Built $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
+              --prerelease
+
+          # Upload assets (overwrite if exists)
+          for file in tiles.pmtiles routing.tar geocoding.db; do
+            if [ -f "work/${{ matrix.region.id }}/$file" ]; then
+              gh release upload "$TAG" \
+                "work/${{ matrix.region.id }}/$file#${ASSET_PREFIX}-${file}" \
+                --repo "${{ github.repository }}" \
+                --clobber
+            fi
+          done
+
+      - name: Upload build artifacts (for debugging)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.region.id }}-logs
+          path: work/${{ matrix.region.id }}/*.json
+          retention-days: 7
