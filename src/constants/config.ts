@@ -11,8 +11,7 @@
  *   {DATA_BASE_URL}/{region-id}/routing.tar
  *   {DATA_BASE_URL}/{region-id}/geocoding.db
  *
- * When Arweave tx IDs are available, the app uses Arweave gateways instead.
- * Set to null to disable direct HTTP downloads and only use Arweave/GitHub.
+ * Set to null to disable direct HTTP downloads and only use GitHub Releases.
  */
 export const DATA_BASE_URL: string | null = null;
 
@@ -29,9 +28,3 @@ export const DATA_BASE_URL: string | null = null;
  * Set to null to disable GitHub Releases as a source.
  */
 export const GITHUB_DATA_REPO: 'ghobs91/polaris-maps' | null = null;
-
-/**
- * Arweave gateway base URL for permanent decentralized storage.
- * Used when regions have published Arweave transaction IDs.
- */
-export const ARWEAVE_GATEWAY = 'https://arweave.net';

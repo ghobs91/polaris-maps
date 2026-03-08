@@ -9,8 +9,6 @@ export interface TileServerConfig {
 export interface TileSource {
   id: string;
   filePath: string;
-  arweaveGateway?: string;
-  arweaveTxId?: string;
 }
 
 export interface Spec extends TurboModule {
