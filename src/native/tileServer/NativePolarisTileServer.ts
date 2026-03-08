@@ -22,4 +22,4 @@ export interface Spec extends TurboModule {
   getBaseUrl(): string;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('PolarisTileServer');
+export default TurboModuleRegistry.get<Spec>('PolarisTileServer');

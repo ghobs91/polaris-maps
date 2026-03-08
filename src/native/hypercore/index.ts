@@ -37,6 +37,7 @@ let emitterSubscription: ReturnType<NativeEventEmitter['addListener']> | null = 
 
 function ensureListener(): void {
   if (emitterSubscription) return;
+  if (!NativePolarisHypercore) return;
   const emitter = new NativeEventEmitter(NativeModules.PolarisHypercore);
   emitterSubscription = emitter.addListener('HypercoreEvent', (event: HypercoreEvent) => {
     // Resolve pending request
@@ -61,6 +62,9 @@ function ensureListener(): void {
 }
 
 function sendCommand(cmd: HypercoreCommand): Promise<HypercoreEvent> {
+  if (!NativePolarisHypercore) {
+    return Promise.reject(new Error('PolarisHypercore native module is not available'));
+  }
   ensureListener();
   return new Promise<HypercoreEvent>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -79,7 +83,7 @@ function sendCommand(cmd: HypercoreCommand): Promise<HypercoreEvent> {
       },
     });
 
-    NativePolarisHypercore.sendMessage(JSON.stringify(cmd));
+    NativePolarisHypercore!.sendMessage(JSON.stringify(cmd));
   });
 }
 

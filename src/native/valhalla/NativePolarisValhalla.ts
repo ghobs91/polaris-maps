@@ -82,4 +82,4 @@ export interface Spec extends TurboModule {
   dispose(): Promise<void>;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('PolarisValhalla');
+export default TurboModuleRegistry.get<Spec>('PolarisValhalla');

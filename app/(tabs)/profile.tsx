@@ -1,6 +1,7 @@
 import React, { useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePeerStore } from '../../src/stores/peerStore';
 import { joinNetwork, getLocalNode } from '../../src/services/sync/peerService';
 import { getActiveFeeds } from '../../src/services/sync/feedSyncService';
@@ -10,6 +11,7 @@ import { colors, spacing, typography } from '../../src/constants/theme';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode, setSyncingFeeds } =
     usePeerStore();
   const [refreshing, setRefreshing] = React.useState(false);
@@ -48,7 +50,7 @@ export default function ProfileScreen() {
     <ErrorBoundary>
       <ScrollView
         style={styles.container}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + spacing.sm }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <Text style={styles.heading}>Node Dashboard</Text>
