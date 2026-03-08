@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
 import { MapControls } from '@/components/map/MapControls';
+import { LocationActionPanel } from '@/components/map/LocationActionPanel';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { initTileService } from '@/services/map/tileService';
@@ -35,6 +36,7 @@ export default function MapScreen() {
       <View style={styles.container}>
         <MapView routeGeometry={routeGeometry} onMapPress={handleMapPress} />
         <MapControls onLocatePress={handleLocate} />
+        <LocationActionPanel />
       </View>
     </ErrorBoundary>
   );

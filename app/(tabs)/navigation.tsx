@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MapView } from '@/components/map/MapView';
 import { NextTurnBanner, ManeuverList, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { Button } from '@/components/common';
-import { colors, spacing, typography } from '@/constants/theme';
+import { spacing, typography } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const {
     activeRoute,
     currentManeuver,
@@ -45,11 +48,12 @@ export default function NavigationScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  mapContainer: { flex: 1 },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
-  emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
-  emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
-  footer: { padding: spacing.md },
-});
+const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    mapContainer: { flex: 1 },
+    empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+    emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
+    emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
+    footer: { padding: spacing.md },
+  });
