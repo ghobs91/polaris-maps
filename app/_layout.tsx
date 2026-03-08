@@ -2,11 +2,13 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { ConnectivityBanner } from '@/components/common';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 
-export default function RootLayout() {
+function RootLayoutInner() {
+  const { isDark } = useTheme();
   return (
     <>
-      <StatusBar style="auto" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <ConnectivityBanner />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -21,5 +23,13 @@ export default function RootLayout() {
         <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
       </Stack>
     </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <RootLayoutInner />
+    </ThemeProvider>
   );
 }

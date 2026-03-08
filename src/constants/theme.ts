@@ -41,6 +41,78 @@ export const colors = {
   },
 } as const;
 
+export const darkColors = {
+  primary: '#409CFF',
+  primaryDark: '#007AFF',
+  primaryLight: '#66B2FF',
+  secondary: '#636366',
+  background: '#111827',
+  backgroundDark: '#111827',
+  surface: '#1F2937',
+  surfaceDark: '#1F2937',
+  text: '#F9FAFB',
+  textDark: '#F9FAFB',
+  textSecondary: '#9CA3AF',
+  border: '#374151',
+  borderDark: '#374151',
+  error: '#FF453A',
+  warning: '#FF9F0A',
+  success: '#32D74B',
+  white: '#FFFFFF',
+  black: '#000000',
+  glass: {
+    background: 'rgba(30,30,30,0.82)',
+    backgroundDark: 'rgba(30,30,30,0.82)',
+    border: 'rgba(255,255,255,0.1)',
+    shadow: 'rgba(0,0,0,0.4)',
+  },
+  tabBar: {
+    active: '#409CFF',
+    inactive: '#636366',
+    background: 'rgba(28,28,30,0.94)',
+  },
+  trafficFreeFlow: '#34C759',
+  trafficSlow: '#FF9500',
+  trafficCongested: '#FF3B30',
+  trafficStopped: '#991B1B',
+  traffic: {
+    freeFlow: '#34C759',
+    slow: '#FF9500',
+    congested: '#FF3B30',
+    stopped: '#991B1B',
+  },
+} as const;
+
+export type AppColors = typeof colors;
+
+export type AppColorsLoose = {
+  primary: string;
+  primaryDark: string;
+  primaryLight: string;
+  secondary: string;
+  background: string;
+  backgroundDark: string;
+  surface: string;
+  surfaceDark: string;
+  text: string;
+  textDark: string;
+  textSecondary: string;
+  border: string;
+  borderDark: string;
+  error: string;
+  warning: string;
+  success: string;
+  white: string;
+  black: string;
+  glass: { background: string; backgroundDark: string; border: string; shadow: string };
+  tabBar: { active: string; inactive: string; background: string };
+  trafficFreeFlow: string;
+  trafficSlow: string;
+  trafficCongested: string;
+  trafficStopped: string;
+  traffic: { freeFlow: string; slow: string; congested: string; stopped: string };
+};
+
 export const spacing = {
   xs: 4,
   sm: 8,

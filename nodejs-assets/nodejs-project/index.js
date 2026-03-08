@@ -33,6 +33,9 @@ channel.addListener('message', async (msg) => {
       case 'publish':
         await handlePublish(command);
         break;
+      case 'extract-tar':
+        await handleExtractTar(command);
+        break;
       case 'status':
         handleStatus(command);
         break;
@@ -83,6 +86,61 @@ function sendResponse(requestId, data) {
 
 function sendError(requestId, error) {
   channel.send(JSON.stringify({ type: 'error', error, requestId }));
+}
+
+// --- tar extraction (Node.js built-ins only) ---
+
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+
+async function handleExtractTar(command) {
+  const { srcPath, destDir, requestId } = command;
+  try {
+    if (!fs.existsSync(srcPath)) {
+      return sendError(requestId, `Source file not found: ${srcPath}`);
+    }
+    fs.mkdirSync(destDir, { recursive: true });
+
+    let buf = fs.readFileSync(srcPath);
+
+    // Detect gzip (magic bytes 1f 8b)
+    if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+      buf = zlib.gunzipSync(buf);
+    }
+
+    let offset = 0;
+    while (offset + 512 <= buf.length) {
+      const header = buf.slice(offset, offset + 512);
+      // Two zero blocks mark end of archive
+      if (header.every((b) => b === 0)) break;
+
+      const nameRaw = header.slice(0, 100).toString('utf8').replace(/\0/g, '');
+      const sizeOctal = header.slice(124, 136).toString('utf8').replace(/\0/g, '').trim();
+      const typeFlag = header[156];
+      const size = parseInt(sizeOctal, 8) || 0;
+      offset += 512;
+
+      if (!nameRaw) break;
+
+      const fullPath = path.join(destDir, nameRaw);
+      // Directory (typeflag '5' = 53)
+      if (typeFlag === 53 || nameRaw.endsWith('/')) {
+        fs.mkdirSync(fullPath, { recursive: true });
+      } else {
+        // Regular file
+        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+        fs.writeFileSync(fullPath, buf.slice(offset, offset + size));
+      }
+
+      // Advance past data, padded to 512-byte boundary
+      offset += Math.ceil(size / 512) * 512;
+    }
+
+    sendResponse(requestId, { type: 'response', success: true });
+  } catch (err) {
+    sendError(requestId, err.message || String(err));
+  }
 }
 
 // Simulate incoming message relay (production: filter callback)
