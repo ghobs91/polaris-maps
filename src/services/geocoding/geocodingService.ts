@@ -8,6 +8,16 @@ export interface GeocodingResult {
 
 export async function searchAddress(query: string, limit: number = 10): Promise<GeocodingResult[]> {
   if (!query.trim()) return [];
+
+  // Try local DB first
+  const localResults = await searchAddressLocal(query, limit);
+  if (localResults.length > 0) return localResults;
+
+  // Fall back to Nominatim online geocoding
+  return searchAddressNominatim(query, limit);
+}
+
+async function searchAddressLocal(query: string, limit: number): Promise<GeocodingResult[]> {
   const db = await getDatabase();
 
   // FTS5 match query — add * for prefix matching
@@ -44,6 +54,82 @@ export async function searchAddress(query: string, limit: number = 10): Promise<
     },
     rank: row.rank ?? i,
   }));
+}
+
+async function searchAddressNominatim(query: string, limit: number): Promise<GeocodingResult[]> {
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      format: 'jsonv2',
+      addressdetails: '1',
+      limit: String(limit),
+    });
+
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+      {
+        headers: {
+          'User-Agent': 'PolarisMaps/1.0',
+          Accept: 'application/json',
+        },
+      },
+    );
+
+    if (!response.ok) return [];
+
+    const data: NominatimResult[] = await response.json();
+
+    return data.map((item, i) => ({
+      entry: {
+        id: Number(item.place_id),
+        text: item.display_name,
+        type: mapNominatimType(item.type),
+        housenumber: item.address?.house_number ?? null,
+        street: item.address?.road ?? null,
+        city: item.address?.city ?? item.address?.town ?? item.address?.village ?? null,
+        state: item.address?.state ?? null,
+        postcode: item.address?.postcode ?? null,
+        country: item.address?.country ?? null,
+        lat: parseFloat(item.lat),
+        lng: parseFloat(item.lon),
+      },
+      rank: i,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+interface NominatimResult {
+  place_id: number;
+  lat: string;
+  lon: string;
+  display_name: string;
+  type: string;
+  address?: {
+    house_number?: string;
+    road?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    state?: string;
+    postcode?: string;
+    country?: string;
+  };
+}
+
+function mapNominatimType(type: string): GeocodingEntry['type'] {
+  const mapping: Record<string, GeocodingEntry['type']> = {
+    house: 'address',
+    residential: 'address',
+    city: 'city',
+    town: 'city',
+    village: 'city',
+    administrative: 'place',
+    state: 'place',
+    country: 'place',
+  };
+  return mapping[type] ?? 'address';
 }
 
 export async function reverseGeocode(

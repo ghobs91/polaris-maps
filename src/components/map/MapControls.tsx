@@ -1,35 +1,36 @@
 import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { colors, spacing, borderRadius } from '../../constants/theme';
-import { useMapStore } from '../../stores/mapStore';
+import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { spacing, shadow } from '../../constants/theme';
 
 interface MapControlsProps {
   onLocatePress: () => void;
 }
 
-export function MapControls({ onLocatePress }: MapControlsProps) {
-  const { viewport, setViewport } = useMapStore();
+function GlassButton({ onPress, icon }: { onPress: () => void; icon: string }) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={styles.buttonOuter}>
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={60} tint="systemChromeMaterial" style={styles.button}>
+          <Ionicons name={icon as any} size={22} color="#333" />
+        </BlurView>
+      ) : (
+        <View style={[styles.button, styles.buttonAndroid]}>
+          <Ionicons name={icon as any} size={22} color="#333" />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
 
-  const zoomIn = () => setViewport({ zoom: Math.min(viewport.zoom + 1, 20) });
-  const zoomOut = () => setViewport({ zoom: Math.max(viewport.zoom - 1, 0) });
-  const resetBearing = () => setViewport({ bearing: 0 });
+export function MapControls({ onLocatePress }: MapControlsProps) {
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
-      {viewport.bearing !== 0 && (
-        <TouchableOpacity style={styles.button} onPress={resetBearing}>
-          <Text style={styles.icon}>🧭</Text>
-        </TouchableOpacity>
-      )}
-      <TouchableOpacity style={styles.button} onPress={zoomIn}>
-        <Text style={styles.icon}>＋</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.button} onPress={zoomOut}>
-        <Text style={styles.icon}>－</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.button} onPress={onLocatePress}>
-        <Text style={styles.icon}>◎</Text>
-      </TouchableOpacity>
+    <View style={[styles.container, { bottom: 100 + insets.bottom }]}>
+      <GlassButton onPress={onLocatePress} icon="locate" />
     </View>
   );
 }
@@ -38,24 +39,22 @@ const styles = StyleSheet.create({
   container: {
     position: 'absolute',
     right: spacing.md,
-    bottom: 100,
-    gap: spacing.xs,
+    gap: spacing.sm,
+  },
+  buttonOuter: {
+    borderRadius: 999,
+    overflow: 'hidden',
+    ...shadow.md,
   },
   button: {
-    width: 44,
-    height: 44,
-    borderRadius: borderRadius.round,
-    backgroundColor: colors.white,
+    width: 48,
+    height: 48,
+    borderRadius: 999,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    overflow: 'hidden',
   },
-  icon: {
-    fontSize: 20,
-    color: colors.text,
+  buttonAndroid: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
   },
 });

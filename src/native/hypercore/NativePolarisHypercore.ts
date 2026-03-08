@@ -5,4 +5,4 @@ export interface Spec extends TurboModule {
   sendMessage(message: string): void;
 }
 
-export default TurboModuleRegistry.getEnforcing<Spec>('PolarisHypercore');
+export default TurboModuleRegistry.get<Spec>('PolarisHypercore');
