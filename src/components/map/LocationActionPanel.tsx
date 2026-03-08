@@ -16,7 +16,10 @@ import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import * as FileSystem from 'expo-file-system';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
-import { getRegionContainingPoint, getDownloadedRegions } from '../../services/regions/regionRepository';
+import {
+  getRegionContainingPoint,
+  getDownloadedRegions,
+} from '../../services/regions/regionRepository';
 import { extractTar } from '../../utils/archiveExtract';
 import { getDatabase } from '../../services/database/init';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
@@ -53,10 +56,7 @@ export function LocationActionPanel() {
       });
 
       // Try to load local routing tiles if a downloaded region exists
-      const destRegion = await getRegionContainingPoint(
-        selectedLocation.lat,
-        selectedLocation.lng,
-      );
+      const destRegion = await getRegionContainingPoint(selectedLocation.lat, selectedLocation.lng);
       const originRegion = await getRegionContainingPoint(
         pos.coords.latitude,
         pos.coords.longitude,
@@ -146,7 +146,8 @@ export function LocationActionPanel() {
         <View style={styles.titleRow}>
           <Ionicons name="location" size={18} color={colors.primary} style={styles.locationIcon} />
           <Text style={styles.name} numberOfLines={2}>
-            {selectedLocation.name ?? `${selectedLocation.lat.toFixed(5)}, ${selectedLocation.lng.toFixed(5)}`}
+            {selectedLocation.name ??
+              `${selectedLocation.lat.toFixed(5)}, ${selectedLocation.lng.toFixed(5)}`}
           </Text>
         </View>
         <TouchableOpacity onPress={handleDismiss} style={styles.closeBtn} hitSlop={8}>
