@@ -15,64 +15,68 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:
     inputs:
-      region:
-        description: 'Region ID to build (leave blank for all)'
+      region_id:
+        description: 'Region ID (e.g. jp-tokyo). Leave blank to build all catalog regions.'
+        required: false
+        default: ''
+      geofabrik_url:
+        description: 'Custom Geofabrik PBF URL — required when region_id is not in the catalog.'
+        required: false
+        default: ''
+      bbox:
+        description: 'Bounding box for clip: minLon,minLat,maxLon,maxLat (e.g. 139.5,35.5,140.0,35.9)'
         required: false
         default: ''
   push:
     branches: [main]
     paths:
-      - 'src/services/regions/catalogService.ts'
+      - 'scripts/regions.json'
       - '.github/workflows/build-region-data.yml'
 
+# ── Job 1: derive the build matrix from scripts/regions.json ──────────────────
 jobs:
+  setup:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build matrix from catalog or dispatch inputs
+        id: matrix
+        run: |
+          if [[ -n "${{ github.event.inputs.region_id }}" && -n "${{ github.event.inputs.geofabrik_url }}" && -n "${{ github.event.inputs.bbox }}" ]]; then
+            # On-demand single region (arbitrary — may not be in catalog)
+            matrix=$(jq -cn \
+              --arg id   "${{ github.event.inputs.region_id }}" \
+              --arg name "${{ github.event.inputs.region_id }}" \
+              --arg geo  "${{ github.event.inputs.geofabrik_url }}" \
+              --arg bbox "${{ github.event.inputs.bbox }}" \
+              '{include: [{id: $id, name: $name, geofabrik: $geo, bbox: $bbox}]}')
+          elif [[ -n "${{ github.event.inputs.region_id }}" ]]; then
+            # Filter catalog to a single known region by ID
+            matrix=$(jq -c \
+              --arg id "${{ github.event.inputs.region_id }}" \
+              '{include: [.include[] | select(.id == $id) | {id, name, geofabrik, bbox}]}' \
+              scripts/regions.json)
+          else
+            # Full catalog build
+            matrix=$(jq -c '{include: [.include[] | {id, name, geofabrik, bbox}]}' scripts/regions.json)
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # ── Job 2: build each region in parallel ─────────────────────────────────────
   build:
-    name: Build ${{ matrix.region.id }}
+    needs: setup
+    name: Build ${{ matrix.id }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
     strategy:
       fail-fast: false
-      matrix:
-        region:
-          - id: us-ny-new-york
-            name: New York Metro
-            geofabrik: https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf
-            # Bounding box for clip (minLon,minLat,maxLon,maxLat)
-            bbox: -74.3,40.4,-73.7,41.0
-          - id: us-ca-los-angeles
-            name: Los Angeles
-            geofabrik: https://download.geofabrik.de/north-america/us/california-latest.osm.pbf
-            bbox: -118.7,33.7,-117.9,34.4
-          - id: us-ca-san-francisco
-            name: San Francisco Bay Area
-            geofabrik: https://download.geofabrik.de/north-america/us/california-latest.osm.pbf
-            bbox: -122.6,37.2,-121.5,38.0
-          - id: us-il-chicago
-            name: Chicago
-            geofabrik: https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
-            bbox: -88.0,41.6,-87.5,42.1
-          - id: us-tx-houston
-            name: Houston
-            geofabrik: https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf
-            bbox: -95.6,29.5,-95.0,30.1
-          - id: us-wa-seattle
-            name: Seattle
-            geofabrik: https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf
-            bbox: -122.5,47.3,-122.1,47.8
-          - id: gb-england-london
-            name: London
-            geofabrik: https://download.geofabrik.de/europe/great-britain/england-latest.osm.pbf
-            bbox: -0.5,51.3,0.3,51.7
-          - id: de-berlin
-            name: Berlin
-            geofabrik: https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
-            bbox: 13.1,52.3,13.7,52.7
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - name: Skip if region filter set and doesn't match
-        if: ${{ github.event.inputs.region != '' && github.event.inputs.region != matrix.region.id }}
-        run: echo "Skipping ${{ matrix.region.id }}" && exit 0
 
       - name: Install tools
         run: |
@@ -89,60 +93,60 @@ jobs:
 
       - name: Download OSM extract
         run: |
-          mkdir -p work/${{ matrix.region.id }}
-          echo "Downloading ${{ matrix.region.name }} extract..."
-          curl -fSL -o work/${{ matrix.region.id }}/region.osm.pbf "${{ matrix.region.geofabrik }}"
-          echo "Download size: $(du -h work/${{ matrix.region.id }}/region.osm.pbf | cut -f1)"
+          mkdir -p work/${{ matrix.id }}
+          echo "Downloading ${{ matrix.name }} extract..."
+          curl -fSL -o work/${{ matrix.id }}/region.osm.pbf "${{ matrix.geofabrik }}"
+          echo "Download size: $(du -h work/${{ matrix.id }}/region.osm.pbf | cut -f1)"
 
       - name: Clip extract to bounding box
         run: |
           osmium extract \
-            --bbox "${{ matrix.region.bbox }}" \
+            --bbox "${{ matrix.bbox }}" \
             --strategy simple \
-            --output work/${{ matrix.region.id }}/clipped.osm.pbf \
-            work/${{ matrix.region.id }}/region.osm.pbf
-          rm -f work/${{ matrix.region.id }}/region.osm.pbf
-          echo "Clipped size: $(du -h work/${{ matrix.region.id }}/clipped.osm.pbf | cut -f1)"
+            --output work/${{ matrix.id }}/clipped.osm.pbf \
+            work/${{ matrix.id }}/region.osm.pbf
+          rm -f work/${{ matrix.id }}/region.osm.pbf
+          echo "Clipped size: $(du -h work/${{ matrix.id }}/clipped.osm.pbf | cut -f1)"
 
       - name: Generate PMTiles
         run: |
           java -Xmx6g -jar /usr/local/bin/planetiler.jar \
-            --osm-path=work/${{ matrix.region.id }}/clipped.osm.pbf \
-            --output=work/${{ matrix.region.id }}/tiles.pmtiles \
+            --osm-path=work/${{ matrix.id }}/clipped.osm.pbf \
+            --output=work/${{ matrix.id }}/tiles.pmtiles \
             --force \
             --download
-          echo "PMTiles size: $(du -h work/${{ matrix.region.id }}/tiles.pmtiles | cut -f1)"
+          echo "PMTiles size: $(du -h work/${{ matrix.id }}/tiles.pmtiles | cut -f1)"
 
       - name: Build Valhalla routing tiles
         run: |
-          mkdir -p work/${{ matrix.region.id }}/valhalla_tiles
+          mkdir -p work/${{ matrix.id }}/valhalla_tiles
           # Generate Valhalla config
           docker run --rm \
-            -v ${{ github.workspace }}/work/${{ matrix.region.id }}:/data \
+            -v ${{ github.workspace }}/work/${{ matrix.id }}:/data \
             ghcr.io/valhalla/valhalla:latest \
             valhalla_build_config \
               --mjolnir-tile-dir /data/valhalla_tiles \
               --mjolnir-tile-extract /data/valhalla_tiles.tar \
               --mjolnir-timezone /data/valhalla_tiles/timezones.sqlite \
               --mjolnir-admin /data/valhalla_tiles/admins.sqlite \
-            > work/${{ matrix.region.id }}/valhalla.json
+            > work/${{ matrix.id }}/valhalla.json
           # Build tiles
           docker run --rm \
-            -v ${{ github.workspace }}/work/${{ matrix.region.id }}:/data \
+            -v ${{ github.workspace }}/work/${{ matrix.id }}:/data \
             ghcr.io/valhalla/valhalla:latest \
             valhalla_build_tiles \
               -c /data/valhalla.json \
               /data/clipped.osm.pbf
           # Package as tar (not gzip — app tar extractor handles plain tar)
-          tar -cf work/${{ matrix.region.id }}/routing.tar \
-            -C work/${{ matrix.region.id }}/valhalla_tiles .
-          echo "Routing tar size: $(du -h work/${{ matrix.region.id }}/routing.tar | cut -f1)"
+          tar -cf work/${{ matrix.id }}/routing.tar \
+            -C work/${{ matrix.id }}/valhalla_tiles .
+          echo "Routing tar size: $(du -h work/${{ matrix.id }}/routing.tar | cut -f1)"
 
       - name: Generate geocoding database
         run: |
           python3 - \
-            "work/${{ matrix.region.id }}/clipped.osm.pbf" \
-            "work/${{ matrix.region.id }}/geocoding.db" \
+            "work/${{ matrix.id }}/clipped.osm.pbf" \
+            "work/${{ matrix.id }}/geocoding.db" \
             <<'PYEOF'
           import sys, sqlite3, osmium
 
@@ -201,14 +205,14 @@ jobs:
           db.close()
           print(f"Indexed {h.count} entries.")
           PYEOF
-          echo "Geocoding DB size: $(du -h work/${{ matrix.region.id }}/geocoding.db | cut -f1)"
+          echo "Geocoding DB size: $(du -h work/${{ matrix.id }}/geocoding.db | cut -f1)"
 
       - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="map-data-$(date +%Y-%m)"
-          ASSET_PREFIX="${{ matrix.region.id }}"
+          ASSET_PREFIX="${{ matrix.id }}"
 
           # Create release if it doesn't exist
           gh release view "$TAG" --repo "${{ github.repository }}" 2>/dev/null || \
@@ -220,9 +224,9 @@ jobs:
 
           # Upload assets (overwrite if exists)
           for file in tiles.pmtiles routing.tar geocoding.db; do
-            if [ -f "work/${{ matrix.region.id }}/$file" ]; then
+            if [ -f "work/${{ matrix.id }}/$file" ]; then
               gh release upload "$TAG" \
-                "work/${{ matrix.region.id }}/$file#${ASSET_PREFIX}-${file}" \
+                "work/${{ matrix.id }}/$file#${ASSET_PREFIX}-${file}" \
                 --repo "${{ github.repository }}" \
                 --clobber
             fi
@@ -232,6 +236,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ matrix.region.id }}-logs
-          path: work/${{ matrix.region.id }}/*.json
+          name: build-${{ matrix.id }}-logs
+          path: work/${{ matrix.id }}/*.json
           retention-days: 7
