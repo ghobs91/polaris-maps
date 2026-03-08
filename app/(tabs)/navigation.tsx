@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MapView } from '@/components/map/MapView';
 import { NextTurnBanner, ManeuverList, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
@@ -7,6 +8,7 @@ import { Button } from '@/components/common';
 import { colors, spacing, typography } from '@/constants/theme';
 
 export default function NavigationScreen() {
+  const insets = useSafeAreaInsets();
   const {
     activeRoute,
     currentManeuver,
@@ -19,7 +21,7 @@ export default function NavigationScreen() {
 
   if (!isNavigating || !activeRoute) {
     return (
-      <View style={styles.empty}>
+      <View style={[styles.empty, { paddingTop: insets.top }]}>
         <Text style={styles.emptyText}>No active navigation</Text>
         <Text style={styles.emptyHint}>Search for a destination and start a route</Text>
       </View>
