@@ -2,8 +2,8 @@ name: Build Region Map Data
 
 # Builds Valhalla routing tiles, PMTiles, and geocoding databases from
 # OpenStreetMap data (via Geofabrik) and publishes them to GitHub Releases.
-# The Polaris Maps app downloads these assets automatically when Arweave
-# hasn't been seeded yet.
+# The Polaris Maps app downloads these assets automatically via
+# GitHub Releases or Hyperdrive P2P.
 #
 # Runs:
 #   - Weekly (Sunday midnight UTC) to pick up OSM updates

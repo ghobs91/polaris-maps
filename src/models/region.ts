@@ -7,9 +7,6 @@ export interface Region {
     minLng: number;
     maxLng: number;
   };
-  pmtilesTxId: string | null;
-  routingGraphTxId: string | null;
-  geocodingDbTxId: string | null;
   version: string;
   downloadStatus: RegionDownloadStatus;
   tilesSizeBytes: number | null;

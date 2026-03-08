@@ -1,20 +1,15 @@
 /**
  * Region catalog service.
  *
- * Maintains a bundled list of well-known regions. On first load it queries
- * the Arweave GraphQL API for the latest published transaction IDs for each
- * region's assets, then upserts them into the local database so they appear
- * in the regions list.
+ * Maintains a bundled list of well-known regions. On first load it seeds
+ * the local database so they appear in the regions list.
  *
  * If the network is unavailable the bundled metadata is still seeded so
  * the user can see available regions and download them later.
  */
 
 import { upsertRegion, getRegionById } from './regionRepository';
-import { DATA_BASE_URL, GITHUB_DATA_REPO } from '../../constants/config';
 import type { Region } from '../../models/region';
-
-const ARWEAVE_GRAPHQL = 'https://arweave.net/graphql';
 
 interface CatalogEntry {
   id: string;
@@ -356,76 +351,9 @@ const CATALOG: CatalogEntry[] = [
   },
 ];
 
-interface ArweaveTxIds {
-  pmtilesTxId: string | null;
-  routingGraphTxId: string | null;
-  geocodingDbTxId: string | null;
-}
-
-/** Query Arweave GraphQL for the latest published tx IDs for a region. */
-async function fetchRegionTxIds(regionId: string): Promise<ArweaveTxIds> {
-  const query = `
-    query ($regionId: String!) {
-      tiles: transactions(
-        tags: [
-          { name: "App-Name", values: ["Polaris"] }
-          { name: "Region", values: [$regionId] }
-          { name: "Type", values: ["pmtiles"] }
-        ]
-        sort: HEIGHT_DESC
-        first: 1
-      ) { edges { node { id } } }
-      routing: transactions(
-        tags: [
-          { name: "App-Name", values: ["Polaris"] }
-          { name: "Region", values: [$regionId] }
-          { name: "Type", values: ["routing"] }
-        ]
-        sort: HEIGHT_DESC
-        first: 1
-      ) { edges { node { id } } }
-      geocoding: transactions(
-        tags: [
-          { name: "App-Name", values: ["Polaris"] }
-          { name: "Region", values: [$regionId] }
-          { name: "Type", values: ["geocoding"] }
-        ]
-        sort: HEIGHT_DESC
-        first: 1
-      ) { edges { node { id } } }
-    }
-  `;
-
-  const response = await fetch(ARWEAVE_GRAPHQL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables: { regionId } }),
-  });
-
-  if (!response.ok) throw new Error(`Arweave GraphQL error: ${response.status}`);
-
-  const json = (await response.json()) as {
-    data: {
-      tiles: { edges: { node: { id: string } }[] };
-      routing: { edges: { node: { id: string } }[] };
-      geocoding: { edges: { node: { id: string } }[] };
-    };
-  };
-
-  return {
-    pmtilesTxId: json.data.tiles.edges[0]?.node.id ?? null,
-    routingGraphTxId: json.data.routing.edges[0]?.node.id ?? null,
-    geocodingDbTxId: json.data.geocoding.edges[0]?.node.id ?? null,
-  };
-}
-
 /**
  * Seed the local database with the bundled catalog.
  * Existing rows (already downloaded/downloading) are not overwritten.
- * Attempts to fetch live tx IDs from Arweave for each entry, falls back
- * to null tx IDs. When DATA_BASE_URL is configured, regions are downloadable
- * even without Arweave tx IDs (the download service resolves URLs from the
- * data server).
  */
 export async function seedCatalog(): Promise<void> {
   await Promise.all(
@@ -434,28 +362,10 @@ export async function seedCatalog(): Promise<void> {
       const existing = await getRegionById(entry.id);
       if (existing && existing.downloadStatus !== 'none') return;
 
-      let txIds: ArweaveTxIds = {
-        pmtilesTxId: null,
-        routingGraphTxId: null,
-        geocodingDbTxId: null,
-      };
-
-      // Only query Arweave if no local data server or GitHub repo is configured
-      if (!DATA_BASE_URL && !GITHUB_DATA_REPO) {
-        try {
-          txIds = await fetchRegionTxIds(entry.id);
-        } catch {
-          // Offline or query failed — seed anyway without tx IDs
-        }
-      }
-
       const region: Region = {
         id: entry.id,
         name: entry.name,
         bounds: entry.bounds,
-        pmtilesTxId: txIds.pmtilesTxId,
-        routingGraphTxId: txIds.routingGraphTxId,
-        geocodingDbTxId: txIds.geocodingDbTxId,
         version: '1',
         downloadStatus: existing?.downloadStatus ?? 'none',
         tilesSizeBytes: entry.tilesSizeBytes,

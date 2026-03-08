@@ -38,10 +38,9 @@ export async function upsertRegion(region: Region): Promise<void> {
   await db.runAsync(
     `INSERT OR REPLACE INTO regions (
        id, name, bounds_min_lat, bounds_max_lat, bounds_min_lng, bounds_max_lng,
-       pmtiles_tx_id, routing_graph_tx_id, geocoding_db_tx_id, version,
-       download_status, tiles_size_bytes, routing_size_bytes, geocoding_size_bytes,
+       version, download_status, tiles_size_bytes, routing_size_bytes, geocoding_size_bytes,
        downloaded_at, last_updated, drive_key
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       region.id,
       region.name,
@@ -49,9 +48,6 @@ export async function upsertRegion(region: Region): Promise<void> {
       region.bounds.maxLat,
       region.bounds.minLng,
       region.bounds.maxLng,
-      region.pmtilesTxId,
-      region.routingGraphTxId,
-      region.geocodingDbTxId,
       region.version,
       region.downloadStatus,
       region.tilesSizeBytes,
@@ -92,9 +88,6 @@ interface RegionRow {
   bounds_max_lat: number;
   bounds_min_lng: number;
   bounds_max_lng: number;
-  pmtiles_tx_id: string | null;
-  routing_graph_tx_id: string | null;
-  geocoding_db_tx_id: string | null;
   version: string;
   download_status: string;
   tiles_size_bytes: number | null;
@@ -115,9 +108,6 @@ function rowToRegion(row: RegionRow): Region {
       minLng: row.bounds_min_lng,
       maxLng: row.bounds_max_lng,
     },
-    pmtilesTxId: row.pmtiles_tx_id,
-    routingGraphTxId: row.routing_graph_tx_id,
-    geocodingDbTxId: row.geocoding_db_tx_id,
     version: row.version,
     downloadStatus: row.download_status as RegionDownloadStatus,
     tilesSizeBytes: row.tiles_size_bytes,

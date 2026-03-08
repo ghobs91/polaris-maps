@@ -4,7 +4,7 @@ import { updatePeerMetrics } from '../sync/peerService';
 import { isStorageAvailable } from '../sync/resourceManager';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
-import { DATA_BASE_URL, ARWEAVE_GATEWAY, GITHUB_DATA_REPO } from '../../constants/config';
+import { DATA_BASE_URL, GITHUB_DATA_REPO } from '../../constants/config';
 import type { Region } from '../../models/region';
 
 /** Cached latest GitHub release tag to avoid repeated API calls. */
@@ -26,13 +26,8 @@ async function getLatestGitHubTag(): Promise<string | null> {
   }
 }
 
-/** Resolve the download URL for a region asset. Priority: Arweave > GitHub Releases > DATA_BASE_URL. */
-async function resolveUrl(
-  regionId: string,
-  filename: string,
-  arweaveTxId: string | null,
-): Promise<string | null> {
-  if (arweaveTxId) return `${ARWEAVE_GATEWAY}/${arweaveTxId}`;
+/** Resolve the download URL for a region asset. Priority: GitHub Releases > DATA_BASE_URL. */
+async function resolveUrl(regionId: string, filename: string): Promise<string | null> {
   const tag = await getLatestGitHubTag();
   if (tag) {
     const asset = `${regionId}-${filename}`;
@@ -165,19 +160,19 @@ async function tryPeerDownload(
   }
 }
 
-/** Download region data via HTTP (Arweave > GitHub Releases > DATA_BASE_URL). */
+/** Download region data via HTTP (GitHub Releases > DATA_BASE_URL). */
 async function downloadViaHttp(
   region: Region,
   destDir: string,
   onProgress?: ProgressCallback,
 ): Promise<void> {
-  const tilesUrl = await resolveUrl(region.id, 'tiles.pmtiles', region.pmtilesTxId);
-  const routingUrl = await resolveUrl(region.id, 'routing.tar', region.routingGraphTxId);
-  const geocodingUrl = await resolveUrl(region.id, 'geocoding.db', region.geocodingDbTxId);
+  const tilesUrl = await resolveUrl(region.id, 'tiles.pmtiles');
+  const routingUrl = await resolveUrl(region.id, 'routing.tar');
+  const geocodingUrl = await resolveUrl(region.id, 'geocoding.db');
 
   if (!routingUrl) {
     throw new Error(
-      'Routing data is not available for this region. Generate region data with scripts/generate-region-data.sh and serve it, or publish to Arweave.',
+      'Routing data is not available for this region. Generate region data with scripts/generate-region-data.sh and serve it, or configure GitHub Releases.',
     );
   }
 

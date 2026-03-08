@@ -21,9 +21,6 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       bounds_max_lat REAL NOT NULL,
       bounds_min_lng REAL NOT NULL,
       bounds_max_lng REAL NOT NULL,
-      pmtiles_tx_id TEXT,
-      routing_graph_tx_id TEXT,
-      geocoding_db_tx_id TEXT,
       version TEXT NOT NULL,
       download_status TEXT NOT NULL DEFAULT 'none',
       tiles_size_bytes INTEGER,
@@ -182,11 +179,18 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_imagery_author ON street_imagery (author_pubkey);
   `);
 
-  // Migration: add drive_key column for existing databases
+  // Migrations for existing databases
   try {
     await database.execAsync(`ALTER TABLE regions ADD COLUMN drive_key TEXT`);
   } catch {
-    // Column already exists — ignore
+    // Column already exists
+  }
+  for (const col of ['pmtiles_tx_id', 'routing_graph_tx_id', 'geocoding_db_tx_id']) {
+    try {
+      await database.execAsync(`ALTER TABLE regions DROP COLUMN ${col}`);
+    } catch {
+      // Column already removed or never existed
+    }
   }
 }
 
