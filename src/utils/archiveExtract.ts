@@ -31,9 +31,7 @@ export function extractTar(srcPath: string, destDir: string): Promise<void> {
       }
     });
 
-    NodeChannel.send(
-      JSON.stringify({ type: 'extract-tar', srcPath, destDir, requestId }),
-    );
+    NodeChannel.send(JSON.stringify({ type: 'extract-tar', srcPath, destDir, requestId }));
 
     // Timeout after 120s (large archives)
     setTimeout(() => {

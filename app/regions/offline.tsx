@@ -41,7 +41,10 @@ export default function OfflineRegionsScreen() {
               deleteRegionData(region.id)
                 .then(() => loadRegions())
                 .catch((err) =>
-                  Alert.alert('Delete Failed', err instanceof Error ? err.message : 'Unknown error'),
+                  Alert.alert(
+                    'Delete Failed',
+                    err instanceof Error ? err.message : 'Unknown error',
+                  ),
                 )
                 .finally(() => setDeletingId(null));
             },

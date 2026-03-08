@@ -18,7 +18,7 @@ async function getLatestGitHubTag(): Promise<string | null> {
       headers: { Accept: 'application/vnd.github+json' },
     });
     if (!res.ok) return (cachedGitHubTag = null);
-    const json = await res.json() as { tag_name: string };
+    const json = (await res.json()) as { tag_name: string };
     return (cachedGitHubTag = json.tag_name);
   } catch {
     return (cachedGitHubTag = null);
@@ -88,20 +88,15 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
     });
 
     if (tilesUrl) {
-      await downloadFile(
-        tilesUrl,
-        `${destDir}tiles.pmtiles`,
-        region.id,
-        (downloaded, total) => {
-          onProgress?.({
-            regionId: region.id,
-            totalBytes: total,
-            downloadedBytes: downloaded,
-            percent: total > 0 ? (downloaded / total) * 33 : 0,
-            stage: 'tiles',
-          });
-        },
-      );
+      await downloadFile(tilesUrl, `${destDir}tiles.pmtiles`, region.id, (downloaded, total) => {
+        onProgress?.({
+          regionId: region.id,
+          totalBytes: total,
+          downloadedBytes: downloaded,
+          percent: total > 0 ? (downloaded / total) * 33 : 0,
+          stage: 'tiles',
+        });
+      });
     }
 
     // Stage 2: Download Valhalla routing graph
@@ -113,20 +108,15 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       stage: 'routing',
     });
 
-    await downloadFile(
-      routingUrl,
-      `${destDir}routing.tar`,
-      region.id,
-      (downloaded, total) => {
-        onProgress?.({
-          regionId: region.id,
-          totalBytes: total,
-          downloadedBytes: downloaded,
-          percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
-          stage: 'routing',
-        });
-      },
-    );
+    await downloadFile(routingUrl, `${destDir}routing.tar`, region.id, (downloaded, total) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: total,
+        downloadedBytes: downloaded,
+        percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
+        stage: 'routing',
+      });
+    });
 
     // Extract the Valhalla graph tiles from the tar archive
     await extractTar(`${destDir}routing.tar`, `${destDir}routing/`);
@@ -142,20 +132,15 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
     });
 
     if (geocodingUrl) {
-      await downloadFile(
-        geocodingUrl,
-        `${destDir}geocoding.db`,
-        region.id,
-        (downloaded, total) => {
-          onProgress?.({
-            regionId: region.id,
-            totalBytes: total,
-            downloadedBytes: downloaded,
-            percent: 66 + (total > 0 ? (downloaded / total) * 34 : 0),
-            stage: 'geocoding',
-          });
-        },
-      );
+      await downloadFile(geocodingUrl, `${destDir}geocoding.db`, region.id, (downloaded, total) => {
+        onProgress?.({
+          regionId: region.id,
+          totalBytes: total,
+          downloadedBytes: downloaded,
+          percent: 66 + (total > 0 ? (downloaded / total) * 34 : 0),
+          stage: 'geocoding',
+        });
+      });
     }
 
     // Calculate total size

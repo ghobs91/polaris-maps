@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
 import { getAllRegions } from '../../src/services/regions/regionRepository';
-import { downloadRegion, deleteRegionData, type DownloadProgress } from '../../src/services/regions/downloadService';
+import {
+  downloadRegion,
+  deleteRegionData,
+  type DownloadProgress,
+} from '../../src/services/regions/downloadService';
 import { seedCatalog } from '../../src/services/regions/catalogService';
 import { RegionCard, DownloadProgressBar } from '../../src/components/regions';
 import { ErrorBoundary, LoadingSpinner } from '../../src/components/common';
@@ -61,7 +65,10 @@ export default function RegionsScreen() {
               deleteRegionData(region.id)
                 .then(() => loadRegions())
                 .catch((err) =>
-                  Alert.alert('Delete Failed', err instanceof Error ? err.message : 'Unknown error'),
+                  Alert.alert(
+                    'Delete Failed',
+                    err instanceof Error ? err.message : 'Unknown error',
+                  ),
                 );
             },
           },
