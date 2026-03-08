@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 
@@ -21,35 +21,51 @@ export function RegionCard({ region, onPress, onDownload, onDelete }: RegionCard
     : null;
 
   return (
-    <Pressable
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-      onPress={() => onPress?.(region)}
-      accessibilityRole="button"
-      accessibilityLabel={region.name}
-    >
-      <View style={styles.header}>
-        <Text style={styles.name}>{region.name}</Text>
-        <StatusBadge status={region.downloadStatus} />
-      </View>
+    <View style={styles.card}>
+      <Pressable
+        style={({ pressed }) => [styles.cardBody, pressed && onPress && styles.pressed]}
+        onPress={() => onPress?.(region)}
+        accessibilityRole={onPress ? 'button' : 'none'}
+        accessibilityLabel={region.name}
+      >
+        <View style={styles.header}>
+          <Text style={styles.name}>{region.name}</Text>
+          <StatusBadge status={region.downloadStatus} />
+        </View>
 
-      {sizeMb != null && <Text style={styles.size}>{sizeMb} MB</Text>}
+        {sizeMb != null && <Text style={styles.size}>{sizeMb} MB</Text>}
+      </Pressable>
 
       <View style={styles.actions}>
         {region.downloadStatus === 'none' && (
-          <Pressable style={styles.actionBtn} onPress={() => onDownload?.(region)}>
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={() => onDownload?.(region)}
+            activeOpacity={0.7}
+          >
             <Text style={styles.actionText}>Download</Text>
-          </Pressable>
+          </TouchableOpacity>
+        )}
+        {region.downloadStatus === 'failed' && (
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.retryBtn]}
+            onPress={() => onDownload?.(region)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.actionText, styles.retryText]}>Retry</Text>
+          </TouchableOpacity>
         )}
         {region.downloadStatus === 'complete' && (
-          <Pressable
+          <TouchableOpacity
             style={[styles.actionBtn, styles.dangerBtn]}
             onPress={() => onDelete?.(region)}
+            activeOpacity={0.7}
           >
             <Text style={[styles.actionText, styles.dangerText]}>Delete</Text>
-          </Pressable>
+          </TouchableOpacity>
         )}
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -83,10 +99,14 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
-    padding: spacing.md,
     marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  cardBody: {
+    padding: spacing.md,
+    paddingBottom: 0,
   },
   pressed: { opacity: 0.7 },
   header: {
@@ -99,7 +119,7 @@ const styles = StyleSheet.create({
   size: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.sm },
   badge: { borderRadius: borderRadius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   badgeText: { ...typography.caption, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: spacing.sm },
+  actions: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm },
   actionBtn: {
     borderWidth: 1,
     borderColor: colors.primary,
@@ -108,6 +128,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   actionText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
+  retryBtn: { borderColor: colors.warning },
+  retryText: { color: colors.warning },
   dangerBtn: { borderColor: colors.error },
   dangerText: { color: colors.error },
 });

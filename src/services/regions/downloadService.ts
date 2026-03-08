@@ -2,9 +2,44 @@ import * as FileSystem from 'expo-file-system';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { isStorageAvailable } from '../sync/resourceManager';
+import { extractTar } from '../../utils/archiveExtract';
+import { DATA_BASE_URL, ARWEAVE_GATEWAY, GITHUB_DATA_REPO } from '../../constants/config';
 import type { Region } from '../../models/region';
 
-const ARWEAVE_GATEWAY = 'https://arweave.net';
+/** Cached latest GitHub release tag to avoid repeated API calls. */
+let cachedGitHubTag: string | null | undefined = undefined;
+
+/** Fetch the latest GitHub release tag for the data repo, or null if unavailable. */
+async function getLatestGitHubTag(): Promise<string | null> {
+  if (cachedGitHubTag !== undefined) return cachedGitHubTag;
+  if (!GITHUB_DATA_REPO) return (cachedGitHubTag = null);
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_DATA_REPO}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    if (!res.ok) return (cachedGitHubTag = null);
+    const json = await res.json() as { tag_name: string };
+    return (cachedGitHubTag = json.tag_name);
+  } catch {
+    return (cachedGitHubTag = null);
+  }
+}
+
+/** Resolve the download URL for a region asset. Priority: Arweave > GitHub Releases > DATA_BASE_URL. */
+async function resolveUrl(
+  regionId: string,
+  filename: string,
+  arweaveTxId: string | null,
+): Promise<string | null> {
+  if (arweaveTxId) return `${ARWEAVE_GATEWAY}/${arweaveTxId}`;
+  const tag = await getLatestGitHubTag();
+  if (tag) {
+    const asset = `${regionId}-${filename}`;
+    return `https://github.com/${GITHUB_DATA_REPO}/releases/download/${tag}/${asset}`;
+  }
+  if (DATA_BASE_URL) return `${DATA_BASE_URL}/${regionId}/${filename}`;
+  return null;
+}
 
 export interface DownloadProgress {
   regionId: string;
@@ -20,13 +55,23 @@ type ProgressCallback = (progress: DownloadProgress) => void;
 const activeDownloads = new Map<string, FileSystem.DownloadResumable>();
 
 export async function downloadRegion(region: Region, onProgress?: ProgressCallback): Promise<void> {
+  const tilesUrl = await resolveUrl(region.id, 'tiles.pmtiles', region.pmtilesTxId);
+  const routingUrl = await resolveUrl(region.id, 'routing.tar', region.routingGraphTxId);
+  const geocodingUrl = await resolveUrl(region.id, 'geocoding.db', region.geocodingDbTxId);
+
+  if (!routingUrl) {
+    throw new Error(
+      'Routing data is not available for this region. Generate region data with scripts/generate-region-data.sh and serve it, or publish to Arweave.',
+    );
+  }
+
   const destDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
   await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
 
   const db = await getDatabase();
 
   // Update region status to downloading
-  await db.runAsync('UPDATE regions SET download_status = ?, updated_at = ? WHERE id = ?', [
+  await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
     'downloading',
     Math.floor(Date.now() / 1000),
     region.id,
@@ -42,9 +87,9 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       stage: 'tiles',
     });
 
-    if (region.pmtilesTxId) {
+    if (tilesUrl) {
       await downloadFile(
-        `${ARWEAVE_GATEWAY}/${region.pmtilesTxId}`,
+        tilesUrl,
         `${destDir}tiles.pmtiles`,
         region.id,
         (downloaded, total) => {
@@ -68,22 +113,24 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       stage: 'routing',
     });
 
-    if (region.routingGraphTxId) {
-      await downloadFile(
-        `${ARWEAVE_GATEWAY}/${region.routingGraphTxId}`,
-        `${destDir}routing.tar`,
-        region.id,
-        (downloaded, total) => {
-          onProgress?.({
-            regionId: region.id,
-            totalBytes: total,
-            downloadedBytes: downloaded,
-            percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
-            stage: 'routing',
-          });
-        },
-      );
-    }
+    await downloadFile(
+      routingUrl,
+      `${destDir}routing.tar`,
+      region.id,
+      (downloaded, total) => {
+        onProgress?.({
+          regionId: region.id,
+          totalBytes: total,
+          downloadedBytes: downloaded,
+          percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
+          stage: 'routing',
+        });
+      },
+    );
+
+    // Extract the Valhalla graph tiles from the tar archive
+    await extractTar(`${destDir}routing.tar`, `${destDir}routing/`);
+    await FileSystem.deleteAsync(`${destDir}routing.tar`, { idempotent: true });
 
     // Stage 3: Download geocoding database
     onProgress?.({
@@ -94,9 +141,9 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       stage: 'geocoding',
     });
 
-    if (region.geocodingDbTxId) {
+    if (geocodingUrl) {
       await downloadFile(
-        `${ARWEAVE_GATEWAY}/${region.geocodingDbTxId}`,
+        geocodingUrl,
         `${destDir}geocoding.db`,
         region.id,
         (downloaded, total) => {
@@ -117,8 +164,8 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
 
     // Mark as downloaded
     await db.runAsync(
-      'UPDATE regions SET download_status = ?, size_bytes = ?, updated_at = ? WHERE id = ?',
-      ['complete', totalSize, Math.floor(Date.now() / 1000), region.id],
+      'UPDATE regions SET download_status = ?, downloaded_at = ?, last_updated = ? WHERE id = ?',
+      ['complete', Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), region.id],
     );
 
     await updatePeerMetrics({ cacheSizeBytes: totalSize });
@@ -131,7 +178,7 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       stage: 'complete',
     });
   } catch (error) {
-    await db.runAsync('UPDATE regions SET download_status = ?, updated_at = ? WHERE id = ?', [
+    await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
       'failed',
       Math.floor(Date.now() / 1000),
       region.id,
@@ -169,7 +216,7 @@ export async function deleteRegionData(regionId: string): Promise<void> {
 
   const db = await getDatabase();
   await db.runAsync(
-    'UPDATE regions SET download_status = ?, size_bytes = 0, updated_at = ? WHERE id = ?',
+    'UPDATE regions SET download_status = ?, downloaded_at = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
 }

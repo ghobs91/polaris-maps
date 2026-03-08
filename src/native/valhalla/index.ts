@@ -50,7 +50,7 @@ function mapNativeRoute(native: NativeValhallaRoute): ValhallaRoute {
 const isAvailable = NativePolarisValhalla != null;
 
 export async function initialize(config: ValhallaConfig): Promise<void> {
-  if (!isAvailable) return;
+  if (!isAvailable) throw new Error('PolarisValhalla native module is not available');
   return NativePolarisValhalla!.initialize(config);
 }
 
@@ -59,7 +59,7 @@ export async function computeRoute(
   costing: CostingModel,
   options?: RouteOptions,
 ): Promise<ValhallaRoute[]> {
-  if (!isAvailable) return [];
+  if (!isAvailable) throw new Error('PolarisValhalla native module is not available');
   const results = await NativePolarisValhalla!.computeRoute(waypoints, costing, options);
   return results.map(mapNativeRoute);
 }

@@ -3,16 +3,22 @@ import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { StyleSheet, Platform } from 'react-native';
-import { colors } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function TabLayout() {
+  const { colors } = useTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: colors.tabBar.active,
+        tabBarInactiveTintColor: colors.tabBar.inactive,
+        tabBarStyle: {
+          position: 'absolute',
+          borderTopWidth: 0,
+          elevation: 0,
+          backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.tabBar.background,
+        },
         tabBarLabelStyle: styles.tabLabel,
         tabBarBackground: () =>
           Platform.OS === 'ios' ? (
@@ -55,12 +61,6 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabBar: {
-    position: 'absolute',
-    borderTopWidth: 0,
-    elevation: 0,
-    backgroundColor: Platform.OS === 'ios' ? 'transparent' : colors.tabBar.background,
-  },
   tabLabel: {
     fontSize: 10,
     fontWeight: '600',
