@@ -6,7 +6,17 @@ import { ErrorBoundary } from '../../src/components/common';
 import { spacing, typography } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 
-function SliderRow({ label, value, unit, colors }: { label: string; value: number; unit: string; colors: ReturnType<typeof useTheme>['colors'] }) {
+function SliderRow({
+  label,
+  value,
+  unit,
+  colors,
+}: {
+  label: string;
+  value: number;
+  unit: string;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.sliderRow}>
@@ -25,8 +35,14 @@ const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
 ];
 
 export default function SettingsScreen() {
-  const { resourceLimits, permissions, themeMode, setResourceLimits, setPermissions, setThemeMode } =
-    useSettingsStore();
+  const {
+    resourceLimits,
+    permissions,
+    themeMode,
+    setResourceLimits,
+    setPermissions,
+    setThemeMode,
+  } = useSettingsStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -70,7 +86,10 @@ export default function SettingsScreen() {
                 activeOpacity={0.7}
               >
                 <Text
-                  style={[styles.themeChipText, themeMode === opt.value && styles.themeChipTextActive]}
+                  style={[
+                    styles.themeChipText,
+                    themeMode === opt.value && styles.themeChipTextActive,
+                  ]}
                 >
                   {opt.label}
                 </Text>
@@ -82,7 +101,12 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Resource Limits</Text>
 
-          <SliderRow label="Max Storage" value={resourceLimits.maxStorageMb} unit="MB" colors={colors} />
+          <SliderRow
+            label="Max Storage"
+            value={resourceLimits.maxStorageMb}
+            unit="MB"
+            colors={colors}
+          />
           <View style={styles.buttonRow}>
             {[512, 1024, 2048, 4096].map((mb) => (
               <Text
@@ -95,7 +119,12 @@ export default function SettingsScreen() {
             ))}
           </View>
 
-          <SliderRow label="Max Bandwidth" value={resourceLimits.maxBandwidthMbps} unit="Mbps" colors={colors} />
+          <SliderRow
+            label="Max Bandwidth"
+            value={resourceLimits.maxBandwidthMbps}
+            unit="Mbps"
+            colors={colors}
+          />
           <View style={styles.buttonRow}>
             {[1, 5, 10, 25].map((mbps) => (
               <Text
@@ -108,7 +137,12 @@ export default function SettingsScreen() {
             ))}
           </View>
 
-          <SliderRow label="Max Battery" value={resourceLimits.maxBatteryPctHr} unit="% / hr" colors={colors} />
+          <SliderRow
+            label="Max Battery"
+            value={resourceLimits.maxBatteryPctHr}
+            unit="% / hr"
+            colors={colors}
+          />
           <View style={styles.buttonRow}>
             {[2, 5, 10, 15].map((pct) => (
               <Text

@@ -1,6 +1,11 @@
 import * as Valhalla from '../../native/valhalla';
 import { isOnline } from '../regions/connectivityService';
-import type { ValhallaRoute, ValhallaManeuver, ManeuverType, CostingModel } from '../../models/route';
+import type {
+  ValhallaRoute,
+  ValhallaManeuver,
+  ManeuverType,
+  CostingModel,
+} from '../../models/route';
 
 let initialized = false;
 
@@ -10,26 +15,55 @@ const OSM_VALHALLA_ENDPOINT = 'https://valhalla1.openstreetmap.de/route';
 /** Map Valhalla HTTP maneuver type codes to our ManeuverType strings. */
 function valhallaTypeCode(code: number): ManeuverType {
   switch (code) {
-    case 1: case 2: case 3: return 'start';
-    case 4: case 5: case 6: return 'destination';
-    case 7: return 'name_change';
-    case 8: return 'continue';
-    case 9: return 'slight_right';
-    case 10: return 'turn_right';
-    case 11: return 'sharp_right';
-    case 12: case 13: return 'u_turn';
-    case 14: return 'sharp_left';
-    case 15: return 'turn_left';
-    case 16: return 'slight_left';
-    case 17: case 22: return 'continue';
-    case 18: case 19: return 'enter_highway';
-    case 20: case 21: return 'exit_highway';
-    case 23: return 'merge_right';
-    case 24: case 25: return 'merge_left';
-    case 26: return 'enter_roundabout';
-    case 27: return 'exit_roundabout';
-    case 28: return 'ferry';
-    default: return 'continue';
+    case 1:
+    case 2:
+    case 3:
+      return 'start';
+    case 4:
+    case 5:
+    case 6:
+      return 'destination';
+    case 7:
+      return 'name_change';
+    case 8:
+      return 'continue';
+    case 9:
+      return 'slight_right';
+    case 10:
+      return 'turn_right';
+    case 11:
+      return 'sharp_right';
+    case 12:
+    case 13:
+      return 'u_turn';
+    case 14:
+      return 'sharp_left';
+    case 15:
+      return 'turn_left';
+    case 16:
+      return 'slight_left';
+    case 17:
+    case 22:
+      return 'continue';
+    case 18:
+    case 19:
+      return 'enter_highway';
+    case 20:
+    case 21:
+      return 'exit_highway';
+    case 23:
+      return 'merge_right';
+    case 24:
+    case 25:
+      return 'merge_left';
+    case 26:
+      return 'enter_roundabout';
+    case 27:
+      return 'exit_roundabout';
+    case 28:
+      return 'ferry';
+    default:
+      return 'continue';
   }
 }
 
@@ -37,7 +71,12 @@ function valhallaTypeCode(code: number): ManeuverType {
 async function computeRouteOnline(
   waypoints: Array<{ lat: number; lng: number }>,
   costing: CostingModel,
-  options?: { avoidTolls?: boolean; avoidHighways?: boolean; avoidFerries?: boolean; alternates?: number },
+  options?: {
+    avoidTolls?: boolean;
+    avoidHighways?: boolean;
+    avoidFerries?: boolean;
+    alternates?: number;
+  },
 ): Promise<ValhallaRoute[]> {
   const body = {
     locations: waypoints.map((w) => ({ lat: w.lat, lon: w.lng, type: 'break' })),
@@ -64,7 +103,7 @@ async function computeRouteOnline(
     throw new Error(`Online routing error ${res.status}: ${text}`);
   }
 
-  const json = await res.json() as Record<string, unknown>;
+  const json = (await res.json()) as Record<string, unknown>;
   const rawTrips = json['trip'] ? [json] : ((json['alternates'] as unknown[]) ?? [json]);
   const trips = rawTrips as Record<string, unknown>[];
 
@@ -72,23 +111,27 @@ async function computeRouteOnline(
     const trip = (t['trip'] ?? t) as Record<string, unknown>;
     const rawLegs = (trip['legs'] ?? []) as Record<string, unknown>[];
     const legs = rawLegs.map((leg) => ({
-      maneuvers: ((leg['maneuvers'] ?? []) as Record<string, unknown>[]).map((m): ValhallaManeuver => ({
-        type: valhallaTypeCode((m['type'] as number) ?? 0),
-        instruction: (m['instruction'] as string) ?? '',
-        distanceMeters: ((m['length'] as number) ?? 0) * 1000,
-        durationSeconds: (m['time'] as number) ?? 0,
-        beginShapeIndex: (m['begin_shape_index'] as number) ?? 0,
-        endShapeIndex: (m['end_shape_index'] as number) ?? 0,
-        streetNames: m['street_names'] as string[] | undefined,
-        verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
-        verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
-      })),
-      distanceMeters: (((leg['summary'] as Record<string, unknown>)?.['length'] as number) ?? 0) * 1000,
+      maneuvers: ((leg['maneuvers'] ?? []) as Record<string, unknown>[]).map(
+        (m): ValhallaManeuver => ({
+          type: valhallaTypeCode((m['type'] as number) ?? 0),
+          instruction: (m['instruction'] as string) ?? '',
+          distanceMeters: ((m['length'] as number) ?? 0) * 1000,
+          durationSeconds: (m['time'] as number) ?? 0,
+          beginShapeIndex: (m['begin_shape_index'] as number) ?? 0,
+          endShapeIndex: (m['end_shape_index'] as number) ?? 0,
+          streetNames: m['street_names'] as string[] | undefined,
+          verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
+          verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
+        }),
+      ),
+      distanceMeters:
+        (((leg['summary'] as Record<string, unknown>)?.['length'] as number) ?? 0) * 1000,
       durationSeconds: ((leg['summary'] as Record<string, unknown>)?.['time'] as number) ?? 0,
     }));
 
     const summary = (trip['summary'] ?? {}) as Record<string, unknown>;
-    const firstLegShape = ((trip['legs'] as Record<string, unknown>[])?.[0]?.['shape'] as string) ?? '';
+    const firstLegShape =
+      ((trip['legs'] as Record<string, unknown>[])?.[0]?.['shape'] as string) ?? '';
     return {
       summary: {
         distanceMeters: ((summary['length'] as number) ?? 0) * 1000,

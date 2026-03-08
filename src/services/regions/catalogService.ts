@@ -141,7 +141,7 @@ async function fetchRegionTxIds(regionId: string): Promise<ArweaveTxIds> {
 
   if (!response.ok) throw new Error(`Arweave GraphQL error: ${response.status}`);
 
-  const json = await response.json() as {
+  const json = (await response.json()) as {
     data: {
       tiles: { edges: { node: { id: string } }[] };
       routing: { edges: { node: { id: string } }[] };

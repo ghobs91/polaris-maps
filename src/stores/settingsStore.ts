@@ -27,7 +27,11 @@ interface SettingsState {
 
 const STORAGE_KEY = 'settings';
 
-function loadSettings(): { resourceLimits: ResourceLimits; permissions: PermissionPreferences; themeMode: ThemeMode } {
+function loadSettings(): {
+  resourceLimits: ResourceLimits;
+  permissions: PermissionPreferences;
+  themeMode: ThemeMode;
+} {
   const raw = storage.getString(STORAGE_KEY);
   if (raw) {
     try {
@@ -67,16 +71,28 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     setResourceLimits: (limits) => {
       const updated = { ...get().resourceLimits, ...limits };
       set({ resourceLimits: updated });
-      persistSettings({ resourceLimits: updated, permissions: get().permissions, themeMode: get().themeMode });
+      persistSettings({
+        resourceLimits: updated,
+        permissions: get().permissions,
+        themeMode: get().themeMode,
+      });
     },
     setPermissions: (prefs) => {
       const updated = { ...get().permissions, ...prefs };
       set({ permissions: updated });
-      persistSettings({ resourceLimits: get().resourceLimits, permissions: updated, themeMode: get().themeMode });
+      persistSettings({
+        resourceLimits: get().resourceLimits,
+        permissions: updated,
+        themeMode: get().themeMode,
+      });
     },
     setThemeMode: (mode) => {
       set({ themeMode: mode });
-      persistSettings({ resourceLimits: get().resourceLimits, permissions: get().permissions, themeMode: mode });
+      persistSettings({
+        resourceLimits: get().resourceLimits,
+        permissions: get().permissions,
+        themeMode: mode,
+      });
     },
   };
 });
