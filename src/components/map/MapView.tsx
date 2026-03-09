@@ -2,33 +2,8 @@ import React, { useRef, useCallback, useEffect } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
-import { getTileServerBaseUrl } from '../../native/tileServer';
+import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
 import { colors } from '../../constants/theme';
-
-// Fallback OSM raster style used when the local tile server is unavailable
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const OSM_FALLBACK_STYLE: any = {
-  version: 8,
-  name: 'OSM Raster',
-  sources: {
-    osm: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '&copy; OpenStreetMap contributors',
-      maxzoom: 19,
-    },
-  },
-  layers: [
-    {
-      id: 'osm-tiles',
-      type: 'raster',
-      source: 'osm',
-      minzoom: 0,
-      maxzoom: 22,
-    },
-  ],
-};
 
 interface MapViewProps {
   routeGeometry?: string;
@@ -38,13 +13,10 @@ interface MapViewProps {
 export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
   const mapRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
-  const tileServerPort = useMapStore((s) => s.tileServerPort);
   const viewport = useMapStore((s) => s.viewport);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
-
-  const styleUrl = tileServerPort ? `${getTileServerBaseUrl()}/style.json` : OSM_FALLBACK_STYLE;
 
   // Listen for programmatic viewport changes (locate, search select) and fly to them
   useEffect(() => {
@@ -72,7 +44,6 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
     return unsub;
   }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handlePress = useCallback(
     (event: any) => {
       const [lng, lat] = event.geometry.coordinates as [number, number];
@@ -83,7 +54,12 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
 
   return (
     <View style={styles.container}>
-      <MapLibreGL.MapView ref={mapRef} style={styles.map} mapStyle={styleUrl} onPress={handlePress}>
+      <MapLibreGL.MapView
+        ref={mapRef}
+        style={styles.map}
+        mapStyle={OPENFREEMAP_STYLE_URL}
+        onPress={handlePress}
+      >
         <MapLibreGL.Camera
           ref={cameraRef}
           defaultSettings={{

@@ -6,19 +6,21 @@ import { MapControls } from '@/components/map/MapControls';
 import { LocationActionPanel } from '@/components/map/LocationActionPanel';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
-import { initTileService } from '@/services/map/tileService';
 import { ErrorBoundary } from '@/components/common';
 
 export default function MapScreen() {
   const setViewport = useMapStore((s) => s.setViewport);
-  const setTileServerPort = useMapStore((s) => s.setTileServerPort);
   const routeGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
 
+  // Center on user location at startup
   useEffect(() => {
-    initTileService()
-      .then((port) => setTileServerPort(port))
-      .catch(console.error);
-  }, [setTileServerPort]);
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 13 });
+    })();
+  }, [setViewport]);
 
   const handleLocate = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();

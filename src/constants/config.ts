@@ -1,30 +1,15 @@
 /**
  * App-wide configuration constants.
  *
- * DATA_BASE_URL is the HTTP base URL where pre-built region data is hosted.
- * During development, generate data with `scripts/generate-region-data.sh`
- * and serve it locally:
- *   cd region-data && python3 -m http.server 9000
+ * All map tiles are sourced from OpenFreeMap (vector tiles backed by
+ * OpenStreetMap data). No API keys or registration required.
  *
- * The app downloads region assets from:
- *   {DATA_BASE_URL}/{region-id}/tiles.pmtiles
- *   {DATA_BASE_URL}/{region-id}/routing.tar
- *   {DATA_BASE_URL}/{region-id}/geocoding.db
- *
- * Set to null to disable direct HTTP downloads and only use GitHub Releases.
+ * For offline use, tiles are first shared via Hyperdrive P2P. If not
+ * available from peers, they are fetched on-demand from OpenFreeMap.
  */
-export const DATA_BASE_URL: string | null = null;
 
-/**
- * GitHub repository that publishes pre-built region map data via Releases.
- * Format: "owner/repo"
- *
- * The CI workflow (.github/workflows/build-region-data.yml) automatically
- * builds tiles from OpenStreetMap data (Geofabrik) and uploads them to
- * GitHub Releases as assets named: {regionId}-tiles.pmtiles, {regionId}-routing.tar,
- * {regionId}-geocoding.db. The app queries the GitHub API to find the latest
- * release tag and downloads from there.
- *
- * Set to null to disable GitHub Releases as a source.
- */
-export const GITHUB_DATA_REPO: string | null = 'ghobs91/polaris-maps';
+/** OpenFreeMap MapLibre style URL — global vector tiles, no download needed. */
+export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+
+/** OpenFreeMap TileJSON endpoint for the planet vector tile source. */
+export const OPENFREEMAP_TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
