@@ -4,13 +4,16 @@ import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
 import { MapControls } from '@/components/map/MapControls';
 import { LocationActionPanel } from '@/components/map/LocationActionPanel';
+import { FloatingSearchPanel } from '@/components/map/FloatingSearchPanel';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { ErrorBoundary } from '@/components/common';
 
 export default function MapScreen() {
   const setViewport = useMapStore((s) => s.setViewport);
-  const routeGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
+  const activeRouteGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
+  const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
+  const routeGeometry = activeRouteGeometry ?? previewRouteGeometry;
 
   // Center on user location at startup
   useEffect(() => {
@@ -39,6 +42,7 @@ export default function MapScreen() {
         <MapView routeGeometry={routeGeometry} onMapPress={handleMapPress} />
         <MapControls onLocatePress={handleLocate} />
         <LocationActionPanel />
+        <FloatingSearchPanel />
       </View>
     </ErrorBoundary>
   );

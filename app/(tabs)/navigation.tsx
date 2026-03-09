@@ -1,15 +1,30 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { MapView } from '@/components/map/MapView';
-import { NextTurnBanner, ManeuverList, EtaDisplay } from '@/components/navigation';
+import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
-import { Button } from '@/components/common';
+import { useMapStore } from '@/stores/mapStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
+import { decodePolyline } from '@/utils/polyline';
+
+/** Compute bearing (in degrees, 0=north, CW) between two [lng,lat] points */
+function computeBearing(from: [number, number], to: [number, number]): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const dLng = toRad(to[0] - from[0]);
+  const lat1 = toRad(from[1]);
+  const lat2 = toRad(to[1]);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const {
@@ -22,6 +37,114 @@ export default function NavigationScreen() {
     stopNavigation,
   } = useNavigationStore();
 
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [navPosition, setNavPosition] = useState<[number, number] | null>(null);
+  const [navBearing, setNavBearing] = useState(0);
+  const previewRafRef = useRef<number | null>(null);
+  const previewIndexRef = useRef(0);
+  const previewStartTimeRef = useRef(0);
+
+  const stopPreview = useCallback(() => {
+    setIsPreviewMode(false);
+    if (previewRafRef.current !== null) {
+      cancelAnimationFrame(previewRafRef.current);
+      previewRafRef.current = null;
+    }
+  }, []);
+
+  const togglePreview = useCallback(() => {
+    if (isPreviewMode) {
+      stopPreview();
+    } else {
+      previewIndexRef.current = 0;
+      setIsPreviewMode(true);
+    }
+  }, [isPreviewMode, stopPreview]);
+
+  // Stop preview if navigation ends
+  useEffect(() => {
+    if (!isNavigating) stopPreview();
+  }, [isNavigating, stopPreview]);
+
+  // Preview simulation: advance at real-time speed based on each maneuver's duration,
+  // which reflects the road's speed limit as computed by the routing engine.
+  useEffect(() => {
+    if (!isPreviewMode || !activeRoute) return;
+
+    const coords = decodePolyline(activeRoute.geometry);
+    if (coords.length === 0) return;
+
+    const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
+
+    // Build a cumulative time table: cumulativeMs[i] = simulated ms from start to reach coords[i].
+    // Each maneuver's durationSeconds is distributed evenly across its shape segments.
+    const cumulativeMs: number[] = new Array(coords.length).fill(0);
+    for (const maneuver of allManeuvers) {
+      const numSegments = maneuver.endShapeIndex - maneuver.beginShapeIndex;
+      if (numSegments <= 0) continue;
+      const msPerSegment = (maneuver.durationSeconds * 1000) / numSegments;
+      for (let i = maneuver.beginShapeIndex; i < maneuver.endShapeIndex; i++) {
+        cumulativeMs[i + 1] = cumulativeMs[i] + msPerSegment;
+      }
+    }
+    const totalMs = cumulativeMs[coords.length - 1];
+
+    // Reset to start
+    previewIndexRef.current = 0;
+    previewStartTimeRef.current = performance.now();
+    setNavPosition(coords[0]);
+    setNavBearing(0);
+
+    // Use requestAnimationFrame for smooth, continuous interpolation between points.
+    const tick = (now: number) => {
+      const elapsedMs = now - previewStartTimeRef.current;
+      if (elapsedMs >= totalMs) {
+        stopPreview();
+        return;
+      }
+
+      // Binary search: find the segment [lo, lo+1] that straddles elapsedMs
+      let lo = 0;
+      let hi = coords.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (cumulativeMs[mid] <= elapsedMs) lo = mid;
+        else hi = mid - 1;
+      }
+
+      // Interpolate between coords[lo] and coords[lo+1]
+      const nextIdx = Math.min(lo + 1, coords.length - 1);
+      const segStart = cumulativeMs[lo];
+      const segEnd = cumulativeMs[nextIdx];
+      const t = segEnd > segStart ? (elapsedMs - segStart) / (segEnd - segStart) : 0;
+      const a = coords[lo];
+      const b = coords[nextIdx];
+      const pos: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const bearing = computeBearing(a, b);
+
+      setNavPosition(pos);
+      setNavBearing(bearing);
+
+      // Advance maneuver step if we've crossed its beginShapeIndex
+      if (lo !== previewIndexRef.current) {
+        previewIndexRef.current = lo;
+        const store = useNavigationStore.getState();
+        const nextStep = store.currentStepIndex + 1;
+        if (nextStep < allManeuvers.length && lo >= allManeuvers[nextStep].beginShapeIndex) {
+          store.advanceStep();
+        }
+      }
+
+      previewRafRef.current = requestAnimationFrame(tick);
+    };
+
+    previewRafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (previewRafRef.current !== null) cancelAnimationFrame(previewRafRef.current);
+    };
+  }, [isPreviewMode, activeRoute, stopPreview]);
+
   if (!isNavigating || !activeRoute) {
     return (
       <View style={[styles.empty, { paddingTop: insets.top }]}>
@@ -32,17 +155,32 @@ export default function NavigationScreen() {
   }
 
   const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
+  const nextManeuver = allManeuvers[currentStepIndex + 1] ?? null;
 
   return (
     <View style={styles.container}>
-      <NextTurnBanner maneuver={currentManeuver} />
-      <View style={styles.mapContainer}>
-        <MapView routeGeometry={activeRoute.geometry} />
+      {/* Full-screen map — tilted + heading-up when navigating */}
+      <MapView
+        routeGeometry={activeRoute.geometry}
+        navigationMode={isPreviewMode || isNavigating}
+        navPosition={navPosition}
+        navBearing={navBearing}
+      />
+
+      {/* Turn banner overlaid at top */}
+      <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
+        <NextTurnBanner maneuver={currentManeuver} nextManeuver={nextManeuver} />
       </View>
-      <EtaDisplay etaSeconds={etaSeconds} remainingDistanceMeters={remainingDistanceMeters} />
-      <ManeuverList maneuvers={allManeuvers} currentIndex={currentStepIndex} />
-      <View style={styles.footer}>
-        <Button title="End Navigation" onPress={stopNavigation} variant="outline" />
+
+      {/* ETA / Exit bar — sits above the tab bar */}
+      <View style={[styles.etaContainer, { bottom: tabBarHeight }]}>
+        <EtaDisplay
+          etaSeconds={etaSeconds}
+          remainingDistanceMeters={remainingDistanceMeters}
+          onExit={stopNavigation}
+          onPreview={togglePreview}
+          isPreviewMode={isPreviewMode}
+        />
       </View>
     </View>
   );
@@ -50,10 +188,18 @@ export default function NavigationScreen() {
 
 const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    mapContainer: { flex: 1 },
+    container: { flex: 1 },
+    bannerContainer: {
+      position: 'absolute',
+      left: spacing.md,
+      right: spacing.md,
+    },
+    etaContainer: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+    },
     empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
     emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
     emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
-    footer: { padding: spacing.md },
   });

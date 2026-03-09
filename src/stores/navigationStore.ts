@@ -14,6 +14,19 @@ interface NavigationState {
   costing: CostingModel;
   destination: { lat: number; lng: number; name?: string } | null;
 
+  // Route preview (directions mode, before turn-by-turn)
+  routePreview: ValhallaRoute | null;
+  routePreviewAlternates: ValhallaRoute[];
+  routePreviewDestination: { lat: number; lng: number; name?: string } | null;
+  routePreviewCosting: CostingModel;
+
+  setRoutePreview: (
+    route: ValhallaRoute,
+    alternates: ValhallaRoute[],
+    destination: NavigationState['destination'],
+    costing: CostingModel,
+  ) => void;
+  clearRoutePreview: () => void;
   startNavigation: (
     route: ValhallaRoute,
     alternates: ValhallaRoute[],
@@ -42,6 +55,27 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   costing: 'auto',
   destination: null,
 
+  routePreview: null,
+  routePreviewAlternates: [],
+  routePreviewDestination: null,
+  routePreviewCosting: 'auto',
+
+  setRoutePreview: (route, alternates, destination, costing) =>
+    set({
+      routePreview: route,
+      routePreviewAlternates: alternates,
+      routePreviewDestination: destination,
+      routePreviewCosting: costing,
+    }),
+
+  clearRoutePreview: () =>
+    set({
+      routePreview: null,
+      routePreviewAlternates: [],
+      routePreviewDestination: null,
+      routePreviewCosting: 'auto',
+    }),
+
   startNavigation: (route, alternates, destination, costing) => {
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
     set({
@@ -56,6 +90,10 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       hasDeviated: false,
       costing,
       destination,
+      // Clear preview when starting real navigation
+      routePreview: null,
+      routePreviewAlternates: [],
+      routePreviewDestination: null,
     });
   },
 
