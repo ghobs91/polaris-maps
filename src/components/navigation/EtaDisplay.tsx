@@ -1,27 +1,57 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { colors, spacing, typography } from '../../constants/theme';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { formatDistance } from '../../utils/units';
 
 interface EtaDisplayProps {
   etaSeconds: number | null;
   remainingDistanceMeters: number | null;
+  onExit?: () => void;
+  onPreview?: () => void;
+  isPreviewMode?: boolean;
 }
 
-export function EtaDisplay({ etaSeconds, remainingDistanceMeters }: EtaDisplayProps) {
+export function EtaDisplay({
+  etaSeconds,
+  remainingDistanceMeters,
+  onExit,
+  onPreview,
+  isPreviewMode,
+}: EtaDisplayProps) {
   if (etaSeconds == null) return null;
+
+  const arrival = new Date(Date.now() + etaSeconds * 1000);
+  const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
     <View style={styles.container}>
-      <View style={styles.stat}>
-        <Text style={styles.value}>{formatDuration(etaSeconds)}</Text>
-        <Text style={styles.label}>ETA</Text>
+      <View style={styles.info}>
+        <Text style={styles.eta}>{formatDuration(etaSeconds)}</Text>
+        <Text style={styles.sub}>
+          {remainingDistanceMeters != null ? `${formatDistance(remainingDistanceMeters)} · ` : ''}
+          {arrivalStr}
+        </Text>
       </View>
-      {remainingDistanceMeters != null && (
-        <View style={styles.stat}>
-          <Text style={styles.value}>{formatDistance(remainingDistanceMeters)}</Text>
-          <Text style={styles.label}>Remaining</Text>
-        </View>
-      )}
+      <View style={styles.buttons}>
+        {onPreview && (
+          <TouchableOpacity
+            style={[styles.previewBtn, isPreviewMode && styles.previewBtnActive]}
+            onPress={onPreview}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name={isPreviewMode ? 'pause' : 'play'}
+              size={18}
+              color={isPreviewMode ? '#fff' : 'rgba(255,255,255,0.75)'}
+            />
+          </TouchableOpacity>
+        )}
+        {onExit && (
+          <TouchableOpacity style={styles.exitBtn} onPress={onExit} activeOpacity={0.85}>
+            <Text style={styles.exitText}>Exit</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -33,31 +63,55 @@ function formatDuration(seconds: number): string {
   return `${mins} min`;
 }
 
-function formatDistance(meters: number): string {
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
-}
-
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#111',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
-  stat: {
+  info: {
+    flex: 1,
+  },
+  eta: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#4ADE80',
+    lineHeight: 36,
+  },
+  sub: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.55)',
+    marginTop: 3,
+  },
+  buttons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  previewBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  value: {
-    ...typography.h3,
-    color: colors.text,
-    fontWeight: '700',
+  previewBtnActive: {
+    backgroundColor: 'rgba(74,222,128,0.25)',
   },
-  label: {
-    ...typography.caption,
-    color: colors.textSecondary,
+  exitBtn: {
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 26,
+    paddingVertical: 14,
+    borderRadius: 999,
+  },
+  exitText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

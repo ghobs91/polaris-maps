@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { formatDistance } from '../../utils/units';
 import type { ValhallaManeuver } from '../../models/route';
 
 interface ManeuverListProps {
@@ -29,11 +30,6 @@ export function ManeuverList({ maneuvers, currentIndex }: ManeuverListProps) {
       )}
     />
   );
-}
-
-function formatDistance(meters: number): string {
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
 }
 
 const styles = StyleSheet.create({

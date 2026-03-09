@@ -4,13 +4,26 @@ import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
 import { colors } from '../../constants/theme';
+import { decodePolyline } from '../../utils/polyline';
 
 interface MapViewProps {
   routeGeometry?: string;
   onMapPress?: (lat: number, lng: number) => void;
+  /** When true, tilts the camera, hides user dot, shows chevron at navPosition */
+  navigationMode?: boolean;
+  /** Current position of the navigation chevron [lng, lat] */
+  navPosition?: [number, number] | null;
+  /** Bearing in degrees (0 = north, 90 = east) for heading-up rotation */
+  navBearing?: number;
 }
 
-export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
+export function MapView({
+  routeGeometry,
+  onMapPress,
+  navigationMode,
+  navPosition,
+  navBearing = 0,
+}: MapViewProps) {
   const mapRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
   const viewport = useMapStore((s) => s.viewport);
@@ -18,10 +31,39 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
 
+  // In navigation mode, follow navPosition with tilt + heading
+  useEffect(() => {
+    if (!navigationMode || !navPosition || !cameraRef.current) return;
+    cameraRef.current.setCamera({
+      centerCoordinate: navPosition,
+      zoomLevel: 17,
+      heading: navBearing,
+      pitch: 55,
+      animationDuration: 800,
+      animationMode: 'flyTo',
+    });
+  }, [navigationMode, navPosition, navBearing]);
+
   // Listen for programmatic viewport changes (locate, search select) and fly to them
   useEffect(() => {
     const unsub = useMapStore.subscribe((state, prev) => {
-      if (state.viewport !== prev.viewport && cameraRef.current) {
+      if (!cameraRef.current) return;
+
+      // Handle fitBounds requests (route overview zoom)
+      if (state.fitBounds && state.fitBounds !== prev.fitBounds) {
+        const [minLng, minLat, maxLng, maxLat] = state.fitBounds;
+        cameraRef.current.fitBounds(
+          [maxLng, maxLat], // NE
+          [minLng, minLat], // SW
+          60, // padding
+          500, // duration ms
+        );
+        // Clear after applying so it can be re-triggered
+        useMapStore.getState().setFitBounds(null);
+        return;
+      }
+
+      if (state.viewport !== prev.viewport) {
         // Only animate if this is a programmatic change (zoom/lat/lng changed materially)
         const v = state.viewport;
         const p = prev.viewport;
@@ -70,7 +112,21 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
           }}
         />
 
-        <MapLibreGL.UserLocation visible />
+        <MapLibreGL.UserLocation visible={!navigationMode} />
+
+        {/* Navigation chevron as a map annotation */}
+        {navigationMode && navPosition && (
+          <MapLibreGL.PointAnnotation
+            id="navChevron"
+            coordinate={navPosition}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={chevronStyles.container}>
+              <View style={chevronStyles.triangle} />
+              <View style={chevronStyles.glow} />
+            </View>
+          </MapLibreGL.PointAnnotation>
+        )}
 
         {selectedLocation && (
           <MapLibreGL.ShapeSource
@@ -124,41 +180,33 @@ export function MapView({ routeGeometry, onMapPress }: MapViewProps) {
   );
 }
 
-// Decode polyline with precision 6 (Valhalla default)
-function decodePolyline(encoded: string, precision: number = 6): [number, number][] {
-  const coords: [number, number][] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-  const factor = Math.pow(10, precision);
-
-  while (index < encoded.length) {
-    let shift = 0;
-    let result = 0;
-    let byte: number;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-
-    shift = 0;
-    result = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
-
-    coords.push([lng / factor, lat / factor]);
-  }
-
-  return coords;
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+});
+
+const chevronStyles = StyleSheet.create({
+  container: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  triangle: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 14,
+    borderRightWidth: 14,
+    borderBottomWidth: 28,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#4A90D9',
+  },
+  glow: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(74,144,217,0.25)',
+  },
 });

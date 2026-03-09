@@ -6,10 +6,11 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useMapStore } from '../../stores/mapStore';
@@ -23,12 +24,17 @@ import {
 import { extractTar } from '../../utils/archiveExtract';
 import { getDatabase } from '../../services/database/init';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
+import { formatDistance } from '../../utils/units';
 
 export function LocationActionPanel() {
   const selectedLocation = useMapStore((s) => s.selectedLocation);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
+  const setFitBounds = useMapStore((s) => s.setFitBounds);
+  const routePreview = useNavigationStore((s) => s.routePreview);
+  const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
+  const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
-  const tabBarHeight = useBottomTabBarHeight();
+  const { bottom: safeBottom } = useSafeAreaInsets();
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
@@ -36,11 +42,13 @@ export function LocationActionPanel() {
 
   const handleDismiss = useCallback(() => {
     setSelectedLocation(null);
+    clearRoutePreview();
     setRouteError(null);
     setUsedOnlineRouting(false);
-  }, [setSelectedLocation]);
+  }, [setSelectedLocation, clearRoutePreview]);
 
-  const handleNavigate = useCallback(async () => {
+  /** Compute route and show it on the map (directions preview) */
+  const handleDirections = useCallback(async () => {
     if (!selectedLocation) return;
     setIsRouting(true);
     setRouteError(null);
@@ -84,7 +92,6 @@ export function LocationActionPanel() {
               // Extraction failed — fall through to online routing
             }
           } else {
-            // Empty bogus 'complete' region — reset so user can re-download
             const db = await getDatabase();
             await db.runAsync(
               'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
@@ -103,7 +110,6 @@ export function LocationActionPanel() {
         }
       }
 
-      // computeRoute automatically falls back to online Valhalla when local tiles aren't loaded
       const routes = await computeRoute(
         [
           { lat: pos.coords.latitude, lng: pos.coords.longitude },
@@ -115,17 +121,38 @@ export function LocationActionPanel() {
         setRouteError('No route found between these points');
         return;
       }
-      // Show hint if we used online routing (no local tiles)
       if (!region) setUsedOnlineRouting(true);
-      startNavigation(routes[0], routes.slice(1), selectedLocation, 'auto');
-      setSelectedLocation(null);
+
+      // Store as preview (not active navigation)
+      setRoutePreview(routes[0], routes.slice(1), selectedLocation, 'auto');
+
+      // Zoom map to show the entire route
+      if (routes[0].boundingBox) {
+        setFitBounds(routes[0].boundingBox);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setRouteError(msg || 'Could not compute route');
     } finally {
       setIsRouting(false);
     }
-  }, [selectedLocation, startNavigation, setSelectedLocation]);
+  }, [selectedLocation, setRoutePreview, setFitBounds]);
+
+  /** Start turn-by-turn navigation from the previewed route */
+  const handleStartNavigation = useCallback(() => {
+    if (!routePreview) return;
+    const { routePreviewAlternates, routePreviewDestination, routePreviewCosting } =
+      useNavigationStore.getState();
+    startNavigation(
+      routePreview,
+      routePreviewAlternates,
+      routePreviewDestination,
+      routePreviewCosting,
+    );
+    setSelectedLocation(null);
+    // Switch to the navigation tab
+    router.push('/(tabs)/navigation');
+  }, [routePreview, startNavigation, setSelectedLocation, router]);
 
   const handleAddPoi = useCallback(() => {
     if (!selectedLocation) return;
@@ -138,16 +165,27 @@ export function LocationActionPanel() {
     });
   }, [selectedLocation, router]);
 
-  if (!selectedLocation) return null;
+  if (!selectedLocation && !routePreview) return null;
 
-  const panelContent = (
+  const displayLocation =
+    (selectedLocation ?? routePreview)
+      ? (selectedLocation ?? useNavigationStore.getState().routePreviewDestination)
+      : null;
+
+  const panelContent = routePreview ? (
+    // ── Phase 2: Route preview with directions ──
     <View style={styles.inner}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Ionicons name="location" size={18} color={colors.primary} style={styles.locationIcon} />
-          <Text style={styles.name} numberOfLines={2}>
-            {selectedLocation.name ??
-              `${selectedLocation.lat.toFixed(5)}, ${selectedLocation.lng.toFixed(5)}`}
+          <Ionicons
+            name="map-outline"
+            size={18}
+            color={colors.primary}
+            style={styles.locationIcon}
+          />
+          <Text style={styles.name} numberOfLines={1}>
+            {displayLocation?.name ??
+              `${displayLocation?.lat.toFixed(5)}, ${displayLocation?.lng.toFixed(5)}`}
           </Text>
         </View>
         <TouchableOpacity onPress={handleDismiss} style={styles.closeBtn} hitSlop={8}>
@@ -155,13 +193,21 @@ export function LocationActionPanel() {
         </TouchableOpacity>
       </View>
 
-      {selectedLocation.name && (
-        <Text style={styles.coords}>
-          {selectedLocation.lat.toFixed(5)}, {selectedLocation.lng.toFixed(5)}
-        </Text>
-      )}
-
-      {routeError && <Text style={styles.error}>{routeError}</Text>}
+      {/* Route summary */}
+      <View style={styles.routeSummary}>
+        <View style={styles.summaryItem}>
+          <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+          <Text style={styles.summaryText}>
+            {formatDuration(routePreview.summary.durationSeconds)}
+          </Text>
+        </View>
+        <View style={styles.summaryItem}>
+          <Ionicons name="speedometer-outline" size={14} color={colors.textSecondary} />
+          <Text style={styles.summaryText}>
+            {formatDistance(routePreview.summary.distanceMeters)}
+          </Text>
+        </View>
+      </View>
 
       {usedOnlineRouting && (
         <TouchableOpacity
@@ -176,19 +222,75 @@ export function LocationActionPanel() {
         </TouchableOpacity>
       )}
 
+      {/* Direction steps */}
+      <FlatList
+        data={routePreview.legs.flatMap((l) => l.maneuvers)}
+        keyExtractor={(_, i) => String(i)}
+        style={styles.stepsList}
+        renderItem={({ item, index }) => (
+          <View style={styles.stepRow}>
+            <View style={styles.stepBadge}>
+              <Text style={styles.stepBadgeText}>{index + 1}</Text>
+            </View>
+            <View style={styles.stepContent}>
+              <Text style={styles.stepInstruction} numberOfLines={2}>
+                {item.instruction}
+              </Text>
+              <Text style={styles.stepDistance}>{formatDistance(item.distanceMeters)}</Text>
+            </View>
+          </View>
+        )}
+      />
+
+      {/* Navigate button */}
       <View style={styles.actions}>
         <TouchableOpacity
           style={[styles.actionBtn, styles.primaryBtn]}
-          onPress={handleNavigate}
+          onPress={handleStartNavigation}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="navigate" size={18} color={colors.white} />
+          <Text style={styles.primaryBtnText}>Navigate</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  ) : (
+    // ── Phase 1: Initial location card ──
+    <View style={styles.inner}>
+      <View style={styles.header}>
+        <View style={styles.titleRow}>
+          <Ionicons name="location" size={18} color={colors.primary} style={styles.locationIcon} />
+          <Text style={styles.name} numberOfLines={2}>
+            {selectedLocation?.name ??
+              `${selectedLocation?.lat.toFixed(5)}, ${selectedLocation?.lng.toFixed(5)}`}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={handleDismiss} style={styles.closeBtn} hitSlop={8}>
+          <Ionicons name="close" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      {selectedLocation?.name && (
+        <Text style={styles.coords}>
+          {selectedLocation.lat.toFixed(5)}, {selectedLocation.lng.toFixed(5)}
+        </Text>
+      )}
+
+      {routeError && <Text style={styles.error}>{routeError}</Text>}
+
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.primaryBtn]}
+          onPress={handleDirections}
           disabled={isRouting}
           activeOpacity={0.8}
         >
           {isRouting ? (
             <ActivityIndicator color={colors.white} size="small" />
           ) : (
-            <Ionicons name="navigate" size={18} color={colors.white} />
+            <Ionicons name="map-outline" size={18} color={colors.white} />
           )}
-          <Text style={styles.primaryBtnText}>{isRouting ? 'Routing…' : 'Navigate'}</Text>
+          <Text style={styles.primaryBtnText}>{isRouting ? 'Routing…' : 'Directions'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -204,7 +306,7 @@ export function LocationActionPanel() {
   );
 
   return (
-    <View style={[styles.container, { bottom: tabBarHeight + spacing.sm }]}>
+    <View style={[styles.container, { bottom: safeBottom + 200 }]}>
       {Platform.OS === 'ios' ? (
         <BlurView intensity={70} tint="systemChromeMaterial" style={styles.blurCard}>
           {panelContent}
@@ -310,4 +412,66 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
   },
+  routeSummary: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    marginLeft: 26,
+  },
+  summaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  summaryText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  stepsList: {
+    maxHeight: 200,
+    marginTop: spacing.sm,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  stepBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,122,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 1,
+  },
+  stepBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  stepContent: {
+    flex: 1,
+  },
+  stepInstruction: {
+    ...typography.caption,
+    color: colors.text,
+  },
+  stepDistance: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontSize: 11,
+    marginTop: 1,
+  },
 });
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
