@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
-import { getAllRegions } from '../../src/services/regions/regionRepository';
+import { getDownloadedRegions } from '../../src/services/regions/regionRepository';
 import {
-  downloadRegion,
   deleteRegionData,
   type DownloadProgress,
 } from '../../src/services/regions/downloadService';
-import { seedCatalog } from '../../src/services/regions/catalogService';
 import { RegionCard, DownloadProgressBar } from '../../src/components/regions';
 import { ErrorBoundary, LoadingSpinner } from '../../src/components/common';
 import { colors, spacing, typography } from '../../src/constants/theme';
@@ -15,13 +13,12 @@ import type { Region } from '../../src/models/region';
 export default function RegionsScreen() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [loading, setLoading] = useState(true);
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [downloadProgress] = useState<DownloadProgress | null>(null);
 
   const loadRegions = useCallback(async () => {
     setLoading(true);
     try {
-      await seedCatalog();
-      const data = await getAllRegions();
+      const data = await getDownloadedRegions();
       setRegions(data);
     } finally {
       setLoading(false);
@@ -31,25 +28,6 @@ export default function RegionsScreen() {
   useEffect(() => {
     loadRegions();
   }, [loadRegions]);
-
-  const handleDownload = useCallback(
-    async (region: Region) => {
-      try {
-        await downloadRegion(region, (progress) => {
-          setDownloadProgress(progress);
-          if (progress.stage === 'complete' || progress.stage === 'error') {
-            setTimeout(() => {
-              setDownloadProgress(null);
-              loadRegions();
-            }, 1000);
-          }
-        });
-      } catch (e) {
-        Alert.alert('Download Failed', (e as Error).message);
-      }
-    },
-    [loadRegions],
-  );
 
   const handleDelete = useCallback(
     (region: Region) => {
@@ -89,20 +67,22 @@ export default function RegionsScreen() {
   return (
     <ErrorBoundary>
       <View style={styles.container}>
-        <Text style={styles.heading}>Available Regions</Text>
+        <Text style={styles.heading}>Offline Regions</Text>
+        <Text style={styles.description}>
+          Maps are powered by OpenFreeMap and available globally online. Downloaded regions are
+          saved for offline use.
+        </Text>
 
         {downloadProgress && <DownloadProgressBar progress={downloadProgress} />}
 
         <FlatList
           data={regions}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <RegionCard region={item} onDownload={handleDownload} onDelete={handleDelete} />
-          )}
+          renderItem={({ item }) => <RegionCard region={item} onDelete={handleDelete} />}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Text style={styles.emptyText}>No regions available</Text>
+              <Text style={styles.emptyText}>No regions saved for offline use</Text>
             </View>
           }
         />
@@ -114,7 +94,8 @@ export default function RegionsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  heading: { ...typography.h2, color: colors.text, marginBottom: spacing.md },
+  heading: { ...typography.h2, color: colors.text, marginBottom: spacing.xs },
+  description: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
   list: { paddingBottom: spacing.xl },
   emptyText: { ...typography.body, color: colors.textSecondary },
 });

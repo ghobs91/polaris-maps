@@ -1,40 +1,33 @@
 import * as FileSystem from 'expo-file-system';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
-import { isStorageAvailable } from '../sync/resourceManager';
-import { extractTar } from '../../utils/archiveExtract';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
-import { DATA_BASE_URL, GITHUB_DATA_REPO } from '../../constants/config';
+import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
 
-/** Cached latest GitHub release tag to avoid repeated API calls. */
-let cachedGitHubTag: string | null | undefined = undefined;
+/** Cached OpenFreeMap tile URL template resolved from TileJSON. */
+let cachedTileUrlTemplate: string | null = null;
 
-/** Fetch the latest GitHub release tag for the data repo, or null if unavailable. */
-async function getLatestGitHubTag(): Promise<string | null> {
-  if (cachedGitHubTag !== undefined) return cachedGitHubTag;
-  if (!GITHUB_DATA_REPO) return (cachedGitHubTag = null);
+/**
+ * Resolve the OpenFreeMap vector tile URL template from TileJSON.
+ * Returns a URL like `https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf`.
+ */
+async function getTileUrlTemplate(): Promise<string | null> {
+  if (cachedTileUrlTemplate) return cachedTileUrlTemplate;
   try {
-    const res = await fetch(`https://api.github.com/repos/${GITHUB_DATA_REPO}/releases/latest`, {
-      headers: { Accept: 'application/vnd.github+json' },
+    const res = await fetch(OPENFREEMAP_TILEJSON_URL, {
+      headers: { Accept: 'application/json' },
     });
-    if (!res.ok) return (cachedGitHubTag = null);
-    const json = (await res.json()) as { tag_name: string };
-    return (cachedGitHubTag = json.tag_name);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { tiles?: string[] };
+    if (json.tiles && json.tiles.length > 0) {
+      cachedTileUrlTemplate = json.tiles[0];
+      return cachedTileUrlTemplate;
+    }
+    return null;
   } catch {
-    return (cachedGitHubTag = null);
+    return null;
   }
-}
-
-/** Resolve the download URL for a region asset. Priority: GitHub Releases > DATA_BASE_URL. */
-async function resolveUrl(regionId: string, filename: string): Promise<string | null> {
-  const tag = await getLatestGitHubTag();
-  if (tag) {
-    const asset = `${regionId}-${filename}`;
-    return `https://github.com/${GITHUB_DATA_REPO}/releases/download/${tag}/${asset}`;
-  }
-  if (DATA_BASE_URL) return `${DATA_BASE_URL}/${regionId}/${filename}`;
-  return null;
 }
 
 export interface DownloadProgress {
@@ -47,8 +40,6 @@ export interface DownloadProgress {
 }
 
 type ProgressCallback = (progress: DownloadProgress) => void;
-
-const activeDownloads = new Map<string, FileSystem.DownloadResumable>();
 
 export async function downloadRegion(region: Region, onProgress?: ProgressCallback): Promise<void> {
   const destDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
@@ -114,8 +105,6 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
     });
 
     throw error;
-  } finally {
-    activeDownloads.delete(region.id);
   }
 }
 
@@ -145,14 +134,6 @@ async function tryPeerDownload(
       });
     });
 
-    // Hyperdrive download puts files directly — check routing needs extraction
-    const routingTar = `${destDir}routing.tar`;
-    const tarInfo = await FileSystem.getInfoAsync(routingTar);
-    if (tarInfo.exists) {
-      await extractTar(routingTar, `${destDir}routing/`);
-      await FileSystem.deleteAsync(routingTar, { idempotent: true });
-    }
-
     return true;
   } catch {
     // P2P failed — fall through to HTTP
@@ -160,84 +141,94 @@ async function tryPeerDownload(
   }
 }
 
-/** Download region data via HTTP (GitHub Releases > DATA_BASE_URL). */
+/** Download region vector tiles from OpenFreeMap for offline use. */
 async function downloadViaHttp(
   region: Region,
   destDir: string,
   onProgress?: ProgressCallback,
 ): Promise<void> {
-  const tilesUrl = await resolveUrl(region.id, 'tiles.pmtiles');
-  const routingUrl = await resolveUrl(region.id, 'routing.tar');
-  const geocodingUrl = await resolveUrl(region.id, 'geocoding.db');
-
-  if (!routingUrl) {
-    throw new Error('Region data is not yet available for download. Please try again later.');
+  const urlTemplate = await getTileUrlTemplate();
+  if (!urlTemplate) {
+    throw new Error(
+      'Could not reach OpenFreeMap. Please check your internet connection and try again.',
+    );
   }
 
-  // Stage 1: Download PMTiles
+  const tilesDir = `${destDir}tiles/`;
+  await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
+
+  // Calculate tile coordinates for the region bounds at zoom levels 0-14
+  const minZoom = 0;
+  const maxZoom = 14;
+  const tileCoords = getTilesForBounds(region.bounds, minZoom, maxZoom);
+  const totalTiles = tileCoords.length;
+  let downloaded = 0;
+
   onProgress?.({
     regionId: region.id,
-    totalBytes: 0,
+    totalBytes: totalTiles,
     downloadedBytes: 0,
     percent: 0,
     stage: 'tiles',
   });
 
-  if (tilesUrl) {
-    await downloadFile(tilesUrl, `${destDir}tiles.pmtiles`, region.id, (downloaded, total) => {
-      onProgress?.({
-        regionId: region.id,
-        totalBytes: total,
-        downloadedBytes: downloaded,
-        percent: total > 0 ? (downloaded / total) * 33 : 0,
-        stage: 'tiles',
-      });
-    });
-  }
-
-  // Stage 2: Download Valhalla routing graph
-  onProgress?.({
-    regionId: region.id,
-    totalBytes: 0,
-    downloadedBytes: 0,
-    percent: 33,
-    stage: 'routing',
-  });
-
-  await downloadFile(routingUrl, `${destDir}routing.tar`, region.id, (downloaded, total) => {
+  // Download tiles in batches
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < tileCoords.length; i += BATCH_SIZE) {
+    const batch = tileCoords.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(async ({ z, x, y }) => {
+        const url = urlTemplate
+          .replace('{z}', String(z))
+          .replace('{x}', String(x))
+          .replace('{y}', String(y));
+        const tileDir = `${tilesDir}${z}/${x}/`;
+        await FileSystem.makeDirectoryAsync(tileDir, { intermediates: true });
+        const dest = `${tileDir}${y}.pbf`;
+        try {
+          await FileSystem.downloadAsync(url, dest);
+        } catch {
+          // Skip individual tile failures (ocean tiles, etc.)
+        }
+      }),
+    );
+    downloaded += batch.length;
     onProgress?.({
       regionId: region.id,
-      totalBytes: total,
+      totalBytes: totalTiles,
       downloadedBytes: downloaded,
-      percent: 33 + (total > 0 ? (downloaded / total) * 33 : 0),
-      stage: 'routing',
-    });
-  });
-
-  // Extract the Valhalla graph tiles from the tar archive
-  await extractTar(`${destDir}routing.tar`, `${destDir}routing/`);
-  await FileSystem.deleteAsync(`${destDir}routing.tar`, { idempotent: true });
-
-  // Stage 3: Download geocoding database
-  onProgress?.({
-    regionId: region.id,
-    totalBytes: 0,
-    downloadedBytes: 0,
-    percent: 66,
-    stage: 'geocoding',
-  });
-
-  if (geocodingUrl) {
-    await downloadFile(geocodingUrl, `${destDir}geocoding.db`, region.id, (downloaded, total) => {
-      onProgress?.({
-        regionId: region.id,
-        totalBytes: total,
-        downloadedBytes: downloaded,
-        percent: 66 + (total > 0 ? (downloaded / total) * 34 : 0),
-        stage: 'geocoding',
-      });
+      percent: Math.round((downloaded / totalTiles) * 100),
+      stage: 'tiles',
     });
   }
+}
+
+/** Convert lat/lng to tile coordinates at a given zoom level. */
+function latLngToTile(lat: number, lng: number, zoom: number): { x: number; y: number } {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor(((lng + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
+  return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+}
+
+/** Get all tile coordinates covering a bounding box across zoom levels. */
+function getTilesForBounds(
+  bounds: Region['bounds'],
+  minZoom: number,
+  maxZoom: number,
+): { z: number; x: number; y: number }[] {
+  const tiles: { z: number; x: number; y: number }[] = [];
+  for (let z = minZoom; z <= maxZoom; z++) {
+    const topLeft = latLngToTile(bounds.maxLat, bounds.minLng, z);
+    const bottomRight = latLngToTile(bounds.minLat, bounds.maxLng, z);
+    for (let x = topLeft.x; x <= bottomRight.x; x++) {
+      for (let y = topLeft.y; y <= bottomRight.y; y++) {
+        tiles.push({ z, x, y });
+      }
+    }
+  }
+  return tiles;
 }
 
 /** Seed a downloaded region in the background and persist the drive key. */
@@ -250,12 +241,8 @@ async function autoSeedRegion(
   await db.runAsync('UPDATE regions SET drive_key = ? WHERE id = ?', [key, regionId]);
 }
 
-export function cancelDownload(regionId: string): void {
-  const resumable = activeDownloads.get(regionId);
-  if (resumable) {
-    resumable.pauseAsync();
-    activeDownloads.delete(regionId);
-  }
+export function cancelDownload(_regionId: string): void {
+  // Downloads use batch tile fetching — cancellation is a no-op for now
 }
 
 export async function deleteRegionData(regionId: string): Promise<void> {
@@ -273,21 +260,4 @@ export async function deleteRegionData(regionId: string): Promise<void> {
     'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
-}
-
-async function downloadFile(
-  url: string,
-  dest: string,
-  regionId: string,
-  onProgress: (downloaded: number, total: number) => void,
-): Promise<void> {
-  const callback: FileSystem.DownloadProgressCallback = (data) => {
-    onProgress(data.totalBytesWritten, data.totalBytesExpectedToWrite);
-  };
-
-  const resumable = FileSystem.createDownloadResumable(url, dest, {}, callback);
-  activeDownloads.set(regionId, resumable);
-
-  const result = await resumable.downloadAsync();
-  if (!result) throw new Error(`Download failed for ${url}`);
 }
