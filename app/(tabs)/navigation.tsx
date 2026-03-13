@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useRouter } from 'expo-router';
 import { MapView } from '@/components/map/MapView';
 import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
@@ -9,6 +10,8 @@ import { useMapStore } from '@/stores/mapStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
+import { useTrafficEta } from '@/hooks/useTrafficEta';
+import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 
 /** Compute bearing (in degrees, 0=north, CW) between two [lng,lat] points */
 function computeBearing(from: [number, number], to: [number, number]): number {
@@ -25,6 +28,7 @@ function computeBearing(from: [number, number], to: [number, number]): number {
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
+  const router = useRouter();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const {
@@ -37,7 +41,22 @@ export default function NavigationScreen() {
     stopNavigation,
   } = useNavigationStore();
 
+  // Track previous navigation state so we can detect when it ends
+  const wasNavigating = useRef(false);
+  useEffect(() => {
+    if (wasNavigating.current && !isNavigating) {
+      router.replace('/(tabs)');
+    }
+    wasNavigating.current = isNavigating;
+  }, [isNavigating, router]);
+
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+
+  // Recompute traffic-adjusted ETA when route or traffic data changes
+  useTrafficEta();
+
+  // Start/stop periodic traffic refresh based on navigation state
+  useNavigationTrafficRefresh();
   const [navPosition, setNavPosition] = useState<[number, number] | null>(null);
   const [navBearing, setNavBearing] = useState(0);
   const previewRafRef = useRef<number | null>(null);

@@ -29,7 +29,7 @@ export function MapControls({ onLocatePress }: MapControlsProps) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { bottom: insets.bottom + 200 }]}>
+    <View style={[styles.container, { bottom: insets.bottom + 100 }]}>
       <GlassButton onPress={onLocatePress} icon="locate" />
     </View>
   );
@@ -40,6 +40,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: spacing.md,
     gap: spacing.sm,
+    zIndex: 20,
+    elevation: 20,
   },
   buttonOuter: {
     borderRadius: 999,

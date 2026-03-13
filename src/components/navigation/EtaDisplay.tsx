@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatDistance } from '../../utils/units';
+import { useNavigationStore } from '../../stores/navigationStore';
 
 interface EtaDisplayProps {
   etaSeconds: number | null;
@@ -18,15 +19,20 @@ export function EtaDisplay({
   onPreview,
   isPreviewMode,
 }: EtaDisplayProps) {
-  if (etaSeconds == null) return null;
+  const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
 
-  const arrival = new Date(Date.now() + etaSeconds * 1000);
+  // Use traffic ETA when available, otherwise fall back to route ETA
+  const displayEta = trafficEtaSeconds ?? etaSeconds;
+
+  if (displayEta == null) return null;
+
+  const arrival = new Date(Date.now() + displayEta * 1000);
   const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
     <View style={styles.container}>
       <View style={styles.info}>
-        <Text style={styles.eta}>{formatDuration(etaSeconds)}</Text>
+        <Text style={styles.eta}>{formatDuration(displayEta)}</Text>
         <Text style={styles.sub}>
           {remainingDistanceMeters != null ? `${formatDistance(remainingDistanceMeters)} · ` : ''}
           {arrivalStr}

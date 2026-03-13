@@ -1,53 +1,36 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
-import { useTrafficStore } from '../../stores/trafficStore';
-import { colors } from '../../constants/theme';
-import type { CongestionLevel } from '../../models/traffic';
+import { useMapStore } from '../../stores/mapStore';
+import { tomtomApiKey, TOMTOM_FLOW_TILES_BASE_URL } from '../../constants/config';
 
-const CONGESTION_COLORS: Record<CongestionLevel, string> = {
-  free_flow: colors.trafficFreeFlow,
-  slow: colors.trafficSlow,
-  congested: colors.trafficCongested,
-  stopped: colors.trafficStopped,
-};
+interface TrafficOverlayProps {
+  /** When true, forces the raster layer to opacity 0 (e.g. when traffic is
+   *  shown on the route line instead of the whole map). */
+  suppressRaster?: boolean;
+}
 
-export function TrafficOverlay() {
-  const segmentTraffic = useTrafficStore((s) => s.segmentTraffic);
-  const segments = Object.values(segmentTraffic);
+export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) {
+  const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
 
-  if (segments.length === 0) return null;
+  const tileUrl = useMemo(
+    () =>
+      `${TOMTOM_FLOW_TILES_BASE_URL}/{z}/{x}/{y}.png?key=${tomtomApiKey}&tileSize=256&thickness=10`,
+    [],
+  );
 
-  // Build GeoJSON features from traffic state
-  // In production, this would map segment IDs to actual road geometries
-  // For now, render point markers at congested segments
-  const features: GeoJSON.Feature[] = segments.map((seg) => ({
-    type: 'Feature',
-    properties: {
-      congestionLevel: seg.congestionLevel,
-      color: CONGESTION_COLORS[seg.congestionLevel],
-      speedKmh: seg.avgSpeedKmh,
-    },
-    geometry: {
-      type: 'Point',
-      coordinates: [0, 0], // Would be resolved from segment geometry
-    },
-  }));
+  if (!tomtomApiKey) return null;
 
-  const geojson: GeoJSON.FeatureCollection = {
-    type: 'FeatureCollection',
-    features,
-  };
+  const opacity = suppressRaster || !trafficLayerVisible ? 0 : 0.7;
 
   return (
-    <MapLibreGL.ShapeSource id="traffic-overlay" shape={geojson}>
-      <MapLibreGL.CircleLayer
-        id="traffic-circles"
-        style={{
-          circleRadius: 4,
-          circleColor: ['get', 'color'],
-          circleOpacity: 0.8,
-        }}
-      />
-    </MapLibreGL.ShapeSource>
+    <MapLibreGL.RasterSource
+      id="tomtom-traffic"
+      tileUrlTemplates={[tileUrl]}
+      tileSize={256}
+      minZoomLevel={6}
+      maxZoomLevel={18}
+    >
+      <MapLibreGL.RasterLayer id="tomtom-traffic-layer" style={{ rasterOpacity: opacity }} />
+    </MapLibreGL.RasterSource>
   );
 }
