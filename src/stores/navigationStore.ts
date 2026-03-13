@@ -14,11 +14,17 @@ interface NavigationState {
   costing: CostingModel;
   destination: { lat: number; lng: number; name?: string } | null;
 
+  // Traffic-adjusted ETA
+  trafficEtaSeconds: number | null;
+  freeFlowEtaSeconds: number | null;
+  trafficMatchRatio: number | null;
+
   // Route preview (directions mode, before turn-by-turn)
   routePreview: ValhallaRoute | null;
   routePreviewAlternates: ValhallaRoute[];
   routePreviewDestination: { lat: number; lng: number; name?: string } | null;
   routePreviewCosting: CostingModel;
+  routePreviewTrafficEta: number | null;
 
   setRoutePreview: (
     route: ValhallaRoute,
@@ -26,6 +32,7 @@ interface NavigationState {
     destination: NavigationState['destination'],
     costing: CostingModel,
   ) => void;
+  setRoutePreviewTrafficEta: (seconds: number | null) => void;
   clearRoutePreview: () => void;
   startNavigation: (
     route: ValhallaRoute,
@@ -39,6 +46,7 @@ interface NavigationState {
   setDeviated: (deviated: boolean) => void;
   setRerouting: (rerouting: boolean) => void;
   updateEta: (etaSeconds: number, remainingMeters: number) => void;
+  updateTrafficEta: (trafficEta: number, freeFlowEta: number, matchRatio: number) => void;
   replaceRoute: (route: ValhallaRoute) => void;
 }
 
@@ -55,10 +63,15 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   costing: 'auto',
   destination: null,
 
+  trafficEtaSeconds: null,
+  freeFlowEtaSeconds: null,
+  trafficMatchRatio: null,
+
   routePreview: null,
   routePreviewAlternates: [],
   routePreviewDestination: null,
   routePreviewCosting: 'auto',
+  routePreviewTrafficEta: null,
 
   setRoutePreview: (route, alternates, destination, costing) =>
     set({
@@ -66,7 +79,10 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreviewAlternates: alternates,
       routePreviewDestination: destination,
       routePreviewCosting: costing,
+      routePreviewTrafficEta: null,
     }),
+
+  setRoutePreviewTrafficEta: (seconds) => set({ routePreviewTrafficEta: seconds }),
 
   clearRoutePreview: () =>
     set({
@@ -74,10 +90,12 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreviewAlternates: [],
       routePreviewDestination: null,
       routePreviewCosting: 'auto',
+      routePreviewTrafficEta: null,
     }),
 
   startNavigation: (route, alternates, destination, costing) => {
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
+    const previewTrafficEta = get().routePreviewTrafficEta;
     set({
       activeRoute: route,
       alternateRoutes: alternates,
@@ -90,10 +108,15 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       hasDeviated: false,
       costing,
       destination,
+      // Carry over traffic ETA from preview so it's immediately available
+      trafficEtaSeconds: previewTrafficEta,
+      freeFlowEtaSeconds: previewTrafficEta != null ? route.summary.durationSeconds : null,
+      trafficMatchRatio: previewTrafficEta != null ? 1 : null,
       // Clear preview when starting real navigation
       routePreview: null,
       routePreviewAlternates: [],
       routePreviewDestination: null,
+      routePreviewTrafficEta: null,
     });
   },
 
@@ -109,6 +132,9 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isRerouting: false,
       hasDeviated: false,
       destination: null,
+      trafficEtaSeconds: null,
+      freeFlowEtaSeconds: null,
+      trafficMatchRatio: null,
     }),
 
   advanceStep: () => {
@@ -137,6 +163,12 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   setRerouting: (isRerouting) => set({ isRerouting }),
   updateEta: (etaSeconds, remainingMeters) =>
     set({ etaSeconds, remainingDistanceMeters: remainingMeters }),
+  updateTrafficEta: (trafficEta, freeFlowEta, matchRatio) =>
+    set({
+      trafficEtaSeconds: trafficEta,
+      freeFlowEtaSeconds: freeFlowEta,
+      trafficMatchRatio: matchRatio,
+    }),
   replaceRoute: (route) => {
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
     set({

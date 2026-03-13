@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
 import { MapControls } from '@/components/map/MapControls';
-import { LocationActionPanel } from '@/components/map/LocationActionPanel';
+import { MapLayerToggle } from '@/components/map/MapLayerToggle';
 import { FloatingSearchPanel } from '@/components/map/FloatingSearchPanel';
+import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { ErrorBoundary } from '@/components/common';
@@ -14,6 +15,7 @@ export default function MapScreen() {
   const activeRouteGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
   const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
   const routeGeometry = activeRouteGeometry ?? previewRouteGeometry;
+  const [showNodeDrawer, setShowNodeDrawer] = useState(false);
 
   // Center on user location at startup
   useEffect(() => {
@@ -40,9 +42,10 @@ export default function MapScreen() {
     <ErrorBoundary>
       <View style={styles.container}>
         <MapView routeGeometry={routeGeometry} onMapPress={handleMapPress} />
+        <MapLayerToggle />
+        <FloatingSearchPanel onProfilePress={() => setShowNodeDrawer(true)} />
+        <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <MapControls onLocatePress={handleLocate} />
-        <LocationActionPanel />
-        <FloatingSearchPanel />
       </View>
     </ErrorBoundary>
   );

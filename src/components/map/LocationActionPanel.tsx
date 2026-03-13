@@ -17,6 +17,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import * as FileSystem from 'expo-file-system';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
+import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
   getRegionContainingPoint,
   getDownloadedRegions,
@@ -31,6 +32,7 @@ export function LocationActionPanel() {
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
   const setFitBounds = useMapStore((s) => s.setFitBounds);
   const routePreview = useNavigationStore((s) => s.routePreview);
+  const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
   const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
@@ -130,6 +132,13 @@ export function LocationActionPanel() {
       if (routes[0].boundingBox) {
         setFitBounds(routes[0].boundingBox);
       }
+
+      // Fetch traffic-adjusted ETA in background
+      fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+        if (result) {
+          useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+        }
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setRouteError(msg || 'Could not compute route');
@@ -198,7 +207,7 @@ export function LocationActionPanel() {
         <View style={styles.summaryItem}>
           <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
           <Text style={styles.summaryText}>
-            {formatDuration(routePreview.summary.durationSeconds)}
+            {formatDuration(routePreviewTrafficEta ?? routePreview.summary.durationSeconds)}
           </Text>
         </View>
         <View style={styles.summaryItem}>

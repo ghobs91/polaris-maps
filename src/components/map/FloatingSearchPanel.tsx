@@ -11,11 +11,14 @@ import {
   Alert,
   Keyboard,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
+import * as FileSystem from 'expo-file-system';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { searchAddress, type GeocodingResult } from '../../services/geocoding/geocodingService';
@@ -30,15 +33,45 @@ import {
   type FavoriteLocation,
 } from '../../services/favorites/favoritesService';
 import { useMapStore } from '../../stores/mapStore';
+import { useNavigationStore } from '../../stores/navigationStore';
+import { computeRoute, initRouting } from '../../services/routing/routingService';
+import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
+import {
+  getRegionContainingPoint,
+  getDownloadedRegions,
+} from '../../services/regions/regionRepository';
+import { extractTar } from '../../utils/archiveExtract';
+import { getDatabase } from '../../services/database/init';
+import { formatDistance } from '../../utils/units';
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
 
 // ─────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────
-type PanelMode = 'idle' | 'searching' | 'setting-home' | 'setting-work';
+type PanelMode =
+  | 'idle'
+  | 'searching'
+  | 'setting-home'
+  | 'setting-work'
+  | 'location'
+  | 'route-preview';
 
 interface FloatingSearchPanelProps {
   /** Extra bottom offset so it doesn't overlap the locate button */
   bottomInsetExtra?: number;
+  /** Called when the user taps the profile/node-dashboard icon */
+  onProfilePress?: () => void;
 }
 
 // ─────────────────────────────────────────────
@@ -136,18 +169,31 @@ function FavChip({
 // ─────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────
-export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPanelProps) {
+export function FloatingSearchPanel({
+  bottomInsetExtra = 0,
+  onProfilePress,
+}: FloatingSearchPanelProps) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
+  const setFitBounds = useMapStore((s) => s.setFitBounds);
+  const routePreview = useNavigationStore((s) => s.routePreview);
+  const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
+  const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
+  const startNavigation = useNavigationStore((s) => s.startNavigation);
+  const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
 
   const [mode, setMode] = useState<PanelMode>('idle');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GeocodingResult[]>([]);
   const [history, setHistory] = useState<GeocodingResult[]>([]);
   const [favorites, setFavorites] = useState<FavoriteLocation[]>([]);
+  const [selectedResult, setSelectedResult] = useState<GeocodingResult | null>(null);
+  const [isRouting, setIsRouting] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
 
   const inputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -193,6 +239,16 @@ export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPane
     setResults([]);
   }, []);
 
+  // ── Dismiss location / route view ────────────
+  const dismissLocation = useCallback(() => {
+    setMode('idle');
+    setSelectedResult(null);
+    setSelectedLocation(null);
+    clearRoutePreview();
+    setRouteError(null);
+    setUsedOnlineRouting(false);
+  }, [setSelectedLocation, clearRoutePreview]);
+
   // ── Selecting a result ──────────────────────
   const navigateToResult = useCallback(
     (result: GeocodingResult) => {
@@ -234,14 +290,142 @@ export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPane
         navigateToResult(result);
         return;
       }
-      // Normal search selection
+      // Normal search selection — show location detail view
       addSearchHistory(result);
       setHistory(getSearchHistory());
-      dismissSearch();
+      Keyboard.dismiss();
+      setQuery('');
+      setResults([]);
       navigateToResult(result);
+      setSelectedResult(result);
+      setRouteError(null);
+      setUsedOnlineRouting(false);
+      clearRoutePreview();
+      setMode('location');
     },
-    [mode, dismissSearch, navigateToResult],
+    [mode, dismissSearch, navigateToResult, clearRoutePreview],
   );
+
+  // ── Routing ──────────────────────────────────
+  const handleDirections = useCallback(async () => {
+    if (!selectedResult) return;
+    setIsRouting(true);
+    setRouteError(null);
+    setUsedOnlineRouting(false);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setRouteError('Location permission required');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const dest = { lat: selectedResult.entry.lat, lng: selectedResult.entry.lng };
+      const destRegion = await getRegionContainingPoint(dest.lat, dest.lng);
+      const originRegion = await getRegionContainingPoint(
+        pos.coords.latitude,
+        pos.coords.longitude,
+      );
+      let region =
+        (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
+        (originRegion?.downloadStatus === 'complete' ? originRegion : null);
+      if (!region) {
+        const downloaded = await getDownloadedRegions();
+        if (downloaded.length > 0) region = downloaded[0];
+      }
+
+      if (region) {
+        const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
+        const graphTilePath = `${regionDir}routing/`;
+        const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
+        if (!graphDirInfo.exists) {
+          const tarPath = `${regionDir}routing.tar`;
+          const tarInfo = await FileSystem.getInfoAsync(tarPath);
+          if (tarInfo.exists) {
+            try {
+              await extractTar(tarPath, graphTilePath);
+              await FileSystem.deleteAsync(tarPath, { idempotent: true });
+            } catch {
+              // fall through to online routing
+            }
+          } else {
+            const db = await getDatabase();
+            await db.runAsync(
+              'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
+              ['none', Math.floor(Date.now() / 1000), region.id],
+            );
+            await FileSystem.deleteAsync(regionDir, { idempotent: true });
+            region = null;
+          }
+        }
+        if (region) {
+          try {
+            await initRouting(`${FileSystem.documentDirectory}regions/${region.id}/routing/`);
+          } catch {
+            // fall through to online routing
+          }
+        }
+      }
+
+      const routes = await computeRoute(
+        [{ lat: pos.coords.latitude, lng: pos.coords.longitude }, dest],
+        'auto',
+      );
+      if (!routes.length) {
+        setRouteError('No route found between these points');
+        return;
+      }
+      if (!region) setUsedOnlineRouting(true);
+
+      setRoutePreview(
+        routes[0],
+        routes.slice(1),
+        { lat: dest.lat, lng: dest.lng, name: selectedResult.entry.text },
+        'auto',
+      );
+      if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
+      setMode('route-preview');
+
+      // Fetch traffic-adjusted ETA in background
+      fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+        if (result) {
+          useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+        }
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRouteError(msg || 'Could not compute route');
+    } finally {
+      setIsRouting(false);
+    }
+  }, [selectedResult, setRoutePreview, setFitBounds]);
+
+  const handleStartNavigation = useCallback(() => {
+    if (!routePreview) return;
+    const { routePreviewAlternates, routePreviewDestination, routePreviewCosting } =
+      useNavigationStore.getState();
+    startNavigation(
+      routePreview,
+      routePreviewAlternates,
+      routePreviewDestination,
+      routePreviewCosting,
+    );
+    dismissLocation();
+    router.push('/(tabs)/navigation');
+  }, [routePreview, startNavigation, dismissLocation, router]);
+
+  const handleAddPoi = useCallback(() => {
+    if (!selectedResult) return;
+    router.push({
+      pathname: '/poi/edit',
+      params: {
+        lat: String(selectedResult.entry.lat),
+        lng: String(selectedResult.entry.lng),
+      },
+    });
+  }, [selectedResult, router]);
 
   // ── Favorites shortcuts ──────────────────────
   const homeEntry = favorites.find((f) => f.kind === 'home');
@@ -251,24 +435,34 @@ export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPane
   const handleHomeTap = useCallback(() => {
     if (homeEntry) {
       navigateToResult({ entry: homeEntry.entry, rank: 0 });
+      setSelectedResult({ entry: homeEntry.entry, rank: 0 });
+      setRouteError(null);
+      setUsedOnlineRouting(false);
+      clearRoutePreview();
+      setMode('location');
     } else {
       setQuery('');
       setResults([]);
       setMode('setting-home');
       setTimeout(() => inputRef.current?.focus(), 80);
     }
-  }, [homeEntry, navigateToResult]);
+  }, [homeEntry, navigateToResult, clearRoutePreview]);
 
   const handleWorkTap = useCallback(() => {
     if (workEntry) {
       navigateToResult({ entry: workEntry.entry, rank: 0 });
+      setSelectedResult({ entry: workEntry.entry, rank: 0 });
+      setRouteError(null);
+      setUsedOnlineRouting(false);
+      clearRoutePreview();
+      setMode('location');
     } else {
       setQuery('');
       setResults([]);
       setMode('setting-work');
       setTimeout(() => inputRef.current?.focus(), 80);
     }
-  }, [workEntry, navigateToResult]);
+  }, [workEntry, navigateToResult, clearRoutePreview]);
 
   const handleHomeHold = useCallback(() => {
     if (!homeEntry) return;
@@ -372,6 +566,166 @@ export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPane
     [st, textColor, subColor, handleSelectResult],
   );
 
+  // ── Location detail view (Apple Maps style) ──
+  if (mode === 'location' && selectedResult) {
+    const entry = selectedResult.entry;
+    const subtitle = [entry.city, entry.state, entry.country].filter(Boolean).join(', ');
+    return (
+      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+        <GlassPanel isDark={isDark} style={st.panel}>
+          <View style={styles.handle} />
+
+          {/* Header row */}
+          <View style={st.locHeader}>
+            <View style={st.locTitleBlock}>
+              <Text style={[st.locTitle, { color: textColor }]} numberOfLines={2}>
+                {entry.text}
+              </Text>
+              {subtitle ? (
+                <Text style={[st.locSubtitle, { color: subColor }]} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+            <TouchableOpacity onPress={dismissLocation} style={st.locCloseBtn} hitSlop={10}>
+              <View
+                style={[st.locCloseCircle, { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' }]}
+              >
+                <Ionicons name="close" size={16} color={isDark ? '#EBEBF5' : '#3A3A3C'} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Big Directions pill */}
+          <View style={st.locActions}>
+            <TouchableOpacity
+              style={st.directionsBtn}
+              onPress={handleDirections}
+              disabled={isRouting}
+              activeOpacity={0.85}
+            >
+              {isRouting ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="car" size={22} color="#fff" />
+              )}
+              <Text style={st.directionsBtnText}>{isRouting ? 'Routing…' : 'Directions'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {routeError ? (
+            <Text style={[st.routeError, { color: colors.error }]}>{routeError}</Text>
+          ) : null}
+
+          {/* Secondary actions */}
+          <View style={st.locSecondaryRow}>
+            <TouchableOpacity
+              style={st.locSecondaryBtn}
+              onPress={handleAddPoi}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+              <Text style={[st.locSecondaryLabel, { color: colors.primary }]}>Add POI</Text>
+            </TouchableOpacity>
+          </View>
+        </GlassPanel>
+      </View>
+    );
+  }
+
+  // ── Route preview view ────────────────────────
+  if (mode === 'route-preview' && routePreview && selectedResult) {
+    const entry = selectedResult.entry;
+    const displayEtaSeconds = routePreviewTrafficEta ?? routePreview.summary.durationSeconds;
+    return (
+      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+        <GlassPanel isDark={isDark} style={st.panel}>
+          <View style={styles.handle} />
+
+          {/* Header */}
+          <View style={st.locHeader}>
+            <View style={st.locTitleBlock}>
+              <Text style={[st.locTitle, { color: textColor }]} numberOfLines={1}>
+                {entry.text}
+              </Text>
+              <View style={st.routeSummaryRow}>
+                <Ionicons name="time-outline" size={13} color={subColor} />
+                <Text style={[st.routeSummaryText, { color: subColor }]}>
+                  {formatDuration(displayEtaSeconds)}
+                </Text>
+                <Text style={[st.routeSummaryDot, { color: subColor }]}>·</Text>
+                <Ionicons name="navigate-outline" size={13} color={subColor} />
+                <Text style={[st.routeSummaryText, { color: subColor }]}>
+                  {formatDistance(routePreview.summary.distanceMeters)}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={dismissLocation} style={st.locCloseBtn} hitSlop={10}>
+              <View
+                style={[st.locCloseCircle, { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' }]}
+              >
+                <Ionicons name="close" size={16} color={isDark ? '#EBEBF5' : '#3A3A3C'} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {usedOnlineRouting && (
+            <TouchableOpacity
+              style={st.regionHint}
+              onPress={() => router.push('/regions')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="cloud-download-outline" size={13} color={colors.warning} />
+              <Text style={[st.regionHintText, { color: colors.warning }]}>
+                Using online routing — download a region for offline use
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Steps */}
+          <FlatList
+            data={routePreview.legs.flatMap((l) => l.maneuvers)}
+            keyExtractor={(_, i) => String(i)}
+            style={st.stepsList}
+            renderItem={({ item, index }) => (
+              <View style={st.stepRow}>
+                <View
+                  style={[
+                    st.stepBadge,
+                    { backgroundColor: isDark ? 'rgba(64,156,255,0.2)' : 'rgba(0,122,255,0.1)' },
+                  ]}
+                >
+                  <Text style={[st.stepBadgeText, { color: colors.primary }]}>{index + 1}</Text>
+                </View>
+                <View style={st.stepContent}>
+                  <Text style={[st.stepInstruction, { color: textColor }]} numberOfLines={2}>
+                    {item.instruction}
+                  </Text>
+                  <Text style={[st.stepDistance, { color: subColor }]}>
+                    {formatDistance(item.distanceMeters)}
+                  </Text>
+                </View>
+              </View>
+            )}
+          />
+
+          {/* Navigate CTA */}
+          <View style={st.locActions}>
+            <TouchableOpacity
+              style={st.directionsBtn}
+              onPress={handleStartNavigation}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="navigate" size={20} color="#fff" />
+              <Text style={st.directionsBtnText}>Navigate</Text>
+            </TouchableOpacity>
+          </View>
+        </GlassPanel>
+      </View>
+    );
+  }
+
+  // ── Search / idle panel ───────────────────────
   return (
     <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
       <GlassPanel isDark={isDark} style={st.panel}>
@@ -399,7 +753,7 @@ export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPane
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              onPress={() => router.push('/(tabs)/profile')}
+              onPress={onProfilePress ?? (() => router.push('/(tabs)/profile'))}
               activeOpacity={0.7}
               style={styles.profileBtn}
             >
@@ -474,7 +828,14 @@ export function FloatingSearchPanel({ bottomInsetExtra = 0 }: FloatingSearchPane
                   label={fav.label}
                   iconBg="#6246EA"
                   subtitle={shorten(fav.entry.text, 12)}
-                  onPress={() => navigateToResult({ entry: fav.entry, rank: 0 })}
+                  onPress={() => {
+                    navigateToResult({ entry: fav.entry, rank: 0 });
+                    setSelectedResult({ entry: fav.entry, rank: 0 });
+                    setRouteError(null);
+                    setUsedOnlineRouting(false);
+                    clearRoutePreview();
+                    setMode('location');
+                  }}
                   isDark={isDark}
                 />
               ))}
@@ -622,6 +983,133 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       textAlign: 'center',
       paddingVertical: spacing.md,
       paddingHorizontal: spacing.lg,
+    },
+    // ── Location detail styles ──
+    locHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.xs,
+      paddingBottom: spacing.sm,
+      gap: spacing.sm,
+    },
+    locTitleBlock: {
+      flex: 1,
+    },
+    locTitle: {
+      ...typography.h3,
+      fontWeight: '700',
+    },
+    locSubtitle: {
+      ...typography.caption,
+      marginTop: 3,
+    },
+    locCloseBtn: {
+      marginTop: 2,
+    },
+    locCloseCircle: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    locActions: {
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    directionsBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      backgroundColor: colors.primary,
+      borderRadius: 999,
+      paddingVertical: spacing.md - 2,
+      paddingHorizontal: spacing.xl,
+    },
+    directionsBtnText: {
+      ...typography.subtitle,
+      color: '#fff',
+      fontWeight: '700',
+    },
+    routeError: {
+      ...typography.caption,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    locSecondaryRow: {
+      flexDirection: 'row',
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.md,
+      gap: spacing.sm,
+    },
+    locSecondaryBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingVertical: spacing.xs,
+    },
+    locSecondaryLabel: {
+      ...typography.label,
+    },
+    routeSummaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      marginTop: 3,
+    },
+    routeSummaryText: {
+      ...typography.caption,
+      fontWeight: '600',
+    },
+    routeSummaryDot: {
+      ...typography.caption,
+    },
+    regionHint: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.xs,
+      marginHorizontal: spacing.md,
+      marginBottom: spacing.xs,
+    },
+    regionHintText: {
+      ...typography.caption,
+      flex: 1,
+    },
+    stepsList: {
+      maxHeight: 200,
+      marginHorizontal: spacing.md,
+      marginBottom: spacing.sm,
+    },
+    stepRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+      paddingVertical: spacing.xs,
+    },
+    stepBadge: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 1,
+    },
+    stepBadgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    stepContent: {
+      flex: 1,
+    },
+    stepInstruction: {
+      ...typography.caption,
+    },
+    stepDistance: {
+      ...typography.caption,
+      fontSize: 11,
+      marginTop: 1,
     },
   });
 

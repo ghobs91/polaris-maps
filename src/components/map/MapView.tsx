@@ -2,9 +2,11 @@ import React, { useRef, useCallback, useEffect } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
-import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
+import { OPENFREEMAP_STYLE_URL, MAP_STYLE_URL_DARK } from '../../constants/config';
 import { colors } from '../../constants/theme';
-import { decodePolyline } from '../../utils/polyline';
+import { useTheme } from '../../contexts/ThemeContext';
+import { TrafficOverlay } from './TrafficOverlay';
+import { TrafficRouteLayer } from './TrafficRouteLayer';
 
 interface MapViewProps {
   routeGeometry?: string;
@@ -26,6 +28,7 @@ export function MapView({
 }: MapViewProps) {
   const mapRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
+  const { isDark } = useTheme();
   const viewport = useMapStore((s) => s.viewport);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
   // Track the last programmatic viewport change to fly to
@@ -99,7 +102,7 @@ export function MapView({
       <MapLibreGL.MapView
         ref={mapRef}
         style={styles.map}
-        mapStyle={OPENFREEMAP_STYLE_URL}
+        mapStyle={isDark ? MAP_STYLE_URL_DARK : OPENFREEMAP_STYLE_URL}
         onPress={handlePress}
       >
         <MapLibreGL.Camera
@@ -113,6 +116,9 @@ export function MapView({
         />
 
         <MapLibreGL.UserLocation visible={!navigationMode} />
+
+        {/* Suppress raster overlay when traffic is shown on the route line instead */}
+        <TrafficOverlay suppressRaster={!!routeGeometry} />
 
         {/* Navigation chevron as a map annotation */}
         {navigationMode && navPosition && (
@@ -152,29 +158,7 @@ export function MapView({
           </MapLibreGL.ShapeSource>
         )}
 
-        {routeGeometry && (
-          <MapLibreGL.ShapeSource
-            id="route"
-            shape={{
-              type: 'Feature',
-              properties: {},
-              geometry: {
-                type: 'LineString',
-                coordinates: decodePolyline(routeGeometry),
-              },
-            }}
-          >
-            <MapLibreGL.LineLayer
-              id="routeLine"
-              style={{
-                lineColor: '#4A90D9',
-                lineWidth: 5,
-                lineCap: 'round',
-                lineJoin: 'round',
-              }}
-            />
-          </MapLibreGL.ShapeSource>
-        )}
+        {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
       </MapLibreGL.MapView>
     </View>
   );
