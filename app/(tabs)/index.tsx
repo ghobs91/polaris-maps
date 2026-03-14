@@ -6,6 +6,7 @@ import { MapControls } from '@/components/map/MapControls';
 import { MapLayerToggle } from '@/components/map/MapLayerToggle';
 import { FloatingSearchPanel } from '@/components/map/FloatingSearchPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
+import { POIInfoCard } from '@/components/map/POIInfoCard';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { ErrorBoundary } from '@/components/common';
@@ -46,6 +47,7 @@ export default function MapScreen() {
         <FloatingSearchPanel onProfilePress={() => setShowNodeDrawer(true)} />
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <MapControls onLocatePress={handleLocate} />
+        <POIInfoCard />
       </View>
     </ErrorBoundary>
   );

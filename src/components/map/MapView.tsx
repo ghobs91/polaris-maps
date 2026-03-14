@@ -2,11 +2,17 @@ import React, { useRef, useCallback, useEffect } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
+import { useOsmPoiStore } from '../../stores/osmPoiStore';
+import { fetchOsmPois } from '../../services/poi/osmFetcher';
 import { OPENFREEMAP_STYLE_URL, MAP_STYLE_URL_DARK } from '../../constants/config';
 import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
+import { POILayer } from './POILayer';
+
+const POI_MIN_ZOOM = 14;
+const POI_FETCH_DEBOUNCE_MS = 600;
 
 interface MapViewProps {
   routeGeometry?: string;
@@ -33,6 +39,8 @@ export function MapView({
   const selectedLocation = useMapStore((s) => s.selectedLocation);
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
+  // Debounce timer for OSM POI fetching
+  const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // In navigation mode, follow navPosition with tilt + heading
   useEffect(() => {
@@ -89,6 +97,35 @@ export function MapView({
     return unsub;
   }, []);
 
+  const handleRegionDidChange = useCallback((event: any) => {
+    const zoom: number = event?.properties?.zoomLevel ?? 0;
+    if (zoom < POI_MIN_ZOOM) {
+      // Clear POIs when zoomed out
+      useOsmPoiStore.getState().setPois([]);
+      return;
+    }
+    const bounds: [[number, number], [number, number]] | undefined =
+      event?.properties?.visibleBounds;
+    if (!bounds) return;
+    const [[maxLng, maxLat], [minLng, minLat]] = bounds;
+
+    // Store current zoom + bounds so POILayer can filter for even distribution
+    useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
+
+    if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
+    poiFetchTimer.current = setTimeout(async () => {
+      try {
+        useOsmPoiStore.getState().setIsLoading(true);
+        const pois = await fetchOsmPois(minLat, minLng, maxLat, maxLng);
+        useOsmPoiStore.getState().setPois(pois);
+      } catch {
+        // Silently ignore — Overpass may be unavailable
+      } finally {
+        useOsmPoiStore.getState().setIsLoading(false);
+      }
+    }, POI_FETCH_DEBOUNCE_MS);
+  }, []);
+
   const handlePress = useCallback(
     (event: any) => {
       const [lng, lat] = event.geometry.coordinates as [number, number];
@@ -104,6 +141,7 @@ export function MapView({
         style={styles.map}
         mapStyle={isDark ? MAP_STYLE_URL_DARK : OPENFREEMAP_STYLE_URL}
         onPress={handlePress}
+        onRegionDidChange={handleRegionDidChange}
       >
         <MapLibreGL.Camera
           ref={cameraRef}
@@ -159,6 +197,8 @@ export function MapView({
         )}
 
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
+
+        <POILayer />
       </MapLibreGL.MapView>
     </View>
   );
