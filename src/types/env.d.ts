@@ -5,5 +5,15 @@ declare namespace NodeJS {
   interface ProcessEnv {
     readonly EXPO_PUBLIC_TOMTOM_API_KEY?: string;
     readonly EXPO_PUBLIC_HERE_API_KEY?: string;
+    /**
+     * Optional proxy URL for TomTom traffic API calls.
+     * When set, raw API keys are NOT required in the bundle.
+     */
+    readonly EXPO_PUBLIC_TOMTOM_PROXY_URL?: string;
+    /**
+     * Optional proxy URL for HERE traffic API calls.
+     * When set, raw API keys are NOT required in the bundle.
+     */
+    readonly EXPO_PUBLIC_HERE_PROXY_URL?: string;
   }
 }

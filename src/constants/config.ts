@@ -34,6 +34,34 @@ export const tomtomApiKey: string = process.env.EXPO_PUBLIC_TOMTOM_API_KEY ?? ''
 /** HERE API key — set EXPO_PUBLIC_HERE_API_KEY in .env */
 export const hereApiKey: string = process.env.EXPO_PUBLIC_HERE_API_KEY ?? '';
 
+/**
+ * Optional proxy base URL for TomTom traffic API calls.
+ *
+ * When set, all TomTom requests are routed through this server-controlled proxy
+ * so the raw API key does NOT need to be embedded in the JS bundle.
+ * The proxy must forward requests to api.tomtom.com and append the API key
+ * server-side. Example: https://your-worker.example.com/tomtom
+ *
+ * When unset, requests go directly to TomTom using the key from
+ * EXPO_PUBLIC_TOMTOM_API_KEY. In that case, restrict the key to your app's
+ * bundle ID / package name in the TomTom Developer Portal before release.
+ */
+export const tomtomProxyUrl: string = process.env.EXPO_PUBLIC_TOMTOM_PROXY_URL ?? '';
+
+/**
+ * Optional proxy base URL for HERE traffic API calls.
+ *
+ * When set, all HERE requests are routed through this server-controlled proxy
+ * so the raw API key does NOT need to be embedded in the JS bundle.
+ * The proxy must forward to data.traffic.hereapi.com and append the API key
+ * server-side. Example: https://your-worker.example.com/here
+ *
+ * When unset, requests go directly to HERE using the key from
+ * EXPO_PUBLIC_HERE_API_KEY. In that case, restrict the key to your app's
+ * bundle ID / package name in the HERE Developer Portal before release.
+ */
+export const hereProxyUrl: string = process.env.EXPO_PUBLIC_HERE_PROXY_URL ?? '';
+
 /** Debounce delay (ms) for viewport-triggered traffic fetches. */
 export const TRAFFIC_FETCH_DEBOUNCE_MS = 800;
 

@@ -1,5 +1,6 @@
 import { getGun } from '../gun/init';
 import { getOrCreateKeypair } from '../identity/keypair';
+import { sign, verify, createSigningPayload } from '../identity/signing';
 import type { UserReputation } from '../../models/reputation';
 import { computeReputationScore } from '../../models/reputation';
 
@@ -12,6 +13,20 @@ export async function getReputation(pubkey: string): Promise<UserReputation | nu
       .get(pubkey)
       .once((data: Record<string, unknown> | undefined) => {
         if (!data || !data.pubkey) {
+          resolve(null);
+          return;
+        }
+
+        // Verify the signature before trusting data from any Gun.js peer.
+        // A malicious peer could write a fake high score for any pubkey, which
+        // would cause edits from that pubkey to be auto-accepted.
+        const sig = (data.signature as string) ?? '';
+        const payload = createSigningPayload(
+          data.pubkey as string,
+          String(data.score ?? 0),
+          String(data.last_updated ?? 0),
+        );
+        if (!sig || !verify(payload, sig, data.pubkey as string)) {
           resolve(null);
           return;
         }
@@ -98,6 +113,10 @@ export async function updateTrafficAccuracy(accuracy: number): Promise<UserReput
 }
 
 async function writeReputation(rep: UserReputation): Promise<void> {
+  const keypair = await getOrCreateKeypair();
+  const payload = createSigningPayload(rep.pubkey, String(rep.score), String(rep.lastUpdated));
+  const signature = await sign(payload, keypair.privateKey);
+
   const gun = getGun();
   (gun as any).get('polaris').get('reputation').get(rep.pubkey).put({
     pubkey: rep.pubkey,
@@ -109,6 +128,7 @@ async function writeReputation(rep: UserReputation): Promise<void> {
     traffic_accuracy_score: rep.trafficAccuracyScore,
     imagery_contributions: rep.imageryContributions,
     last_updated: rep.lastUpdated,
+    signature,
   });
 }
 

@@ -12,6 +12,7 @@ import {
   Keyboard,
   Animated,
   ActivityIndicator,
+  Switch,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -72,7 +73,177 @@ interface FloatingSearchPanelProps {
   bottomInsetExtra?: number;
   /** Called when the user taps the profile/node-dashboard icon */
   onProfilePress?: () => void;
+  /** Called when the user taps the locate/find-me button */
+  onLocatePress?: () => void;
 }
+
+// ─────────────────────────────────────────────
+// Map controls column — layers toggle + locate button anchored above the panel
+// ─────────────────────────────────────────────
+function LayersCardContent({
+  trafficVisible,
+  onTrafficToggle,
+  isDark,
+}: {
+  trafficVisible: boolean;
+  onTrafficToggle: (v: boolean) => void;
+  isDark: boolean;
+}) {
+  const textColor = isDark ? '#EBEBF5' : '#1C1C1E';
+  return (
+    <>
+      <Text style={[ctrlStyles.cardTitle, { color: textColor }]}>Map Layers</Text>
+      <View style={ctrlStyles.cardRow}>
+        <Ionicons name="car" size={18} color="#FF9500" style={ctrlStyles.cardRowIcon} />
+        <Text style={[ctrlStyles.cardRowLabel, { color: textColor }]}>Traffic</Text>
+        <Switch
+          value={trafficVisible}
+          onValueChange={onTrafficToggle}
+          trackColor={{ false: '#767577', true: '#007AFF' }}
+        />
+      </View>
+    </>
+  );
+}
+
+function CtrlBtn({
+  icon,
+  onPress,
+  isDark,
+}: {
+  icon: string;
+  onPress: () => void;
+  isDark: boolean;
+}) {
+  const iconColor = isDark ? '#EBEBF5' : '#1C1C1E';
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btn}>
+      <Ionicons name={icon as any} size={20} color={iconColor} />
+    </TouchableOpacity>
+  );
+}
+
+function MapControlsColumn({
+  onLocatePress,
+  isDark,
+}: {
+  onLocatePress?: () => void;
+  isDark: boolean;
+}) {
+  const [layersOpen, setLayersOpen] = useState(false);
+  const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
+  const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
+  const blurTint = isDark ? 'systemThickMaterialDark' : 'systemChromeMaterial';
+
+  return (
+    <View style={ctrlStyles.column}>
+      {/* Layers popup — floats above the buttons */}
+      {layersOpen &&
+        (Platform.OS === 'ios' ? (
+          <BlurView intensity={60} tint={blurTint} style={ctrlStyles.layersCard}>
+            <LayersCardContent
+              trafficVisible={trafficLayerVisible}
+              onTrafficToggle={setTrafficLayerVisible}
+              isDark={isDark}
+            />
+          </BlurView>
+        ) : (
+          <View
+            style={[
+              ctrlStyles.layersCard,
+              { backgroundColor: isDark ? 'rgba(28,28,30,0.96)' : 'rgba(255,255,255,0.96)' },
+            ]}
+          >
+            <LayersCardContent
+              trafficVisible={trafficLayerVisible}
+              onTrafficToggle={setTrafficLayerVisible}
+              isDark={isDark}
+            />
+          </View>
+        ))}
+
+      {/* Stacked glass buttons */}
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={60} tint={blurTint} style={ctrlStyles.buttonsContainer}>
+          <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
+          <View style={ctrlStyles.separator} />
+          <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
+        </BlurView>
+      ) : (
+        <View
+          style={[
+            ctrlStyles.buttonsContainer,
+            { backgroundColor: isDark ? 'rgba(28,28,30,0.93)' : 'rgba(255,255,255,0.93)' },
+          ]}
+        >
+          <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
+          <View style={ctrlStyles.separator} />
+          <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+const ctrlStyles = StyleSheet.create({
+  column: {
+    alignSelf: 'flex-end',
+    alignItems: 'flex-end',
+    marginBottom: 8,
+    gap: 6,
+  },
+  buttonsContainer: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 10,
+  },
+  btn: {
+    width: 46,
+    height: 46,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(120,120,128,0.3)',
+    marginHorizontal: 10,
+  },
+  layersCard: {
+    borderRadius: borderRadius.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minWidth: 190,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 10,
+  },
+  layersCardAndroid: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardRowIcon: {
+    marginRight: 8,
+  },
+  cardRowLabel: {
+    flex: 1,
+    fontSize: 15,
+  },
+});
 
 // ─────────────────────────────────────────────
 // Glass container — renders BlurView on iOS, semi-transparent on Android
@@ -172,6 +343,7 @@ function FavChip({
 export function FloatingSearchPanel({
   bottomInsetExtra = 0,
   onProfilePress,
+  onLocatePress,
 }: FloatingSearchPanelProps) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -572,6 +744,7 @@ export function FloatingSearchPanel({
     const subtitle = [entry.city, entry.state, entry.country].filter(Boolean).join(', ');
     return (
       <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
         <GlassPanel isDark={isDark} style={st.panel}>
           <View style={styles.handle} />
 
@@ -639,6 +812,7 @@ export function FloatingSearchPanel({
     const displayEtaSeconds = routePreviewTrafficEta ?? routePreview.summary.durationSeconds;
     return (
       <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
         <GlassPanel isDark={isDark} style={st.panel}>
           <View style={styles.handle} />
 
@@ -728,6 +902,7 @@ export function FloatingSearchPanel({
   // ── Search / idle panel ───────────────────────
   return (
     <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+      <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
       <GlassPanel isDark={isDark} style={st.panel}>
         {/* ── Handle bar ── */}
         <View style={styles.handle} />

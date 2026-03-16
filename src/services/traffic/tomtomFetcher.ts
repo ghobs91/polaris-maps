@@ -1,5 +1,5 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
-import { tomtomApiKey, TOMTOM_FLOW_BASE_URL } from '../../constants/config';
+import { tomtomApiKey, tomtomProxyUrl, TOMTOM_FLOW_BASE_URL } from '../../constants/config';
 
 export interface TomTomFlowResponse {
   flowSegmentData: {
@@ -103,14 +103,18 @@ export interface ViewportBounds {
 export async function fetchTomTomTraffic(
   viewport: ViewportBounds,
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!tomtomApiKey) return [];
+  // Require either a proxy URL or a direct API key; skip if neither is available.
+  if (!tomtomProxyUrl && !tomtomApiKey) return [];
 
   const gridSize = gridSizeForZoom(viewport.zoom);
   const points = sampleGrid(viewport.west, viewport.south, viewport.east, viewport.north, gridSize);
   const zoom = Math.round(Math.min(22, Math.max(0, viewport.zoom)));
 
   const promises = points.map(async (pt) => {
-    const url = `${TOMTOM_FLOW_BASE_URL}/${zoom}/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?key=${encodeURIComponent(tomtomApiKey)}&unit=KMPH&thickness=1`;
+    // When a proxy URL is configured, the server appends the API key — no key in the bundle.
+    const flowBase = tomtomProxyUrl || TOMTOM_FLOW_BASE_URL;
+    const keyParam = tomtomProxyUrl ? '' : `&key=${encodeURIComponent(tomtomApiKey)}`;
+    const url = `${flowBase}/${zoom}/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?unit=KMPH&thickness=1${keyParam}`;
     try {
       const res = await fetch(url);
       if (!res.ok) return null;

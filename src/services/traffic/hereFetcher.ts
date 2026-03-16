@@ -1,5 +1,5 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
-import { hereApiKey, HERE_FLOW_BASE_URL } from '../../constants/config';
+import { hereApiKey, hereProxyUrl, HERE_FLOW_BASE_URL } from '../../constants/config';
 import type { ViewportBounds } from './tomtomFetcher';
 
 export interface HEREFlowResponse {
@@ -76,10 +76,14 @@ export function normalizeHEREResponse(
 export async function fetchHERETraffic(
   viewport: ViewportBounds,
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!hereApiKey) return [];
+  // Require either a proxy URL or a direct API key; skip if neither is available.
+  if (!hereProxyUrl && !hereApiKey) return [];
 
   const bbox = `bbox:${viewport.west},${viewport.south},${viewport.east},${viewport.north}`;
-  const url = `${HERE_FLOW_BASE_URL}?apiKey=${encodeURIComponent(hereApiKey)}&in=${encodeURIComponent(bbox)}&locationReferencing=shape`;
+  // When a proxy URL is configured, the server appends the API key — no key in the bundle.
+  const url = hereProxyUrl
+    ? `${hereProxyUrl}?in=${encodeURIComponent(bbox)}&locationReferencing=shape`
+    : `${HERE_FLOW_BASE_URL}?apiKey=${encodeURIComponent(hereApiKey)}&in=${encodeURIComponent(bbox)}&locationReferencing=shape`;
 
   const response = await fetch(url);
   if (!response.ok) return [];

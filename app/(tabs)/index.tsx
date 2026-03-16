@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
-import { MapControls } from '@/components/map/MapControls';
-import { MapLayerToggle } from '@/components/map/MapLayerToggle';
 import { FloatingSearchPanel } from '@/components/map/FloatingSearchPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
@@ -43,10 +41,11 @@ export default function MapScreen() {
     <ErrorBoundary>
       <View style={styles.container}>
         <MapView routeGeometry={routeGeometry} onMapPress={handleMapPress} />
-        <MapLayerToggle />
-        <FloatingSearchPanel onProfilePress={() => setShowNodeDrawer(true)} />
+        <FloatingSearchPanel
+          onProfilePress={() => setShowNodeDrawer(true)}
+          onLocatePress={handleLocate}
+        />
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
-        <MapControls onLocatePress={handleLocate} />
         <POIInfoCard />
       </View>
     </ErrorBoundary>

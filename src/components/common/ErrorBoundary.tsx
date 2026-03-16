@@ -21,7 +21,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, info.componentStack);
+    // Only log detailed stack traces in development.
+    // In production, full traces in system logs (adb logcat, Console.app)
+    // can reveal internal source paths and component structure.
+    if (__DEV__) {
+      console.error('ErrorBoundary caught:', error, info.componentStack);
+    }
   }
 
   handleReset = () => {
@@ -34,7 +39,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       return (
         <View style={styles.container}>
           <Text style={styles.title}>Something went wrong</Text>
-          <Text style={styles.message}>{this.state.error?.message}</Text>
+          <Text style={styles.message}>
+            {__DEV__
+              ? this.state.error?.message
+              : 'An unexpected error occurred. Please try again.'}
+          </Text>
           <Button title="Try Again" onPress={this.handleReset} variant="outline" />
         </View>
       );

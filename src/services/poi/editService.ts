@@ -1,5 +1,5 @@
 import { getGun } from '../gun/init';
-import { sign, createSigningPayload } from '../identity/signing';
+import { sign, verify, createSigningPayload } from '../identity/signing';
 import { getOrCreateKeypair } from '../identity/keypair';
 import { recordContribution, recordConfirmation, getReputation } from './reputationService';
 import { updatePlace } from './poiService';
@@ -123,7 +123,7 @@ export async function getPendingEdits(entityId: string): Promise<DataEdit[]> {
       .get(entityId)
       .map()
       .once((data: Record<string, unknown> | undefined) => {
-        if (data && data.status === 'pending') {
+        if (data && data.status === 'pending' && isEditSignatureValid(data)) {
           edits.push(gunRecordToEdit(data));
         }
       });
@@ -146,7 +146,7 @@ async function getEditFromGun(editId: string, entityId: string): Promise<DataEdi
       .get(entityId)
       .get(editId)
       .once((data: Record<string, unknown> | undefined) => {
-        if (!data || !data.id) {
+        if (!data || !data.id || !isEditSignatureValid(data)) {
           resolve(null);
           return;
         }
@@ -177,6 +177,23 @@ async function writeEditToGun(edit: DataEdit): Promise<void> {
       created_at: edit.createdAt,
       resolved_at: edit.resolvedAt ?? null,
     });
+}
+
+/**
+ * Verify the Schnorr signature on a raw Gun.js edit record before trusting it.
+ * Returns false for any record with a missing, invalid, or unverifiable signature.
+ * This prevents malicious peers from injecting or tampering with edit records.
+ */
+function isEditSignatureValid(data: Record<string, unknown>): boolean {
+  const sig = (data.signature as string) ?? '';
+  const pubkey = (data.author_pubkey as string) ?? '';
+  const id = (data.id as string) ?? '';
+  const entityId = (data.entity_id as string) ?? '';
+  const fieldName = (data.field_name as string) ?? '';
+  const createdAt = String((data.created_at as number) ?? 0);
+  if (!sig || !pubkey) return false;
+  const payload = createSigningPayload(id, entityId, fieldName, createdAt);
+  return verify(payload, sig, pubkey);
 }
 
 function gunRecordToEdit(data: Record<string, unknown>): DataEdit {

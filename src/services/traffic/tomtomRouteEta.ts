@@ -1,4 +1,4 @@
-import { tomtomApiKey } from '../../constants/config';
+import { tomtomApiKey, tomtomProxyUrl } from '../../constants/config';
 import { decodePolyline } from '../../utils/polyline';
 
 const TOMTOM_ROUTE_URL = 'https://api.tomtom.com/routing/1/calculateRoute';
@@ -14,10 +14,13 @@ export async function fetchTomTomRouteEta(
   origin: { lat: number; lng: number },
   destination: { lat: number; lng: number },
 ): Promise<{ travelTimeSeconds: number; trafficDelaySeconds: number } | null> {
-  if (!tomtomApiKey) return null;
+  if (!tomtomProxyUrl && !tomtomApiKey) return null;
 
   const coords = `${origin.lat},${origin.lng}:${destination.lat},${destination.lng}`;
-  const url = `${TOMTOM_ROUTE_URL}/${coords}/json?key=${encodeURIComponent(tomtomApiKey)}&traffic=true&travelMode=car`;
+  // When a proxy URL is configured, the server appends the API key — no key in the bundle.
+  const routeBase = tomtomProxyUrl ? `${tomtomProxyUrl}/route` : TOMTOM_ROUTE_URL;
+  const keyParam = tomtomProxyUrl ? '' : `&key=${encodeURIComponent(tomtomApiKey)}`;
+  const url = `${routeBase}/${coords}/json?traffic=true&travelMode=car${keyParam}`;
 
   try {
     const res = await fetch(url);

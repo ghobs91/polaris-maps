@@ -109,6 +109,10 @@ const zlib = require('zlib');
 
 async function handleExtractTar(command) {
   const { srcPath, destDir, requestId } = command;
+
+  /** Maximum uncompressed archive size: 2 GB (decompression bomb guard). */
+  const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
+
   try {
     if (!fs.existsSync(srcPath)) {
       return sendError(requestId, `Source file not found: ${srcPath}`);
@@ -117,10 +121,19 @@ async function handleExtractTar(command) {
 
     let buf = fs.readFileSync(srcPath);
 
-    // Detect gzip (magic bytes 1f 8b)
+    // Detect gzip (magic bytes 1f 8b) and decompress with size guard.
     if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
-      buf = zlib.gunzipSync(buf);
+      buf = zlib.gunzipSync(buf, { maxOutputLength: MAX_UNCOMPRESSED_BYTES });
     }
+
+    // Validate tar magic: POSIX ustar archives have "ustar" at offset 257.
+    // Plain (pre-POSIX) archives have no magic but are still valid tars — we
+    // allow both and only require the buffer to be large enough for one header.
+    if (buf.length < 512) {
+      return sendError(requestId, 'Archive is too small to be a valid tar');
+    }
+
+    const resolvedDestDir = path.resolve(destDir);
 
     let offset = 0;
     while (offset + 512 <= buf.length) {
@@ -136,7 +149,15 @@ async function handleExtractTar(command) {
 
       if (!nameRaw) break;
 
-      const fullPath = path.join(destDir, nameRaw);
+      // Security: resolve the full path and verify it stays within destDir.
+      // This prevents path traversal attacks (e.g. entries like ../../evil).
+      const fullPath = path.resolve(resolvedDestDir, nameRaw);
+      if (!fullPath.startsWith(resolvedDestDir + path.sep) && fullPath !== resolvedDestDir) {
+        // Skip entries that attempt to escape the destination directory
+        offset += Math.ceil(size / 512) * 512;
+        continue;
+      }
+
       // Directory (typeflag '5' = 53)
       if (typeFlag === 53 || nameRaw.endsWith('/')) {
         fs.mkdirSync(fullPath, { recursive: true });
