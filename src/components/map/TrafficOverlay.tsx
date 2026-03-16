@@ -14,7 +14,7 @@ export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) 
 
   const tileUrl = useMemo(
     () =>
-      `${TOMTOM_FLOW_TILES_BASE_URL}/{z}/{x}/{y}.png?key=${tomtomApiKey}&tileSize=256&thickness=10`,
+      `${TOMTOM_FLOW_TILES_BASE_URL}/{z}/{x}/{y}.png?key=${tomtomApiKey}&tileSize=256&thickness=3`,
     [],
   );
 

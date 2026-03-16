@@ -4,7 +4,8 @@ import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { fetchOsmPois } from '../../services/poi/osmFetcher';
-import { OPENFREEMAP_STYLE_URL, MAP_STYLE_URL_DARK } from '../../constants/config';
+import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
+import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
 import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
@@ -139,7 +140,7 @@ export function MapView({
       <MapLibreGL.MapView
         ref={mapRef}
         style={styles.map}
-        mapStyle={isDark ? MAP_STYLE_URL_DARK : OPENFREEMAP_STYLE_URL}
+        mapStyle={isDark ? DARK_MAP_STYLE_JSON : OPENFREEMAP_STYLE_URL}
         onPress={handlePress}
         onRegionDidChange={handleRegionDidChange}
       >

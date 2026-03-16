@@ -60,67 +60,6 @@ describe('Tar path traversal guard', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. Proxy URL routing — fetchers should use proxy base when configured
-// ---------------------------------------------------------------------------
-describe('Traffic fetcher proxy URL routing', () => {
-  it('includes API key in URL when no proxy is set', () => {
-    const tomtomApiKey = 'test-key-123';
-    const tomtomProxyUrl = '';
-    const TOMTOM_FLOW_BASE_URL =
-      'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute';
-    const flowBase = tomtomProxyUrl || TOMTOM_FLOW_BASE_URL;
-    const keyParam = tomtomProxyUrl ? '' : `&key=${encodeURIComponent(tomtomApiKey)}`;
-    const url = `${flowBase}/15/51.50000,-0.12000.json?unit=KMPH&thickness=1${keyParam}`;
-
-    expect(url).toContain('api.tomtom.com');
-    expect(url).toContain('key=test-key-123');
-  });
-
-  it('omits API key and uses proxy base URL when proxy is configured', () => {
-    const tomtomApiKey = 'test-key-123';
-    const tomtomProxyUrl = 'https://proxy.example.com/tomtom';
-    const TOMTOM_FLOW_BASE_URL =
-      'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute';
-    const flowBase = tomtomProxyUrl || TOMTOM_FLOW_BASE_URL;
-    const keyParam = tomtomProxyUrl ? '' : `&key=${encodeURIComponent(tomtomApiKey)}`;
-    const url = `${flowBase}/15/51.50000,-0.12000.json?unit=KMPH&thickness=1${keyParam}`;
-
-    expect(url).toContain('proxy.example.com');
-    expect(url).not.toContain('api.tomtom.com');
-    expect(url).not.toContain('key=');
-    expect(url).not.toContain('test-key-123');
-  });
-
-  it('HERE fetcher uses proxy URL and omits API key when proxy is set', () => {
-    const hereApiKey = 'here-key-abc';
-    const hereProxyUrl = 'https://proxy.example.com/here';
-    const HERE_FLOW_BASE_URL = 'https://data.traffic.hereapi.com/v7/flow';
-    const bbox = 'bbox:-74.006,40.706,-73.995,40.720';
-    const url = hereProxyUrl
-      ? `${hereProxyUrl}?in=${encodeURIComponent(bbox)}&locationReferencing=shape`
-      : `${HERE_FLOW_BASE_URL}?apiKey=${encodeURIComponent(hereApiKey)}&in=${encodeURIComponent(bbox)}&locationReferencing=shape`;
-
-    expect(url).toContain('proxy.example.com');
-    expect(url).not.toContain('hereapi.com');
-    expect(url).not.toContain('apiKey');
-    expect(url).not.toContain('here-key-abc');
-  });
-
-  it('HERE fetcher includes API key in URL when no proxy is configured', () => {
-    const hereApiKey = 'here-key-abc';
-    const hereProxyUrl = '';
-    const HERE_FLOW_BASE_URL = 'https://data.traffic.hereapi.com/v7/flow';
-    const bbox = 'bbox:-74.006,40.706,-73.995,40.720';
-    const url = hereProxyUrl
-      ? `${hereProxyUrl}?in=${encodeURIComponent(bbox)}&locationReferencing=shape`
-      : `${HERE_FLOW_BASE_URL}?apiKey=${encodeURIComponent(hereApiKey)}&in=${encodeURIComponent(bbox)}&locationReferencing=shape`;
-
-    expect(url).toContain('hereapi.com');
-    expect(url).toContain('apiKey=here-key-abc');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // 3. ErrorBoundary: production build shows generic message, not raw error
 // ---------------------------------------------------------------------------
 describe('ErrorBoundary message exposure', () => {

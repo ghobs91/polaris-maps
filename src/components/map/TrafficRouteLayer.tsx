@@ -60,11 +60,21 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
       <MapLibreGL.ShapeSource id="route-base" shape={fallbackShape}>
         <MapLibreGL.LineLayer
           id="route-base-casing"
-          style={{ lineColor: '#ffffff', lineWidth: 10, lineCap: 'round', lineJoin: 'round' }}
+          style={{
+            lineColor: '#ffffff',
+            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
         />
         <MapLibreGL.LineLayer
           id="route-base-line"
-          style={{ lineColor: '#4A90D9', lineWidth: 6, lineCap: 'round', lineJoin: 'round' }}
+          style={{
+            lineColor: '#4A90D9',
+            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
+            lineCap: 'round',
+            lineJoin: 'round',
+          }}
         />
       </MapLibreGL.ShapeSource>
 
@@ -73,13 +83,18 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
         <MapLibreGL.ShapeSource id="route-traffic" shape={geoJSON as any}>
           <MapLibreGL.LineLayer
             id="route-traffic-casing"
-            style={{ lineColor: '#ffffff', lineWidth: 10, lineCap: 'round', lineJoin: 'round' }}
+            style={{
+              lineColor: '#ffffff',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
+              lineCap: 'round',
+              lineJoin: 'round',
+            }}
           />
           <MapLibreGL.LineLayer
             id="route-traffic-line"
             style={{
               lineColor: ['get', 'color'] as any,
-              lineWidth: 6,
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
               lineCap: 'round',
               lineJoin: 'round',
             }}

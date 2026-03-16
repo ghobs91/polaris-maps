@@ -1,4 +1,4 @@
-import { tomtomApiKey, tomtomProxyUrl, TOMTOM_FLOW_BASE_URL } from '../../constants/config';
+import { tomtomApiKey, TOMTOM_FLOW_BASE_URL } from '../../constants/config';
 import { decodePolyline } from '../../utils/polyline';
 import { normalizeTomTomResponse } from './tomtomFetcher';
 
@@ -32,7 +32,7 @@ export async function fetchRouteTrafficGeoJSON(geometry: string): Promise<{
     geometry: { type: 'LineString'; coordinates: [number, number][] };
   }>;
 } | null> {
-  if (!tomtomProxyUrl && !tomtomApiKey) return null;
+  if (!tomtomApiKey) return null;
 
   const coords = decodePolyline(geometry); // [lng, lat][]
   if (coords.length < 2) return null;
@@ -55,12 +55,9 @@ export async function fetchRouteTrafficGeoJSON(geometry: string): Promise<{
   // Fetch flow data for each chunk midpoint in parallel
   const coloredChunks = await Promise.all(
     chunks.map(async ({ start, end, midLat, midLng }) => {
-      // When a proxy URL is configured, the server appends the API key — no key in the bundle.
-      const flowBase = tomtomProxyUrl || TOMTOM_FLOW_BASE_URL;
-      const keyParam = tomtomProxyUrl ? '' : `&key=${encodeURIComponent(tomtomApiKey)}`;
       const url =
-        `${flowBase}/${ZOOM_LEVEL}/${midLat.toFixed(5)},${midLng.toFixed(5)}.json` +
-        `?unit=KMPH&thickness=1${keyParam}`;
+        `${TOMTOM_FLOW_BASE_URL}/${ZOOM_LEVEL}/${midLat.toFixed(5)},${midLng.toFixed(5)}.json` +
+        `?key=${encodeURIComponent(tomtomApiKey)}&unit=KMPH&thickness=1`;
       try {
         const res = await fetch(url);
         if (!res.ok) return { start, end, color: '#4A90D9' };
