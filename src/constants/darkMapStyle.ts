@@ -584,7 +584,7 @@ const style = {
       filter: ['==', 'class', 'ocean'],
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Italic'],
+        'text-font': ['Noto Sans Italic'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 2, 12, 8, 16],
         'text-letter-spacing': 0.15,
         'text-max-width': 8,
@@ -603,7 +603,7 @@ const style = {
       filter: ['==', 'class', 'sea'],
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Italic'],
+        'text-font': ['Noto Sans Italic'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 4, 11, 10, 14],
         'text-letter-spacing': 0.1,
         'text-max-width': 6,
@@ -623,7 +623,7 @@ const style = {
       minzoom: 8,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Italic'],
+        'text-font': ['Noto Sans Italic'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
         'text-max-width': 6,
       },
@@ -644,7 +644,7 @@ const style = {
       minzoom: 10,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 12, 18, 15],
         'symbol-placement': 'line',
         'text-rotation-alignment': 'map',
@@ -665,7 +665,7 @@ const style = {
       minzoom: 12,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 12, 8.5, 16, 12, 18, 14],
         'symbol-placement': 'line',
         'text-rotation-alignment': 'map',
@@ -686,7 +686,7 @@ const style = {
       minzoom: 14,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 14, 8, 18, 12],
         'symbol-placement': 'line',
         'text-rotation-alignment': 'map',
@@ -709,7 +709,7 @@ const style = {
       maxzoom: 3,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Bold'],
+        'text-font': ['Noto Sans Bold'],
         'text-size': 14,
         'text-transform': 'uppercase',
         'text-letter-spacing': 0.2,
@@ -731,7 +731,7 @@ const style = {
       maxzoom: 8,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Bold'],
+        'text-font': ['Noto Sans Bold'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 2, 10, 6, 14],
         'text-transform': 'uppercase',
         'text-letter-spacing': 0.1,
@@ -753,7 +753,7 @@ const style = {
       maxzoom: 10,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Semibold'],
+        'text-font': ['Noto Sans Bold'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 4, 9, 8, 12],
         'text-transform': 'uppercase',
         'text-letter-spacing': 0.1,
@@ -775,7 +775,7 @@ const style = {
       maxzoom: 14,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Bold'],
+        'text-font': ['Noto Sans Bold'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 8, 14, 12, 18],
         'text-max-width': 8,
       },
@@ -794,7 +794,7 @@ const style = {
       minzoom: 8,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Semibold'],
+        'text-font': ['Noto Sans Bold'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 12, 14, 16, 17],
         'text-max-width': 8,
       },
@@ -813,7 +813,7 @@ const style = {
       minzoom: 10,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 12, 18, 15],
         'text-max-width': 7,
       },
@@ -832,7 +832,7 @@ const style = {
       minzoom: 11,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Semibold'],
+        'text-font': ['Noto Sans Bold'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 11, 10, 14, 13, 18, 16],
         'text-transform': 'uppercase',
         'text-letter-spacing': 0.08,
@@ -853,7 +853,7 @@ const style = {
       minzoom: 13,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 13, 9, 16, 12],
         'text-transform': 'uppercase',
         'text-letter-spacing': 0.06,
@@ -875,7 +875,7 @@ const style = {
       minzoom: 14,
       layout: {
         'text-field': '{name}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9, 18, 12],
         'text-max-width': 7,
         'text-anchor': 'top',
@@ -897,7 +897,7 @@ const style = {
       minzoom: 17,
       layout: {
         'text-field': '{housenumber}',
-        'text-font': ['Open Sans Regular'],
+        'text-font': ['Noto Sans Regular'],
         'text-size': 9,
       },
       paint: {
