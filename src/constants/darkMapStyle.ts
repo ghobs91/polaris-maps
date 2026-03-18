@@ -867,6 +867,8 @@ const style = {
     },
 
     // ───────────────────── Labels: POI ─────────────────────
+    // Hidden — POI names are rendered by our custom PoiBadge overlays.
+    // Showing both would duplicate the label on every marker.
     {
       id: 'poi-label',
       type: 'symbol',
@@ -874,6 +876,7 @@ const style = {
       'source-layer': 'poi',
       minzoom: 14,
       layout: {
+        visibility: 'none',
         'text-field': '{name}',
         'text-font': ['Noto Sans Regular'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9, 18, 12],

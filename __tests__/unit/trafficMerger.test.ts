@@ -97,7 +97,6 @@ describe('mergeTrafficSources', () => {
     const merged = mergeTrafficSources([tomtom, here]);
     // Overlapping segments should be merged
     // speed = (30*0.9 + 40*0.85) / (0.9 + 0.85) = (27 + 34) / 1.75 = 34.86
-    const mergedSeg = merged.find((s) => s.id.includes('merged'));
     // May or may not merge depending on coordinate proximity — at least should have results
     expect(merged.length).toBeGreaterThanOrEqual(1);
   });

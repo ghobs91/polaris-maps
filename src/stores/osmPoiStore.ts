@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { OsmPoi } from '../services/poi/osmFetcher';
+import type { EnrichedPoiData } from '../services/poi/poiEnricher';
 import type { ViewportBounds } from '../utils/poiSpatialFilter';
 
 interface OsmPoiState {
@@ -8,10 +9,14 @@ interface OsmPoiState {
   isLoading: boolean;
   currentZoom: number;
   viewportBounds: ViewportBounds | null;
+  enrichedData: EnrichedPoiData | null;
+  isEnriching: boolean;
   setPois: (pois: OsmPoi[]) => void;
   setSelectedPoi: (poi: OsmPoi | null) => void;
   setIsLoading: (loading: boolean) => void;
   setZoomAndBounds: (zoom: number, bounds: ViewportBounds) => void;
+  setEnrichedData: (data: EnrichedPoiData | null) => void;
+  setIsEnriching: (loading: boolean) => void;
 }
 
 export const useOsmPoiStore = create<OsmPoiState>((set) => ({
@@ -20,8 +25,12 @@ export const useOsmPoiStore = create<OsmPoiState>((set) => ({
   isLoading: false,
   currentZoom: 0,
   viewportBounds: null,
+  enrichedData: null,
+  isEnriching: false,
   setPois: (pois) => set({ pois }),
-  setSelectedPoi: (selectedPoi) => set({ selectedPoi }),
+  setSelectedPoi: (selectedPoi) => set({ selectedPoi, enrichedData: null }),
   setIsLoading: (isLoading) => set({ isLoading }),
   setZoomAndBounds: (zoom, bounds) => set({ currentZoom: zoom, viewportBounds: bounds }),
+  setEnrichedData: (enrichedData) => set({ enrichedData }),
+  setIsEnriching: (isEnriching) => set({ isEnriching }),
 }));

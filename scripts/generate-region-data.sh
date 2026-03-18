@@ -49,9 +49,9 @@ mkdir -p "${WORK_DIR}" "${DEST_DIR}"
 # Step 1: Download OSM extract from Geofabrik
 # ---------------------------------------------------------------------------
 if [ -f "${PBF_FILE}" ]; then
-  echo "[1/4] OSM extract already downloaded, skipping."
+  echo "[1/5] OSM extract already downloaded, skipping."
 else
-  echo "[1/4] Downloading OSM extract from Geofabrik..."
+  echo "[1/5] Downloading OSM extract from Geofabrik..."
   curl -L -o "${PBF_FILE}" "${GEOFABRIK_URL}"
   echo "      Downloaded $(du -h "${PBF_FILE}" | cut -f1)."
 fi
@@ -61,9 +61,9 @@ fi
 # ---------------------------------------------------------------------------
 PMTILES_FILE="${DEST_DIR}/tiles.pmtiles"
 if [ -f "${PMTILES_FILE}" ]; then
-  echo "[2/4] PMTiles already exists, skipping."
+  echo "[2/5] PMTiles already exists, skipping."
 else
-  echo "[2/4] Generating PMTiles..."
+  echo "[2/5] Generating PMTiles..."
   if command -v planetiler &> /dev/null; then
     planetiler --osm-path="${PBF_FILE}" --output="${PMTILES_FILE}" --force
   elif command -v tilemaker &> /dev/null; then
@@ -97,9 +97,9 @@ fi
 ROUTING_DIR="${WORK_DIR}/valhalla_tiles"
 ROUTING_TAR="${DEST_DIR}/routing.tar"
 if [ -f "${ROUTING_TAR}" ]; then
-  echo "[3/4] Routing tiles already exist, skipping."
+  echo "[3/5] Routing tiles already exist, skipping."
 else
-  echo "[3/4] Generating Valhalla routing tiles..."
+  echo "[3/5] Generating Valhalla routing tiles..."
   if command -v valhalla_build_tiles &> /dev/null; then
     mkdir -p "${ROUTING_DIR}"
 
@@ -135,9 +135,9 @@ fi
 # ---------------------------------------------------------------------------
 GEOCODING_DB="${DEST_DIR}/geocoding.db"
 if [ -f "${GEOCODING_DB}" ]; then
-  echo "[4/4] Geocoding DB already exists, skipping."
+  echo "[4/5] Geocoding DB already exists, skipping."
 else
-  echo "[4/4] Generating geocoding SQLite database..."
+  echo "[4/5] Generating geocoding SQLite database..."
   if command -v python3 &> /dev/null; then
     python3 - "${PBF_FILE}" "${GEOCODING_DB}" <<'PYEOF'
 """
@@ -260,6 +260,136 @@ PYEOF
   else
     echo "      WARNING: python3 not found. Skipping geocoding DB generation."
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5: Extract Overture Maps places for the region
+# ---------------------------------------------------------------------------
+OVERTURE_PLACES="${DEST_DIR}/overture-places.geojson"
+OVERTURE_RELEASE="2026-02-18.0"
+if [ -f "${OVERTURE_PLACES}" ]; then
+  echo "[5/5] Overture places already extracted, skipping."
+else
+  echo "[5/5] Extracting Overture Maps places..."
+
+  # Parse bbox from region bounds — expects BBOX env var or command-line arg
+  # Format: "west,south,east,north" — passed as $BBOX or derived from regions.json
+  BBOX="${BBOX:-$(echo "${4:-}" | tr -d ' ')}"
+
+  if [ -z "${BBOX}" ] && command -v jq &> /dev/null; then
+    # Try to extract bbox from regions.json for this region id
+    REGIONS_FILE="$(dirname "$0")/regions.json"
+    if [ -f "${REGIONS_FILE}" ]; then
+      BBOX=$(jq -r --arg id "${REGION_ID}" \
+        '.include[] | select(.id == $id) | .bbox // empty' \
+        "${REGIONS_FILE}")
+    fi
+  fi
+
+  if [ -z "${BBOX}" ]; then
+    echo "      WARNING: No BBOX available for Overture extraction."
+    echo "      Pass BBOX='west,south,east,north' or ensure regions.json is available."
+    echo "      Skipping Overture places."
+  elif command -v duckdb &> /dev/null; then
+    # Use DuckDB to query Overture's S3-hosted GeoParquet
+    echo "      Using DuckDB to query Overture S3 (release ${OVERTURE_RELEASE})..."
+    IFS=',' read -r BBOX_WEST BBOX_SOUTH BBOX_EAST BBOX_NORTH <<< "${BBOX}"
+
+    duckdb -c "
+      LOAD spatial;
+      SET s3_region='us-west-2';
+
+      COPY (
+        SELECT
+          json_object(
+            'type', 'Feature',
+            'id', id,
+            'geometry', json_object(
+              'type', 'Point',
+              'coordinates', json_array(
+                ST_X(geometry),
+                ST_Y(geometry)
+              )
+            ),
+            'properties', json_object(
+              'id', id,
+              'names', CASE WHEN names IS NOT NULL
+                THEN json_object('primary', names.primary)
+                ELSE NULL END,
+              'categories', CASE WHEN categories IS NOT NULL
+                THEN json_object(
+                  'primary', categories.primary,
+                  'alternate', categories.alternate
+                )
+                ELSE NULL END,
+              'basic_category', basic_category,
+              'confidence', ROUND(confidence, 4),
+              'websites', websites,
+              'phones', phones,
+              'addresses', CASE WHEN addresses IS NOT NULL AND len(addresses) > 0
+                THEN json_array(json_object(
+                  'freeform', addresses[1].freeform,
+                  'locality', addresses[1].locality,
+                  'postcode', addresses[1].postcode,
+                  'region', addresses[1].region,
+                  'country', addresses[1].country
+                ))
+                ELSE NULL END,
+              'operating_status', operating_status,
+              'brand', CASE WHEN brand IS NOT NULL AND brand.names IS NOT NULL
+                THEN json_object('names', json_object('primary', brand.names.primary))
+                ELSE NULL END
+            )
+          ) as feature
+        FROM read_parquet('s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*')
+        WHERE
+          bbox.xmin BETWEEN ${BBOX_WEST} AND ${BBOX_EAST}
+          AND bbox.ymin BETWEEN ${BBOX_SOUTH} AND ${BBOX_NORTH}
+          AND confidence > 0.5
+      ) TO '${OVERTURE_PLACES}' (FORMAT JSON, ARRAY true);
+    " 2>&1 && {
+      # Wrap the JSON array into a proper GeoJSON FeatureCollection
+      python3 -c "
+import json, sys
+with open('${OVERTURE_PLACES}', 'r') as f:
+    features = json.load(f)
+# Each row is a JSON object with a 'feature' key
+if features and 'feature' in features[0]:
+    features = [json.loads(r['feature']) if isinstance(r['feature'], str) else r['feature'] for r in features]
+fc = {'type': 'FeatureCollection', 'features': features}
+with open('${OVERTURE_PLACES}', 'w') as f:
+    json.dump(fc, f)
+print(f'      Extracted {len(features)} Overture places.')
+" 2>&1
+    } || {
+      echo "      DuckDB query failed. Skipping Overture places."
+      rm -f "${OVERTURE_PLACES}"
+    }
+
+  elif command -v overturemaps &> /dev/null; then
+    # Fallback: use the official Overture Python CLI
+    echo "      Using overturemaps CLI..."
+    overturemaps download \
+      --bbox="${BBOX}" \
+      -f geojson \
+      --type=place \
+      -o "${OVERTURE_PLACES}" 2>&1
+    PLACE_COUNT=$(python3 -c "
+import json
+with open('${OVERTURE_PLACES}') as f:
+    data = json.load(f)
+print(len(data.get('features', [])))
+" 2>/dev/null || echo "?")
+    echo "      Extracted ${PLACE_COUNT} Overture places."
+  else
+    echo "      WARNING: Neither duckdb nor overturemaps CLI is installed."
+    echo "      Install one of:"
+    echo "        - DuckDB:         brew install duckdb"
+    echo "        - Overture CLI:   pip install overturemaps"
+    echo "      Skipping Overture places extraction."
+  fi
+
+  [ -f "${OVERTURE_PLACES}" ] && echo "      Generated $(du -h "${OVERTURE_PLACES}" | cut -f1) Overture places file."
 fi
 
 # ---------------------------------------------------------------------------

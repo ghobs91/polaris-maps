@@ -79,7 +79,7 @@ export async function subscribeToAttestations(lat: number, lng: number): Promise
 
   await subscribe(topic);
 
-  const unsubscribeHandler = onMessage((msgTopic: string, payload: Uint8Array) => {
+  void onMessage((msgTopic: string, payload: Uint8Array) => {
     if (msgTopic !== topic) return;
     try {
       const attestation: POIAttestation = JSON.parse(new TextDecoder().decode(payload));

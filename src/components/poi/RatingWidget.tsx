@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { colors, spacing, typography } from '../../constants/theme';
+import { colors, spacing } from '../../constants/theme';
 
 interface RatingWidgetProps {
   value?: number;

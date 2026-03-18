@@ -17,6 +17,7 @@ interface CaptureResult {
 }
 
 let captureInterval: ReturnType<typeof setInterval> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 let captureCallback: ((result: CaptureResult) => void) | null = null;
 let captureCount = 0;
 

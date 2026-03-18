@@ -105,8 +105,6 @@ export function mergeTrafficSources(
 
       const avgSpeed = totalConfidence > 0 ? weightedSpeed / totalConfidence : 0;
       const ratio = maxFreeFlow > 0 ? Math.min(1, Math.max(0, avgSpeed / maxFreeFlow)) : 0;
-      const sources = group.map((s) => s.source).join('+');
-
       merged.push({
         id: `merged:${group.map((s) => s.id).join('|')}`,
         coordinates: group[0].coordinates, // Use coordinates from highest-confidence source

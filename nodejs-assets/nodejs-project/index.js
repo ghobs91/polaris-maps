@@ -254,7 +254,9 @@ async function handleHdSeed(command) {
 
     seededDrives.set(regionId, { drive, discovery, store });
 
-    console.log(`[Hyperdrive] Seeding ${regionId} — key: ${drive.key.toString('hex').slice(0, 16)}…`);
+    console.log(
+      `[Hyperdrive] Seeding ${regionId} — key: ${drive.key.toString('hex').slice(0, 16)}…`,
+    );
 
     sendResponse(requestId, {
       type: 'hd-seed-result',
@@ -319,13 +321,15 @@ async function handleHdDownload(command) {
         totalBytes += content.length;
 
         // Report progress
-        channel.send(JSON.stringify({
-          type: 'hd-download-progress',
-          requestId,
-          file: entry.key,
-          bytes: content.length,
-          totalBytes,
-        }));
+        channel.send(
+          JSON.stringify({
+            type: 'hd-download-progress',
+            requestId,
+            file: entry.key,
+            bytes: content.length,
+            totalBytes,
+          }),
+        );
       }
     }
 

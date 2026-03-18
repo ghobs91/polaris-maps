@@ -38,6 +38,7 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
     })),
   removeSegment: (segmentId) =>
     set((prev) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { [segmentId]: _, ...rest } = prev.segmentTraffic;
       return { segmentTraffic: rest };
     }),

@@ -4,7 +4,16 @@ import prettierConfig from 'eslint-config-prettier';
 
 export default [
   {
-    ignores: ['node_modules/', 'dist/', 'build/', 'ios/', 'android/', 'coverage/', '.expo/', 'nodejs-assets/'],
+    ignores: [
+      'node_modules/',
+      'dist/',
+      'build/',
+      'ios/',
+      'android/',
+      'coverage/',
+      '.expo/',
+      'nodejs-assets/',
+    ],
   },
   {
     files: ['**/*.ts', '**/*.tsx'],

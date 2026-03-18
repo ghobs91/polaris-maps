@@ -5,8 +5,6 @@ import { useRouter } from 'expo-router';
 import {
   initCaptureDir,
   captureImage,
-  getCaptureCount,
-  startIntervalCapture,
   stopIntervalCapture,
 } from '../../src/services/imagery/captureService';
 import { uploadImage } from '../../src/services/imagery/uploadService';

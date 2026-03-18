@@ -1,7 +1,5 @@
 import { getDatabase } from '../database/init';
-import { getGun } from '../gun/init';
 import { getEntry as getHypercoreEntry } from '../../native/hypercore';
-import { encode as geohashEncode } from '../../utils/geohash';
 import type { StreetImagery } from '../../models/imagery';
 
 export async function getImageryNearby(

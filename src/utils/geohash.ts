@@ -121,10 +121,6 @@ export function bounds(hash: string): {
   return { minLat: latMin, maxLat: latMax, minLng: lngMin, maxLng: lngMax };
 }
 
-const NEIGHBOR_OFFSETS: Record<string, Record<string, string>> = {
-  right: { even: 'bc01fg45telefonías89telefonías' },
-};
-
 export function neighbors(hash: string): string[] {
   if (hash.length === 0) return [];
 

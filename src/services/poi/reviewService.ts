@@ -7,7 +7,7 @@ import type { Review } from '../../models/review';
 export async function getReviewsForPlace(placeUuid: string, limit: number = 50): Promise<Review[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<ReviewRow>(
-    'SELECT * FROM reviews WHERE place_uuid = ? ORDER BY created_at DESC LIMIT ?',
+    'SELECT * FROM reviews WHERE poi_uuid = ? ORDER BY created_at DESC LIMIT ?',
     [placeUuid, limit],
   );
   return rows.map(rowToReview);
@@ -19,7 +19,7 @@ export async function getReviewByAuthor(
 ): Promise<Review | null> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<ReviewRow>(
-    'SELECT * FROM reviews WHERE place_uuid = ? AND author_pubkey = ?',
+    'SELECT * FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?',
     [placeUuid, authorPubkey],
   );
   return row ? rowToReview(row) : null;
@@ -72,9 +72,10 @@ export async function createOrUpdateReview(
   const db = await getDatabase();
   await db.runAsync(
     `INSERT OR REPLACE INTO reviews (
-      place_uuid, author_pubkey, rating, body, signature, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      id, poi_uuid, author_pubkey, rating, text, signature, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
+      review.id,
       review.poiUuid,
       review.authorPubkey,
       review.rating,
@@ -97,7 +98,7 @@ export async function deleteReview(placeUuid: string): Promise<void> {
   (gun as any).get('polaris').get('reviews').get(placeUuid).get(keypair.publicKey).put(null);
 
   const db = await getDatabase();
-  await db.runAsync('DELETE FROM reviews WHERE place_uuid = ? AND author_pubkey = ?', [
+  await db.runAsync('DELETE FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?', [
     placeUuid,
     keypair.publicKey,
   ]);
@@ -108,7 +109,7 @@ export async function deleteReview(placeUuid: string): Promise<void> {
 async function recomputeAvgRating(placeUuid: string): Promise<void> {
   const db = await getDatabase();
   const result = await db.getFirstAsync<{ avg_r: number | null; cnt: number }>(
-    'SELECT AVG(rating) as avg_r, COUNT(*) as cnt FROM reviews WHERE place_uuid = ?',
+    'SELECT AVG(rating) as avg_r, COUNT(*) as cnt FROM reviews WHERE poi_uuid = ?',
     [placeUuid],
   );
 
@@ -127,10 +128,11 @@ async function recomputeAvgRating(placeUuid: string): Promise<void> {
 }
 
 interface ReviewRow {
-  place_uuid: string;
+  id: string;
+  poi_uuid: string;
   author_pubkey: string;
   rating: number;
-  body: string | null;
+  text: string | null;
   signature: string;
   created_at: number;
   updated_at: number;
@@ -138,11 +140,11 @@ interface ReviewRow {
 
 function rowToReview(row: ReviewRow): Review {
   return {
-    id: `${row.place_uuid}:${row.author_pubkey}`,
-    poiUuid: row.place_uuid,
+    id: row.id,
+    poiUuid: row.poi_uuid,
     authorPubkey: row.author_pubkey,
     rating: row.rating,
-    text: row.body ?? undefined,
+    text: row.text ?? undefined,
     signature: row.signature,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

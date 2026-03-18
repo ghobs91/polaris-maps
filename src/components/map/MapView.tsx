@@ -4,6 +4,8 @@ import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { fetchOsmPois } from '../../services/poi/osmFetcher';
+import { getPlacesInBounds } from '../../services/poi/poiService';
+import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
 import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
 import { colors } from '../../constants/theme';
@@ -11,9 +13,32 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
 import { POILayer } from './POILayer';
+import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 const POI_MIN_ZOOM = 14;
-const POI_FETCH_DEBOUNCE_MS = 600;
+/** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
+const OSM_FETCH_DEBOUNCE_MS = 300;
+
+/** ~30 m threshold for considering two POIs as duplicates. */
+const DEDUP_THRESHOLD_DEG = 0.0003;
+
+/**
+ * Deduplicate POIs that are very close together and share similar names.
+ * Earlier entries in the array take priority (Overture before OSM).
+ */
+function deduplicatePois(pois: OsmPoi[]): OsmPoi[] {
+  const result: OsmPoi[] = [];
+  for (const poi of pois) {
+    const isDup = result.some(
+      (existing) =>
+        Math.abs(existing.lat - poi.lat) < DEDUP_THRESHOLD_DEG &&
+        Math.abs(existing.lng - poi.lng) < DEDUP_THRESHOLD_DEG &&
+        existing.name.toLowerCase() === poi.name.toLowerCase(),
+    );
+    if (!isDup) result.push(poi);
+  }
+  return result;
+}
 
 interface MapViewProps {
   routeGeometry?: string;
@@ -113,18 +138,29 @@ export function MapView({
     // Store current zoom + bounds so POILayer can filter for even distribution
     useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
 
+    // Debounce the combined fetch — Overpass is cached for repeat viewports, so
+    // this is fast for areas the user has already visited. A single setPois call
+    // avoids the double annotation teardown that triggers the MapLibre
+    // "Unknown annotation found nearby tap" fault.
     if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
     poiFetchTimer.current = setTimeout(async () => {
       try {
         useOsmPoiStore.getState().setIsLoading(true);
-        const pois = await fetchOsmPois(minLat, minLng, maxLat, maxLng);
-        useOsmPoiStore.getState().setPois(pois);
+        const [osmPois, cachedPlaces] = await Promise.all([
+          fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => []),
+          getPlacesInBounds(minLat, minLng, maxLat, maxLng).catch(() => []),
+        ]);
+
+        const overturePois = cachedPlaces.map(placeToOsmPoi);
+        // Overture first (higher quality), OSM fills in the rest
+        const merged = deduplicatePois([...overturePois, ...osmPois]);
+        useOsmPoiStore.getState().setPois(merged);
       } catch {
-        // Silently ignore — Overpass may be unavailable
+        // Silently ignore — data sources may be unavailable
       } finally {
         useOsmPoiStore.getState().setIsLoading(false);
       }
-    }, POI_FETCH_DEBOUNCE_MS);
+    }, OSM_FETCH_DEBOUNCE_MS);
   }, []);
 
   const handlePress = useCallback(

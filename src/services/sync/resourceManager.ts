@@ -1,6 +1,5 @@
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getLocalNode } from './peerService';
-import { getCacheStats } from '../map/tileService';
 
 export interface ResourceBudget {
   storageMb: number;

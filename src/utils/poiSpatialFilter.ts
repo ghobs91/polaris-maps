@@ -7,33 +7,54 @@ export interface ViewportBounds {
   maxLng: number;
 }
 
-/** Grid dimensions — viewport is divided into COLS × ROWS cells */
-const COLS = 6;
-const ROWS = 8;
+/** Hard cap on total displayed POI pills */
+const MAX_TOTAL = 50;
 
-/** Hard cap on total displayed POI badges */
-const MAX_TOTAL = 35;
-
-/** Max POI badges per grid cell, scaled by zoom */
-function cellLimit(zoom: number): number {
-  if (zoom >= 17) return 3;
-  if (zoom >= 16) return 2;
-  return 1;
+/**
+ * Convert a (lat, lng) coordinate to absolute Web Mercator pixel coordinates
+ * at the given MapLibre zoom level. Large absolute values, but differences
+ * between two results give accurate screen-pixel distances.
+ */
+function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number } {
+  const scale = 256 * Math.pow(2, zoom);
+  const x = ((lng + 180) / 360) * scale;
+  const sinLat = Math.sin((lat * Math.PI) / 180);
+  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+  return { x, y };
 }
 
 /**
- * Filters a raw OSM POI list to an evenly distributed, category-diverse
- * subset suitable for display as map badges.
+ * Approximate pill dimensions in screen pixels (icon + average-length label
+ * + padding). Generous sizing eliminates overlap for most label lengths.
+ */
+const PILL_W = 130; // typical rendered width
+const PILL_H = 30; // rendered height
+const GAP_X = PILL_W + 16; // horizontal exclusion zone between pill centres
+const GAP_Y = PILL_H + 10; // vertical exclusion zone between pill centres
+
+/** Returns true if (cx, cy) falls within the exclusion zone of any placed pill. */
+function overlaps(cx: number, cy: number, placed: Array<{ x: number; y: number }>): boolean {
+  for (const p of placed) {
+    if (Math.abs(cx - p.x) < GAP_X && Math.abs(cy - p.y) < GAP_Y) return true;
+  }
+  return false;
+}
+
+/**
+ * Filters a raw POI list down to a non-overlapping, category-diverse subset
+ * suitable for display as pill badges on the map.
  *
  * Algorithm:
- *  1. Overlay a COLS×ROWS grid on the viewport bounding box.
- *  2. Bucket each POI into its grid cell.
- *  3. For each cell pick at most cellLimit(zoom) POIs, preferring subtypes
- *     not already chosen elsewhere in the viewport.
- *  4. Cap the total at MAX_TOTAL.
+ *  1. Convert every POI's lat/lng to absolute Mercator pixel coordinates.
+ *  2. Group by subtype and interleave (round-robin) to build a diversity-first
+ *     candidate order — so different category types appear before duplicates.
+ *  3. Greedily select: skip any candidate whose pill bounding box overlaps an
+ *     already-placed one.
+ *  4. Stop at MAX_TOTAL.
  *
- * Result: spatially spread markers from diverse categories with no
- * artificially dense clusters.
+ * The pixel exclusion zone is naturally zoom-aware: at low zoom each pill
+ * covers a much larger geographic area so fewer can fit; at street level
+ * dense co-located businesses appear without overlap.
  */
 export function filterPoisForDisplay(
   pois: OsmPoi[],
@@ -42,54 +63,42 @@ export function filterPoisForDisplay(
 ): OsmPoi[] {
   if (pois.length === 0) return [];
 
-  const latRange = Math.max(bounds.maxLat - bounds.minLat, 0.0001);
-  const lngRange = Math.max(bounds.maxLng - bounds.minLng, 0.0001);
-  const limit = cellLimit(zoom);
+  // -- 1. Compute pixel positions -------------------------------------------
+  type Entry = { poi: OsmPoi; x: number; y: number };
+  const entries: Entry[] = pois.map((poi) => {
+    const { x, y } = toPixel(poi.lat, poi.lng, zoom);
+    return { poi, x, y };
+  });
 
-  // -- 1. Bucket POIs into grid cells -----------------------------------------
-  const grid = new Map<string, OsmPoi[]>();
-  for (const poi of pois) {
-    const col = Math.max(
-      0,
-      Math.min(COLS - 1, Math.floor(((poi.lng - bounds.minLng) / lngRange) * COLS)),
-    );
-    const row = Math.max(
-      0,
-      Math.min(ROWS - 1, Math.floor(((poi.lat - bounds.minLat) / latRange) * ROWS)),
-    );
-    const key = `${col},${row}`;
-    if (!grid.has(key)) grid.set(key, []);
-    grid.get(key)!.push(poi);
+  // -- 2. Round-robin diversity ordering ------------------------------------
+  // Group by subtype so we interleave categories: restaurant, cafe, pharmacy,
+  // restaurant (2nd), cafe (2nd), … rather than all restaurants first.
+  const groups = new Map<string, Entry[]>();
+  for (const e of entries) {
+    const key = `${e.poi.type}/${e.poi.subtype}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(e);
   }
 
-  // -- 2. Select diverse POIs per cell ----------------------------------------
-  const selected: OsmPoi[] = [];
-  // Tracks subtypes already chosen globally — used to prefer novel categories
-  const globalUsedSubtypes = new Set<string>();
-
-  for (const cellPois of grid.values()) {
-    if (selected.length >= MAX_TOTAL) break;
-
-    // Sort cell POIs: novel subtypes (not yet picked globally) come first
-    const sorted = [...cellPois].sort((a, b) => {
-      const aScore = globalUsedSubtypes.has(`${a.type}/${a.subtype}`) ? 1 : 0;
-      const bScore = globalUsedSubtypes.has(`${b.type}/${b.subtype}`) ? 1 : 0;
-      return aScore - bScore;
-    });
-
-    // Pick up to `limit` POIs from this cell, one per subtype
-    const cellSubtypes = new Set<string>();
-    for (const poi of sorted) {
-      if (selected.length >= MAX_TOTAL) break;
-      if (cellSubtypes.size >= limit) break;
-      const sk = `${poi.type}/${poi.subtype}`;
-      if (!cellSubtypes.has(sk)) {
-        selected.push(poi);
-        cellSubtypes.add(sk);
-        globalUsedSubtypes.add(sk);
-      }
+  const groupArrays = [...groups.values()];
+  const maxLen = Math.max(...groupArrays.map((g) => g.length));
+  const candidates: Entry[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    for (const g of groupArrays) {
+      if (i < g.length) candidates.push(g[i]);
     }
   }
 
-  return selected;
+  // -- 3. Greedy pixel-exclusion selection ----------------------------------
+  const placed: Array<{ x: number; y: number }> = [];
+  const result: OsmPoi[] = [];
+
+  for (const { poi, x, y } of candidates) {
+    if (result.length >= MAX_TOTAL) break;
+    if (overlaps(x, y, placed)) continue;
+    placed.push({ x, y });
+    result.push(poi);
+  }
+
+  return result;
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
+import { enrichPoi } from '../../services/poi/poiEnricher';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
@@ -300,6 +301,8 @@ export function POIInfoCard() {
   const insets = useSafeAreaInsets();
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
+  // Track whether the Clearbit logo failed to load (e.g. 404 for unknown brands)
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   // Use a ref so PanResponder closures always read the latest value
   const expandedRef = useRef(false);
 
@@ -374,7 +377,52 @@ export function POIInfoCard() {
   ).current;
 
   const poi = selectedPoi;
-  const parsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
+  const enrichedData = useOsmPoiStore((s) => s.enrichedData);
+  const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
+  const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
+  const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
+
+  // Reset logo error state when POI changes
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [poi?.id]);
+
+  // Trigger Apple Maps enrichment when a POI is selected
+  useEffect(() => {
+    if (!poi) return;
+    let cancelled = false;
+    setIsEnriching(true);
+    enrichPoi(poi)
+      .then((data) => {
+        if (!cancelled) setEnrichedData(data);
+      })
+      .catch(() => {
+        /* enrichment is best-effort */
+      })
+      .finally(() => {
+        if (!cancelled) setIsEnriching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [poi, setEnrichedData, setIsEnriching]);
+
+  // Merge OSM parsed data with Apple Maps enrichment — OSM takes priority
+  const parsed = useMemo(() => {
+    if (!rawParsed) return null;
+    if (!enrichedData) return rawParsed;
+    return {
+      ...rawParsed,
+      // Apple Maps provides formatted addresses for POIs OSM left blank
+      address: rawParsed.address ?? enrichedData.formattedAddress ?? null,
+      // Native MapKit provides phone/website that OSM often lacks
+      phone: rawParsed.phone ?? enrichedData.phone ?? null,
+      website: rawParsed.website ?? enrichedData.website ?? null,
+      // Opening hours from MapKit (iOS 16+)
+      hours: rawParsed.hours ?? enrichedData.openingHours ?? null,
+    };
+  }, [rawParsed, enrichedData]);
+
   const category = poi ? getPoiCategory(poi.type, poi.subtype) : null;
 
   // Theme shorthands
@@ -492,15 +540,24 @@ export function POIInfoCard() {
 
           {/* ── Header ────────────────────────────────────────────────── */}
           <View style={styles.header}>
-            <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
-              <Ionicons name={category.icon} size={22} color="#FFFFFF" />
-            </View>
+            {enrichedData?.logoUrl && !logoLoadFailed ? (
+              <Image
+                source={{ uri: enrichedData.logoUrl }}
+                style={styles.brandLogo}
+                resizeMode="contain"
+                onError={() => setLogoLoadFailed(true)}
+              />
+            ) : (
+              <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
+                <Ionicons name={category.icon} size={22} color="#FFFFFF" />
+              </View>
+            )}
             <View style={styles.headerText}>
               <Text style={[styles.name, { color: textColor }]} numberOfLines={2}>
                 {poi.name}
               </Text>
               <Text style={[styles.categoryLabel, { color: subtextColor }]}>
-                {capitalise(poi.subtype)}
+                {enrichedData?.poiCategory ?? capitalise(poi.subtype)}
                 {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
                 {parsed.stars ? ` · ${parsed.stars}` : ''}
               </Text>
@@ -809,6 +866,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+  },
+  brandLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    flexShrink: 0,
+    backgroundColor: '#ffffff',
   },
   headerText: {
     flex: 1,

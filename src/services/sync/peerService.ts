@@ -1,6 +1,5 @@
 import { getDatabase } from '../database/init';
 import { getOrCreateKeypair } from '../identity/keypair';
-import { joinFeed, getStatus } from '../../native/hypercore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import type { PeerNode } from '../../models/peer';
 

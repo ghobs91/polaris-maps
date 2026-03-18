@@ -124,8 +124,6 @@ EXPO_PUBLIC_HERE_API_KEY=your_here_key
 EXPO_PUBLIC_TOMTOM_PROXY_URL=https://your-proxy-server/tomtom   # optional — preferred over direct key
 ```
 
-> ⚠️ **Security note**: `EXPO_PUBLIC_` variables are **statically inlined into the JS bundle** at build time. They are visible in release APK/IPA files. See [F-002](#f-002--high--a04--api-keys-bundled-into-client-bundle) in the Security Review below. Restrict your keys by bundle ID in the TomTom / HERE dashboards, or proxy all API calls through a backend server.
-
 ---
 
 ## Project Structure

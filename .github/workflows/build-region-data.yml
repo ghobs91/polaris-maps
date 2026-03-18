@@ -77,7 +77,6 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-
       - name: Install tools
         run: |
           sudo apt-get update -qq

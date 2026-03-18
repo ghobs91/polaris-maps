@@ -69,6 +69,7 @@ export interface Place {
   phone?: string;
   website?: string;
   hours?: string; // JSON-encoded
+  brandWikidata?: string;
   avgRating?: number;
   reviewCount?: number;
   status: PlaceStatus;

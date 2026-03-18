@@ -1,15 +1,26 @@
-import React, { useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Linking, Pressable, Alert } from 'react-native';
+import React, { useEffect, useCallback, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Linking,
+  Pressable,
+  Alert,
+  FlatList,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { usePOIStore } from '../../src/stores/poiStore';
 import { getPlaceById } from '../../src/services/poi/poiService';
 import { getReviewsForPlace } from '../../src/services/poi/reviewService';
 import { getPendingEdits } from '../../src/services/poi/editService';
 import { attestPOI } from '../../src/services/poi/attestationService';
+import { getImageryNearby } from '../../src/services/imagery/browseService';
 import { ReviewCard } from '../../src/components/poi/ReviewCard';
 import { RatingWidget } from '../../src/components/poi/RatingWidget';
 import { Button, LoadingSpinner, ErrorBoundary } from '../../src/components/common';
 import { colors, spacing, typography, borderRadius } from '../../src/constants/theme';
+import type { StreetImagery } from '../../src/models/imagery';
 
 export default function POIDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,6 +35,7 @@ export default function POIDetailScreen() {
     setPendingEdits,
     setIsLoadingPlace,
   } = usePOIStore();
+  const [nearbyImages, setNearbyImages] = useState<StreetImagery[]>([]);
 
   const loadPlace = useCallback(async () => {
     if (!id) return;
@@ -37,6 +49,10 @@ export default function POIDetailScreen() {
       setSelectedPlace(place);
       setSelectedPlaceReviews(reviews);
       setPendingEdits(edits);
+      if (place) {
+        const images = await getImageryNearby(place.lat, place.lng, 0.1);
+        setNearbyImages(images);
+      }
     } finally {
       setIsLoadingPlace(false);
     }
@@ -168,6 +184,53 @@ export default function POIDetailScreen() {
           </View>
         )}
 
+        {nearbyImages.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Photos</Text>
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/imagery/viewer',
+                    params: {
+                      lat: String(selectedPlace.lat),
+                      lng: String(selectedPlace.lng),
+                    },
+                  })
+                }
+              >
+                <Text style={styles.link}>See all</Text>
+              </Pressable>
+            </View>
+            <FlatList
+              data={nearbyImages.slice(0, 10)}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.photoStrip}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/imagery/viewer',
+                      params: {
+                        lat: String(selectedPlace.lat),
+                        lng: String(selectedPlace.lng),
+                        id: item.id,
+                      },
+                    })
+                  }
+                >
+                  <View style={styles.photoThumb}>
+                    <Text style={styles.photoThumbIcon}>📷</Text>
+                    <Text style={styles.photoThumbBearing}>{item.bearing}°</Text>
+                  </View>
+                </Pressable>
+              )}
+            />
+          </View>
+        )}
+
         {selectedPlaceReviews.length > 0 && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -234,4 +297,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   editMeta: { ...typography.caption, color: colors.textSecondary },
+  photoStrip: { gap: spacing.sm, paddingVertical: spacing.xs },
+  photoThumb: {
+    width: 80,
+    height: 80,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoThumbIcon: { fontSize: 24 },
+  photoThumbBearing: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
 });

@@ -3,7 +3,7 @@ import { getDatabase } from '../database/init';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { sign, createSigningPayload } from '../identity/signing';
 import { getOrCreateKeypair } from '../identity/keypair';
-import type { Place, PlaceCategory, PlaceStatus } from '../../models/poi';
+import type { Place, PlaceCategory } from '../../models/poi';
 import { PLACE_CATEGORIES } from '../../models/poi';
 
 export async function getPlaceById(uuid: string): Promise<Place | null> {
@@ -15,11 +15,6 @@ export async function getPlaceById(uuid: string): Promise<Place | null> {
 export async function searchPlaces(query: string, limit: number = 20): Promise<Place[]> {
   if (!query.trim()) return [];
   const db = await getDatabase();
-  const ftsQuery = query
-    .trim()
-    .split(/\s+/)
-    .map((w) => `"${w}"*`)
-    .join(' ');
   // Using the places table with name/category indexes
   const rows = await db.getAllAsync<PlaceRow>(
     `SELECT * FROM places WHERE name LIKE ? OR category LIKE ? ORDER BY avg_rating DESC LIMIT ?`,
@@ -54,6 +49,28 @@ export async function getNearbyPlaces(
   params.push(lat, lat, lng, lng);
 
   const rows = await db.getAllAsync<PlaceRow>(sql, params);
+  return rows.map(rowToPlace);
+}
+
+/**
+ * Retrieve cached places (Overture + community) within a bounding box.
+ * Used by the map viewport to display Overture POIs alongside OSM data.
+ */
+export async function getPlacesInBounds(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  limit: number = 100,
+): Promise<Place[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<PlaceRow>(
+    `SELECT * FROM places
+     WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND status = 'open'
+     ORDER BY avg_rating DESC NULLS LAST
+     LIMIT ?`,
+    [south, north, west, east, limit],
+  );
   return rows.map(rowToPlace);
 }
 

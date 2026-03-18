@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { getImageryNearby } from '../../src/services/imagery/browseService';
 import { ImageryViewer } from '../../src/components/imagery';
 import { LoadingSpinner, ErrorBoundary } from '../../src/components/common';
-import { colors, spacing, typography } from '../../src/constants/theme';
+import { colors, typography } from '../../src/constants/theme';
 import type { StreetImagery } from '../../src/models/imagery';
 
 export default function ImageryViewerScreen() {

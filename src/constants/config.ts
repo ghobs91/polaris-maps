@@ -34,8 +34,24 @@ export const tomtomApiKey: string = process.env.EXPO_PUBLIC_TOMTOM_API_KEY ?? ''
 /** HERE API key — set EXPO_PUBLIC_HERE_API_KEY in .env */
 export const hereApiKey: string = process.env.EXPO_PUBLIC_HERE_API_KEY ?? '';
 
+/** Apple MapKit JS token — set EXPO_PUBLIC_APPLE_MAPKIT_TOKEN in .env */
+export const appleMapkitToken: string = process.env.EXPO_PUBLIC_APPLE_MAPKIT_TOKEN ?? '';
+
 /** Debounce delay (ms) for viewport-triggered traffic fetches. */
 export const TRAFFIC_FETCH_DEBOUNCE_MS = 800;
 
 /** Periodic traffic refresh interval (ms) during active navigation. */
 export const TRAFFIC_REFRESH_INTERVAL_MS = 60_000;
+
+/**
+ * Overture Maps Places API endpoint.
+ * Should serve GeoJSON FeatureCollection for bbox queries.
+ * Set EXPO_PUBLIC_OVERTURE_PLACES_URL in .env, or leave empty to skip online Overture queries.
+ */
+export const OVERTURE_PLACES_URL: string = process.env.EXPO_PUBLIC_OVERTURE_PLACES_URL ?? '';
+
+/** Overture Maps data release version used for region generation. */
+export const OVERTURE_RELEASE = '2026-02-18.0';
+
+/** Overture GeoParquet S3 path for places. */
+export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*`;

@@ -6,7 +6,6 @@ import { useRouter } from 'expo-router';
 import { MapView } from '@/components/map/MapView';
 import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
-import { useMapStore } from '@/stores/mapStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';

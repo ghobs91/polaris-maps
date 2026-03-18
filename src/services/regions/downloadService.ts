@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
+import { importRegionOverturePlaces } from './overtureImporter';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
 
@@ -63,6 +64,9 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
     if (!peerSuccess) {
       await downloadViaHttp(region, destDir, onProgress);
     }
+
+    // Import Overture places bundled with the region (non-fatal)
+    importRegionOverturePlaces(destDir).catch(() => {});
 
     // Calculate total size
     const dirInfo = await FileSystem.getInfoAsync(destDir);

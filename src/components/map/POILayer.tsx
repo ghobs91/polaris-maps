@@ -5,30 +5,30 @@ import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { filterPoisForDisplay } from '../../utils/poiSpatialFilter';
 import { getPoiCategory } from '../../utils/poiCategories';
-import { useTheme } from '../../contexts/ThemeContext';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
-/** Badge anchored so the icon circle sits at the map coordinate */
-const ANCHOR = { x: 0.08, y: 0.5 } as const;
+/**
+ * Anchor positions the pill so the icon circle (left side of pill) sits at
+ * the map coordinate.  x=0.1 ≈ icon centre / total pill width.
+ */
+const ANCHOR = { x: 0.1, y: 0.5 } as const;
 
 interface PoiBadgeProps {
   poi: OsmPoi;
-  isDark: boolean;
   onPress: (poi: OsmPoi) => void;
 }
 
-function PoiBadge({ poi, isDark, onPress }: PoiBadgeProps) {
+function PoiBadge({ poi, onPress }: PoiBadgeProps) {
   const { icon, color } = getPoiCategory(poi.type, poi.subtype);
 
   return (
-    <TouchableOpacity onPress={() => onPress(poi)} activeOpacity={0.75} style={styles.badgeHitArea}>
-      <View style={styles.badge}>
-        {/* Coloured category icon circle */}
-        <View style={[styles.iconCircle, { backgroundColor: color }]}>
-          <Ionicons name={icon} size={13} color="#FFFFFF" />
+    <TouchableOpacity onPress={() => onPress(poi)} activeOpacity={0.75} style={styles.hitArea}>
+      <View style={[styles.pill, { backgroundColor: color }]}>
+        {/* Icon circle — semi-transparent white background separates it from pill colour */}
+        <View style={styles.iconWrap}>
+          <Ionicons name={icon} size={12} color="#FFFFFF" />
         </View>
-        {/* POI name — colour matches the icon on dark maps; dark text on light */}
-        <Text style={[styles.badgeName, { color: isDark ? color : '#1A1A1A' }]} numberOfLines={1}>
+        <Text style={styles.label} numberOfLines={1}>
           {poi.name}
         </Text>
       </View>
@@ -40,13 +40,12 @@ export function POILayer() {
   const pois = useOsmPoiStore((s) => s.pois);
   const zoom = useOsmPoiStore((s) => s.currentZoom);
   const bounds = useOsmPoiStore((s) => s.viewportBounds);
-  const { isDark } = useTheme();
 
   const handlePress = useCallback((poi: OsmPoi) => {
     useOsmPoiStore.getState().setSelectedPoi(poi);
   }, []);
 
-  /** Spatially filtered, category-diverse subset — memoised on POI list + bounds + zoom */
+  /** Non-overlapping, category-diverse subset — recomputed when pois/bounds/zoom change */
   const visiblePois = useMemo(() => {
     if (!bounds || pois.length === 0) return [];
     return filterPoisForDisplay(pois, bounds, zoom);
@@ -63,7 +62,7 @@ export function POILayer() {
           anchor={ANCHOR}
           allowOverlap={false}
         >
-          <PoiBadge poi={poi} isDark={isDark} onPress={handlePress} />
+          <PoiBadge poi={poi} onPress={handlePress} />
         </MapLibreGL.MarkerView>
       ))}
     </>
@@ -71,38 +70,45 @@ export function POILayer() {
 }
 
 const styles = StyleSheet.create({
-  /** Extra hit area so small badges are still easily tappable */
-  badgeHitArea: {
+  /** Generous hit area so small pills are easily tappable */
+  hitArea: {
     padding: 4,
   },
-  badge: {
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: 16,
+    paddingVertical: 4,
+    paddingLeft: 4,
+    paddingRight: 9,
     gap: 5,
+    maxWidth: 170,
+    // Crisp white border for contrast against any map background
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.55)',
+    // Shadow lifts the pill off the map surface
+    shadowColor: '#000000',
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
   },
-  iconCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+  iconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
-    // Subtle shadow so the circle lifts off the map
-    shadowColor: '#000000',
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 4,
-    // White border like Apple Maps
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.9)',
+    flexShrink: 0,
   },
-  badgeName: {
+  label: {
     fontSize: 11,
     fontWeight: '700',
-    maxWidth: 120,
-    // Text shadow helps legibility on complex map backgrounds
-    textShadowColor: 'rgba(0,0,0,0.25)',
+    color: '#FFFFFF',
+    flexShrink: 1,
+    textShadowColor: 'rgba(0,0,0,0.3)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 1,
   },
 });

@@ -1,6 +1,5 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { useTrafficStore } from '../../stores/trafficStore';
-import { useNavigationStore } from '../../stores/navigationStore';
 import { fetchTomTomTraffic, type ViewportBounds } from './tomtomFetcher';
 import { convertP2PToNormalized, mergeTrafficSources } from './trafficMerger';
 import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../constants/config';
