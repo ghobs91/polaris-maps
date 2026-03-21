@@ -3,26 +3,16 @@ import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
 import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
+import { computeBearing, snapToRoute, computeRemainingMeters } from '@/utils/routeSnap';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
-
-/** Compute bearing (in degrees, 0=north, CW) between two [lng,lat] points */
-function computeBearing(from: [number, number], to: [number, number]): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const toDeg = (r: number) => (r * 180) / Math.PI;
-  const dLng = toRad(to[0] - from[0]);
-  const lat1 = toRad(from[1]);
-  const lat2 = toRad(to[1]);
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  return (toDeg(Math.atan2(y, x)) + 360) % 360;
-}
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
@@ -38,6 +28,7 @@ export default function NavigationScreen() {
     remainingDistanceMeters,
     isNavigating,
     stopNavigation,
+    updateEta,
   } = useNavigationStore();
 
   // Track previous navigation state so we can detect when it ends
@@ -61,6 +52,17 @@ export default function NavigationScreen() {
   const previewRafRef = useRef<number | null>(null);
   const previewIndexRef = useRef(0);
   const previewStartTimeRef = useRef(0);
+
+  // Initialize navPosition from the route start so the chevron appears immediately
+  useEffect(() => {
+    if (isNavigating && activeRoute && !navPosition) {
+      const coords = decodePolyline(activeRoute.geometry);
+      if (coords.length >= 2) {
+        setNavPosition(coords[0]);
+        setNavBearing(computeBearing(coords[0], coords[1]));
+      }
+    }
+  }, [isNavigating, activeRoute]);
 
   const stopPreview = useCallback(() => {
     setIsPreviewMode(false);
@@ -162,6 +164,60 @@ export default function NavigationScreen() {
       if (previewRafRef.current !== null) cancelAnimationFrame(previewRafRef.current);
     };
   }, [isPreviewMode, activeRoute, stopPreview]);
+
+  // Live GPS tracking: watch position and snap to route during active navigation
+  useEffect(() => {
+    if (!isNavigating || isPreviewMode || !activeRoute) return;
+
+    const coords = decodePolyline(activeRoute.geometry);
+    if (coords.length < 2) return;
+
+    const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
+    let subscription: Location.LocationSubscription | null = null;
+
+    (async () => {
+      subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.BestForNavigation,
+          distanceInterval: 5,
+          timeInterval: 1000,
+        },
+        (location) => {
+          const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
+          const { snapped, bearing, segmentIndex } = snapToRoute(gpsPos, coords);
+
+          setNavPosition(snapped);
+          setNavBearing(
+            location.coords.heading != null && location.coords.heading >= 0
+              ? location.coords.heading
+              : bearing,
+          );
+
+          // Update remaining distance and ETA based on current position
+          const remainingMeters = computeRemainingMeters(snapped, segmentIndex, coords);
+          const totalMeters = activeRoute.summary.distanceMeters;
+          const totalSeconds = activeRoute.summary.durationSeconds;
+          const progress = totalMeters > 0 ? remainingMeters / totalMeters : 0;
+          const remainingSeconds = Math.round(progress * totalSeconds);
+          updateEta(remainingSeconds, remainingMeters);
+
+          // Advance maneuver step if user has progressed past the next step's start shape index
+          const store = useNavigationStore.getState();
+          const nextStep = store.currentStepIndex + 1;
+          if (
+            nextStep < allManeuvers.length &&
+            segmentIndex >= allManeuvers[nextStep].beginShapeIndex
+          ) {
+            store.advanceStep();
+          }
+        },
+      );
+    })();
+
+    return () => {
+      subscription?.remove();
+    };
+  }, [isNavigating, isPreviewMode, activeRoute]);
 
   if (!isNavigating || !activeRoute) {
     return (

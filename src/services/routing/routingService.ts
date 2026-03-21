@@ -92,15 +92,20 @@ async function computeRouteOnline(
     directions_options: { units: 'kilometers' },
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
   const res = await fetch(OSM_VALHALLA_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeoutId));
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`Online routing error ${res.status}: ${text}`);
+    const safe = text.slice(0, 300);
+    throw new Error(`Online routing error ${res.status}: ${safe}`);
   }
 
   const json = (await res.json()) as Record<string, unknown>;

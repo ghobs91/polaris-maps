@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect } from 'react';
-import MapLibreGL from '@maplibre/maplibre-react-native';
+import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
@@ -14,6 +14,14 @@ import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
 import { POILayer } from './POILayer';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
+
+// Suppress noisy MapLibre Native font-loading timeouts (e.g. missing glyph
+// ranges on OpenFreeMap's CDN). These are non-fatal — the map still renders.
+Logger.setLogCallback((log) => {
+  if (log.message.includes('Failed to load glyph range')) return true;
+  if (log.message.includes('/fonts/') && log.message.includes('timed out')) return true;
+  return false;
+});
 
 const POI_MIN_ZOOM = 14;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */

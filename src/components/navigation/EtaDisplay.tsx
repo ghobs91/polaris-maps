@@ -20,9 +20,20 @@ export function EtaDisplay({
   isPreviewMode,
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
+  const activeRoute = useNavigationStore((s) => s.activeRoute);
 
-  // Use traffic ETA when available, otherwise fall back to route ETA
-  const displayEta = trafficEtaSeconds ?? etaSeconds;
+  // trafficEtaSeconds from TomTom is always the full-route value. Scale it
+  // by the remaining-distance fraction so it stays in sync with the chevron.
+  let scaledTrafficEta: number | null = null;
+  if (trafficEtaSeconds != null && activeRoute != null) {
+    const totalMeters = activeRoute.summary.distanceMeters;
+    const remaining = remainingDistanceMeters ?? totalMeters;
+    const progress = totalMeters > 0 ? remaining / totalMeters : 0;
+    scaledTrafficEta = Math.round(progress * trafficEtaSeconds);
+  }
+
+  // Use position-scaled traffic ETA when available, otherwise base route ETA
+  const displayEta = scaledTrafficEta ?? etaSeconds;
 
   if (displayEta == null) return null;
 

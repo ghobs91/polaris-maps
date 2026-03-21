@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PolarisMaps.ipa</key>
+	<array>
+		<dict>
+			<key>architectures</key>
+			<array>
+				<string>arm64</string>
+			</array>
+			<key>buildNumber</key>
+			<string>1</string>
+			<key>certificate</key>
+			<dict>
+				<key>SHA1</key>
+				<string>A5F11264F61411DBDEFF5B290AA71848777C0D3B</string>
+				<key>dateExpires</key>
+				<string>1/3/27</string>
+				<key>type</key>
+				<string>Cloud Managed Apple Distribution</string>
+			</dict>
+			<key>embeddedBinaries</key>
+			<array>
+				<dict>
+					<key>architectures</key>
+					<array>
+						<string>arm64</string>
+					</array>
+					<key>buildNumber</key>
+					<string>6.17.1</string>
+					<key>certificate</key>
+					<dict>
+						<key>SHA1</key>
+						<string>A5F11264F61411DBDEFF5B290AA71848777C0D3B</string>
+						<key>dateExpires</key>
+						<string>1/3/27</string>
+						<key>type</key>
+						<string>Cloud Managed Apple Distribution</string>
+					</dict>
+					<key>name</key>
+					<string>MapLibre.framework</string>
+					<key>team</key>
+					<dict>
+						<key>id</key>
+						<string>XTXZ3CYRPX</string>
+						<key>name</key>
+						<string>Andrew Ghobrial</string>
+					</dict>
+					<key>versionNumber</key>
+					<string>6.17.1</string>
+				</dict>
+				<dict>
+					<key>architectures</key>
+					<array>
+						<string>arm64</string>
+					</array>
+					<key>buildNumber</key>
+					<string>1</string>
+					<key>certificate</key>
+					<dict>
+						<key>SHA1</key>
+						<string>A5F11264F61411DBDEFF5B290AA71848777C0D3B</string>
+						<key>dateExpires</key>
+						<string>1/3/27</string>
+						<key>type</key>
+						<string>Cloud Managed Apple Distribution</string>
+					</dict>
+					<key>name</key>
+					<string>crsqlite.framework</string>
+					<key>team</key>
+					<dict>
+						<key>id</key>
+						<string>XTXZ3CYRPX</string>
+						<key>name</key>
+						<string>Andrew Ghobrial</string>
+					</dict>
+					<key>versionNumber</key>
+					<string>1.0.0</string>
+				</dict>
+				<dict>
+					<key>architectures</key>
+					<array>
+						<string>arm64</string>
+					</array>
+					<key>buildNumber</key>
+					<string>0.12.0</string>
+					<key>certificate</key>
+					<dict>
+						<key>SHA1</key>
+						<string>A5F11264F61411DBDEFF5B290AA71848777C0D3B</string>
+						<key>dateExpires</key>
+						<string>1/3/27</string>
+						<key>type</key>
+						<string>Cloud Managed Apple Distribution</string>
+					</dict>
+					<key>name</key>
+					<string>hermes.framework</string>
+					<key>team</key>
+					<dict>
+						<key>id</key>
+						<string>XTXZ3CYRPX</string>
+						<key>name</key>
+						<string>Andrew Ghobrial</string>
+					</dict>
+					<key>versionNumber</key>
+					<string>0.12.0</string>
+				</dict>
+			</array>
+			<key>entitlements</key>
+			<dict>
+				<key>application-identifier</key>
+				<string>XTXZ3CYRPX.com.polarismaps.app</string>
+				<key>com.apple.developer.team-identifier</key>
+				<string>XTXZ3CYRPX</string>
+				<key>get-task-allow</key>
+				<false/>
+			</dict>
+			<key>name</key>
+			<string>PolarisMaps.app</string>
+			<key>profile</key>
+			<dict>
+				<key>UUID</key>
+				<string>f7ed2649-0038-4082-8301-c3949f7c4a3c</string>
+				<key>dateExpires</key>
+				<string>1/17/27</string>
+				<key>name</key>
+				<string>iOS Team Ad Hoc Provisioning Profile: com.polarismaps.app</string>
+			</dict>
+			<key>team</key>
+			<dict>
+				<key>id</key>
+				<string>XTXZ3CYRPX</string>
+				<key>name</key>
+				<string>Andrew Ghobrial</string>
+			</dict>
+			<key>versionNumber</key>
+			<string>0.1.0</string>
+		</dict>
+	</array>
+</dict>
+</plist>

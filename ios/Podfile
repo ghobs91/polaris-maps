@@ -81,5 +81,16 @@ target 'PolarisMaps' do
         end
       end
     end
+
+    # Create Package.resolved inside Pods.xcodeproj so Xcode can resolve the
+    # MapLibre SPM product that maplibre-react-native's post_install hook adds.
+    # Without this file the Pods project has an SPM reference but no pin, causing
+    # "Missing package product 'MapLibre'" errors after every pod install.
+    workspace_resolved = File.join(__dir__, 'PolarisMaps.xcworkspace/xcshareddata/swiftpm/Package.resolved')
+    pods_swiftpm_dir = File.join(installer.sandbox.root, '../Pods.xcodeproj/xcshareddata/swiftpm')
+    if File.exist?(workspace_resolved)
+      FileUtils.mkdir_p(pods_swiftpm_dir)
+      FileUtils.cp(workspace_resolved, File.join(pods_swiftpm_dir, 'Package.resolved'))
+    end
   end
 end
