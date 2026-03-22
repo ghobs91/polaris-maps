@@ -8,6 +8,8 @@ import type { ValhallaManeuver, ManeuverType } from '../../models/route';
 interface NextTurnBannerProps {
   maneuver: ValhallaManeuver | null;
   nextManeuver?: ValhallaManeuver | null;
+  /** Live remaining distance to the next turn (overrides the static route value). */
+  distanceToTurnMeters?: number;
 }
 
 function getManeuverIcon(type: ManeuverType): { name: string; rotate: number } {
@@ -44,12 +46,19 @@ function getManeuverIcon(type: ManeuverType): { name: string; rotate: number } {
   }
 }
 
-export function NextTurnBanner({ maneuver, nextManeuver }: NextTurnBannerProps) {
+export function NextTurnBanner({
+  maneuver,
+  nextManeuver,
+  distanceToTurnMeters,
+}: NextTurnBannerProps) {
   if (!maneuver) return null;
 
   const { name: iconName, rotate } = getManeuverIcon(maneuver.type);
   const instruction = maneuver.verbalPreTransition || maneuver.instruction;
   const nextIcon = nextManeuver ? getManeuverIcon(nextManeuver.type) : null;
+
+  // Use live countdown distance when available; fall back to the static route value.
+  const displayDistance = distanceToTurnMeters ?? maneuver.distanceMeters;
 
   return (
     <View style={styles.container}>
@@ -64,7 +73,7 @@ export function NextTurnBanner({ maneuver, nextManeuver }: NextTurnBannerProps) 
           />
         </View>
         <View style={styles.textBox}>
-          <Text style={styles.distance}>{formatDistance(maneuver.distanceMeters)}</Text>
+          <Text style={styles.distance}>{formatDistance(displayDistance)}</Text>
           <Text style={styles.instruction} numberOfLines={2}>
             {instruction}
           </Text>

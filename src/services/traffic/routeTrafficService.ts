@@ -1,6 +1,5 @@
 import { tomtomApiKey, TOMTOM_FLOW_BASE_URL } from '../../constants/config';
 import { decodePolyline } from '../../utils/polyline';
-import { normalizeTomTomResponse } from './tomtomFetcher';
 
 /** Maximum number of TomTom flow API calls when coloring a route. */
 const MAX_SAMPLES = 25;
@@ -62,8 +61,15 @@ export async function fetchRouteTrafficGeoJSON(geometry: string): Promise<{
         const res = await fetch(url);
         if (!res.ok) return { start, end, color: '#4A90D9' };
         const json = await res.json();
-        const seg = normalizeTomTomResponse(json);
-        return { start, end, color: seg ? congestionColor(seg.congestionRatio) : '#4A90D9' };
+        // Read ratio directly from the raw response — normalizeTomTomResponse
+        // returns null when the segment has < 2 coordinates, which is common
+        // for short road segments, causing every chunk to fall back to blue.
+        const fsd = json?.flowSegmentData;
+        if (fsd && fsd.freeFlowSpeed > 0 && fsd.currentSpeed >= 0) {
+          const ratio = Math.min(1, Math.max(0, fsd.currentSpeed / fsd.freeFlowSpeed));
+          return { start, end, color: congestionColor(ratio) };
+        }
+        return { start, end, color: '#4A90D9' };
       } catch {
         return { start, end, color: '#4A90D9' };
       }

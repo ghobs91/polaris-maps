@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -10,7 +10,12 @@ import { useNavigationStore } from '@/stores/navigationStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
-import { computeBearing, snapToRoute, computeRemainingMeters } from '@/utils/routeSnap';
+import {
+  computeBearing,
+  snapToRoute,
+  computeRemainingMeters,
+  haversineMeters,
+} from '@/utils/routeSnap';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 
@@ -40,8 +45,6 @@ export default function NavigationScreen() {
     wasNavigating.current = isNavigating;
   }, [isNavigating, router]);
 
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
-
   // Recompute traffic-adjusted ETA when route or traffic data changes
   useTrafficEta();
 
@@ -49,9 +52,9 @@ export default function NavigationScreen() {
   useNavigationTrafficRefresh();
   const [navPosition, setNavPosition] = useState<[number, number] | null>(null);
   const [navBearing, setNavBearing] = useState(0);
-  const previewRafRef = useRef<number | null>(null);
-  const previewIndexRef = useRef(0);
-  const previewStartTimeRef = useRef(0);
+  // Live remaining distance to the end of the current maneuver step.
+  // Updated every animation frame so the banner counts down continuously.
+  const [distanceToTurn, setDistanceToTurn] = useState<number | null>(null);
 
   // Initialize navPosition from the route start so the chevron appears immediately
   useEffect(() => {
@@ -64,116 +67,126 @@ export default function NavigationScreen() {
     }
   }, [isNavigating, activeRoute]);
 
-  const stopPreview = useCallback(() => {
-    setIsPreviewMode(false);
-    if (previewRafRef.current !== null) {
-      cancelAnimationFrame(previewRafRef.current);
-      previewRafRef.current = null;
-    }
-  }, []);
-
-  const togglePreview = useCallback(() => {
-    if (isPreviewMode) {
-      stopPreview();
-    } else {
-      previewIndexRef.current = 0;
-      setIsPreviewMode(true);
-    }
-  }, [isPreviewMode, stopPreview]);
-
-  // Stop preview if navigation ends
-  useEffect(() => {
-    if (!isNavigating) stopPreview();
-  }, [isNavigating, stopPreview]);
-
-  // Preview simulation: advance at real-time speed based on each maneuver's duration,
-  // which reflects the road's speed limit as computed by the routing engine.
-  useEffect(() => {
-    if (!isPreviewMode || !activeRoute) return;
-
-    const coords = decodePolyline(activeRoute.geometry);
-    if (coords.length === 0) return;
-
-    const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
-
-    // Build a cumulative time table: cumulativeMs[i] = simulated ms from start to reach coords[i].
-    // Each maneuver's durationSeconds is distributed evenly across its shape segments.
-    const cumulativeMs: number[] = new Array(coords.length).fill(0);
-    for (const maneuver of allManeuvers) {
-      const numSegments = maneuver.endShapeIndex - maneuver.beginShapeIndex;
-      if (numSegments <= 0) continue;
-      const msPerSegment = (maneuver.durationSeconds * 1000) / numSegments;
-      for (let i = maneuver.beginShapeIndex; i < maneuver.endShapeIndex; i++) {
-        cumulativeMs[i + 1] = cumulativeMs[i] + msPerSegment;
-      }
-    }
-    const totalMs = cumulativeMs[coords.length - 1];
-
-    // Reset to start
-    previewIndexRef.current = 0;
-    previewStartTimeRef.current = performance.now();
-    setNavPosition(coords[0]);
-    setNavBearing(0);
-
-    // Use requestAnimationFrame for smooth, continuous interpolation between points.
-    const tick = (now: number) => {
-      const elapsedMs = now - previewStartTimeRef.current;
-      if (elapsedMs >= totalMs) {
-        stopPreview();
-        return;
-      }
-
-      // Binary search: find the segment [lo, lo+1] that straddles elapsedMs
-      let lo = 0;
-      let hi = coords.length - 1;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (cumulativeMs[mid] <= elapsedMs) lo = mid;
-        else hi = mid - 1;
-      }
-
-      // Interpolate between coords[lo] and coords[lo+1]
-      const nextIdx = Math.min(lo + 1, coords.length - 1);
-      const segStart = cumulativeMs[lo];
-      const segEnd = cumulativeMs[nextIdx];
-      const t = segEnd > segStart ? (elapsedMs - segStart) / (segEnd - segStart) : 0;
-      const a = coords[lo];
-      const b = coords[nextIdx];
-      const pos: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-      const bearing = computeBearing(a, b);
-
-      setNavPosition(pos);
-      setNavBearing(bearing);
-
-      // Advance maneuver step if we've crossed its beginShapeIndex
-      if (lo !== previewIndexRef.current) {
-        previewIndexRef.current = lo;
-        const store = useNavigationStore.getState();
-        const nextStep = store.currentStepIndex + 1;
-        if (nextStep < allManeuvers.length && lo >= allManeuvers[nextStep].beginShapeIndex) {
-          store.advanceStep();
-        }
-      }
-
-      previewRafRef.current = requestAnimationFrame(tick);
-    };
-
-    previewRafRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (previewRafRef.current !== null) cancelAnimationFrame(previewRafRef.current);
-    };
-  }, [isPreviewMode, activeRoute, stopPreview]);
+  // Dead-reckoning anchor: updated on every GPS callback.
+  // pos/segIdx = snapped position on route; speedMps = estimated travel speed;
+  // time = performance.now() timestamp when this anchor was set.
+  const drAnchorRef = useRef<{
+    pos: [number, number];
+    segIdx: number;
+    speedMps: number;
+    time: number;
+  } | null>(null);
+  // Low-pass filtered bearing so turns animate smoothly rather than snapping.
+  const smoothBearingRef = useRef(0);
+  const interpolationRafRef = useRef<number | null>(null);
 
   // Live GPS tracking: watch position and snap to route during active navigation
   useEffect(() => {
-    if (!isNavigating || isPreviewMode || !activeRoute) return;
+    if (!isNavigating || !activeRoute) return;
 
     const coords = decodePolyline(activeRoute.geometry);
     if (coords.length < 2) return;
 
     const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
     let subscription: Location.LocationSubscription | null = null;
+
+    /**
+     * Walk `distMeters` forward along the route polyline from startPos/startSegIdx.
+     * Returns the projected [lng, lat] and the segment index it falls on.
+     */
+    const advanceAlongRoute = (
+      startPos: [number, number],
+      startSegIdx: number,
+      distMeters: number,
+    ): [[number, number], number] => {
+      let remaining = distMeters;
+      let pos = startPos;
+      let segIdx = startSegIdx;
+      while (remaining > 0 && segIdx < coords.length - 1) {
+        const segEnd = coords[segIdx + 1];
+        const distToEnd = haversineMeters(pos, segEnd);
+        if (distToEnd <= remaining) {
+          remaining -= distToEnd;
+          pos = segEnd;
+          segIdx++;
+        } else {
+          const t = remaining / distToEnd;
+          pos = [pos[0] + (segEnd[0] - pos[0]) * t, pos[1] + (segEnd[1] - pos[1]) * t];
+          remaining = 0;
+        }
+      }
+      return [pos, segIdx];
+    };
+
+    // Dead-reckoning loop at ~60fps:
+    // Each frame advances the displayed position along the route at the last
+    // known speed, computed from the elapsed time since the GPS anchor.
+    // This produces continuous, Google/Apple-Maps-style gliding between GPS ticks.
+    const BEARING_ALPHA = 0.12; // low-pass weight for bearing smoothing
+
+    // Distance from pos/segIdx to coords[targetIdx], walking the polyline.
+    const distToIndex = (pos: [number, number], segIdx: number, targetIdx: number): number => {
+      if (segIdx >= targetIdx) return 0;
+      let d = haversineMeters(pos, coords[segIdx + 1]);
+      for (let i = segIdx + 1; i < targetIdx; i++) d += haversineMeters(coords[i], coords[i + 1]);
+      return d;
+    };
+
+    const interpolate = (now: number) => {
+      const anchor = drAnchorRef.current;
+      if (anchor) {
+        const elapsed = Math.min((now - anchor.time) / 1000, 2.0); // cap at 2s
+
+        let curPos: [number, number];
+        let curSegIdx: number;
+
+        if (anchor.speedMps > 0.3 && elapsed > 0) {
+          [curPos, curSegIdx] = advanceAlongRoute(
+            anchor.pos,
+            anchor.segIdx,
+            anchor.speedMps * elapsed,
+          );
+          // Low-pass filter the bearing from the route direction
+          const rawBearing = computeBearing(
+            coords[curSegIdx],
+            coords[Math.min(curSegIdx + 1, coords.length - 1)],
+          );
+          const delta = ((rawBearing - smoothBearingRef.current + 540) % 360) - 180;
+          smoothBearingRef.current = (smoothBearingRef.current + delta * BEARING_ALPHA + 360) % 360;
+          setNavPosition(curPos);
+          setNavBearing(smoothBearingRef.current);
+        } else {
+          // Stationary — hold at anchor position
+          curPos = anchor.pos;
+          curSegIdx = anchor.segIdx;
+          setNavPosition(curPos);
+        }
+
+        // Advance maneuver step as soon as DR crosses the next step's shape boundary.
+        // This fires at 60fps so the banner updates instantly, not waiting for the
+        // next GPS tick (which can lag up to 1s behind the smooth extrapolation).
+        const store = useNavigationStore.getState();
+        const nextStepIdx = store.currentStepIndex + 1;
+        if (
+          nextStepIdx < allManeuvers.length &&
+          curSegIdx >= allManeuvers[nextStepIdx].beginShapeIndex
+        ) {
+          store.advanceStep();
+        }
+
+        // Compute live remaining distance to the end of the current step so the
+        // banner counts down continuously rather than showing a fixed value.
+        const liveStepIndex = useNavigationStore.getState().currentStepIndex;
+        const stepEndIdx = Math.min(
+          allManeuvers[liveStepIndex]?.endShapeIndex ?? coords.length - 1,
+          coords.length - 1,
+        );
+        setDistanceToTurn(distToIndex(curPos, curSegIdx, stepEndIdx));
+      }
+      interpolationRafRef.current = requestAnimationFrame(interpolate);
+    };
+
+    interpolationRafRef.current = requestAnimationFrame(interpolate);
 
     (async () => {
       subscription = await Location.watchPositionAsync(
@@ -184,22 +197,52 @@ export default function NavigationScreen() {
         },
         (location) => {
           const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
-          const { snapped, bearing, segmentIndex } = snapToRoute(gpsPos, coords);
+          const { snapped, segmentIndex } = snapToRoute(gpsPos, coords);
+          const now = performance.now();
 
-          setNavPosition(snapped);
-          setNavBearing(
-            location.coords.heading != null && location.coords.heading >= 0
-              ? location.coords.heading
-              : bearing,
-          );
+          // Prefer the GPS speed field; fall back to estimating from distance/time delta.
+          let speedMps = (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0;
+          if (speedMps <= 0 && drAnchorRef.current) {
+            const dt = (now - drAnchorRef.current.time) / 1000;
+            if (dt > 0.1) {
+              speedMps = haversineMeters(drAnchorRef.current.pos, snapped) / dt;
+            }
+          }
+          // Clamp to reasonable road speed (0–55 m/s ≈ 200 km/h)
+          speedMps = Math.min(Math.max(speedMps, 0), 55);
 
-          // Update remaining distance and ETA based on current position
+          // Never move the marker backwards. If the current dead-reckoning
+          // projection is *ahead* of the GPS snapped position on the route,
+          // keep the DR position as the new anchor and simply adopt the
+          // GPS speed. This prevents the visible backward jump that occurs
+          // when GPS latency/inaccuracy reports a position behind the smooth
+          // extrapolation.
+          const prevAnchor = drAnchorRef.current;
+          if (prevAnchor && prevAnchor.speedMps > 0.3) {
+            const elapsed = Math.min((now - prevAnchor.time) / 1000, 2.0);
+            const [drPos, drSegIdx] = advanceAlongRoute(
+              prevAnchor.pos,
+              prevAnchor.segIdx,
+              prevAnchor.speedMps * elapsed,
+            );
+            const drRemaining = computeRemainingMeters(drPos, drSegIdx, coords);
+            const gpsRemaining = computeRemainingMeters(snapped, segmentIndex, coords);
+            if (drRemaining < gpsRemaining) {
+              // DR is ahead of GPS — anchor at DR position, update speed only
+              drAnchorRef.current = { pos: drPos, segIdx: drSegIdx, speedMps, time: now };
+            } else {
+              drAnchorRef.current = { pos: snapped, segIdx: segmentIndex, speedMps, time: now };
+            }
+          } else {
+            drAnchorRef.current = { pos: snapped, segIdx: segmentIndex, speedMps, time: now };
+          }
+
+          // Update remaining distance and ETA based on current GPS position
           const remainingMeters = computeRemainingMeters(snapped, segmentIndex, coords);
           const totalMeters = activeRoute.summary.distanceMeters;
           const totalSeconds = activeRoute.summary.durationSeconds;
           const progress = totalMeters > 0 ? remainingMeters / totalMeters : 0;
-          const remainingSeconds = Math.round(progress * totalSeconds);
-          updateEta(remainingSeconds, remainingMeters);
+          updateEta(Math.round(progress * totalSeconds), remainingMeters);
 
           // Advance maneuver step if user has progressed past the next step's start shape index
           const store = useNavigationStore.getState();
@@ -216,8 +259,13 @@ export default function NavigationScreen() {
 
     return () => {
       subscription?.remove();
+      if (interpolationRafRef.current !== null) {
+        cancelAnimationFrame(interpolationRafRef.current);
+        interpolationRafRef.current = null;
+      }
+      drAnchorRef.current = null;
     };
-  }, [isNavigating, isPreviewMode, activeRoute]);
+  }, [isNavigating, activeRoute]);
 
   if (!isNavigating || !activeRoute) {
     return (
@@ -236,14 +284,18 @@ export default function NavigationScreen() {
       {/* Full-screen map — tilted + heading-up when navigating */}
       <MapView
         routeGeometry={activeRoute.geometry}
-        navigationMode={isPreviewMode || isNavigating}
+        navigationMode={isNavigating}
         navPosition={navPosition}
         navBearing={navBearing}
       />
 
       {/* Turn banner overlaid at top */}
       <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
-        <NextTurnBanner maneuver={currentManeuver} nextManeuver={nextManeuver} />
+        <NextTurnBanner
+          maneuver={currentManeuver}
+          nextManeuver={nextManeuver}
+          distanceToTurnMeters={distanceToTurn ?? undefined}
+        />
       </View>
 
       {/* ETA / Exit bar — sits above the tab bar */}
@@ -252,8 +304,6 @@ export default function NavigationScreen() {
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           onExit={stopNavigation}
-          onPreview={togglePreview}
-          isPreviewMode={isPreviewMode}
         />
       </View>
     </View>

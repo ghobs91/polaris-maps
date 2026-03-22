@@ -371,6 +371,23 @@ export function FloatingSearchPanel({
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  // Track keyboard height so the panel stays above the keyboard
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   // Load data on mount
   useEffect(() => {
     setHistory(getSearchHistory());
@@ -674,7 +691,8 @@ export function FloatingSearchPanel({
   // ── Styles ──────────────────────────────────
   const st = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
 
-  const panelBottom = insets.bottom + 12 + bottomInsetExtra;
+  const panelBottom =
+    keyboardHeight > 0 ? keyboardHeight + 12 : insets.bottom + 12 + bottomInsetExtra;
   const textColor = isDark ? '#F2F2F7' : '#1C1C1E';
   const subColor = '#8E8E93';
 

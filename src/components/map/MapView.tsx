@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, Dimensions } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { fetchOsmPois } from '../../services/poi/osmFetcher';
@@ -76,14 +76,23 @@ export function MapView({
   // Debounce timer for OSM POI fetching
   const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // In navigation mode, follow navPosition with tilt + heading
+  // In navigation mode, follow navPosition with tilt + heading.
+  // paddingTop shifts the focal point downward in screen space so the marker
+  // sits in the lower third, showing more of the route ahead (Apple/Google Maps style).
   useEffect(() => {
     if (!navigationMode || !navPosition || !cameraRef.current) return;
+    const screenHeight = Dimensions.get('window').height;
     cameraRef.current.setCamera({
       centerCoordinate: navPosition,
       zoomLevel: 17,
       heading: navBearing,
       pitch: 55,
+      padding: {
+        paddingTop: screenHeight * 0.4,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
+      },
       animationDuration: 800,
       animationMode: 'flyTo',
     });
@@ -94,13 +103,16 @@ export function MapView({
     const unsub = useMapStore.subscribe((state, prev) => {
       if (!cameraRef.current) return;
 
-      // Handle fitBounds requests (route overview zoom)
+      // Handle fitBounds requests (route overview zoom).
+      // Use asymmetric padding so the route appears fully above the directions
+      // panel that covers the bottom ~60% of the screen.
       if (state.fitBounds && state.fitBounds !== prev.fitBounds) {
         const [minLng, minLat, maxLng, maxLat] = state.fitBounds;
+        const sh = Dimensions.get('window').height;
         cameraRef.current.fitBounds(
           [maxLng, maxLat], // NE
           [minLng, minLat], // SW
-          60, // padding
+          { paddingTop: 80, paddingBottom: sh * 0.62, paddingLeft: 60, paddingRight: 60 },
           500, // duration ms
         );
         // Clear after applying so it can be re-triggered
@@ -131,45 +143,52 @@ export function MapView({
     return unsub;
   }, []);
 
-  const handleRegionDidChange = useCallback((event: any) => {
-    const zoom: number = event?.properties?.zoomLevel ?? 0;
-    if (zoom < POI_MIN_ZOOM) {
-      // Clear POIs when zoomed out
-      useOsmPoiStore.getState().setPois([]);
-      return;
-    }
-    const bounds: [[number, number], [number, number]] | undefined =
-      event?.properties?.visibleBounds;
-    if (!bounds) return;
-    const [[maxLng, maxLat], [minLng, minLat]] = bounds;
+  const handleRegionDidChange = useCallback(
+    (event: any) => {
+      // Don't fetch POIs while actively navigating — camera moves constantly and
+      // POI annotations would fight the nav UI.
+      if (navigationMode) return;
 
-    // Store current zoom + bounds so POILayer can filter for even distribution
-    useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
-
-    // Debounce the combined fetch — Overpass is cached for repeat viewports, so
-    // this is fast for areas the user has already visited. A single setPois call
-    // avoids the double annotation teardown that triggers the MapLibre
-    // "Unknown annotation found nearby tap" fault.
-    if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
-    poiFetchTimer.current = setTimeout(async () => {
-      try {
-        useOsmPoiStore.getState().setIsLoading(true);
-        const [osmPois, cachedPlaces] = await Promise.all([
-          fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => []),
-          getPlacesInBounds(minLat, minLng, maxLat, maxLng).catch(() => []),
-        ]);
-
-        const overturePois = cachedPlaces.map(placeToOsmPoi);
-        // Overture first (higher quality), OSM fills in the rest
-        const merged = deduplicatePois([...overturePois, ...osmPois]);
-        useOsmPoiStore.getState().setPois(merged);
-      } catch {
-        // Silently ignore — data sources may be unavailable
-      } finally {
-        useOsmPoiStore.getState().setIsLoading(false);
+      const zoom: number = event?.properties?.zoomLevel ?? 0;
+      if (zoom < POI_MIN_ZOOM) {
+        // Clear POIs when zoomed out
+        useOsmPoiStore.getState().setPois([]);
+        return;
       }
-    }, OSM_FETCH_DEBOUNCE_MS);
-  }, []);
+      const bounds: [[number, number], [number, number]] | undefined =
+        event?.properties?.visibleBounds;
+      if (!bounds) return;
+      const [[maxLng, maxLat], [minLng, minLat]] = bounds;
+
+      // Store current zoom + bounds so POILayer can filter for even distribution
+      useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
+
+      // Debounce the combined fetch — Overpass is cached for repeat viewports, so
+      // this is fast for areas the user has already visited. A single setPois call
+      // avoids the double annotation teardown that triggers the MapLibre
+      // "Unknown annotation found nearby tap" fault.
+      if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
+      poiFetchTimer.current = setTimeout(async () => {
+        try {
+          useOsmPoiStore.getState().setIsLoading(true);
+          const [osmPois, cachedPlaces] = await Promise.all([
+            fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => []),
+            getPlacesInBounds(minLat, minLng, maxLat, maxLng).catch(() => []),
+          ]);
+
+          const overturePois = cachedPlaces.map(placeToOsmPoi);
+          // Overture first (higher quality), OSM fills in the rest
+          const merged = deduplicatePois([...overturePois, ...osmPois]);
+          useOsmPoiStore.getState().setPois(merged);
+        } catch {
+          // Silently ignore — data sources may be unavailable
+        } finally {
+          useOsmPoiStore.getState().setIsLoading(false);
+        }
+      }, OSM_FETCH_DEBOUNCE_MS);
+    },
+    [navigationMode],
+  );
 
   const handlePress = useCallback(
     (event: any) => {
@@ -203,17 +222,14 @@ export function MapView({
         {/* Suppress raster overlay when traffic is shown on the route line instead */}
         <TrafficOverlay suppressRaster={!!routeGeometry} />
 
-        {/* Navigation chevron as a map annotation */}
+        {/* Navigation marker — frosted-glass red triangle */}
         {navigationMode && navPosition && (
           <MapLibreGL.PointAnnotation
             id="navChevron"
             coordinate={navPosition}
             anchor={{ x: 0.5, y: 0.5 }}
           >
-            <View style={chevronStyles.container}>
-              <View style={chevronStyles.triangle} />
-              <View style={chevronStyles.glow} />
-            </View>
+            <NavPuck />
           </MapLibreGL.PointAnnotation>
         )}
 
@@ -254,28 +270,104 @@ const styles = StyleSheet.create({
   map: { flex: 1 },
 });
 
-const chevronStyles = StyleSheet.create({
-  container: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
+/**
+ * Red frosted-glass triangle nav marker, pointing UP (direction of travel).
+ * Uses layered CSS-border triangles to simulate a glossy, translucent look.
+ */
+function NavPuck() {
+  return (
+    <View style={puckStyles.wrapper}>
+      {/* Diffuse outer glow halo */}
+      <View style={puckStyles.glow} />
+      {/* Main body — deep semi-transparent red */}
+      <View style={puckStyles.body} />
+      {/* Inner dark layer for depth (lower two-thirds) */}
+      <View style={puckStyles.shadow} />
+      {/* Gloss highlight near the tip */}
+      <View style={puckStyles.gloss} />
+    </View>
+  );
+}
+
+// Triangle dimensions
+const TW = 21; // half-base width of the body triangle
+const TH = 33; // height of the body triangle
+const PAD = 5; // padding around the body for the glow halo
+// Derived positions (all triangles share the same tip x-center)
+const GLOSS_BW = Math.round(TW * 0.38); // 11
+const GLOSS_BH = Math.round(TH * 0.44); // 19
+const GLOSS_L = PAD + TW - GLOSS_BW; // 23  — keeps gloss tip x == body tip x
+const GLOSS_BOT = Math.round(TH * 0.52); // 23  — bottom offset inside wrapper
+const SHADOW_BW = Math.round(TW * 0.8); // 22
+const SHADOW_BH = Math.round(TH * 0.65); // 29
+const SHADOW_L = PAD + TW - SHADOW_BW; // 6   — also centered with body
+const SHADOW_BOT = 0;
+
+const puckStyles = StyleSheet.create({
+  wrapper: {
+    width: (TW + PAD) * 2, // 68
+    height: TH + PAD, // 50
+    // Drop shadow for depth
+    shadowColor: '#7f1d1d',
+    shadowOpacity: 0.72,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 14,
   },
-  triangle: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 14,
-    borderRightWidth: 14,
-    borderBottomWidth: 28,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: '#4A90D9',
-  },
+  // Slightly oversized dim halo behind the body
   glow: {
     position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(74,144,217,0.25)',
+    bottom: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: TW + PAD,
+    borderRightWidth: TW + PAD,
+    borderBottomWidth: TH + PAD,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'rgba(220, 40, 40, 0.22)',
+  },
+  // Main triangle — ▲ pointing UP (borderBottomWidth = tip at top)
+  body: {
+    position: 'absolute',
+    bottom: 0,
+    left: PAD,
+    width: 0,
+    height: 0,
+    borderLeftWidth: TW,
+    borderRightWidth: TW,
+    borderBottomWidth: TH,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'rgba(196, 24, 24, 0.92)',
+  },
+  // Darker overlay on the lower portion to add depth/candy-glass look
+  shadow: {
+    position: 'absolute',
+    bottom: SHADOW_BOT,
+    left: SHADOW_L,
+    width: 0,
+    height: 0,
+    borderLeftWidth: SHADOW_BW,
+    borderRightWidth: SHADOW_BW,
+    borderBottomWidth: SHADOW_BH,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'rgba(80, 0, 0, 0.28)',
+  },
+  // Bright gloss highlight pinned near the tip
+  gloss: {
+    position: 'absolute',
+    bottom: GLOSS_BOT,
+    left: GLOSS_L,
+    width: 0,
+    height: 0,
+    borderLeftWidth: GLOSS_BW,
+    borderRightWidth: GLOSS_BW,
+    borderBottomWidth: GLOSS_BH,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: 'rgba(255, 190, 185, 0.32)',
   },
 });
