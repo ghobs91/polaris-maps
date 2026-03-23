@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
-import { importRegionOverturePlaces } from './overtureImporter';
+import { fetchOverturePlaces } from '../poi/overtureFetcher';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
 
@@ -36,13 +36,26 @@ export interface DownloadProgress {
   totalBytes: number;
   downloadedBytes: number;
   percent: number;
-  stage: 'tiles' | 'routing' | 'geocoding' | 'complete' | 'error';
+  stage: 'tiles' | 'places' | 'routing' | 'geocoding' | 'complete' | 'error';
   error?: string;
 }
 
 type ProgressCallback = (progress: DownloadProgress) => void;
 
-export async function downloadRegion(region: Region, onProgress?: ProgressCallback): Promise<void> {
+/** Throws an AbortError if the signal has been aborted. Works across all RN/Hermes versions. */
+function checkAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    const err = new Error('Download cancelled');
+    err.name = 'AbortError';
+    throw err;
+  }
+}
+
+export async function downloadRegion(
+  region: Region,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
   const destDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
   await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
 
@@ -61,12 +74,17 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       ? await tryPeerDownload(region, destDir, onProgress)
       : false;
 
+    checkAborted(signal);
+
     if (!peerSuccess) {
-      await downloadViaHttp(region, destDir, onProgress);
+      await downloadViaHttp(region, destDir, onProgress, signal);
     }
 
-    // Import Overture places bundled with the region (non-fatal)
-    importRegionOverturePlaces(destDir).catch(() => {});
+    checkAborted(signal);
+
+    // Bulk-fetch Overture places for the region bounds into local SQLite (non-fatal).
+    // Uses OVERTURE_PLACES_URL if configured; skips silently otherwise.
+    await prefetchOverturePlaces(region, onProgress).catch(() => {});
 
     // Calculate total size
     const dirInfo = await FileSystem.getInfoAsync(destDir);
@@ -93,6 +111,17 @@ export async function downloadRegion(region: Region, onProgress?: ProgressCallba
       // Non-fatal — seeding failure shouldn't affect the download result
     });
   } catch (error) {
+    if ((error as Error).name === 'AbortError') {
+      // Clean up the partial download directory and reset status
+      await FileSystem.deleteAsync(destDir, { idempotent: true }).catch(() => {});
+      await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
+        'not_downloaded',
+        Math.floor(Date.now() / 1000),
+        region.id,
+      ]);
+      return;
+    }
+
     await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
       'failed',
       Math.floor(Date.now() / 1000),
@@ -145,11 +174,51 @@ async function tryPeerDownload(
   }
 }
 
+/**
+ * Pre-fetch Overture places for the entire region bbox and upsert into
+ * local SQLite, so category searches work offline after download.
+ *
+ * Uses the existing OVERTURE_PLACES_URL 3rd-party endpoint.
+ * Non-fatal: silently skips if OVERTURE_PLACES_URL is not configured.
+ */
+export async function prefetchOverturePlaces(
+  region: Region,
+  onProgress?: ProgressCallback,
+): Promise<void> {
+  const { minLat, maxLat, minLng, maxLng } = region.bounds;
+
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: 0,
+    downloadedBytes: 0,
+    percent: 0,
+    stage: 'places',
+  });
+
+  // fetchOverturePlaces returns [] immediately if OVERTURE_PLACES_URL is unset
+  const places = await fetchOverturePlaces(
+    minLat, // south
+    minLng, // west
+    maxLat, // north
+    maxLng, // east
+    10_000, // generous limit for region-level seeding
+  );
+
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: places.length,
+    downloadedBytes: places.length,
+    percent: 100,
+    stage: 'places',
+  });
+}
+
 /** Download region vector tiles from OpenFreeMap for offline use. */
 async function downloadViaHttp(
   region: Region,
   destDir: string,
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<void> {
   const urlTemplate = await getTileUrlTemplate();
   if (!urlTemplate) {
@@ -161,9 +230,11 @@ async function downloadViaHttp(
   const tilesDir = `${destDir}tiles/`;
   await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
 
-  // Calculate tile coordinates for the region bounds at zoom levels 0-14
+  // Calculate tile coordinates for the region bounds at zoom levels 0-12.
+  // z12 gives city-level detail in vector tiles (MapLibre renders z13+ from z12 data).
+  // Going to z14 multiplies tile count by 16× — far too many for region-scale downloads.
   const minZoom = 0;
-  const maxZoom = 14;
+  const maxZoom = 12;
   const tileCoords = getTilesForBounds(region.bounds, minZoom, maxZoom);
   const totalTiles = tileCoords.length;
   let downloaded = 0;
@@ -176,9 +247,10 @@ async function downloadViaHttp(
     stage: 'tiles',
   });
 
-  // Download tiles in batches
-  const BATCH_SIZE = 10;
+  // Download tiles in batches of 50 concurrent requests
+  const BATCH_SIZE = 50;
   for (let i = 0; i < tileCoords.length; i += BATCH_SIZE) {
+    checkAborted(signal);
     const batch = tileCoords.slice(i, i + BATCH_SIZE);
     await Promise.all(
       batch.map(async ({ z, x, y }) => {

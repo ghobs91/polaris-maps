@@ -172,4 +172,41 @@ describe('fetchOsmPois', () => {
     await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
+
+  it('aborts Overpass request after timeout', async () => {
+    jest.useFakeTimers();
+
+    // Simulate a request that never resolves (server unreachable)
+    mockFetch.mockImplementation(
+      (_url: string, opts: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          opts.signal.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        }),
+    );
+
+    const promise = fetchOsmPois(40.7, -74.0, 40.8, -73.9);
+
+    // Advance past the 8-second timeout
+    jest.advanceTimersByTime(9_000);
+
+    await expect(promise).rejects.toThrow('aborted');
+
+    jest.useRealTimers();
+  });
+
+  it('passes AbortSignal to fetch', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => makeOverpassResponse([makeNode(1, 'Test')]),
+    });
+
+    await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
 });

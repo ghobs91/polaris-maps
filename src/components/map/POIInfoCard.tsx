@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
+import { useMapStore } from '../../stores/mapStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
@@ -299,6 +300,7 @@ const pillStyles = StyleSheet.create({
 export function POIInfoCard() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
   // Track whether the Clearbit logo failed to load (e.g. 404 for unknown brands)
@@ -465,6 +467,16 @@ export function POIInfoCard() {
       );
   }, [parsed?.facebook]);
 
+  const handleDirections = useCallback(() => {
+    if (!poi) return;
+    setPendingDirectionsTarget({
+      lat: poi.lat,
+      lng: poi.lng,
+      name: poi.name,
+    });
+    setSelectedPoi(null);
+  }, [poi, setPendingDirectionsTarget, setSelectedPoi]);
+
   const handleInstagram = useCallback(() => {
     if (parsed?.instagram)
       Linking.openURL(
@@ -571,6 +583,13 @@ export function POIInfoCard() {
 
           {/* ── Action pill buttons ────────────────────────────────────── */}
           <View style={styles.actions}>
+            <ActionPill
+              icon="navigate"
+              label="Directions"
+              onPress={handleDirections}
+              color={primary}
+              bg={pillBg}
+            />
             {parsed.phone && (
               <ActionPill
                 icon="call"

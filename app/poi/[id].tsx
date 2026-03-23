@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { usePOIStore } from '../../src/stores/poiStore';
+import { useMapStore } from '../../src/stores/mapStore';
 import { getPlaceById } from '../../src/services/poi/poiService';
 import { getReviewsForPlace } from '../../src/services/poi/reviewService';
 import { getPendingEdits } from '../../src/services/poi/editService';
@@ -25,6 +26,7 @@ import type { StreetImagery } from '../../src/models/imagery';
 export default function POIDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const {
     selectedPlace,
     selectedPlaceReviews,
@@ -73,6 +75,16 @@ export default function POIDetailScreen() {
     }
   }, [selectedPlace]);
 
+  const handleDirectionsPress = useCallback(() => {
+    if (!selectedPlace) return;
+    setPendingDirectionsTarget({
+      lat: selectedPlace.lat,
+      lng: selectedPlace.lng,
+      name: selectedPlace.name,
+    });
+    router.replace('/(tabs)');
+  }, [selectedPlace, setPendingDirectionsTarget, router]);
+
   if (isLoadingPlace || !selectedPlace) {
     return (
       <View style={styles.center}>
@@ -87,6 +99,9 @@ export default function POIDetailScreen() {
     <ErrorBoundary>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <Text style={styles.name}>{selectedPlace.name}</Text>
+        {selectedPlace.brandName && selectedPlace.brandName !== selectedPlace.name && (
+          <Text style={styles.brandName}>{selectedPlace.brandName}</Text>
+        )}
         <Text style={styles.category}>{categoryLabel}</Text>
 
         <View style={styles.ratingRow}>
@@ -131,6 +146,17 @@ export default function POIDetailScreen() {
           </Pressable>
         )}
 
+        {selectedPlace.emails && selectedPlace.emails.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Email</Text>
+            {selectedPlace.emails.map((email) => (
+              <Pressable key={email} onPress={() => Linking.openURL(`mailto:${email}`)}>
+                <Text style={[styles.sectionBody, styles.link]}>{email}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         {selectedPlace.website && (
           <Pressable onPress={() => Linking.openURL(selectedPlace.website!)}>
             <View style={styles.section}>
@@ -142,6 +168,19 @@ export default function POIDetailScreen() {
           </Pressable>
         )}
 
+        {selectedPlace.socials && selectedPlace.socials.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Social Media</Text>
+            {selectedPlace.socials.map((url) => (
+              <Pressable key={url} onPress={() => Linking.openURL(url)}>
+                <Text style={[styles.sectionBody, styles.link]} numberOfLines={1}>
+                  {url}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         {selectedPlace.hours && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Hours</Text>
@@ -150,6 +189,7 @@ export default function POIDetailScreen() {
         )}
 
         <View style={styles.actions}>
+          <Button title="Directions" onPress={handleDirectionsPress} variant="primary" />
           <Button
             title="Write Review"
             onPress={() =>
@@ -258,6 +298,12 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   name: { ...typography.h1, color: colors.text, marginBottom: spacing.xs },
+  brandName: {
+    ...typography.body,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    marginBottom: spacing.xs,
+  },
   category: {
     ...typography.body,
     color: colors.textSecondary,

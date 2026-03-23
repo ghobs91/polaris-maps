@@ -11,15 +11,17 @@ export function DownloadProgressBar({ progress }: DownloadProgressBarProps) {
   const stageLabel =
     progress.stage === 'tiles'
       ? 'Downloading map tiles…'
-      : progress.stage === 'routing'
-        ? 'Downloading routing data…'
-        : progress.stage === 'geocoding'
-          ? 'Downloading search index…'
-          : progress.stage === 'complete'
-            ? 'Download complete'
-            : progress.stage === 'error'
-              ? `Error: ${progress.error}`
-              : 'Preparing…';
+      : progress.stage === 'places'
+        ? 'Importing places…'
+        : progress.stage === 'routing'
+          ? 'Downloading routing data…'
+          : progress.stage === 'geocoding'
+            ? 'Downloading search index…'
+            : progress.stage === 'complete'
+              ? 'Download complete'
+              : progress.stage === 'error'
+                ? `Error: ${progress.error}`
+                : 'Preparing…';
 
   return (
     <View style={styles.container}>

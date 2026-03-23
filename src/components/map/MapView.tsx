@@ -3,7 +3,7 @@ import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Dimensions } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
-import { fetchOsmPois } from '../../services/poi/osmFetcher';
+import { fetchOsmPois, fetchNominatimPois } from '../../services/poi/osmFetcher';
 import { getPlacesInBounds } from '../../services/poi/poiService';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
@@ -150,18 +150,36 @@ export function MapView({
       if (navigationMode) return;
 
       const zoom: number = event?.properties?.zoomLevel ?? 0;
+      const rawBounds: [[number, number], [number, number]] | undefined =
+        event?.properties?.visibleBounds;
+
+      // Always update bounds so POILayer and category search always have them,
+      // even when zoomed out below the fetch threshold.
+      if (rawBounds) {
+        const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
+        useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
+      }
+
       if (zoom < POI_MIN_ZOOM) {
-        // Clear POIs when zoomed out
-        useOsmPoiStore.getState().setPois([]);
+        // Clear POIs when zoomed out (but keep category search results)
+        const { categorySearchResults } = useOsmPoiStore.getState();
+        if (!categorySearchResults) {
+          useOsmPoiStore.getState().setPois([]);
+        }
         return;
       }
-      const bounds: [[number, number], [number, number]] | undefined =
-        event?.properties?.visibleBounds;
-      if (!bounds) return;
-      const [[maxLng, maxLat], [minLng, minLat]] = bounds;
+      if (!rawBounds) return;
+      const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
 
-      // Store current zoom + bounds so POILayer can filter for even distribution
-      useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
+      // If a category search is active, show those results instead of the
+      // default POI fetch. The category search already ran against the viewport
+      // at search time — we don't re-fetch on every pan because the results
+      // are bounded to the region the user was viewing when they searched.
+      const { categorySearchResults } = useOsmPoiStore.getState();
+      if (categorySearchResults) {
+        useOsmPoiStore.getState().setPois(categorySearchResults);
+        return;
+      }
 
       // Debounce the combined fetch — Overpass is cached for repeat viewports, so
       // this is fast for areas the user has already visited. A single setPois call
@@ -171,14 +189,24 @@ export function MapView({
       poiFetchTimer.current = setTimeout(async () => {
         try {
           useOsmPoiStore.getState().setIsLoading(true);
+
+          // Try Overpass + local Overture in parallel
           const [osmPois, cachedPlaces] = await Promise.all([
-            fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => []),
+            fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => [] as OsmPoi[]),
             getPlacesInBounds(minLat, minLng, maxLat, maxLng).catch(() => []),
           ]);
 
           const overturePois = cachedPlaces.map(placeToOsmPoi);
-          // Overture first (higher quality), OSM fills in the rest
-          const merged = deduplicatePois([...overturePois, ...osmPois]);
+          let merged = deduplicatePois([...overturePois, ...osmPois]);
+
+          // If both Overpass and local DB returned nothing, try Nominatim
+          if (merged.length === 0) {
+            const nominatimPois = await fetchNominatimPois(minLat, minLng, maxLat, maxLng).catch(
+              () => [],
+            );
+            merged = nominatimPois;
+          }
+
           useOsmPoiStore.getState().setPois(merged);
         } catch {
           // Silently ignore — data sources may be unavailable

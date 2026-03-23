@@ -9,6 +9,9 @@ const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 20;
 
+/** Client-side timeout for Overpass API requests (ms). */
+const OVERPASS_TIMEOUT_MS = 8_000;
+
 interface CacheEntry {
   pois: OsmPoi[];
   expiresAt: number;
@@ -89,11 +92,20 @@ export async function fetchOsmPois(
 );
 out body center;`;
 
-  const res = await fetch(OVERPASS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) throw new Error(`Overpass API ${res.status}`);
 
@@ -123,4 +135,169 @@ out body center;`;
 
   cacheSet(key, pois);
   return pois;
+}
+
+/**
+ * Fetch POIs from Overpass for specific OSM tag pairs within a bounding box.
+ * Used as a fallback when local Overture data has insufficient results for
+ * a category search.
+ *
+ * @param tagPairs - Array of [key, value] tuples e.g. [['amenity', 'cafe'], ['shop', 'coffee']]
+ */
+export async function fetchOsmPoisByTags(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  tagPairs: Array<[string, string]>,
+): Promise<OsmPoi[]> {
+  if (tagPairs.length === 0) return [];
+
+  const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}:${bboxKey(south, west, north, east)}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  const bbox = `${south},${west},${north},${east}`;
+
+  // Build Overpass union of node+way queries for each tag pair
+  const clauses = tagPairs.flatMap(([k, v]) => [
+    `node["${k}"="${v}"]["name"](${bbox});`,
+    `way["${k}"="${v}"]["name"](${bbox});`,
+  ]);
+
+  const query = `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout body center;`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) throw new Error(`Overpass API ${res.status}`);
+
+  const data = await res.json();
+
+  const pois = (data.elements as any[])
+    .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)
+    .map((el) => {
+      const t = el.tags as Record<string, string>;
+      const type = t.amenity
+        ? 'amenity'
+        : t.shop
+          ? 'shop'
+          : t.tourism
+            ? 'tourism'
+            : t.leisure
+              ? 'leisure'
+              : t.railway
+                ? 'railway'
+                : t.aeroway
+                  ? 'aeroway'
+                  : t.natural
+                    ? 'natural'
+                    : 'amenity';
+      const subtype = t[type] ?? 'place';
+      const lat: number = el.type === 'node' ? el.lat : el.center?.lat;
+      const lng: number = el.type === 'node' ? el.lon : el.center?.lon;
+      if (lat == null || lng == null) return null;
+      return { id: el.id as number, lat, lng, name: t.name, type, subtype, tags: t };
+    })
+    .filter((p): p is OsmPoi => p !== null);
+
+  cacheSet(key, pois);
+  return pois;
+}
+
+/**
+ * Fetch general POIs from Nominatim for a bounding box.
+ * Used as a fallback when Overpass API is unavailable/rate-limited.
+ * Queries for common amenity types the user would expect on a map.
+ */
+export async function fetchNominatimPois(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<OsmPoi[]> {
+  const key = `nom:${bboxKey(south, west, north, east)}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  // Nominatim bounded search — query for common POI types visible on a map.
+  // We do a few focused queries in parallel to get diverse results.
+  const queries = ['restaurant cafe', 'shop supermarket', 'hotel tourism'];
+
+  const allPois: OsmPoi[] = [];
+  const poiClasses = new Set(['amenity', 'shop', 'tourism', 'leisure', 'craft']);
+
+  await Promise.all(
+    queries.map(async (q) => {
+      try {
+        const params = new URLSearchParams({
+          q,
+          format: 'jsonv2',
+          viewbox: `${west},${north},${east},${south}`,
+          bounded: '1',
+          limit: '20',
+          addressdetails: '1',
+        });
+
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+          {
+            headers: { 'User-Agent': 'PolarisMaps/1.0', Accept: 'application/json' },
+          },
+        );
+        if (!response.ok) return;
+
+        const data: Array<{
+          place_id: number;
+          lat: string;
+          lon: string;
+          display_name: string;
+          type: string;
+          class: string;
+          address?: { city?: string; town?: string; village?: string; road?: string };
+        }> = await response.json();
+
+        for (const item of data) {
+          if (!poiClasses.has(item.class)) continue;
+          const lat = parseFloat(item.lat);
+          const lng = parseFloat(item.lon);
+          if (isNaN(lat) || isNaN(lng)) continue;
+          const shortName = item.display_name.split(',')[0].trim();
+          allPois.push({
+            id: item.place_id,
+            lat,
+            lng,
+            name: shortName,
+            type: item.class,
+            subtype: item.type,
+            tags: {
+              [item.class]: item.type,
+              name: shortName,
+              ...(item.address?.road ? { 'addr:street': item.address.road } : {}),
+              ...((item.address?.city ?? item.address?.town ?? item.address?.village)
+                ? { 'addr:city': (item.address.city ?? item.address.town ?? item.address.village)! }
+                : {}),
+            },
+          });
+        }
+      } catch {
+        // Individual query failed — continue with others
+      }
+    }),
+  );
+
+  cacheSet(key, allPois);
+  return allPois;
 }

@@ -23,6 +23,8 @@ import * as FileSystem from 'expo-file-system';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { searchAddress, type GeocodingResult } from '../../services/geocoding/geocodingService';
+import { searchByCategory } from '../../services/poi/categorySearchService';
+import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import {
   getSearchHistory,
   addSearchHistory,
@@ -44,6 +46,26 @@ import {
 import { extractTar } from '../../utils/archiveExtract';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
+import type { OsmPoi } from '../../services/poi/osmFetcher';
+import type { GeocodingEntry } from '../../models/geocoding';
+
+/** Convert a category-search POI into the GeocodingResult shape the results list expects. */
+function osmPoiToResult(poi: OsmPoi): GeocodingResult {
+  const entry: GeocodingEntry = {
+    id: poi.id,
+    text: poi.name,
+    type: 'place',
+    housenumber: null,
+    street: poi.tags['addr:street'] ?? null,
+    city: poi.tags['addr:city'] ?? null,
+    state: null,
+    postcode: null,
+    country: null,
+    lat: poi.lat,
+    lng: poi.lng,
+  };
+  return { entry, rank: 0 };
+}
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -351,6 +373,8 @@ export function FloatingSearchPanel({
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
   const setFitBounds = useMapStore((s) => s.setFitBounds);
+  const pendingDirectionsTarget = useMapStore((s) => s.pendingDirectionsTarget);
+  const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const routePreview = useNavigationStore((s) => s.routePreview);
   const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
@@ -409,9 +433,50 @@ export function FloatingSearchPanel({
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (text.length < 2) {
       setResults([]);
+      useOsmPoiStore.getState().clearCategorySearch();
       return;
     }
     debounceTimer.current = setTimeout(async () => {
+      // Resolve bounds: prefer live viewportBounds from the map, fall back to
+      // a box derived from the mapStore viewport center + zoom so category search
+      // always works even before the first onRegionDidChange fires.
+      let bounds = useOsmPoiStore.getState().viewportBounds;
+      if (!bounds) {
+        const vp = useMapStore.getState().viewport;
+        const delta = Math.min(2, (360 / Math.pow(2, vp.zoom)) * 2);
+        bounds = {
+          minLat: vp.lat - delta,
+          minLng: vp.lng - delta,
+          maxLat: vp.lat + delta,
+          maxLng: vp.lng + delta,
+        };
+      }
+
+      // Try category search first (local Overture data → Overpass fallback)
+      useOsmPoiStore.getState().setIsCategorySearching(true);
+      try {
+        const catResult = await searchByCategory(
+          text,
+          bounds.minLat,
+          bounds.minLng,
+          bounds.maxLat,
+          bounds.maxLng,
+        );
+        if (catResult && catResult.pois.length > 0) {
+          useOsmPoiStore
+            .getState()
+            .setCategorySearch(catResult.categories, catResult.pois, catResult.localPrimary);
+          // Show the nearby POIs in the dropdown list
+          setResults(catResult.pois.map(osmPoiToResult));
+          return;
+        }
+      } catch {
+        // Category search failed — fall through to address-only search
+      } finally {
+        useOsmPoiStore.getState().setIsCategorySearching(false);
+      }
+      // No category match — standard geocoding search
+      useOsmPoiStore.getState().clearCategorySearch();
       const found = await searchAddress(text, 10);
       setResults(found);
     }, 320);
@@ -426,6 +491,7 @@ export function FloatingSearchPanel({
     setMode('idle');
     setQuery('');
     setResults([]);
+    useOsmPoiStore.getState().clearCategorySearch();
   }, []);
 
   // ── Dismiss location / route view ────────────
@@ -496,100 +562,134 @@ export function FloatingSearchPanel({
   );
 
   // ── Routing ──────────────────────────────────
-  const handleDirections = useCallback(async () => {
-    if (!selectedResult) return;
-    setIsRouting(true);
-    setRouteError(null);
-    setUsedOnlineRouting(false);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setRouteError('Location permission required');
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+  const performDirections = useCallback(
+    async (dest: { lat: number; lng: number; name: string }) => {
+      setIsRouting(true);
+      setRouteError(null);
+      setUsedOnlineRouting(false);
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setRouteError('Location permission required');
+          return;
+        }
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
 
-      const dest = { lat: selectedResult.entry.lat, lng: selectedResult.entry.lng };
-      const destRegion = await getRegionContainingPoint(dest.lat, dest.lng);
-      const originRegion = await getRegionContainingPoint(
-        pos.coords.latitude,
-        pos.coords.longitude,
-      );
-      let region =
-        (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
-        (originRegion?.downloadStatus === 'complete' ? originRegion : null);
-      if (!region) {
-        const downloaded = await getDownloadedRegions();
-        if (downloaded.length > 0) region = downloaded[0];
-      }
+        const destRegion = await getRegionContainingPoint(dest.lat, dest.lng);
+        const originRegion = await getRegionContainingPoint(
+          pos.coords.latitude,
+          pos.coords.longitude,
+        );
+        let region =
+          (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
+          (originRegion?.downloadStatus === 'complete' ? originRegion : null);
+        if (!region) {
+          const downloaded = await getDownloadedRegions();
+          if (downloaded.length > 0) region = downloaded[0];
+        }
 
-      if (region) {
-        const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
-        const graphTilePath = `${regionDir}routing/`;
-        const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
-        if (!graphDirInfo.exists) {
-          const tarPath = `${regionDir}routing.tar`;
-          const tarInfo = await FileSystem.getInfoAsync(tarPath);
-          if (tarInfo.exists) {
+        if (region) {
+          const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
+          const graphTilePath = `${regionDir}routing/`;
+          const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
+          if (!graphDirInfo.exists) {
+            const tarPath = `${regionDir}routing.tar`;
+            const tarInfo = await FileSystem.getInfoAsync(tarPath);
+            if (tarInfo.exists) {
+              try {
+                await extractTar(tarPath, graphTilePath);
+                await FileSystem.deleteAsync(tarPath, { idempotent: true });
+              } catch {
+                // fall through to online routing
+              }
+            } else {
+              const db = await getDatabase();
+              await db.runAsync(
+                'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
+                ['none', Math.floor(Date.now() / 1000), region.id],
+              );
+              await FileSystem.deleteAsync(regionDir, { idempotent: true });
+              region = null;
+            }
+          }
+          if (region) {
             try {
-              await extractTar(tarPath, graphTilePath);
-              await FileSystem.deleteAsync(tarPath, { idempotent: true });
+              await initRouting(`${FileSystem.documentDirectory}regions/${region.id}/routing/`);
             } catch {
               // fall through to online routing
             }
-          } else {
-            const db = await getDatabase();
-            await db.runAsync(
-              'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
-              ['none', Math.floor(Date.now() / 1000), region.id],
-            );
-            await FileSystem.deleteAsync(regionDir, { idempotent: true });
-            region = null;
           }
         }
-        if (region) {
-          try {
-            await initRouting(`${FileSystem.documentDirectory}regions/${region.id}/routing/`);
-          } catch {
-            // fall through to online routing
+
+        const routes = await computeRoute(
+          [{ lat: pos.coords.latitude, lng: pos.coords.longitude }, dest],
+          'auto',
+        );
+        if (!routes.length) {
+          setRouteError('No route found between these points');
+          return;
+        }
+        if (!region) setUsedOnlineRouting(true);
+
+        // Ensure selectedResult is populated so the route-preview panel renders
+        setSelectedResult((prev) =>
+          prev
+            ? prev
+            : {
+                entry: {
+                  id: 0,
+                  text: dest.name,
+                  type: 'place' as const,
+                  housenumber: null,
+                  street: null,
+                  city: null,
+                  state: null,
+                  postcode: null,
+                  country: null,
+                  lat: dest.lat,
+                  lng: dest.lng,
+                },
+                rank: 0,
+              },
+        );
+        setRoutePreview(routes[0], routes.slice(1), dest, 'auto');
+        if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
+        setMode('route-preview');
+
+        // Fetch traffic-adjusted ETA in background
+        fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+          if (result) {
+            useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
           }
-        }
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setRouteError(msg || 'Could not compute route');
+      } finally {
+        setIsRouting(false);
       }
+    },
+    [setRoutePreview, setFitBounds],
+  );
 
-      const routes = await computeRoute(
-        [{ lat: pos.coords.latitude, lng: pos.coords.longitude }, dest],
-        'auto',
-      );
-      if (!routes.length) {
-        setRouteError('No route found between these points');
-        return;
-      }
-      if (!region) setUsedOnlineRouting(true);
+  const handleDirections = useCallback(async () => {
+    if (!selectedResult) return;
+    await performDirections({
+      lat: selectedResult.entry.lat,
+      lng: selectedResult.entry.lng,
+      name: selectedResult.entry.text,
+    });
+  }, [selectedResult, performDirections]);
 
-      setRoutePreview(
-        routes[0],
-        routes.slice(1),
-        { lat: dest.lat, lng: dest.lng, name: selectedResult.entry.text },
-        'auto',
-      );
-      if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
-      setMode('route-preview');
-
-      // Fetch traffic-adjusted ETA in background
-      fetchRouteTrafficEta(routes[0].geometry).then((result) => {
-        if (result) {
-          useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
-        }
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setRouteError(msg || 'Could not compute route');
-    } finally {
-      setIsRouting(false);
-    }
-  }, [selectedResult, setRoutePreview, setFitBounds]);
+  // Handle directions triggered from the POI detail screen
+  useEffect(() => {
+    if (!pendingDirectionsTarget) return;
+    const target = pendingDirectionsTarget;
+    setPendingDirectionsTarget(null);
+    performDirections(target);
+  }, [pendingDirectionsTarget, setPendingDirectionsTarget, performDirections]);
 
   const handleStartNavigation = useCallback(() => {
     if (!routePreview) return;

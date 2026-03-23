@@ -3,6 +3,7 @@ import { encode as geohashEncode } from '../../utils/geohash';
 import { OVERTURE_PLACES_URL } from '../../constants/config';
 import type { Place, PlaceCategory } from '../../models/poi';
 import type { OverturePlace, OverturePlaceCollection } from '../../types/overture';
+import type { SQLiteBindValue } from 'expo-sqlite';
 
 /**
  * Fetch Overture Maps places for a bounding box and upsert into the local
@@ -263,8 +264,11 @@ export function overtureFeatureToPlace(feature: OverturePlace): Place | null {
     addressCountry: addr?.country ?? undefined,
     phone: props.phones?.[0] ?? undefined,
     website: props.websites?.[0] ?? undefined,
+    socials: props.socials?.length ? props.socials : undefined,
+    emails: props.emails?.length ? props.emails : undefined,
     hours: undefined, // Overture doesn't include opening hours
     brandWikidata: props.brand?.wikidata ?? undefined,
+    brandName: props.brand?.names?.primary ?? undefined,
     avgRating: undefined,
     reviewCount: 0,
     status: mapStatus(props.operating_status),
@@ -283,29 +287,23 @@ export function overtureFeatureToPlace(feature: OverturePlace): Place | null {
 async function upsertOverturePlaces(places: Place[]): Promise<void> {
   const db = await getDatabase();
 
-  // Batch insert/update in a transaction
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    for (const p of places) {
-      await txn.runAsync(
-        `INSERT INTO places (
-          uuid, name, category, lat, lng, geohash8,
+  // SQLite variable limit is 999. With 25 columns per row, max ~39 rows per statement.
+  // Use chunks of 30 rows to stay safely under the limit.
+  const CHUNK_SIZE = 30;
+  const colCount = 25;
+  const colList = `uuid, name, category, lat, lng, geohash8,
           address_street, address_city, address_state, address_postcode, address_country,
-          phone, website, hours, avg_rating, review_count,
-          status, source, author_pubkey, signature, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(uuid) DO UPDATE SET
-          name = excluded.name,
-          category = excluded.category,
-          address_street = COALESCE(excluded.address_street, places.address_street),
-          address_city = COALESCE(excluded.address_city, places.address_city),
-          address_state = COALESCE(excluded.address_state, places.address_state),
-          address_postcode = COALESCE(excluded.address_postcode, places.address_postcode),
-          address_country = COALESCE(excluded.address_country, places.address_country),
-          phone = COALESCE(excluded.phone, places.phone),
-          website = COALESCE(excluded.website, places.website),
-          status = excluded.status,
-          updated_at = excluded.updated_at`,
-        [
+          phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
+          status, source, author_pubkey, signature, created_at, updated_at`;
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    for (let i = 0; i < places.length; i += CHUNK_SIZE) {
+      const chunk = places.slice(i, i + CHUNK_SIZE);
+      const rowPlaceholders = `(${Array(colCount).fill('?').join(', ')})`;
+      const placeholders = chunk.map(() => rowPlaceholders).join(', ');
+      const params: SQLiteBindValue[] = [];
+      for (const p of chunk) {
+        params.push(
           p.uuid,
           p.name,
           p.category,
@@ -319,6 +317,9 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           p.addressCountry ?? null,
           p.phone ?? null,
           p.website ?? null,
+          p.socials?.length ? JSON.stringify(p.socials) : null,
+          p.emails?.length ? JSON.stringify(p.emails) : null,
+          p.brandName ?? null,
           p.hours ?? null,
           p.avgRating ?? null,
           p.reviewCount ?? 0,
@@ -328,7 +329,26 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           p.signature,
           p.createdAt,
           p.updatedAt,
-        ],
+        );
+      }
+      await txn.runAsync(
+        `INSERT INTO places (${colList}) VALUES ${placeholders}
+        ON CONFLICT(uuid) DO UPDATE SET
+          name = excluded.name,
+          category = excluded.category,
+          address_street = COALESCE(excluded.address_street, places.address_street),
+          address_city = COALESCE(excluded.address_city, places.address_city),
+          address_state = COALESCE(excluded.address_state, places.address_state),
+          address_postcode = COALESCE(excluded.address_postcode, places.address_postcode),
+          address_country = COALESCE(excluded.address_country, places.address_country),
+          phone = COALESCE(excluded.phone, places.phone),
+          website = COALESCE(excluded.website, places.website),
+          social_media = COALESCE(excluded.social_media, places.social_media),
+          emails = COALESCE(excluded.emails, places.emails),
+          brand_name = COALESCE(excluded.brand_name, places.brand_name),
+          status = excluded.status,
+          updated_at = excluded.updated_at`,
+        params,
       );
     }
   });

@@ -38,6 +38,7 @@ function PoiBadge({ poi, onPress }: PoiBadgeProps) {
 
 export function POILayer() {
   const pois = useOsmPoiStore((s) => s.pois);
+  const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const zoom = useOsmPoiStore((s) => s.currentZoom);
   const bounds = useOsmPoiStore((s) => s.viewportBounds);
 
@@ -45,11 +46,16 @@ export function POILayer() {
     useOsmPoiStore.getState().setSelectedPoi(poi);
   }, []);
 
+  // When a category search is active, show those results instead of the
+  // default viewport POIs — this mirrors Google/Apple Maps behaviour of
+  // displaying search-result pills on the map.
+  const activePois = categorySearchResults ?? pois;
+
   /** Non-overlapping, category-diverse subset — recomputed when pois/bounds/zoom change */
   const visiblePois = useMemo(() => {
-    if (!bounds || pois.length === 0) return [];
-    return filterPoisForDisplay(pois, bounds, zoom);
-  }, [pois, bounds, zoom]);
+    if (!bounds || activePois.length === 0) return [];
+    return filterPoisForDisplay(activePois, bounds, zoom);
+  }, [activePois, bounds, zoom]);
 
   if (visiblePois.length === 0) return null;
 

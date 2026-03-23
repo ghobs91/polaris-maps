@@ -74,6 +74,37 @@ export async function getPlacesInBounds(
   return rows.map(rowToPlace);
 }
 
+/**
+ * Search for places by one or more categories within a bounding box.
+ * This is the primary local (Overture-backed) category search. Returns
+ * pre-processed Overture places that were imported via region download
+ * or a previous online fetch.
+ */
+export async function searchPlacesByCategory(
+  categories: PlaceCategory[],
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  limit: number = 100,
+): Promise<Place[]> {
+  if (categories.length === 0) return [];
+  const db = await getDatabase();
+
+  const placeholders = categories.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<PlaceRow>(
+    `SELECT * FROM places
+     WHERE category IN (${placeholders})
+       AND lat BETWEEN ? AND ?
+       AND lng BETWEEN ? AND ?
+       AND status = 'open'
+     ORDER BY avg_rating DESC NULLS LAST
+     LIMIT ?`,
+    [...categories, south, north, west, east, limit],
+  );
+  return rows.map(rowToPlace);
+}
+
 export async function createPlace(
   place: Omit<
     Place,
@@ -164,9 +195,9 @@ async function upsertPlaceCache(place: Place): Promise<void> {
     `INSERT OR REPLACE INTO places (
       uuid, name, category, lat, lng, geohash8,
       address_street, address_city, address_state, address_postcode, address_country,
-      phone, website, hours, avg_rating, review_count,
+      phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
       status, source, author_pubkey, signature, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       place.uuid,
       place.name,
@@ -181,6 +212,9 @@ async function upsertPlaceCache(place: Place): Promise<void> {
       place.addressCountry ?? null,
       place.phone ?? null,
       place.website ?? null,
+      place.socials?.length ? JSON.stringify(place.socials) : null,
+      place.emails?.length ? JSON.stringify(place.emails) : null,
+      place.brandName ?? null,
       place.hours ?? null,
       place.avgRating ?? null,
       place.reviewCount ?? 0,
@@ -209,6 +243,9 @@ function placeToGunRecord(p: Place): Record<string, unknown> {
     address_country: p.addressCountry,
     phone: p.phone,
     website: p.website,
+    social_media: p.socials?.length ? JSON.stringify(p.socials) : undefined,
+    emails: p.emails?.length ? JSON.stringify(p.emails) : undefined,
+    brand_name: p.brandName,
     hours: p.hours,
     status: p.status,
     source: p.source,
@@ -233,6 +270,9 @@ interface PlaceRow {
   address_country: string | null;
   phone: string | null;
   website: string | null;
+  social_media: string | null;
+  emails: string | null;
+  brand_name: string | null;
   hours: string | null;
   avg_rating: number | null;
   review_count: number | null;
@@ -259,6 +299,9 @@ function rowToPlace(row: PlaceRow): Place {
     addressCountry: row.address_country ?? undefined,
     phone: row.phone ?? undefined,
     website: row.website ?? undefined,
+    socials: row.social_media ? (JSON.parse(row.social_media) as string[]) : undefined,
+    emails: row.emails ? (JSON.parse(row.emails) as string[]) : undefined,
+    brandName: row.brand_name ?? undefined,
     hours: row.hours ?? undefined,
     avgRating: row.avg_rating ?? undefined,
     reviewCount: row.review_count ?? 0,

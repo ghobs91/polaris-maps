@@ -68,8 +68,11 @@ export interface Place {
   addressCountry?: string;
   phone?: string;
   website?: string;
+  socials?: string[]; // Social media URLs (Overture socials[])
+  emails?: string[]; // Email addresses (Overture emails[])
   hours?: string; // JSON-encoded
   brandWikidata?: string;
+  brandName?: string; // Brand display name (Overture brand.names.primary)
   avgRating?: number;
   reviewCount?: number;
   status: PlaceStatus;

@@ -27,7 +27,9 @@ export function SearchResults({ results, onSelect }: SearchResultsProps) {
             <Text style={styles.text} numberOfLines={1}>
               {item.entry.text}
             </Text>
-            <Text style={styles.type}>{item.entry.type}</Text>
+            <Text style={styles.type}>
+              {item.entry.city ? `${item.entry.type} · ${item.entry.city}` : item.entry.type}
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
         </TouchableOpacity>

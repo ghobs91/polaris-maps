@@ -14,6 +14,8 @@ interface MapState {
   trafficLayerVisible: boolean;
   // [minLng, minLat, maxLng, maxLat] — set to trigger camera fitBounds
   fitBounds: [number, number, number, number] | null;
+  // Set from outside the map tab (e.g. POI detail) to auto-trigger directions
+  pendingDirectionsTarget: { lat: number; lng: number; name: string } | null;
 
   setViewport: (viewport: Partial<MapState['viewport']>) => void;
   setLoading: (loading: boolean) => void;
@@ -21,6 +23,7 @@ interface MapState {
   setMapStyle: (style: MapState['mapStyle']) => void;
   setTrafficLayerVisible: (visible: boolean) => void;
   setFitBounds: (bounds: [number, number, number, number] | null) => void;
+  setPendingDirectionsTarget: (target: MapState['pendingDirectionsTarget']) => void;
 }
 
 export const useMapStore = create<MapState>()((set) => ({
@@ -36,6 +39,7 @@ export const useMapStore = create<MapState>()((set) => ({
   mapStyle: 'default',
   trafficLayerVisible: true,
   fitBounds: null,
+  pendingDirectionsTarget: null,
 
   setViewport: (viewport) => set((state) => ({ viewport: { ...state.viewport, ...viewport } })),
   setLoading: (isLoadingTiles) => set({ isLoadingTiles }),
@@ -43,4 +47,5 @@ export const useMapStore = create<MapState>()((set) => ({
   setMapStyle: (mapStyle) => set({ mapStyle }),
   setTrafficLayerVisible: (trafficLayerVisible) => set({ trafficLayerVisible }),
   setFitBounds: (fitBounds) => set({ fitBounds }),
+  setPendingDirectionsTarget: (pendingDirectionsTarget) => set({ pendingDirectionsTarget }),
 }));

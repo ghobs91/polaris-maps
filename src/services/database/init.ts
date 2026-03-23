@@ -133,6 +133,9 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       address_country TEXT,
       phone TEXT,
       website TEXT,
+      social_media TEXT,
+      emails TEXT,
+      brand_name TEXT,
       hours TEXT,
       avg_rating REAL,
       review_count INTEGER DEFAULT 0,
@@ -190,6 +193,19 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       await database.execAsync(`ALTER TABLE regions DROP COLUMN ${col}`);
     } catch {
       // Column already removed or never existed
+    }
+  }
+
+  // Add Overture-enriched columns if this is an existing database
+  for (const ddl of [
+    `ALTER TABLE places ADD COLUMN brand_name TEXT`,
+    `ALTER TABLE places ADD COLUMN social_media TEXT`,
+    `ALTER TABLE places ADD COLUMN emails TEXT`,
+  ]) {
+    try {
+      await database.execAsync(ddl);
+    } catch {
+      // Column already exists
     }
   }
 }
