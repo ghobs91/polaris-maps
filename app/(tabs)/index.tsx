@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, Dimensions } from 'react-native';
 import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
+import type { MapViewHandle } from '@/components/map/MapView';
 import { FloatingSearchPanel } from '@/components/map/FloatingSearchPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
@@ -26,12 +27,30 @@ export default function MapScreen() {
     })();
   }, [setViewport]);
 
+  const locateTo = useMapStore((s) => s.locateTo);
+  const mapViewRef = useRef<MapViewHandle>(null);
+
   const handleLocate = useCallback(async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return;
-    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-    setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 15 });
-  }, [setViewport]);
+    // Panel covers ~52% of screen height; offset camera so the dot
+    // sits in the centre of the visible map area above the panel.
+    const { height } = Dimensions.get('window');
+    const panelOffset = Math.round(height * 0.52);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      // Use last-known for instant response, then update with fresh GPS fix
+      const last = await Location.getLastKnownPositionAsync();
+      if (last) {
+        mapViewRef.current?.flyTo(last.coords.latitude, last.coords.longitude, 15, panelOffset);
+        locateTo(last.coords.latitude, last.coords.longitude, 15);
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      mapViewRef.current?.flyTo(loc.coords.latitude, loc.coords.longitude, 15, panelOffset);
+      locateTo(loc.coords.latitude, loc.coords.longitude, 15);
+    } catch {
+      // Location unavailable — silently ignore
+    }
+  }, [locateTo]);
 
   const handleMapPress = useCallback((lat: number, lng: number) => {
     useMapStore.getState().setSelectedLocation({ lat, lng });
@@ -40,7 +59,7 @@ export default function MapScreen() {
   return (
     <ErrorBoundary>
       <View style={styles.container}>
-        <MapView routeGeometry={routeGeometry} onMapPress={handleMapPress} />
+        <MapView ref={mapViewRef} routeGeometry={routeGeometry} onMapPress={handleMapPress} />
         <FloatingSearchPanel
           onProfilePress={() => setShowNodeDrawer(true)}
           onLocatePress={handleLocate}

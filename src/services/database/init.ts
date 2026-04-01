@@ -149,6 +149,34 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_places_geohash ON places (geohash8);
     CREATE INDEX IF NOT EXISTS idx_places_category ON places (category, geohash8);
     CREATE INDEX IF NOT EXISTS idx_places_author ON places (author_pubkey);
+    CREATE INDEX IF NOT EXISTS idx_places_name ON places (name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_places_brand ON places (brand_name COLLATE NOCASE);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS places_fts USING fts5(
+      name,
+      brand_name,
+      category,
+      address_city,
+      content='places',
+      content_rowid='rowid',
+      tokenize='unicode61 remove_diacritics 2'
+    );
+
+    -- Triggers to keep places_fts in sync with the places table
+    CREATE TRIGGER IF NOT EXISTS places_fts_insert AFTER INSERT ON places BEGIN
+      INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+        VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
+    END;
+    CREATE TRIGGER IF NOT EXISTS places_fts_delete AFTER DELETE ON places BEGIN
+      INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+        VALUES ('delete', OLD.rowid, OLD.name, OLD.brand_name, OLD.category, OLD.address_city);
+    END;
+    CREATE TRIGGER IF NOT EXISTS places_fts_update AFTER UPDATE ON places BEGIN
+      INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+        VALUES ('delete', OLD.rowid, OLD.name, OLD.brand_name, OLD.category, OLD.address_city);
+      INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+        VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
+    END;
 
     CREATE TABLE IF NOT EXISTS reviews (
       id TEXT PRIMARY KEY,

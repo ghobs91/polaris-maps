@@ -161,6 +161,11 @@ export async function initRouting(graphTilePath: string): Promise<void> {
   initialized = true;
 }
 
+/** Returns true if a local routing graph has been successfully loaded. */
+export function isRoutingInitialized(): boolean {
+  return initialized;
+}
+
 export async function computeRoute(
   waypoints: Array<{ lat: number; lng: number }>,
   costing: CostingModel,

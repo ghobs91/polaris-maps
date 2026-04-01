@@ -23,6 +23,63 @@ export async function searchPlaces(query: string, limit: number = 20): Promise<P
   return rows.map(rowToPlace);
 }
 
+/**
+ * FTS5-powered text search on the places table.
+ * Supports prefix matching, tokenized multi-word queries, and relevance ranking.
+ * Falls back to LIKE search if FTS table is empty or query fails.
+ */
+export async function searchPlacesFts(
+  query: string,
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  limit: number = 50,
+): Promise<Place[]> {
+  if (!query.trim()) return [];
+  const db = await getDatabase();
+
+  // Build an FTS5 match query with prefix matching on each word
+  const ftsQuery = query
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0)
+    .map((w) => `"${w.replace(/"/g, '')}"*`)
+    .join(' ');
+
+  if (!ftsQuery) return [];
+
+  try {
+    const rows = await db.getAllAsync<PlaceRow>(
+      `SELECT p.* FROM places p
+       JOIN places_fts ON places_fts.rowid = p.rowid
+       WHERE places_fts MATCH ?
+         AND p.lat BETWEEN ? AND ?
+         AND p.lng BETWEEN ? AND ?
+         AND p.status = 'open'
+       ORDER BY places_fts.rank
+       LIMIT ?`,
+      [ftsQuery, south, north, west, east, limit],
+    );
+    if (rows.length > 0) return rows.map(rowToPlace);
+  } catch {
+    // FTS table may not be populated yet — fall through to LIKE
+  }
+
+  // Fallback: LIKE search with bbox filter
+  const rows = await db.getAllAsync<PlaceRow>(
+    `SELECT * FROM places
+     WHERE (name LIKE ? OR brand_name LIKE ?)
+       AND lat BETWEEN ? AND ?
+       AND lng BETWEEN ? AND ?
+       AND status = 'open'
+     ORDER BY avg_rating DESC NULLS LAST
+     LIMIT ?`,
+    [`%${query}%`, `%${query}%`, south, north, west, east, limit],
+  );
+  return rows.map(rowToPlace);
+}
+
 export async function getNearbyPlaces(
   lat: number,
   lng: number,

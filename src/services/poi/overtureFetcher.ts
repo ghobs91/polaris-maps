@@ -96,6 +96,10 @@ const CATEGORY_MAP: Record<string, PlaceCategory> = {
   bakery: 'bakery',
   fast_food_restaurant: 'fast_food',
   fast_food: 'fast_food',
+  deli: 'deli',
+  delicatessen: 'deli',
+  sandwich_shop: 'deli',
+  bagel_shop: 'deli',
 
   // Shopping
   grocery_store: 'grocery',

@@ -19,6 +19,7 @@ const CATEGORY_NOMINATIM_QUERY: Partial<Record<PlaceCategory, string>> = {
   bar: 'bar pub',
   bakery: 'bakery',
   fast_food: 'fast food',
+  deli: 'deli delicatessen sandwich',
   grocery: 'grocery',
   supermarket: 'supermarket',
   convenience: 'convenience store',
@@ -93,7 +94,14 @@ export async function searchByCategory(
   // Step 1: Local Overture data (fast, offline-capable)
   const localPlaces = await searchPlacesByCategory(categories, south, west, north, east, limit);
 
-  const localPois = localPlaces.map(placeToOsmPoi);
+  let localPois = localPlaces.map(placeToOsmPoi);
+
+  // When a specific cuisine/food type is requested, filter & rank local
+  // results by relevance so generic restaurants don't drown out matches.
+  if (cuisineHint) {
+    localPois = rankByCuisineRelevance(localPois, cuisineHint);
+  }
+
   const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD;
 
   if (localPrimary) {
@@ -101,18 +109,24 @@ export async function searchByCategory(
   }
 
   // Step 2: Overpass fallback — build tag pairs for all resolved categories
-  let allTags = categories.flatMap(categoryToOverpassTags);
+  const allTags = categories.flatMap(categoryToOverpassTags);
 
-  // If we have a cuisine hint, add cuisine-specific tag filters
-  if (cuisineHint) {
-    allTags = allTags.flatMap(([k, v]) => [[k, v] as [string, string]]);
-    // Also add direct cuisine= queries for more specific results
-    allTags.push(['cuisine', cuisineHint]);
-  }
-
+  // When a cuisine hint exists, first try a narrow query with cuisine= ANDed
+  // onto each tag pair. If that yields nothing, retry without the AND filter.
   let overpassPois: OsmPoi[] = [];
   try {
-    overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags);
+    if (cuisineHint) {
+      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, [
+        ['cuisine', cuisineHint],
+      ]);
+    }
+    // Broaden to all category results if narrow query was empty or no hint
+    if (overpassPois.length === 0) {
+      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags);
+      if (cuisineHint) {
+        overpassPois = rankByCuisineRelevance(overpassPois, cuisineHint);
+      }
+    }
   } catch {
     // Overpass unavailable — try Nominatim next
   }
@@ -150,6 +164,36 @@ export async function searchByCategory(
 
 /** ~30 m threshold for deduplication */
 const DEDUP_THRESHOLD_DEG = 0.0003;
+
+/**
+ * Score a POI's relevance to a cuisine keyword.
+ * Higher = more relevant.  0 = no match at all.
+ */
+function cuisineRelevanceScore(poi: OsmPoi, cuisine: string): number {
+  const lowerCuisine = cuisine.toLowerCase();
+  const name = poi.name.toLowerCase();
+  const cuisineTag = (poi.tags.cuisine ?? '').toLowerCase();
+  const subtypeTag = (poi.subtype ?? '').toLowerCase();
+
+  // Direct cuisine tag match is the strongest signal
+  if (cuisineTag.includes(lowerCuisine)) return 3;
+  // Name contains the keyword (e.g. "Joe's Pizza" for "pizza")
+  if (name.includes(lowerCuisine)) return 2;
+  // Subtype match (e.g. subtype "pizza" in some OSM data)
+  if (subtypeTag.includes(lowerCuisine)) return 1;
+
+  return 0;
+}
+
+/**
+ * Rank POIs by relevance to a specific cuisine keyword.
+ * Matching POIs come first (sorted by score), followed by non-matching ones.
+ */
+function rankByCuisineRelevance(pois: OsmPoi[], cuisine: string): OsmPoi[] {
+  return [...pois].sort(
+    (a, b) => cuisineRelevanceScore(b, cuisine) - cuisineRelevanceScore(a, cuisine),
+  );
+}
 
 function deduplicateCategoryResults(primary: OsmPoi[], secondary: OsmPoi[]): OsmPoi[] {
   const result = [...primary];
@@ -206,16 +250,41 @@ async function fetchNominatimPois(
   if (cuisineHint) {
     queryTerms = `${cuisineHint} restaurant`;
   } else {
-    queryTerms = categories
-      .map((c) => CATEGORY_NOMINATIM_QUERY[c] ?? c.replace(/_/g, ' '))
-      .join(' ');
+    // Use the first category's Nominatim term — joining all terms into one
+    // query confuses Nominatim's free-text parser (e.g. "cafe coffee" matches
+    // place names instead of amenity types).
+    const primaryCategory = categories[0];
+    queryTerms = CATEGORY_NOMINATIM_QUERY[primaryCategory] ?? primaryCategory.replace(/_/g, ' ');
   }
 
+  // First try a strictly bounded search within the viewbox
+  let pois = await fetchNominatimPoiSingle(queryTerms, west, north, east, south, limit, true);
+  if (pois.length > 0) return pois;
+
+  // Retry without strict bounding — viewbox acts as a preference/bias so
+  // Nominatim can return nearby POIs that may be just outside the box.
+  pois = await fetchNominatimPoiSingle(queryTerms, west, north, east, south, limit, false);
+  return pois;
+}
+
+/** POI-class values we accept from Nominatim (filters out admin boundaries). */
+const POI_CLASSES = new Set(['amenity', 'shop', 'tourism', 'leisure', 'craft']);
+
+/** Single Nominatim search request, filtered to POI-class results. */
+async function fetchNominatimPoiSingle(
+  queryTerms: string,
+  west: number,
+  north: number,
+  east: number,
+  south: number,
+  limit: number,
+  bounded: boolean,
+): Promise<OsmPoi[]> {
   const params = new URLSearchParams({
     q: queryTerms,
     format: 'jsonv2',
     viewbox: `${west},${north},${east},${south}`,
-    bounded: '1',
+    bounded: bounded ? '1' : '0',
     limit: String(Math.min(limit, 50)),
     addressdetails: '1',
   });
@@ -231,12 +300,9 @@ async function fetchNominatimPois(
 
   const data: NominatimSearchResult[] = await response.json();
 
-  // Filter to only amenity/shop/tourism/leisure class results (skip admin boundaries)
-  const poiClasses = new Set(['amenity', 'shop', 'tourism', 'leisure', 'craft']);
-
   return data
     .filter((item) => {
-      if (!poiClasses.has(item.class)) return false;
+      if (!POI_CLASSES.has(item.class)) return false;
       const lat = parseFloat(item.lat);
       const lng = parseFloat(item.lon);
       return !isNaN(lat) && !isNaN(lng);

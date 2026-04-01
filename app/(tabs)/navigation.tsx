@@ -15,7 +15,10 @@ import {
   snapToRoute,
   computeRemainingMeters,
   haversineMeters,
+  isOffRoute,
+  OFF_ROUTE_THRESHOLD_METERS,
 } from '@/utils/routeSnap';
+import { reroute } from '@/services/routing/routingService';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 
@@ -66,6 +69,11 @@ export default function NavigationScreen() {
       }
     }
   }, [isNavigating, activeRoute]);
+
+  // Counter for consecutive off-route GPS readings; triggers reroute after threshold.
+  const offRouteCountRef = useRef(0);
+  // Prevents overlapping reroute requests.
+  const reroutingRef = useRef(false);
 
   // Dead-reckoning anchor: updated on every GPS callback.
   // pos/segIdx = snapped position on route; speedMps = estimated travel speed;
@@ -197,8 +205,68 @@ export default function NavigationScreen() {
         },
         (location) => {
           const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
-          const { snapped, segmentIndex } = snapToRoute(gpsPos, coords);
+          const {
+            snapped,
+            segmentIndex,
+            distanceMeters: distFromRoute,
+          } = snapToRoute(gpsPos, coords);
           const now = performance.now();
+
+          // --- Off-route detection & rerouting ---
+          if (distFromRoute > OFF_ROUTE_THRESHOLD_METERS) {
+            offRouteCountRef.current++;
+          } else {
+            offRouteCountRef.current = 0;
+          }
+
+          const store = useNavigationStore.getState();
+
+          if (
+            isOffRoute(distFromRoute, offRouteCountRef.current) &&
+            !reroutingRef.current &&
+            store.destination
+          ) {
+            reroutingRef.current = true;
+            store.setDeviated(true);
+            store.setRerouting(true);
+
+            const gpsBearing = location.coords.heading ?? 0;
+            reroute(
+              {
+                lat: location.coords.latitude,
+                lng: location.coords.longitude,
+                bearing: gpsBearing,
+              },
+              { lat: store.destination.lat, lng: store.destination.lng },
+              store.costing,
+            )
+              .then((newRoute) => {
+                const navStore = useNavigationStore.getState();
+                if (navStore.isNavigating) {
+                  navStore.replaceRoute(newRoute);
+                  // Reset DR anchor to start of the new route
+                  const newCoords = decodePolyline(newRoute.geometry);
+                  if (newCoords.length >= 2) {
+                    drAnchorRef.current = {
+                      pos: newCoords[0],
+                      segIdx: 0,
+                      speedMps: (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0,
+                      time: performance.now(),
+                    };
+                  }
+                }
+                offRouteCountRef.current = 0;
+                reroutingRef.current = false;
+              })
+              .catch(() => {
+                // Reroute failed (e.g., no connectivity) — clear rerouting flag
+                // so it will retry on the next off-route GPS reading.
+                useNavigationStore.getState().setRerouting(false);
+                reroutingRef.current = false;
+              });
+
+            return; // Skip normal DR update while rerouting
+          }
 
           // Prefer the GPS speed field; fall back to estimating from distance/time delta.
           let speedMps = (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0;
@@ -245,7 +313,6 @@ export default function NavigationScreen() {
           updateEta(Math.round(progress * totalSeconds), remainingMeters);
 
           // Advance maneuver step if user has progressed past the next step's start shape index
-          const store = useNavigationStore.getState();
           const nextStep = store.currentStepIndex + 1;
           if (
             nextStep < allManeuvers.length &&
@@ -264,6 +331,8 @@ export default function NavigationScreen() {
         interpolationRafRef.current = null;
       }
       drAnchorRef.current = null;
+      offRouteCountRef.current = 0;
+      reroutingRef.current = false;
     };
   }, [isNavigating, activeRoute]);
 

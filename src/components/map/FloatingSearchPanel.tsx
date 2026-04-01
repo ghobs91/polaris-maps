@@ -13,6 +13,7 @@ import {
   Animated,
   ActivityIndicator,
   Switch,
+  PanResponder,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,9 +23,10 @@ import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
-import { searchAddress, type GeocodingResult } from '../../services/geocoding/geocodingService';
-import { searchByCategory } from '../../services/poi/categorySearchService';
+import { type GeocodingResult } from '../../services/geocoding/geocodingService';
+import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
+import type { OsmPoi } from '../../services/poi/osmFetcher';
 import {
   getSearchHistory,
   addSearchHistory,
@@ -37,7 +39,11 @@ import {
 } from '../../services/favorites/favoritesService';
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
-import { computeRoute, initRouting } from '../../services/routing/routingService';
+import {
+  computeRoute,
+  initRouting,
+  isRoutingInitialized,
+} from '../../services/routing/routingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
   getRegionContainingPoint,
@@ -46,25 +52,24 @@ import {
 import { extractTar } from '../../utils/archiveExtract';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
-import type { OsmPoi } from '../../services/poi/osmFetcher';
 import type { GeocodingEntry } from '../../models/geocoding';
 
-/** Convert a category-search POI into the GeocodingResult shape the results list expects. */
-function osmPoiToResult(poi: OsmPoi): GeocodingResult {
+/** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
+function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
-    id: poi.id,
-    text: poi.name,
-    type: 'place',
-    housenumber: null,
-    street: poi.tags['addr:street'] ?? null,
-    city: poi.tags['addr:city'] ?? null,
-    state: null,
-    postcode: null,
-    country: null,
-    lat: poi.lat,
-    lng: poi.lng,
+    id: r.poi?.id ?? Math.floor(Math.random() * 1e9),
+    text: r.name,
+    type: r.type === 'address' ? 'address' : 'place',
+    housenumber: r.poi?.tags['addr:housenumber'] ?? null,
+    street: r.poi?.tags['addr:street'] ?? null,
+    city: r.city ?? r.poi?.tags['addr:city'] ?? null,
+    state: r.poi?.tags['addr:state'] ?? null,
+    postcode: r.poi?.tags['addr:postcode'] ?? null,
+    country: r.poi?.tags['addr:country'] ?? null,
+    lat: r.lat,
+    lng: r.lng,
   };
-  return { entry, rank: 0 };
+  return { entry, rank: r.score };
 }
 
 // ─────────────────────────────────────────────
@@ -105,23 +110,75 @@ interface FloatingSearchPanelProps {
 function LayersCardContent({
   trafficVisible,
   onTrafficToggle,
-  isDark,
+  isDark: _isDark,
 }: {
   trafficVisible: boolean;
   onTrafficToggle: (v: boolean) => void;
   isDark: boolean;
 }) {
-  const textColor = isDark ? '#EBEBF5' : '#1C1C1E';
+  const textColor = '#EBEBF5';
+  const subtextColor = '#A0A0B8';
+  const chipBg = '#3A3A58';
+  const chipActiveBg = '#007AFF';
+  const mapStyle = useMapStore((s) => s.mapStyle);
+  const setMapStyle = useMapStore((s) => s.setMapStyle);
+
   return (
     <>
       <Text style={[ctrlStyles.cardTitle, { color: textColor }]}>Map Layers</Text>
+
+      {/* Map type selector */}
+      <Text style={[ctrlStyles.sectionLabel, { color: subtextColor }]}>Map Type</Text>
+      <View style={ctrlStyles.chipRow}>
+        <TouchableOpacity
+          style={[
+            ctrlStyles.chip,
+            { backgroundColor: mapStyle === 'default' ? chipActiveBg : chipBg },
+          ]}
+          onPress={() => setMapStyle('default')}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="map-outline"
+            size={15}
+            color={mapStyle === 'default' ? '#FFF' : textColor}
+          />
+          <Text
+            style={[ctrlStyles.chipLabel, { color: mapStyle === 'default' ? '#FFF' : textColor }]}
+          >
+            Default
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            ctrlStyles.chip,
+            { backgroundColor: mapStyle === 'satellite' ? chipActiveBg : chipBg },
+          ]}
+          onPress={() => setMapStyle('satellite')}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="earth-outline"
+            size={15}
+            color={mapStyle === 'satellite' ? '#FFF' : textColor}
+          />
+          <Text
+            style={[ctrlStyles.chipLabel, { color: mapStyle === 'satellite' ? '#FFF' : textColor }]}
+          >
+            Satellite
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Traffic toggle */}
+      <View style={ctrlStyles.cardDivider} />
       <View style={ctrlStyles.cardRow}>
         <Ionicons name="car" size={18} color="#FF9500" style={ctrlStyles.cardRowIcon} />
         <Text style={[ctrlStyles.cardRowLabel, { color: textColor }]}>Traffic</Text>
         <Switch
           value={trafficVisible}
           onValueChange={onTrafficToggle}
-          trackColor={{ false: '#767577', true: '#007AFF' }}
+          trackColor={{ false: '#555', true: '#007AFF' }}
         />
       </View>
     </>
@@ -131,13 +188,13 @@ function LayersCardContent({
 function CtrlBtn({
   icon,
   onPress,
-  isDark,
+  isDark: _isDark,
 }: {
   icon: string;
   onPress: () => void;
   isDark: boolean;
 }) {
-  const iconColor = isDark ? '#EBEBF5' : '#1C1C1E';
+  const iconColor = '#EBEBF5';
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btn}>
       <Ionicons name={icon as any} size={20} color={iconColor} />
@@ -155,7 +212,7 @@ function MapControlsColumn({
   const [layersOpen, setLayersOpen] = useState(false);
   const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
-  const blurTint = isDark ? 'systemThickMaterialDark' : 'systemChromeMaterial';
+  const blurTint = 'systemThickMaterialDark' as const;
 
   return (
     <View style={ctrlStyles.column}>
@@ -252,7 +309,34 @@ const ctrlStyles = StyleSheet.create({
   cardTitle: {
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginBottom: 5,
+  },
+  chipRow: {
+    flexDirection: 'row' as const,
+    gap: 7,
+    marginBottom: 4,
+  },
+  chip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: borderRadius.md,
+    gap: 4,
+  },
+  chipLabel: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+  },
+  cardDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(128,128,128,0.3)',
+    marginVertical: 8,
   },
   cardRow: {
     flexDirection: 'row',
@@ -273,7 +357,7 @@ const ctrlStyles = StyleSheet.create({
 function GlassPanel({
   children,
   style,
-  isDark,
+  isDark: _isDark,
 }: {
   children: React.ReactNode;
   style?: object;
@@ -281,11 +365,7 @@ function GlassPanel({
 }) {
   if (Platform.OS === 'ios') {
     return (
-      <BlurView
-        intensity={78}
-        tint={isDark ? 'systemThickMaterialDark' : 'systemThickMaterial'}
-        style={[styles.glassPanel, style]}
-      >
+      <BlurView intensity={78} tint="systemThickMaterialDark" style={[styles.glassPanel, style]}>
         {children}
       </BlurView>
     );
@@ -295,7 +375,7 @@ function GlassPanel({
       style={[
         styles.glassPanel,
         {
-          backgroundColor: isDark ? 'rgba(28,28,30,0.93)' : 'rgba(242,242,247,0.95)',
+          backgroundColor: 'rgba(28,28,30,0.93)',
         },
         style,
       ]}
@@ -327,10 +407,10 @@ function FavChip({
   onPress,
   onLongPress,
   unset,
-  isDark,
+  isDark: _isDark,
 }: FavChipProps) {
-  const textColor = isDark ? '#F2F2F7' : '#1C1C1E';
-  const subColor = isDark ? '#8E8E93' : '#8E8E93';
+  const textColor = '#F2F2F7';
+  const subColor = '#8E8E93';
 
   return (
     <TouchableOpacity
@@ -390,10 +470,62 @@ export function FloatingSearchPanel({
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
+  const [recentsExpanded, setRecentsExpanded] = useState(false);
 
   const inputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // ── Minimized state (drag-to-collapse, like Google/Apple Maps) ──
+  const [minimized, setMinimized] = useState(false);
+  const collapseAnim = useRef(new Animated.Value(1)).current; // 1 = expanded, 0 = collapsed
+  // Stable refs so PanResponder (created once) can call latest versions
+  const collapsePanelRef = useRef<() => void>(() => {});
+  const expandPanelRef = useRef<() => void>(() => {});
+
+  const expandPanel = useCallback(() => {
+    setMinimized(false);
+    Animated.spring(collapseAnim, {
+      toValue: 1,
+      useNativeDriver: false,
+      tension: 80,
+      friction: 12,
+    }).start();
+  }, [collapseAnim]);
+
+  const collapsePanel = useCallback(() => {
+    Keyboard.dismiss();
+    setMinimized(true);
+    Animated.spring(collapseAnim, {
+      toValue: 0,
+      useNativeDriver: false,
+      tension: 80,
+      friction: 12,
+    }).start();
+  }, [collapseAnim]);
+
+  // Keep refs up to date
+  useEffect(() => {
+    collapsePanelRef.current = collapsePanel;
+  }, [collapsePanel]);
+  useEffect(() => {
+    expandPanelRef.current = expandPanel;
+  }, [expandPanel]);
+
+  // Pan responder on the handle: swipe down > ~30px collapses, swipe up expands
+  const handlePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 30) {
+          collapsePanelRef.current();
+        } else if (g.dy < -20) {
+          expandPanelRef.current();
+        }
+      },
+    }),
+  ).current;
 
   // Track keyboard height so the panel stays above the keyboard
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -437,48 +569,50 @@ export function FloatingSearchPanel({
       return;
     }
     debounceTimer.current = setTimeout(async () => {
-      // Resolve bounds: prefer live viewportBounds from the map, fall back to
-      // a box derived from the mapStore viewport center + zoom so category search
-      // always works even before the first onRegionDidChange fires.
-      let bounds = useOsmPoiStore.getState().viewportBounds;
-      if (!bounds) {
-        const vp = useMapStore.getState().viewport;
-        const delta = Math.min(2, (360 / Math.pow(2, vp.zoom)) * 2);
-        bounds = {
-          minLat: vp.lat - delta,
-          minLng: vp.lng - delta,
-          maxLat: vp.lat + delta,
-          maxLng: vp.lng + delta,
-        };
-      }
+      const vp = useMapStore.getState().viewport;
+      const vb = useOsmPoiStore.getState().viewportBounds;
 
-      // Try category search first (local Overture data → Overpass fallback)
+      // Run unified search — scores and ranks results from local DB,
+      // category search, Photon geocoder, and address geocoding.
       useOsmPoiStore.getState().setIsCategorySearching(true);
       try {
-        const catResult = await searchByCategory(
-          text,
-          bounds.minLat,
-          bounds.minLng,
-          bounds.maxLat,
-          bounds.maxLng,
+        const unified = await unifiedSearch(text, {
+          lat: vp.lat,
+          lng: vp.lng,
+          zoom: vp.zoom,
+          limit: 20,
+          viewportBounds: vb
+            ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
+            : undefined,
+        });
+
+        // Show map markers for ALL results with coordinates
+        const markerPois: OsmPoi[] = unified.map(
+          (r, i) =>
+            r.poi ?? {
+              id: -(i + 1),
+              lat: r.lat,
+              lng: r.lng,
+              name: r.name,
+              type: r.osmType ?? r.type,
+              subtype: r.osmSubtype ?? '',
+              tags: {},
+            },
         );
-        if (catResult && catResult.pois.length > 0) {
-          useOsmPoiStore
-            .getState()
-            .setCategorySearch(catResult.categories, catResult.pois, catResult.localPrimary);
-          // Show the nearby POIs in the dropdown list
-          setResults(catResult.pois.map(osmPoiToResult));
-          return;
+        if (markerPois.length > 0) {
+          useOsmPoiStore.getState().setCategorySearch([], markerPois, false);
+        } else {
+          useOsmPoiStore.getState().clearCategorySearch();
         }
+
+        // Convert to GeocodingResult for the existing result list UI
+        setResults(unified.map(unifiedToGeocodingResult));
       } catch {
-        // Category search failed — fall through to address-only search
+        useOsmPoiStore.getState().clearCategorySearch();
+        setResults([]);
       } finally {
         useOsmPoiStore.getState().setIsCategorySearching(false);
       }
-      // No category match — standard geocoding search
-      useOsmPoiStore.getState().clearCategorySearch();
-      const found = await searchAddress(text, 10);
-      setResults(found);
     }, 320);
   }, []);
 
@@ -631,7 +765,7 @@ export function FloatingSearchPanel({
           setRouteError('No route found between these points');
           return;
         }
-        if (!region) setUsedOnlineRouting(true);
+        if (!isRoutingInitialized()) setUsedOnlineRouting(true);
 
         // Ensure selectedResult is populated so the route-preview panel renders
         setSelectedResult((prev) =>
@@ -793,7 +927,8 @@ export function FloatingSearchPanel({
 
   const panelBottom =
     keyboardHeight > 0 ? keyboardHeight + 12 : insets.bottom + 12 + bottomInsetExtra;
-  const textColor = isDark ? '#F2F2F7' : '#1C1C1E';
+  // Panel always uses dark glass (like Apple Maps) — use light text always
+  const textColor = '#F2F2F7';
   const subColor = '#8E8E93';
 
   // ── Render results list (search or history) ──
@@ -855,6 +990,12 @@ export function FloatingSearchPanel({
     ),
     [st, textColor, subColor, handleSelectResult],
   );
+
+  // Must be declared before any early returns so hooks are always called in the same order
+  const handleFocusExpanding = useCallback(() => {
+    if (minimized) expandPanel();
+    handleFocus();
+  }, [minimized, expandPanel, handleFocus]);
 
   // ── Location detail view (Apple Maps style) ──
   if (mode === 'location' && selectedResult) {
@@ -1017,13 +1158,51 @@ export function FloatingSearchPanel({
     );
   }
 
-  // ── Search / idle panel ───────────────────────
+  // ── Minimized pill (Apple Maps style) ──────────
+  if (minimized) {
+    return (
+      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
+        <View {...handlePanResponder.panHandlers}>
+          {/* Subtle handle above the pill */}
+          <View style={styles.miniHandleRow}>
+            <View style={styles.miniHandle} />
+          </View>
+          <TouchableOpacity activeOpacity={0.85} onPress={expandPanel}>
+            <GlassPanel isDark={isDark} style={styles.miniPill}>
+              <Ionicons name="search" size={18} color={subColor} style={styles.miniSearchIcon} />
+              <Text style={[styles.miniPlaceholder, { color: subColor }]}>Search</Text>
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  (onProfilePress ?? (() => router.push('/(tabs)/profile')))();
+                }}
+                activeOpacity={0.7}
+                style={styles.miniProfileBtn}
+              >
+                <View style={[styles.miniProfileCircle, { backgroundColor: '#3A3A3C' }]}>
+                  <Ionicons name="person" size={16} color="#EBEBF0" />
+                </View>
+              </TouchableOpacity>
+            </GlassPanel>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
       <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
       <GlassPanel isDark={isDark} style={st.panel}>
-        {/* ── Handle bar ── */}
-        <View style={styles.handle} />
+        {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
+        <View
+          {...handlePanResponder.panHandlers}
+          style={styles.handleZone}
+          hitSlop={{ top: 8, bottom: 8 }}
+        >
+          <View style={styles.handle} />
+        </View>
 
         {/* ── Search row ── */}
         <View style={styles.searchRow}>
@@ -1033,7 +1212,7 @@ export function FloatingSearchPanel({
             style={[styles.searchInput, { color: textColor }]}
             value={query}
             onChangeText={handleQueryChange}
-            onFocus={handleFocus}
+            onFocus={handleFocusExpanding}
             placeholder={placeholder}
             placeholderTextColor={subColor}
             autoCorrect={false}
@@ -1050,134 +1229,143 @@ export function FloatingSearchPanel({
               activeOpacity={0.7}
               style={styles.profileBtn}
             >
-              <View
-                style={[styles.profileCircle, { backgroundColor: isDark ? '#3A3A3C' : '#D1D1D6' }]}
-              >
-                <Ionicons name="person" size={18} color={isDark ? '#EBEBF0' : '#3A3A3C'} />
+              <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
+                <Ionicons name="person" size={18} color="#EBEBF0" />
               </View>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* ── Results / history ── */}
-        {(showResults || showHistory) && (
-          <Animated.View style={{ opacity: fadeAnim }}>
-            <View style={st.divider} />
-            <FlatList
-              data={showHistory ? history : results}
-              keyExtractor={(item) => String(item.entry.id)}
-              renderItem={showHistory ? renderHistoryItem : renderResultItem}
-              keyboardShouldPersistTaps="handled"
-              scrollEnabled
-              style={st.resultList}
-              ListHeaderComponent={
-                showHistory ? (
-                  <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
-                ) : null
-              }
-            />
-          </Animated.View>
-        )}
-
-        {/* ── Idle: Favorites + Recents ── */}
-        {mode === 'idle' && (
-          <>
-            {/* Favorites row */}
-            <View style={st.divider} />
-            <View style={st.sectionHeaderRow}>
-              <Text style={[st.sectionTitle, { color: textColor }]}>Places</Text>
-              <Ionicons name="chevron-forward" size={15} color={subColor} />
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.favRow}
-            >
-              <FavChip
-                icon="home"
-                label="Home"
-                iconBg="#30C7E0"
-                subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
-                onPress={handleHomeTap}
-                onLongPress={handleHomeHold}
-                unset={!homeEntry}
-                isDark={isDark}
+        {/* ── Body ── */}
+        <>
+          {/* ── Results / history ── */}
+          {(showResults || showHistory) && (
+            <Animated.View style={{ opacity: fadeAnim }}>
+              <View style={st.divider} />
+              <FlatList
+                data={showHistory ? history : results}
+                keyExtractor={(item) => String(item.entry.id)}
+                renderItem={showHistory ? renderHistoryItem : renderResultItem}
+                keyboardShouldPersistTaps="handled"
+                scrollEnabled
+                style={st.resultList}
+                ListHeaderComponent={
+                  showHistory ? (
+                    <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
+                  ) : null
+                }
               />
-              <FavChip
-                icon="briefcase"
-                label="Work"
-                iconBg="#A47455"
-                subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
-                onPress={handleWorkTap}
-                onLongPress={handleWorkHold}
-                unset={!workEntry}
-                isDark={isDark}
-              />
-              {pinnedEntries.map((fav) => (
+            </Animated.View>
+          )}
+
+          {/* ── Idle: Favorites + Recents ── */}
+          {mode === 'idle' && (
+            <>
+              {/* Favorites row */}
+              <View style={st.divider} />
+              <View style={st.sectionHeaderRow}>
+                <Text style={[st.sectionTitle, { color: textColor }]}>Places</Text>
+                <Ionicons name="chevron-forward" size={15} color={subColor} />
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.favRow}
+              >
                 <FavChip
-                  key={fav.id}
-                  icon="bookmark"
-                  label={fav.label}
-                  iconBg="#6246EA"
-                  subtitle={shorten(fav.entry.text, 12)}
-                  onPress={() => {
-                    navigateToResult({ entry: fav.entry, rank: 0 });
-                    setSelectedResult({ entry: fav.entry, rank: 0 });
-                    setRouteError(null);
-                    setUsedOnlineRouting(false);
-                    clearRoutePreview();
-                    setMode('location');
-                  }}
+                  icon="home"
+                  label="Home"
+                  iconBg="#30C7E0"
+                  subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
+                  onPress={handleHomeTap}
+                  onLongPress={handleHomeHold}
+                  unset={!homeEntry}
                   isDark={isDark}
                 />
-              ))}
-            </ScrollView>
-
-            {/* Recents */}
-            {history.length > 0 && (
-              <>
-                <View style={st.divider} />
-                <View style={st.sectionHeaderRow}>
-                  <Text style={[st.sectionTitle, { color: textColor }]}>Recents</Text>
-                  <Ionicons name="chevron-forward" size={15} color={subColor} />
-                </View>
-                {history.slice(0, 10).map((item) => (
-                  <TouchableOpacity
-                    key={item.entry.id}
-                    style={st.recentRow}
-                    onPress={() => handleSelectResult(item)}
-                    activeOpacity={0.65}
-                  >
-                    <View style={st.recentIcon}>
-                      <Ionicons name="time-outline" size={18} color={subColor} />
-                    </View>
-                    <View style={st.resultText}>
-                      <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
-                        {item.entry.text}
-                      </Text>
-                      <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
-                        {[item.entry.city, item.entry.state].filter(Boolean).join(', ')}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
+                <FavChip
+                  icon="briefcase"
+                  label="Work"
+                  iconBg="#A47455"
+                  subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
+                  onPress={handleWorkTap}
+                  onLongPress={handleWorkHold}
+                  unset={!workEntry}
+                  isDark={isDark}
+                />
+                {pinnedEntries.map((fav) => (
+                  <FavChip
+                    key={fav.id}
+                    icon="bookmark"
+                    label={fav.label}
+                    iconBg="#6246EA"
+                    subtitle={shorten(fav.entry.text, 12)}
+                    onPress={() => {
+                      navigateToResult({ entry: fav.entry, rank: 0 });
+                      setSelectedResult({ entry: fav.entry, rank: 0 });
+                      setRouteError(null);
+                      setUsedOnlineRouting(false);
+                      clearRoutePreview();
+                      setMode('location');
+                    }}
+                    isDark={isDark}
+                  />
                 ))}
-              </>
-            )}
-          </>
-        )}
+              </ScrollView>
 
-        {/* Setting-home/work header when no results yet */}
-        {(mode === 'setting-home' || mode === 'setting-work') && !showResults && (
-          <Animated.View style={{ opacity: fadeAnim }}>
-            <View style={st.divider} />
-            <Text style={[st.settingHint, { color: subColor }]}>
-              {mode === 'setting-home'
-                ? 'Type your home address to save it'
-                : 'Type your work address to save it'}
-            </Text>
-          </Animated.View>
-        )}
+              {/* Recents — collapsed to 1 item by default */}
+              {history.length > 0 && (
+                <>
+                  <View style={st.divider} />
+                  <TouchableOpacity
+                    style={st.sectionHeaderRow}
+                    onPress={() => setRecentsExpanded((v) => !v)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[st.sectionTitle, { color: textColor }]}>Recents</Text>
+                    <Ionicons
+                      name={recentsExpanded ? 'chevron-down' : 'chevron-forward'}
+                      size={15}
+                      color={subColor}
+                    />
+                  </TouchableOpacity>
+                  {(recentsExpanded ? history : history.slice(0, 1)).map((item) => (
+                    <TouchableOpacity
+                      key={item.entry.id}
+                      style={st.recentRow}
+                      onPress={() => handleSelectResult(item)}
+                      activeOpacity={0.65}
+                    >
+                      <View style={st.recentIcon}>
+                        <Ionicons name="time-outline" size={18} color={subColor} />
+                      </View>
+                      <View style={st.resultText}>
+                        <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
+                          {item.entry.text}
+                        </Text>
+                        <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
+                          {[item.entry.city, item.entry.state].filter(Boolean).join(', ')}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+
+          {/* Setting-home/work header when no results yet */}
+          {(mode === 'setting-home' || mode === 'setting-work') && !showResults && (
+            <Animated.View style={{ opacity: fadeAnim }}>
+              <View style={st.divider} />
+              <Text style={[st.settingHint, { color: subColor }]}>
+                {mode === 'setting-home'
+                  ? 'Type your home address to save it'
+                  : 'Type your work address to save it'}
+              </Text>
+            </Animated.View>
+          )}
+        </>
       </GlassPanel>
     </View>
   );
@@ -1433,6 +1621,48 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(120,120,128,0.3)',
     marginTop: 8,
     marginBottom: 4,
+  },
+  handleZone: {
+    // Larger tap/drag target around the handle pill
+    paddingBottom: 4,
+    alignItems: 'center',
+  },
+  // ── Minimized Apple Maps-style pill ──
+  miniHandleRow: {
+    alignItems: 'center',
+    paddingBottom: 4,
+  },
+  miniHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(120,120,128,0.3)',
+  },
+  miniPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingLeft: 14,
+    paddingRight: 6,
+  },
+  miniSearchIcon: {
+    marginRight: 8,
+  },
+  miniPlaceholder: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '400',
+  },
+  miniProfileBtn: {
+    marginLeft: 8,
+  },
+  miniProfileCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   searchRow: {
     flexDirection: 'row',

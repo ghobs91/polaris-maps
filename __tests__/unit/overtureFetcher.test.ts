@@ -148,6 +148,24 @@ describe('mapOvertureCategory', () => {
     });
     expect(mapOvertureCategory(feat)).toBe('other');
   });
+
+  it('maps "deli" basic_category to deli', () => {
+    expect(mapOvertureCategory(makeOverturePlace({ basic_category: 'deli' }))).toBe('deli');
+  });
+
+  it('maps "delicatessen" basic_category to deli', () => {
+    expect(mapOvertureCategory(makeOverturePlace({ basic_category: 'delicatessen' }))).toBe('deli');
+  });
+
+  it('maps "sandwich_shop" basic_category to deli', () => {
+    expect(mapOvertureCategory(makeOverturePlace({ basic_category: 'sandwich_shop' }))).toBe(
+      'deli',
+    );
+  });
+
+  it('maps "bagel_shop" basic_category to deli', () => {
+    expect(mapOvertureCategory(makeOverturePlace({ basic_category: 'bagel_shop' }))).toBe('deli');
+  });
 });
 
 // ---------------------------------------------------------------------------

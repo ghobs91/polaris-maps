@@ -41,6 +41,7 @@ export type PlaceCategory =
   | 'laundry'
   | 'car_repair'
   | 'car_wash'
+  | 'deli'
   | 'police'
   | 'fire_station'
   | 'government'
@@ -123,6 +124,7 @@ export const PLACE_CATEGORIES: PlaceCategory[] = [
   'laundry',
   'car_repair',
   'car_wash',
+  'deli',
   'police',
   'fire_station',
   'government',

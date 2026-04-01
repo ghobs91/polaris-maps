@@ -86,7 +86,33 @@ describe('resolveSearchCategories', () => {
     expect(result).toEqual(['cafe']);
   });
 
-  it('resolves queries with multiple matching words', () => {
+  it('does not resolve proper nouns containing a category word', () => {
+    // "tanger outlet deer park" should NOT be classified as a park search
+    // because "park" is part of the place name "Deer Park", not the intent
+    expect(resolveSearchCategories('tanger outlet deer park')).toBeNull();
+    expect(resolveSearchCategories('hyde park london')).toBeNull();
+    expect(resolveSearchCategories('central park zoo tickets')).toBeNull();
+  });
+
+  it('resolves "deli" to deli, convenience, and bakery categories', () => {
+    const result = resolveSearchCategories('deli');
+    expect(result).toContain('deli');
+    expect(result).toContain('convenience');
+    expect(result).toContain('bakery');
+  });
+
+  it('resolves "bagel" to deli and bakery categories', () => {
+    const result = resolveSearchCategories('bagel');
+    expect(result).toContain('deli');
+    expect(result).toContain('bakery');
+  });
+
+  it('resolves "sandwich" to deli category', () => {
+    const result = resolveSearchCategories('sandwich');
+    expect(result).toContain('deli');
+  });
+
+  it('resolves "coffee and food" with multiple matching words', () => {
     // "coffee and food" → "coffee" → cafe, "food" → restaurant, fast_food, cafe, bakery
     const result = resolveSearchCategories('coffee and food');
     expect(result).toContain('cafe');
@@ -128,6 +154,15 @@ describe('categoryToOverpassTags', () => {
   it('returns correct tags for ev_charging', () => {
     const tags = categoryToOverpassTags('ev_charging');
     expect(tags).toEqual([['amenity', 'charging_station']]);
+  });
+
+  it('returns correct tags for deli', () => {
+    const tags = categoryToOverpassTags('deli');
+    expect(tags).toEqual([
+      ['shop', 'deli'],
+      ['shop', 'sandwich'],
+      ['amenity', 'fast_food'],
+    ]);
   });
 
   it('returns fallback for unknown categories', () => {

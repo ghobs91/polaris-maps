@@ -4,13 +4,19 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMapStore } from '../../stores/mapStore';
+import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, borderRadius, shadow } from '../../constants/theme';
 
 export function MapLayerToggle() {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
+  const { isDark } = useTheme();
   const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
+  const mapStyle = useMapStore((s) => s.mapStyle);
+  const setMapStyle = useMapStore((s) => s.setMapStyle);
+
+  const iconColor = isDark ? '#E0E0E0' : '#333';
 
   return (
     <View style={[styles.container, { top: insets.top + spacing.sm }]}>
@@ -20,29 +26,43 @@ export function MapLayerToggle() {
         style={styles.buttonOuter}
       >
         {Platform.OS === 'ios' ? (
-          <BlurView intensity={60} tint="systemChromeMaterial" style={styles.button}>
-            <Ionicons name="layers" size={22} color="#333" />
+          <BlurView
+            intensity={60}
+            tint={isDark ? 'dark' : 'systemChromeMaterial'}
+            style={styles.button}
+          >
+            <Ionicons name="layers" size={22} color={iconColor} />
           </BlurView>
         ) : (
-          <View style={[styles.button, styles.buttonAndroid]}>
-            <Ionicons name="layers" size={22} color="#333" />
+          <View style={[styles.button, isDark ? styles.buttonAndroidDark : styles.buttonAndroid]}>
+            <Ionicons name="layers" size={22} color={iconColor} />
           </View>
         )}
       </TouchableOpacity>
 
       {open &&
         (Platform.OS === 'ios' ? (
-          <BlurView intensity={60} tint="systemChromeMaterial" style={styles.card}>
+          <BlurView
+            intensity={60}
+            tint={isDark ? 'dark' : 'systemChromeMaterial'}
+            style={styles.card}
+          >
             <CardContent
+              isDark={isDark}
               trafficVisible={trafficLayerVisible}
               onTrafficToggle={setTrafficLayerVisible}
+              mapStyle={mapStyle}
+              onMapStyleChange={setMapStyle}
             />
           </BlurView>
         ) : (
-          <View style={[styles.card, styles.cardAndroid]}>
+          <View style={[styles.card, isDark ? styles.cardAndroidDark : styles.cardAndroid]}>
             <CardContent
+              isDark={isDark}
               trafficVisible={trafficLayerVisible}
               onTrafficToggle={setTrafficLayerVisible}
+              mapStyle={mapStyle}
+              onMapStyleChange={setMapStyle}
             />
           </View>
         ))}
@@ -51,22 +71,74 @@ export function MapLayerToggle() {
 }
 
 function CardContent({
+  isDark,
   trafficVisible,
   onTrafficToggle,
+  mapStyle,
+  onMapStyleChange,
 }: {
+  isDark: boolean;
   trafficVisible: boolean;
   onTrafficToggle: (v: boolean) => void;
+  mapStyle: 'default' | 'satellite' | 'terrain';
+  onMapStyleChange: (style: 'default' | 'satellite' | 'terrain') => void;
 }) {
+  const textColor = isDark ? '#E0E0E0' : '#333';
+  const subtextColor = isDark ? '#A0A0B8' : '#666';
+  const chipBg = isDark ? '#3A3A58' : '#E8E8F0';
+  const chipActiveBg = isDark ? '#409CFF' : '#007AFF';
+
   return (
     <>
-      <Text style={styles.cardTitle}>Map Layers</Text>
+      <Text style={[styles.cardTitle, { color: textColor }]}>Map Layers</Text>
+
+      {/* Map style selector */}
+      <Text style={[styles.sectionLabel, { color: subtextColor }]}>Map Type</Text>
+      <View style={styles.chipRow}>
+        <TouchableOpacity
+          style={[styles.chip, { backgroundColor: mapStyle === 'default' ? chipActiveBg : chipBg }]}
+          onPress={() => onMapStyleChange('default')}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="map-outline"
+            size={16}
+            color={mapStyle === 'default' ? '#FFF' : textColor}
+          />
+          <Text style={[styles.chipLabel, { color: mapStyle === 'default' ? '#FFF' : textColor }]}>
+            Default
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.chip,
+            { backgroundColor: mapStyle === 'satellite' ? chipActiveBg : chipBg },
+          ]}
+          onPress={() => onMapStyleChange('satellite')}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="earth-outline"
+            size={16}
+            color={mapStyle === 'satellite' ? '#FFF' : textColor}
+          />
+          <Text
+            style={[styles.chipLabel, { color: mapStyle === 'satellite' ? '#FFF' : textColor }]}
+          >
+            Satellite
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Traffic toggle */}
+      <View style={styles.divider} />
       <View style={styles.row}>
         <Ionicons name="car" size={18} color="#FF9500" style={styles.rowIcon} />
-        <Text style={styles.rowLabel}>Traffic</Text>
+        <Text style={[styles.rowLabel, { color: textColor }]}>Traffic</Text>
         <Switch
           value={trafficVisible}
           onValueChange={onTrafficToggle}
-          trackColor={{ false: '#767577', true: '#007AFF' }}
+          trackColor={{ false: isDark ? '#555' : '#767577', true: isDark ? '#409CFF' : '#007AFF' }}
         />
       </View>
     </>
@@ -97,6 +169,9 @@ const styles = StyleSheet.create({
   buttonAndroid: {
     backgroundColor: 'rgba(255,255,255,0.92)',
   },
+  buttonAndroidDark: {
+    backgroundColor: 'rgba(40,40,60,0.92)',
+  },
   card: {
     marginTop: spacing.sm,
     borderRadius: borderRadius.lg,
@@ -109,11 +184,40 @@ const styles = StyleSheet.create({
   cardAndroid: {
     backgroundColor: 'rgba(255,255,255,0.95)',
   },
+  cardAndroidDark: {
+    backgroundColor: 'rgba(30,30,50,0.95)',
+  },
   cardTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 10,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 4,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: borderRadius.md,
+    gap: 5,
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(128,128,128,0.3)',
+    marginVertical: 10,
   },
   row: {
     flexDirection: 'row',
@@ -125,6 +229,5 @@ const styles = StyleSheet.create({
   rowLabel: {
     flex: 1,
     fontSize: 15,
-    color: '#333',
   },
 });

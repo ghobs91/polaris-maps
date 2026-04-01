@@ -117,6 +117,19 @@ const QUERY_TO_CATEGORIES: Record<string, PlaceCategory[]> = {
   pastry: ['bakery'],
   pastries: ['bakery'],
 
+  // Deli / Sandwich
+  deli: ['deli', 'convenience', 'bakery'],
+  delis: ['deli', 'convenience', 'bakery'],
+  delicatessen: ['deli', 'convenience'],
+  sandwich: ['deli'],
+  sandwiches: ['deli'],
+  'sandwich shop': ['deli'],
+  sub: ['deli'],
+  subs: ['deli'],
+  bagel: ['deli', 'bakery'],
+  bagels: ['deli', 'bakery'],
+  'bagel shop': ['deli', 'bakery'],
+
   // Shopping — Groceries
   grocery: ['grocery', 'supermarket'],
   groceries: ['grocery', 'supermarket'],
@@ -302,6 +315,57 @@ export function extractCuisineHint(query: string): string | null {
   return null;
 }
 
+// Words that indicate search intent/modifiers rather than place name content.
+// These are excluded from the "content word" ratio when deciding if a
+// multi-word query is a category search vs. a proper noun.
+const MODIFIER_WORDS = new Set([
+  'best',
+  'top',
+  'good',
+  'great',
+  'popular',
+  'recommended',
+  'rated',
+  'cheap',
+  'affordable',
+  'budget',
+  'inexpensive',
+  'expensive',
+  'nice',
+  'favorite',
+  'near',
+  'nearby',
+  'closest',
+  'nearest',
+  'around',
+  'here',
+  'me',
+  'open',
+  'now',
+  'late',
+  'still',
+  '24hr',
+  '24hour',
+  'find',
+  'search',
+  'show',
+  'where',
+  'is',
+  'looking',
+  'for',
+  'want',
+  'need',
+  'the',
+  'a',
+  'an',
+  'in',
+  'at',
+  'on',
+  'to',
+  'my',
+  'i',
+]);
+
 export function resolveSearchCategories(query: string): PlaceCategory[] | null {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return null;
@@ -320,11 +384,25 @@ export function resolveSearchCategories(query: string): PlaceCategory[] | null {
   const words = normalized.split(/\s+/);
   if (words.length > 1) {
     const found = new Set<PlaceCategory>();
+    let matchedWordCount = 0;
+    // Count only content words (non-modifier) for the denominator
+    let contentWordCount = 0;
     for (const word of words) {
+      const isModifier = MODIFIER_WORDS.has(word);
+      if (!isModifier) contentWordCount++;
       const cats = QUERY_TO_CATEGORIES[word];
-      if (cats) cats.forEach((c) => found.add(c));
+      if (cats) {
+        cats.forEach((c) => found.add(c));
+        matchedWordCount++;
+      }
     }
-    if (found.size > 0) return [...found];
+    // Only treat as a category search if a significant portion of content
+    // words are category-related. Otherwise it's likely a proper name
+    // containing a common word (e.g. "Deer Park" is a place, not a park search).
+    const denom = Math.max(contentWordCount, 1);
+    if (found.size > 0 && matchedWordCount / denom >= 0.5) {
+      return [...found];
+    }
   }
 
   return null;
@@ -347,6 +425,11 @@ export function categoryToOverpassTags(category: PlaceCategory): Array<[string, 
     ],
     bakery: [['shop', 'bakery']],
     fast_food: [['amenity', 'fast_food']],
+    deli: [
+      ['shop', 'deli'],
+      ['shop', 'sandwich'],
+      ['amenity', 'fast_food'],
+    ],
     grocery: [
       ['shop', 'greengrocer'],
       ['shop', 'grocery'],

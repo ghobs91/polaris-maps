@@ -3,6 +3,9 @@ import {
   computeRemainingMeters,
   haversineMeters,
   snapToRoute,
+  isOffRoute,
+  OFF_ROUTE_THRESHOLD_METERS,
+  OFF_ROUTE_CONSECUTIVE_COUNT,
 } from '../../src/utils/routeSnap';
 
 describe('routeSnap', () => {
@@ -140,6 +143,61 @@ describe('routeSnap', () => {
 
     it('returns 0 for an empty coords array', () => {
       expect(computeRemainingMeters([0, 0], 0, [])).toBe(0);
+    });
+  });
+
+  describe('snapToRoute distanceMeters', () => {
+    const coords: [number, number][] = [
+      [-74.0, 40.0],
+      [-73.99, 40.0],
+      [-73.98, 40.0],
+    ];
+
+    it('returns ~0 distanceMeters when GPS is exactly on the route', () => {
+      const result = snapToRoute([-73.995, 40.0], coords);
+      expect(result.distanceMeters).toBeLessThan(1);
+    });
+
+    it('returns a positive distanceMeters when GPS is offset from the route', () => {
+      // Offset ~111m north (0.001° latitude ≈ 111m)
+      const result = snapToRoute([-73.995, 40.001], coords);
+      expect(result.distanceMeters).toBeGreaterThan(100);
+      expect(result.distanceMeters).toBeLessThan(120);
+    });
+
+    it('returns a large distanceMeters when GPS is far from route', () => {
+      // Offset ~555m north (0.005° latitude ≈ 555m)
+      const result = snapToRoute([-73.995, 40.005], coords);
+      expect(result.distanceMeters).toBeGreaterThan(500);
+    });
+  });
+
+  describe('isOffRoute', () => {
+    it('returns false when distance is below threshold', () => {
+      expect(isOffRoute(OFF_ROUTE_THRESHOLD_METERS - 1, OFF_ROUTE_CONSECUTIVE_COUNT)).toBe(false);
+    });
+
+    it('returns false when distance exceeds threshold but count is too low', () => {
+      expect(isOffRoute(OFF_ROUTE_THRESHOLD_METERS + 10, OFF_ROUTE_CONSECUTIVE_COUNT - 1)).toBe(
+        false,
+      );
+    });
+
+    it('returns true when distance exceeds threshold and count meets minimum', () => {
+      expect(isOffRoute(OFF_ROUTE_THRESHOLD_METERS + 10, OFF_ROUTE_CONSECUTIVE_COUNT)).toBe(true);
+    });
+
+    it('returns true when distance and count both well above thresholds', () => {
+      expect(isOffRoute(200, 10)).toBe(true);
+    });
+
+    it('returns false when distance is exactly the threshold', () => {
+      // Must be strictly greater than threshold
+      expect(isOffRoute(OFF_ROUTE_THRESHOLD_METERS, OFF_ROUTE_CONSECUTIVE_COUNT)).toBe(false);
+    });
+
+    it('returns false when count is 0', () => {
+      expect(isOffRoute(100, 0)).toBe(false);
     });
   });
 });

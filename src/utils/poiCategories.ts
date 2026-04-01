@@ -21,6 +21,8 @@ const SUBTYPE_MAP: Record<string, PoiCategory> = {
   nightclub: { icon: 'musical-notes', color: '#9B4DCA' },
   ice_cream: { icon: 'ice-cream', color: '#FF9BB5' },
   bakery: { icon: 'nutrition', color: '#E07B39' },
+  deli: { icon: 'restaurant', color: '#FF8C42' },
+  sandwich: { icon: 'restaurant', color: '#FF8C42' },
 
   // Finance
   bank: { icon: 'card', color: '#2D9CDB' },

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchResults } from '@/components/search/SearchResults';
 import { SearchHistory } from '@/components/search/SearchHistory';
-import { searchAddress, type GeocodingResult } from '@/services/geocoding/geocodingService';
+import type { GeocodingResult } from '@/services/geocoding/geocodingService';
 import {
   getSearchHistory,
   addSearchHistory,
@@ -13,29 +13,28 @@ import {
   clearSearchHistory,
 } from '@/services/search/searchHistoryService';
 import { useMapStore } from '@/stores/mapStore';
+import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
-import { resolveSearchCategories } from '@/services/poi/categoryResolver';
-import { searchByCategory } from '@/services/poi/categorySearchService';
-import type { OsmPoi } from '@/services/poi/osmFetcher';
+import { unifiedSearch, type UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import type { GeocodingEntry } from '@/models/geocoding';
 
-/** Convert a POI result into the GeocodingResult shape so existing UI reuses as-is. */
-function osmPoiToGeocodingResult(poi: OsmPoi): GeocodingResult {
+/** Convert a UnifiedSearchResult into a GeocodingResult for the existing UI. */
+function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
-    id: poi.id,
-    text: poi.name,
-    type: 'place',
+    id: r.poi?.id ?? Math.round(r.lat * 1e6 + r.lng * 1e3),
+    text: r.name,
+    type: r.type === 'poi' ? 'place' : r.type === 'address' ? 'address' : 'place',
     housenumber: null,
     street: null,
-    city: poi.tags['addr:city'] ?? null,
+    city: r.city ?? null,
     state: null,
     postcode: null,
     country: null,
-    lat: poi.lat,
-    lng: poi.lng,
+    lat: r.lat,
+    lng: r.lng,
   };
-  return { entry, rank: 0 };
+  return { entry, rank: r.score };
 }
 
 export default function SearchScreen() {
@@ -64,33 +63,27 @@ export default function SearchScreen() {
         return;
       }
       debounceTimer.current = setTimeout(async () => {
-        // If the query resolves to a known POI category, run category search
-        // around the current map viewport instead of geocoding.
-        const cats = resolveSearchCategories(q);
-        if (cats) {
-          try {
-            // Derive a viewport bounding box from the current map center + zoom.
-            const delta = Math.min(2, (360 / Math.pow(2, viewport.zoom)) * 2);
-            const { lat, lng } = viewport;
-            const poiResult = await searchByCategory(
-              q,
-              lat - delta,
-              lng - delta,
-              lat + delta,
-              lng + delta,
-            );
-            if (poiResult && poiResult.pois.length > 0) {
-              setResults(poiResult.pois.map(osmPoiToGeocodingResult));
-              return;
-            }
-          } catch {
-            // Category search failed entirely — fall through to geocoding
-          }
+        try {
+          // Pass the actual map viewport bounds so nearby results get boosted
+          const bounds = useOsmPoiStore.getState().viewportBounds;
+          const unified = await unifiedSearch(q, {
+            lat: viewport.lat,
+            lng: viewport.lng,
+            zoom: viewport.zoom,
+            viewportBounds: bounds
+              ? {
+                  south: bounds.minLat,
+                  north: bounds.maxLat,
+                  west: bounds.minLng,
+                  east: bounds.maxLng,
+                }
+              : undefined,
+          });
+          setResults(unified.map(unifiedToGeocodingResult));
+        } catch {
+          setResults([]);
         }
-        // Fall back to address/geocoding search
-        const found = await searchAddress(q, 10);
-        setResults(found);
-      }, 350);
+      }, 300);
     },
     [viewport],
   );

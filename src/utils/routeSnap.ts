@@ -24,12 +24,13 @@ export function haversineMeters(a: [number, number], b: [number, number]): numbe
 
 /**
  * Snap a GPS coordinate to the nearest point on the route polyline.
- * Returns the snapped [lng, lat], bearing, and the shape index of the segment.
+ * Returns the snapped [lng, lat], bearing, the shape index of the segment,
+ * and the distance in meters from the original position to the snapped point.
  */
 export function snapToRoute(
   pos: [number, number],
   coords: [number, number][],
-): { snapped: [number, number]; bearing: number; segmentIndex: number } {
+): { snapped: [number, number]; bearing: number; segmentIndex: number; distanceMeters: number } {
   let bestDist = Infinity;
   let bestPoint: [number, number] = pos;
   let bestIdx = 0;
@@ -53,7 +54,33 @@ export function snapToRoute(
   }
 
   const bearing = computeBearing(coords[bestIdx], coords[Math.min(bestIdx + 1, coords.length - 1)]);
-  return { snapped: bestPoint, bearing, segmentIndex: bestIdx };
+  return {
+    snapped: bestPoint,
+    bearing,
+    segmentIndex: bestIdx,
+    distanceMeters: bestDist === Infinity ? 0 : bestDist,
+  };
+}
+
+/** Threshold in meters beyond which the user is considered off-route. */
+export const OFF_ROUTE_THRESHOLD_METERS = 50;
+
+/**
+ * Number of consecutive off-route GPS readings required before triggering a reroute.
+ * Prevents false positives from GPS drift or brief signal loss.
+ */
+export const OFF_ROUTE_CONSECUTIVE_COUNT = 3;
+
+/**
+ * Determine whether the user has deviated from the route.
+ * Returns true when `consecutiveOffRouteCount` consecutive GPS readings
+ * have all been farther than `OFF_ROUTE_THRESHOLD_METERS` from the route.
+ */
+export function isOffRoute(distanceToRoute: number, consecutiveOffRouteCount: number): boolean {
+  return (
+    distanceToRoute > OFF_ROUTE_THRESHOLD_METERS &&
+    consecutiveOffRouteCount >= OFF_ROUTE_CONSECUTIVE_COUNT
+  );
 }
 
 /**

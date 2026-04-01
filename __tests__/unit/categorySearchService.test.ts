@@ -191,6 +191,55 @@ describe('searchByCategory', () => {
     expect(result!.localPrimary).toBe(false);
   });
 
+  it('retries Nominatim without strict bounding when bounded search returns no POIs', async () => {
+    jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
+    jest.spyOn(osmFetcher, 'fetchOsmPoisByTags').mockResolvedValue([]);
+
+    // First call (bounded) returns only a boundary result (filtered out),
+    // second call (unbounded) returns an actual cafe POI.
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            place_id: 600,
+            lat: '33.5',
+            lon: '-86.0',
+            display_name: 'Coffee County, Alabama, US',
+            type: 'administrative',
+            class: 'boundary',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            place_id: 601,
+            lat: '40.755',
+            lon: '-73.975',
+            display_name: 'Starbucks, Broadway, NY',
+            type: 'cafe',
+            class: 'amenity',
+            address: { road: 'Broadway', city: 'New York' },
+          },
+        ],
+      });
+
+    const result = await searchByCategory('coffee', bbox.south, bbox.west, bbox.north, bbox.east);
+
+    expect(result).not.toBeNull();
+    expect(result!.pois.length).toBe(1);
+    expect(result!.pois[0].name).toBe('Starbucks');
+
+    // Verify two Nominatim calls: first bounded, then unbounded
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const firstUrl = mockFetch.mock.calls[0][0] as string;
+    const secondUrl = mockFetch.mock.calls[1][0] as string;
+    expect(firstUrl).toContain('bounded=1');
+    expect(secondUrl).toContain('bounded=0');
+  });
+
   it('filters out non-POI Nominatim results (e.g. admin boundaries)', async () => {
     jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
     jest.spyOn(osmFetcher, 'fetchOsmPoisByTags').mockResolvedValue([]);
@@ -272,16 +321,34 @@ describe('searchByCategory', () => {
     expect(callUrl).toContain('chinese+restaurant');
   });
 
-  it('adds cuisine tag to Overpass queries for cuisine-specific searches', async () => {
+  it('adds cuisine tag as extra AND filter on Overpass queries for cuisine-specific searches', async () => {
     jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
     const spy = jest.spyOn(osmFetcher, 'fetchOsmPoisByTags').mockResolvedValue([]);
     mockFetch.mockResolvedValue({ ok: true, json: async () => [] });
 
     await searchByCategory('chinese food', bbox.south, bbox.west, bbox.north, bbox.east);
 
-    // Overpass should include cuisine=chinese tag
-    const tagPairs = spy.mock.calls[0]?.[4] as Array<[string, string]>;
-    expect(tagPairs).toBeDefined();
-    expect(tagPairs).toContainEqual(['cuisine', 'chinese']);
+    // First call should be the narrow (cuisine-filtered) Overpass query
+    const extraFilters = spy.mock.calls[0]?.[5] as Array<[string, string]>;
+    expect(extraFilters).toBeDefined();
+    expect(extraFilters).toContainEqual(['cuisine', 'chinese']);
+  });
+
+  it('ranks results by cuisine relevance when a food keyword is searched', async () => {
+    // Return generic restaurants and one with cuisine=pizza tag
+    const places = [
+      makePlace({ uuid: 'p1', name: 'Kabul Grill', lat: 40.74 }),
+      makePlace({ uuid: 'p2', name: 'Texas Roadhouse', lat: 40.741 }),
+      makePlace({ uuid: 'p3', name: "Joe's Pizza", lat: 40.742 }),
+      makePlace({ uuid: 'p4', name: 'Sabor A Colombia', lat: 40.743 }),
+      makePlace({ uuid: 'p5', name: 'New Chilli and Curry', lat: 40.744 }),
+    ];
+    jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue(places);
+
+    const result = await searchByCategory('pizza', bbox.south, bbox.west, bbox.north, bbox.east);
+
+    expect(result).not.toBeNull();
+    // "Joe's Pizza" should be ranked first because the name contains "pizza"
+    expect(result!.pois[0].name).toBe("Joe's Pizza");
   });
 });

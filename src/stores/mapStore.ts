@@ -16,8 +16,12 @@ interface MapState {
   fitBounds: [number, number, number, number] | null;
   // Set from outside the map tab (e.g. POI detail) to auto-trigger directions
   pendingDirectionsTarget: { lat: number; lng: number; name: string } | null;
+  // Incremented by locateTo so MapView always flies even when position/zoom unchanged
+  locateTrigger: number;
 
   setViewport: (viewport: Partial<MapState['viewport']>) => void;
+  /** Update viewport and force the camera to fly, even if lat/lng/zoom are unchanged. */
+  locateTo: (lat: number, lng: number, zoom: number) => void;
   setLoading: (loading: boolean) => void;
   setSelectedLocation: (location: MapState['selectedLocation']) => void;
   setMapStyle: (style: MapState['mapStyle']) => void;
@@ -40,8 +44,14 @@ export const useMapStore = create<MapState>()((set) => ({
   trafficLayerVisible: true,
   fitBounds: null,
   pendingDirectionsTarget: null,
+  locateTrigger: 0,
 
   setViewport: (viewport) => set((state) => ({ viewport: { ...state.viewport, ...viewport } })),
+  locateTo: (lat, lng, zoom) =>
+    set((s) => ({
+      viewport: { ...s.viewport, lat, lng, zoom },
+      locateTrigger: s.locateTrigger + 1,
+    })),
   setLoading: (isLoadingTiles) => set({ isLoadingTiles }),
   setSelectedLocation: (selectedLocation) => set({ selectedLocation }),
   setMapStyle: (mapStyle) => set({ mapStyle }),

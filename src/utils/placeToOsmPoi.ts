@@ -10,6 +10,7 @@ const CATEGORY_TO_OSM: Record<string, { type: string; subtype: string }> = {
   bar: { type: 'amenity', subtype: 'bar' },
   bakery: { type: 'shop', subtype: 'bakery' },
   fast_food: { type: 'amenity', subtype: 'fast_food' },
+  deli: { type: 'shop', subtype: 'deli' },
   grocery: { type: 'shop', subtype: 'greengrocer' },
   supermarket: { type: 'shop', subtype: 'supermarket' },
   convenience: { type: 'shop', subtype: 'convenience' },

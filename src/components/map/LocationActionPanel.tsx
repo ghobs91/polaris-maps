@@ -16,7 +16,11 @@ import { useRouter } from 'expo-router';
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import * as FileSystem from 'expo-file-system';
-import { computeRoute, initRouting } from '../../services/routing/routingService';
+import {
+  computeRoute,
+  initRouting,
+  isRoutingInitialized,
+} from '../../services/routing/routingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
   getRegionContainingPoint,
@@ -123,7 +127,7 @@ export function LocationActionPanel() {
         setRouteError('No route found between these points');
         return;
       }
-      if (!region) setUsedOnlineRouting(true);
+      if (!isRoutingInitialized()) setUsedOnlineRouting(true);
 
       // Store as preview (not active navigation)
       setRoutePreview(routes[0], routes.slice(1), selectedLocation, 'auto');

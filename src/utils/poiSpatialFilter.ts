@@ -7,8 +7,18 @@ export interface ViewportBounds {
   maxLng: number;
 }
 
-/** Hard cap on total displayed POI pills */
-const MAX_TOTAL = 50;
+/**
+ * Zoom-adaptive cap on total displayed POI pills.
+ * At street level (zoom ≥ 17) we allow up to 200 pills since the viewport
+ * covers a small area and users expect to see every nearby business —
+ * matching the density shown by Overture Maps Explorer.
+ */
+function maxTotalForZoom(zoom: number): number {
+  if (zoom >= 17) return 200;
+  if (zoom >= 16) return 160;
+  if (zoom >= 15) return 120;
+  return 80;
+}
 
 /**
  * Convert a (lat, lng) coordinate to absolute Web Mercator pixel coordinates
@@ -25,17 +35,32 @@ function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number
 
 /**
  * Approximate pill dimensions in screen pixels (icon + average-length label
- * + padding). Generous sizing eliminates overlap for most label lengths.
+ * + padding). At high zoom, tighten spacing so more POIs fit on screen.
  */
-const PILL_W = 130; // typical rendered width
-const PILL_H = 30; // rendered height
-const GAP_X = PILL_W + 16; // horizontal exclusion zone between pill centres
-const GAP_Y = PILL_H + 10; // vertical exclusion zone between pill centres
+const PILL_W = 120; // typical rendered width
+const PILL_H = 28; // rendered height
+
+function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
+  // At zoom ≥ 17 (street level), shrink gaps to ~60% of default so dense
+  // shopping centres render all storefronts. Scale linearly between z15–z17.
+  const t = Math.min(1, Math.max(0, (zoom - 15) / 2)); // 0 at z15, 1 at z17+
+  const scale = 1 - t * 0.4; // 1.0 → 0.6
+  return {
+    gapX: (PILL_W + 8) * scale,
+    gapY: (PILL_H + 6) * scale,
+  };
+}
 
 /** Returns true if (cx, cy) falls within the exclusion zone of any placed pill. */
-function overlaps(cx: number, cy: number, placed: Array<{ x: number; y: number }>): boolean {
+function overlaps(
+  cx: number,
+  cy: number,
+  placed: Array<{ x: number; y: number }>,
+  gapX: number,
+  gapY: number,
+): boolean {
   for (const p of placed) {
-    if (Math.abs(cx - p.x) < GAP_X && Math.abs(cy - p.y) < GAP_Y) return true;
+    if (Math.abs(cx - p.x) < gapX && Math.abs(cy - p.y) < gapY) return true;
   }
   return false;
 }
@@ -92,10 +117,12 @@ export function filterPoisForDisplay(
   // -- 3. Greedy pixel-exclusion selection ----------------------------------
   const placed: Array<{ x: number; y: number }> = [];
   const result: OsmPoi[] = [];
+  const maxTotal = maxTotalForZoom(zoom);
+  const { gapX, gapY } = exclusionGaps(zoom);
 
   for (const { poi, x, y } of candidates) {
-    if (result.length >= MAX_TOTAL) break;
-    if (overlaps(x, y, placed)) continue;
+    if (result.length >= maxTotal) break;
+    if (overlaps(x, y, placed, gapX, gapY)) continue;
     placed.push({ x, y });
     result.push(poi);
   }

@@ -150,10 +150,13 @@ export async function fetchOsmPoisByTags(
   north: number,
   east: number,
   tagPairs: Array<[string, string]>,
+  /** Extra tag filters ANDed onto every clause (e.g. cuisine=pizza). */
+  extraFilters?: Array<[string, string]>,
 ): Promise<OsmPoi[]> {
   if (tagPairs.length === 0) return [];
 
-  const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}:${bboxKey(south, west, north, east)}`;
+  const filterSuffix = (extraFilters ?? []).map(([k, v]) => `["${k}"="${v}"]`).join('');
+  const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}${filterSuffix}:${bboxKey(south, west, north, east)}`;
   const cached = cacheGet(key);
   if (cached) return cached;
 
@@ -161,8 +164,8 @@ export async function fetchOsmPoisByTags(
 
   // Build Overpass union of node+way queries for each tag pair
   const clauses = tagPairs.flatMap(([k, v]) => [
-    `node["${k}"="${v}"]["name"](${bbox});`,
-    `way["${k}"="${v}"]["name"](${bbox});`,
+    `node["${k}"="${v}"]${filterSuffix}["name"](${bbox});`,
+    `way["${k}"="${v}"]${filterSuffix}["name"](${bbox});`,
   ]);
 
   const query = `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout body center;`;
@@ -212,6 +215,82 @@ export async function fetchOsmPoisByTags(
       return { id: el.id as number, lat, lng, name: t.name, type, subtype, tags: t };
     })
     .filter((p): p is OsmPoi => p !== null);
+
+  cacheSet(key, pois);
+  return pois;
+}
+
+/**
+ * Fetch POIs from Overpass whose name matches a case-insensitive regex.
+ * Searches across amenity, shop, tourism, and leisure nodes/ways.
+ *
+ * Used as a fallback when tag-based category search doesn't find enough
+ * results — catches places like "Turnpike Bagels Deli & Bakery" that
+ * have the search term in their name but might be tagged differently.
+ */
+export async function fetchOsmPoisByName(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  namePattern: string,
+): Promise<OsmPoi[]> {
+  if (!namePattern.trim()) return [];
+
+  // Sanitize the pattern for Overpass regex — escape special regex chars
+  // except alphanumerics and spaces
+  const safe = namePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const key = `name:${safe}:${bboxKey(south, west, north, east)}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  const bbox = `${south},${west},${north},${east}`;
+
+  const query = `[out:json][timeout:25];
+(
+  node["name"~"${safe}",i]["amenity"](${bbox});
+  node["name"~"${safe}",i]["shop"](${bbox});
+  node["name"~"${safe}",i]["tourism"](${bbox});
+  node["name"~"${safe}",i]["leisure"](${bbox});
+  way["name"~"${safe}",i]["amenity"](${bbox});
+  way["name"~"${safe}",i]["shop"](${bbox});
+  way["name"~"${safe}",i]["tourism"](${bbox});
+  way["name"~"${safe}",i]["leisure"](${bbox});
+);
+out body center;`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(OVERPASS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) throw new Error(`Overpass API ${res.status}`);
+
+  const data = await res.json();
+
+  const pois = (data.elements as any[])
+    .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)
+    .map((el: any) => {
+      const t = el.tags as Record<string, string>;
+      const type = t.amenity ? 'amenity' : t.shop ? 'shop' : t.tourism ? 'tourism' : 'leisure';
+      const subtype = t[type] ?? 'place';
+      const lat: number = el.type === 'node' ? el.lat : el.center?.lat;
+      const lng: number = el.type === 'node' ? el.lon : el.center?.lon;
+      if (lat == null || lng == null) return null;
+      return { id: el.id as number, lat, lng, name: t.name, type, subtype, tags: t };
+    })
+    .filter((p: any): p is OsmPoi => p !== null);
 
   cacheSet(key, pois);
   return pois;

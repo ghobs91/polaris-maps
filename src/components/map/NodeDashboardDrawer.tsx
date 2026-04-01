@@ -39,15 +39,24 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
   const translateY = useRef(new Animated.Value(DRAWER_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode, setSyncingFeeds } =
-    usePeerStore();
+  const {
+    localNode,
+    activePeers,
+    syncingFeeds,
+    isOnline,
+    setLocalNode,
+    setSyncingFeeds,
+    setActivePeers,
+  } = usePeerStore();
   const [refreshing, setRefreshing] = useState(false);
 
   const loadNodeData = useCallback(async () => {
     try {
       const node = await getLocalNode();
       setLocalNode(node);
-      setSyncingFeeds(getActiveFeeds().length);
+      const feeds = getActiveFeeds();
+      setSyncingFeeds(feeds.length);
+      setActivePeers(feeds.reduce((sum, f) => sum + f.peers, 0));
     } catch {
       try {
         const node = await joinNetwork();

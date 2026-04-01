@@ -1,13 +1,15 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useImperativeHandle, forwardRef } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Dimensions } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { fetchOsmPois, fetchNominatimPois } from '../../services/poi/osmFetcher';
 import { getPlacesInBounds } from '../../services/poi/poiService';
+import { fetchOverturePlaces } from '../../services/poi/overtureFetcher';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
 import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
+import { SATELLITE_STYLE_JSON } from '../../constants/satelliteStyle';
 import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
@@ -23,7 +25,7 @@ Logger.setLogCallback((log) => {
   return false;
 });
 
-const POI_MIN_ZOOM = 14;
+const POI_MIN_ZOOM = 13;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
 
@@ -48,6 +50,10 @@ function deduplicatePois(pois: OsmPoi[]): OsmPoi[] {
   return result;
 }
 
+export interface MapViewHandle {
+  flyTo: (lat: number, lng: number, zoom: number, bottomPadding?: number) => void;
+}
+
 interface MapViewProps {
   routeGeometry?: string;
   onMapPress?: (lat: number, lng: number) => void;
@@ -59,17 +65,30 @@ interface MapViewProps {
   navBearing?: number;
 }
 
-export function MapView({
-  routeGeometry,
-  onMapPress,
-  navigationMode,
-  navPosition,
-  navBearing = 0,
-}: MapViewProps) {
+export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
+  { routeGeometry, onMapPress, navigationMode, navPosition, navBearing = 0 },
+  ref,
+) {
   const mapRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
+
+  useImperativeHandle(ref, () => ({
+    flyTo(lat: number, lng: number, zoom: number, bottomPadding = 0) {
+      if (!cameraRef.current) return;
+      cameraRef.current.setCamera({
+        centerCoordinate: [lng, lat],
+        zoomLevel: zoom,
+        animationDuration: 500,
+        animationMode: 'flyTo',
+        ...(bottomPadding > 0 && {
+          padding: { paddingTop: 0, paddingBottom: bottomPadding, paddingLeft: 0, paddingRight: 0 },
+        }),
+      });
+    },
+  }));
   const { isDark } = useTheme();
   const viewport = useMapStore((s) => s.viewport);
+  const mapStylePref = useMapStore((s) => s.mapStyle);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
@@ -117,6 +136,21 @@ export function MapView({
         );
         // Clear after applying so it can be re-triggered
         useMapStore.getState().setFitBounds(null);
+        return;
+      }
+
+      // locateTo always forces a fly (e.g. repeated taps after panning)
+      if (state.locateTrigger !== prev.locateTrigger) {
+        const v = state.viewport;
+        lastProgrammaticMove.current = Date.now();
+        cameraRef.current.setCamera({
+          centerCoordinate: [v.lng, v.lat],
+          zoomLevel: v.zoom,
+          heading: v.bearing,
+          pitch: v.pitch,
+          animationDuration: 500,
+          animationMode: 'flyTo',
+        });
         return;
       }
 
@@ -190,13 +224,16 @@ export function MapView({
         try {
           useOsmPoiStore.getState().setIsLoading(true);
 
-          // Try Overpass + local Overture in parallel
-          const [osmPois, cachedPlaces] = await Promise.all([
+          // Try Overpass + local Overture + online Overture in parallel.
+          // Online Overture fetch also upserts into SQLite so subsequent
+          // pans over the same area are instant from the local cache.
+          const [osmPois, cachedPlaces, onlineOverture] = await Promise.all([
             fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => [] as OsmPoi[]),
-            getPlacesInBounds(minLat, minLng, maxLat, maxLng).catch(() => []),
+            getPlacesInBounds(minLat, minLng, maxLat, maxLng, 500).catch(() => []),
+            fetchOverturePlaces(minLat, minLng, maxLat, maxLng, 500).catch(() => []),
           ]);
 
-          const overturePois = cachedPlaces.map(placeToOsmPoi);
+          const overturePois = [...cachedPlaces, ...onlineOverture].map(placeToOsmPoi);
           let merged = deduplicatePois([...overturePois, ...osmPois]);
 
           // If both Overpass and local DB returned nothing, try Nominatim
@@ -226,12 +263,20 @@ export function MapView({
     [onMapPress],
   );
 
+  // Resolve the map style based on user preference and dark mode
+  const resolvedMapStyle =
+    mapStylePref === 'satellite'
+      ? SATELLITE_STYLE_JSON
+      : isDark
+        ? DARK_MAP_STYLE_JSON
+        : OPENFREEMAP_STYLE_URL;
+
   return (
     <View style={styles.container}>
       <MapLibreGL.MapView
         ref={mapRef}
         style={styles.map}
-        mapStyle={isDark ? DARK_MAP_STYLE_JSON : OPENFREEMAP_STYLE_URL}
+        mapStyle={resolvedMapStyle}
         onPress={handlePress}
         onRegionDidChange={handleRegionDidChange}
       >
@@ -250,14 +295,14 @@ export function MapView({
         {/* Suppress raster overlay when traffic is shown on the route line instead */}
         <TrafficOverlay suppressRaster={!!routeGeometry} />
 
-        {/* Navigation marker — frosted-glass red triangle */}
+        {/* Navigation marker — Apple Maps-style oval puck with solid arrow */}
         {navigationMode && navPosition && (
           <MapLibreGL.PointAnnotation
             id="navChevron"
             coordinate={navPosition}
             anchor={{ x: 0.5, y: 0.5 }}
           >
-            <NavPuck />
+            <NavPuck isDark={isDark} />
           </MapLibreGL.PointAnnotation>
         )}
 
@@ -291,7 +336,7 @@ export function MapView({
       </MapLibreGL.MapView>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -299,103 +344,52 @@ const styles = StyleSheet.create({
 });
 
 /**
- * Red frosted-glass triangle nav marker, pointing UP (direction of travel).
- * Uses layered CSS-border triangles to simulate a glossy, translucent look.
+ * Apple Maps-style nav puck: oval circle background with a solid blue arrow.
+ * Background colour adapts to light/dark mode.
  */
-function NavPuck() {
+function NavPuck({ isDark: dark }: { isDark: boolean }) {
   return (
-    <View style={puckStyles.wrapper}>
-      {/* Diffuse outer glow halo */}
-      <View style={puckStyles.glow} />
-      {/* Main body — deep semi-transparent red */}
-      <View style={puckStyles.body} />
-      {/* Inner dark layer for depth (lower two-thirds) */}
-      <View style={puckStyles.shadow} />
-      {/* Gloss highlight near the tip */}
-      <View style={puckStyles.gloss} />
+    <View style={[puckStyles.oval, dark ? puckStyles.ovalDark : puckStyles.ovalLight]}>
+      {/* Up-pointing solid arrow via CSS border trick */}
+      <View style={puckStyles.arrow} />
     </View>
   );
 }
 
-// Triangle dimensions
-const TW = 21; // half-base width of the body triangle
-const TH = 33; // height of the body triangle
-const PAD = 5; // padding around the body for the glow halo
-// Derived positions (all triangles share the same tip x-center)
-const GLOSS_BW = Math.round(TW * 0.38); // 11
-const GLOSS_BH = Math.round(TH * 0.44); // 19
-const GLOSS_L = PAD + TW - GLOSS_BW; // 23  — keeps gloss tip x == body tip x
-const GLOSS_BOT = Math.round(TH * 0.52); // 23  — bottom offset inside wrapper
-const SHADOW_BW = Math.round(TW * 0.8); // 22
-const SHADOW_BH = Math.round(TH * 0.65); // 29
-const SHADOW_L = PAD + TW - SHADOW_BW; // 6   — also centered with body
-const SHADOW_BOT = 0;
+const ARROW_HALF = 11; // half of arrow base width
+const ARROW_H = 18; // arrow height
 
 const puckStyles = StyleSheet.create({
-  wrapper: {
-    width: (TW + PAD) * 2, // 68
-    height: TH + PAD, // 50
-    // Drop shadow for depth
-    shadowColor: '#7f1d1d',
-    shadowOpacity: 0.72,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 14,
+  oval: {
+    width: 56,
+    height: 46,
+    borderRadius: 23,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
   },
-  // Slightly oversized dim halo behind the body
-  glow: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
+  ovalLight: {
+    backgroundColor: '#FFFFFF',
+  },
+  ovalDark: {
+    backgroundColor: '#2C2C2E',
+  },
+  // ▲ pointing UP — the CSS-border triangle trick
+  arrow: {
     width: 0,
     height: 0,
-    borderLeftWidth: TW + PAD,
-    borderRightWidth: TW + PAD,
-    borderBottomWidth: TH + PAD,
+    borderLeftWidth: ARROW_HALF,
+    borderRightWidth: ARROW_HALF,
+    borderBottomWidth: ARROW_H,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderBottomColor: 'rgba(220, 40, 40, 0.22)',
-  },
-  // Main triangle — ▲ pointing UP (borderBottomWidth = tip at top)
-  body: {
-    position: 'absolute',
-    bottom: 0,
-    left: PAD,
-    width: 0,
-    height: 0,
-    borderLeftWidth: TW,
-    borderRightWidth: TW,
-    borderBottomWidth: TH,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'rgba(196, 24, 24, 0.92)',
-  },
-  // Darker overlay on the lower portion to add depth/candy-glass look
-  shadow: {
-    position: 'absolute',
-    bottom: SHADOW_BOT,
-    left: SHADOW_L,
-    width: 0,
-    height: 0,
-    borderLeftWidth: SHADOW_BW,
-    borderRightWidth: SHADOW_BW,
-    borderBottomWidth: SHADOW_BH,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'rgba(80, 0, 0, 0.28)',
-  },
-  // Bright gloss highlight pinned near the tip
-  gloss: {
-    position: 'absolute',
-    bottom: GLOSS_BOT,
-    left: GLOSS_L,
-    width: 0,
-    height: 0,
-    borderLeftWidth: GLOSS_BW,
-    borderRightWidth: GLOSS_BW,
-    borderBottomWidth: GLOSS_BH,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: 'rgba(255, 190, 185, 0.32)',
+    borderBottomColor: '#007AFF',
+    // Visual centroid of a triangle is at 1/3 height from base;
+    // nudge up slightly so arrow looks centered in the oval.
+    marginBottom: Math.round(ARROW_H / 5),
   },
 });

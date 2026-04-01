@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MetricCard } from './MetricCard';
-import { colors, spacing, typography } from '../../constants/theme';
+import { spacing, typography } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
 import type { PeerNode } from '../../models/peer';
 
 interface NodeDashboardProps {
@@ -12,6 +13,7 @@ interface NodeDashboardProps {
 }
 
 export function NodeDashboard({ node, activePeers, syncingFeeds, isOnline }: NodeDashboardProps) {
+  const { colors } = useTheme();
   const uptimeHours = node ? Math.floor(node.uptimeSeconds / 3600) : 0;
   const dataServedMb = node ? Math.round(node.dataServedBytes / (1024 * 1024)) : 0;
   const cacheSizeMb = node ? Math.round(node.cacheSizeBytes / (1024 * 1024)) : 0;
@@ -20,8 +22,15 @@ export function NodeDashboard({ node, activePeers, syncingFeeds, isOnline }: Nod
   return (
     <View style={styles.container}>
       <View style={styles.statusRow}>
-        <View style={[styles.statusDot, isOnline ? styles.online : styles.offline]} />
-        <Text style={styles.statusText}>{isOnline ? 'Connected' : 'Offline'}</Text>
+        <View
+          style={[
+            styles.statusDot,
+            isOnline ? { backgroundColor: colors.success } : { backgroundColor: colors.error },
+          ]}
+        />
+        <Text style={[styles.statusText, { color: colors.text }]}>
+          {isOnline ? 'Connected' : 'Offline'}
+        </Text>
       </View>
 
       <View style={styles.metricsRow}>
@@ -57,11 +66,8 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginRight: spacing.xs,
   },
-  online: { backgroundColor: colors.success },
-  offline: { backgroundColor: colors.error },
   statusText: {
     ...typography.body,
-    color: colors.text,
   },
   metricsRow: {
     flexDirection: 'row',

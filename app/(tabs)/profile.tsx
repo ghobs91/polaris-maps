@@ -15,15 +15,24 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
-  const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode, setSyncingFeeds } =
-    usePeerStore();
+  const {
+    localNode,
+    activePeers,
+    syncingFeeds,
+    isOnline,
+    setLocalNode,
+    setSyncingFeeds,
+    setActivePeers,
+  } = usePeerStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadNodeData = useCallback(async () => {
     try {
       const node = await getLocalNode();
       setLocalNode(node);
-      setSyncingFeeds(getActiveFeeds().length);
+      const feeds = getActiveFeeds();
+      setSyncingFeeds(feeds.length);
+      setActivePeers(feeds.reduce((sum, f) => sum + f.peers, 0));
     } catch {
       // Node not joined yet — auto-join
       try {
