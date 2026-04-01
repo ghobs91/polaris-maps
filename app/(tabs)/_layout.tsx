@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
-import { getRegionContainingPoint } from '@/services/regions/regionRepository';
+import { getDownloadedRegions } from '@/services/regions/regionRepository';
 import { RegionGate } from '@/components/regions';
 
 type GateState = 'checking' | 'needed' | 'clear';
@@ -12,31 +12,40 @@ export default function TabLayout() {
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
+        // Fast path: if any region has been downloaded, skip the gate entirely.
+        // This avoids a slow GPS lookup on every app resume and prevents the
+        // gate from flashing when returning from background.
+        const downloaded = await getDownloadedRegions();
+        if (downloaded.length > 0) {
+          if (!cancelled) setGate('clear');
+          return;
+        }
+
+        // No downloaded regions — fall through to the GPS-based check to
+        // suggest a region for the user to download.
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          // No location permission — we can't determine which region to suggest,
-          // so let the user through without blocking.
-          setGate('clear');
+          if (!cancelled) setGate('clear');
           return;
         }
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
+        if (cancelled) return;
         const { latitude: lat, longitude: lng } = loc.coords;
         setUserCoords({ lat, lng });
-        const region = await getRegionContainingPoint(lat, lng);
-        if (region?.downloadStatus === 'complete') {
-          setGate('clear');
-        } else {
-          setGate('needed');
-        }
+        setGate('needed');
       } catch {
         // Fail open — don't block the user if the check itself errors.
-        setGate('clear');
+        if (!cancelled) setGate('clear');
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

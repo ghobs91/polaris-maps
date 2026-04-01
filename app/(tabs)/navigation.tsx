@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
@@ -38,6 +39,18 @@ export default function NavigationScreen() {
     stopNavigation,
     updateEta,
   } = useNavigationStore();
+
+  // Keep the screen awake while actively navigating (like Apple/Google Maps)
+  useEffect(() => {
+    if (isNavigating) {
+      activateKeepAwakeAsync('navigation');
+    } else {
+      deactivateKeepAwake('navigation');
+    }
+    return () => {
+      deactivateKeepAwake('navigation');
+    };
+  }, [isNavigating]);
 
   // Track previous navigation state so we can detect when it ends
   const wasNavigating = useRef(false);
