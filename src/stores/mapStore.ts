@@ -1,4 +1,19 @@
 import { create } from 'zustand';
+import { storage } from '../services/storage/mmkv';
+
+const LAYER_KEY = 'mapLayerToggles';
+
+function loadLayerToggles(): { trafficLayerVisible: boolean } {
+  const raw = storage.getString(LAYER_KEY);
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { trafficLayerVisible: false };
+}
 
 interface MapState {
   viewport: {
@@ -41,7 +56,7 @@ export const useMapStore = create<MapState>()((set) => ({
   isLoadingTiles: false,
   selectedLocation: null,
   mapStyle: 'default',
-  trafficLayerVisible: true,
+  trafficLayerVisible: loadLayerToggles().trafficLayerVisible,
   fitBounds: null,
   pendingDirectionsTarget: null,
   locateTrigger: 0,
@@ -55,7 +70,10 @@ export const useMapStore = create<MapState>()((set) => ({
   setLoading: (isLoadingTiles) => set({ isLoadingTiles }),
   setSelectedLocation: (selectedLocation) => set({ selectedLocation }),
   setMapStyle: (mapStyle) => set({ mapStyle }),
-  setTrafficLayerVisible: (trafficLayerVisible) => set({ trafficLayerVisible }),
+  setTrafficLayerVisible: (trafficLayerVisible) => {
+    set({ trafficLayerVisible });
+    storage.set(LAYER_KEY, JSON.stringify({ trafficLayerVisible }));
+  },
   setFitBounds: (fitBounds) => set({ fitBounds }),
   setPendingDirectionsTarget: (pendingDirectionsTarget) => set({ pendingDirectionsTarget }),
 }));

@@ -39,17 +39,20 @@ import {
 } from '../../services/favorites/favoritesService';
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useTransitStore } from '../../stores/transitStore';
 import {
   computeRoute,
   initRouting,
   isRoutingInitialized,
 } from '../../services/routing/routingService';
+import { planTransitTrip, isOtpConfigured } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
   getRegionContainingPoint,
   getDownloadedRegions,
 } from '../../services/regions/regionRepository';
 import { extractTar } from '../../utils/archiveExtract';
+import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
 import type { GeocodingEntry } from '../../models/geocoding';
@@ -93,7 +96,8 @@ type PanelMode =
   | 'setting-home'
   | 'setting-work'
   | 'location'
-  | 'route-preview';
+  | 'route-preview'
+  | 'transit-preview';
 
 interface FloatingSearchPanelProps {
   /** Extra bottom offset so it doesn't overlap the locate button */
@@ -110,10 +114,14 @@ interface FloatingSearchPanelProps {
 function LayersCardContent({
   trafficVisible,
   onTrafficToggle,
+  transitVisible,
+  onTransitToggle,
   isDark: _isDark,
 }: {
   trafficVisible: boolean;
   onTrafficToggle: (v: boolean) => void;
+  transitVisible: boolean;
+  onTransitToggle: (v: boolean) => void;
   isDark: boolean;
 }) {
   const textColor = '#EBEBF5';
@@ -181,6 +189,18 @@ function LayersCardContent({
           trackColor={{ false: '#555', true: '#007AFF' }}
         />
       </View>
+
+      {/* Transit toggle */}
+      <View style={ctrlStyles.cardDivider} />
+      <View style={ctrlStyles.cardRow}>
+        <Ionicons name="bus" size={18} color="#1A5BA5" style={ctrlStyles.cardRowIcon} />
+        <Text style={[ctrlStyles.cardRowLabel, { color: textColor }]}>Transit</Text>
+        <Switch
+          value={transitVisible}
+          onValueChange={onTransitToggle}
+          trackColor={{ false: '#555', true: '#007AFF' }}
+        />
+      </View>
     </>
   );
 }
@@ -212,6 +232,8 @@ function MapControlsColumn({
   const [layersOpen, setLayersOpen] = useState(false);
   const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
+  const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
+  const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
   const blurTint = 'systemThickMaterialDark' as const;
 
   return (
@@ -223,6 +245,8 @@ function MapControlsColumn({
             <LayersCardContent
               trafficVisible={trafficLayerVisible}
               onTrafficToggle={setTrafficLayerVisible}
+              transitVisible={transitLayerVisible}
+              onTransitToggle={setTransitLayerVisible}
               isDark={isDark}
             />
           </BlurView>
@@ -236,6 +260,8 @@ function MapControlsColumn({
             <LayersCardContent
               trafficVisible={trafficLayerVisible}
               onTrafficToggle={setTrafficLayerVisible}
+              transitVisible={transitLayerVisible}
+              onTransitToggle={setTransitLayerVisible}
               isDark={isDark}
             />
           </View>
@@ -470,6 +496,7 @@ export function FloatingSearchPanel({
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
+  const [isTransitRouting, setIsTransitRouting] = useState(false);
   const [recentsExpanded, setRecentsExpanded] = useState(false);
 
   const inputRef = useRef<TextInput>(null);
@@ -634,6 +661,7 @@ export function FloatingSearchPanel({
     setSelectedResult(null);
     setSelectedLocation(null);
     clearRoutePreview();
+    useTransitStore.getState().clearTransitPlan();
     setRouteError(null);
     setUsedOnlineRouting(false);
   }, [setSelectedLocation, clearRoutePreview]);
@@ -816,6 +844,72 @@ export function FloatingSearchPanel({
       name: selectedResult.entry.text,
     });
   }, [selectedResult, performDirections]);
+
+  // ── Transit Directions ───────────────────────
+  const handleTransitDirections = useCallback(async () => {
+    if (!selectedResult) return;
+    if (!isOtpConfigured()) {
+      setRouteError('Transit routing not configured (set EXPO_PUBLIC_OTP_BASE_URL)');
+      return;
+    }
+    setIsTransitRouting(true);
+    setRouteError(null);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setRouteError('Location permission required');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const dest = {
+        lat: selectedResult.entry.lat,
+        lng: selectedResult.entry.lng,
+        name: selectedResult.entry.text,
+      };
+
+      const enabledModes = useTransitStore.getState().enabledModes;
+      const itineraries = await planTransitTrip({
+        from: origin,
+        to: dest,
+        modes: enabledModes,
+      });
+
+      if (itineraries.length === 0) {
+        setRouteError('No transit routes found');
+        return;
+      }
+
+      useTransitStore.getState().setTransitOrigin(origin);
+      useTransitStore.getState().setTransitDestination(dest);
+      useTransitStore.getState().setItineraries(itineraries);
+      useTransitStore.getState().setTransitLayerVisible(true);
+
+      // Fit map to first itinerary
+      const it = itineraries[0];
+      let minLat = 90,
+        maxLat = -90,
+        minLng = 180,
+        maxLng = -180;
+      for (const leg of it.legs) {
+        for (const place of [leg.from, leg.to]) {
+          if (place.lat < minLat) minLat = place.lat;
+          if (place.lat > maxLat) maxLat = place.lat;
+          if (place.lon < minLng) minLng = place.lon;
+          if (place.lon > maxLng) maxLng = place.lon;
+        }
+      }
+      setFitBounds([minLng, minLat, maxLng, maxLat]);
+      setMode('transit-preview');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRouteError(msg || 'Transit routing failed');
+    } finally {
+      setIsTransitRouting(false);
+    }
+  }, [selectedResult, setFitBounds]);
 
   // Handle directions triggered from the POI detail screen
   useEffect(() => {
@@ -1043,6 +1137,23 @@ export function FloatingSearchPanel({
               )}
               <Text style={st.directionsBtnText}>{isRouting ? 'Routing…' : 'Directions'}</Text>
             </TouchableOpacity>
+            {isOtpConfigured() && (
+              <TouchableOpacity
+                style={[st.directionsBtn, { backgroundColor: '#1A5BA5', flex: 0.7 }]}
+                onPress={handleTransitDirections}
+                disabled={isTransitRouting}
+                activeOpacity={0.85}
+              >
+                {isTransitRouting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Ionicons name="bus" size={20} color="#fff" />
+                )}
+                <Text style={st.directionsBtnText}>
+                  {isTransitRouting ? 'Finding…' : 'Transit'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {routeError ? (
@@ -1153,6 +1264,24 @@ export function FloatingSearchPanel({
               <Text style={st.directionsBtnText}>Navigate</Text>
             </TouchableOpacity>
           </View>
+        </GlassPanel>
+      </View>
+    );
+  }
+
+  // ── Transit preview view ────────────────────
+  if (mode === 'transit-preview') {
+    return (
+      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
+        <GlassPanel isDark={isDark} style={st.panel}>
+          <View style={styles.handle} />
+          <TransitDirectionsPanel
+            onClose={() => {
+              useTransitStore.getState().clearTransitPlan();
+              setMode('idle');
+            }}
+          />
         </GlassPanel>
       </View>
     );

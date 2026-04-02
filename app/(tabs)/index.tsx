@@ -6,8 +6,11 @@ import type { MapViewHandle } from '@/components/map/MapView';
 import { FloatingSearchPanel } from '@/components/map/FloatingSearchPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
+import { TransitStopCard } from '@/components/map/TransitStopCard';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
+import { useTransitStops } from '@/hooks/useTransitStops';
+import { useTransitStore } from '@/stores/transitStore';
 import { ErrorBoundary } from '@/components/common';
 
 export default function MapScreen() {
@@ -16,6 +19,9 @@ export default function MapScreen() {
   const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
   const routeGeometry = activeRouteGeometry ?? previewRouteGeometry;
   const [showNodeDrawer, setShowNodeDrawer] = useState(false);
+
+  // Fetch transit stops when transit layer is toggled on
+  useTransitStops();
 
   // Center on user location at startup
   useEffect(() => {
@@ -54,6 +60,8 @@ export default function MapScreen() {
 
   const handleMapPress = useCallback((lat: number, lng: number) => {
     useMapStore.getState().setSelectedLocation({ lat, lng });
+    // Dismiss transit stop card on map tap
+    useTransitStore.getState().setSelectedStop(null);
   }, []);
 
   return (
@@ -66,6 +74,7 @@ export default function MapScreen() {
         />
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <POIInfoCard />
+        <TransitStopCard />
       </View>
     </ErrorBoundary>
   );

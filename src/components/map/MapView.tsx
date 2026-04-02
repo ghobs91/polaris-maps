@@ -14,6 +14,7 @@ import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
+import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
@@ -331,6 +332,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         )}
 
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
+
+        <TransitLayer />
 
         <POILayer />
       </MapLibreGL.MapView>

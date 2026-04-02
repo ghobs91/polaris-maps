@@ -71,4 +71,4 @@ export interface ValhallaRoute {
   boundingBox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
 }
 
-export type CostingModel = 'auto' | 'pedestrian' | 'bicycle';
+export type CostingModel = 'auto' | 'pedestrian' | 'bicycle' | 'transit';

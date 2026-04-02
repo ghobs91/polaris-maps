@@ -4,6 +4,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMapStore } from '../../stores/mapStore';
+import { useTransitStore } from '../../stores/transitStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, borderRadius, shadow } from '../../constants/theme';
 
@@ -13,6 +14,8 @@ export function MapLayerToggle() {
   const { isDark } = useTheme();
   const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
+  const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
+  const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
   const mapStyle = useMapStore((s) => s.mapStyle);
   const setMapStyle = useMapStore((s) => s.setMapStyle);
 
@@ -42,28 +45,43 @@ export function MapLayerToggle() {
 
       {open &&
         (Platform.OS === 'ios' ? (
-          <BlurView
-            intensity={60}
-            tint={isDark ? 'dark' : 'systemChromeMaterial'}
-            style={styles.card}
-          >
-            <CardContent
-              isDark={isDark}
-              trafficVisible={trafficLayerVisible}
-              onTrafficToggle={setTrafficLayerVisible}
-              mapStyle={mapStyle}
-              onMapStyleChange={setMapStyle}
+          <View style={[styles.cardWrapper, shadow.lg]}>
+            <BlurView
+              intensity={60}
+              tint={isDark ? 'dark' : 'systemChromeMaterial'}
+              style={StyleSheet.absoluteFill}
             />
-          </BlurView>
+            <View style={styles.cardInner}>
+              <CardContent
+                isDark={isDark}
+                trafficVisible={trafficLayerVisible}
+                onTrafficToggle={setTrafficLayerVisible}
+                transitVisible={transitLayerVisible}
+                onTransitToggle={setTransitLayerVisible}
+                mapStyle={mapStyle}
+                onMapStyleChange={setMapStyle}
+              />
+            </View>
+          </View>
         ) : (
-          <View style={[styles.card, isDark ? styles.cardAndroidDark : styles.cardAndroid]}>
-            <CardContent
-              isDark={isDark}
-              trafficVisible={trafficLayerVisible}
-              onTrafficToggle={setTrafficLayerVisible}
-              mapStyle={mapStyle}
-              onMapStyleChange={setMapStyle}
-            />
+          <View
+            style={[
+              styles.cardWrapper,
+              isDark ? styles.cardAndroidDark : styles.cardAndroid,
+              shadow.lg,
+            ]}
+          >
+            <View style={styles.cardInner}>
+              <CardContent
+                isDark={isDark}
+                trafficVisible={trafficLayerVisible}
+                onTrafficToggle={setTrafficLayerVisible}
+                transitVisible={transitLayerVisible}
+                onTransitToggle={setTransitLayerVisible}
+                mapStyle={mapStyle}
+                onMapStyleChange={setMapStyle}
+              />
+            </View>
           </View>
         ))}
     </View>
@@ -74,12 +92,16 @@ function CardContent({
   isDark,
   trafficVisible,
   onTrafficToggle,
+  transitVisible,
+  onTransitToggle,
   mapStyle,
   onMapStyleChange,
 }: {
   isDark: boolean;
   trafficVisible: boolean;
   onTrafficToggle: (v: boolean) => void;
+  transitVisible: boolean;
+  onTransitToggle: (v: boolean) => void;
   mapStyle: 'default' | 'satellite' | 'terrain';
   onMapStyleChange: (style: 'default' | 'satellite' | 'terrain') => void;
 }) {
@@ -141,6 +163,18 @@ function CardContent({
           trackColor={{ false: isDark ? '#555' : '#767577', true: isDark ? '#409CFF' : '#007AFF' }}
         />
       </View>
+
+      {/* Transit toggle */}
+      <View style={styles.divider} />
+      <View style={styles.row}>
+        <Ionicons name="bus" size={18} color="#1A5BA5" style={styles.rowIcon} />
+        <Text style={[styles.rowLabel, { color: textColor }]}>Transit</Text>
+        <Switch
+          value={transitVisible}
+          onValueChange={onTransitToggle}
+          trackColor={{ false: isDark ? '#555' : '#767577', true: isDark ? '#409CFF' : '#007AFF' }}
+        />
+      </View>
     </>
   );
 }
@@ -172,14 +206,15 @@ const styles = StyleSheet.create({
   buttonAndroidDark: {
     backgroundColor: 'rgba(40,40,60,0.92)',
   },
-  card: {
+  cardWrapper: {
     marginTop: spacing.sm,
     borderRadius: borderRadius.lg,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
     minWidth: 200,
     overflow: 'hidden',
-    ...shadow.lg,
+  },
+  cardInner: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
   cardAndroid: {
     backgroundColor: 'rgba(255,255,255,0.95)',

@@ -55,3 +55,26 @@ export const OVERTURE_RELEASE = '2026-02-18.0';
 
 /** Overture GeoParquet S3 path for places. */
 export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*`;
+
+// ── Transit ─────────────────────────────────────────────────────────
+
+/** MobilityData Mobility Database API base URL. */
+export const MOBILITY_DB_API_URL = 'https://api.mobilitydatabase.org';
+
+/** MobilityData API key — set EXPO_PUBLIC_MOBILITY_DB_API_KEY in .env */
+export const mobilityDbRefreshToken: string =
+  process.env.EXPO_PUBLIC_MOBILITY_DB_API_KEY ??
+  process.env.MOBILITY_DATABASE_SERVICE_API_KEY ??
+  '';
+
+/** OpenTripPlanner GTFS GraphQL API base URL — set EXPO_PUBLIC_OTP_BASE_URL in .env */
+export const OTP_BASE_URL: string = process.env.EXPO_PUBLIC_OTP_BASE_URL ?? '';
+
+/** OTP GraphQL endpoint path. */
+export const OTP_GRAPHQL_PATH = '/otp/gtfs/v1';
+
+/** Debounce delay (ms) for transit stop fetch when viewport changes. */
+export const TRANSIT_FETCH_DEBOUNCE_MS = 500;
+
+/** Cache TTL (ms) for transit feed discovery results. */
+export const TRANSIT_FEED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

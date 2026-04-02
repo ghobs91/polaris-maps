@@ -1,0 +1,16 @@
+diff --git a/package.json b/package.json
+index 48af535f1e9b1620a4a0290ad58e1df179f7b07c..b8c89ecb0fc2b357aa19b6be6b6e1fb04931fbe2 100644
+--- a/package.json
++++ b/package.json
+@@ -70,6 +70,11 @@
+         "types": "./lib/typescript/commonjs/src/plugin/withMapLibre.d.ts",
+         "default": "./lib/commonjs/plugin/withMapLibre.js"
+       }
++    },
++    "./app.plugin": {
++      "require": {
++        "default": "./app.plugin.js"
++      }
+     }
+   },
+   "files": [
