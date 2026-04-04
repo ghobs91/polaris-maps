@@ -520,7 +520,7 @@ export function TransitStopCard() {
               <TextInput
                 ref={destInputRef}
                 style={[dirStyles.destInput, { color: colors.text }]}
-                placeholder="Search destination station\u2026"
+                placeholder="Search destination station"
                 placeholderTextColor={colors.textSecondary}
                 value={destQuery}
                 onChangeText={handleDestQueryChange}
@@ -552,7 +552,7 @@ export function TransitStopCard() {
                 <View style={styles.loadingRow}>
                   <ActivityIndicator size="small" color={colors.primary} />
                   <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-                    Planning route{'\u2026'}
+                    Planning route...
                   </Text>
                 </View>
               )}

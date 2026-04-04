@@ -11,8 +11,8 @@
 
 import { getStopsInBounds, isUserOtpConfigured } from './transitRoutingService';
 import type { OtpStop, TransitMode } from '../../models/transit';
+import { overpassFetch } from '../overpassClient';
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const OVERPASS_TIMEOUT_MS = 12_000;
 
 // ── Overpass cache ──────────────────────────────────────────────────
@@ -33,18 +33,18 @@ function cacheKey(s: number, w: number, n: number, e: number): string {
 
 // ── OSM → OtpStop mapping ───────────────────────────────────────────
 
-function osmModeToTransit(tags: Record<string, string>): TransitMode {
+function osmModeToTransit(tags: Record<string, string>): TransitMode | null {
   if (tags.station === 'subway' || tags.subway === 'yes') return 'SUBWAY';
   if (tags.railway === 'tram_stop' || tags.railway === 'halt') return 'TRAM';
-  if (tags.amenity === 'ferry_terminal' || tags.route === 'ferry') return 'FERRY';
+  if (tags.amenity === 'ferry_terminal' || tags.route === 'ferry') return null;
   if (tags.railway === 'station' || tags.railway === 'stop' || tags.train === 'yes') return 'RAIL';
-  if (tags.highway === 'bus_stop' || tags.bus === 'yes' || tags.route === 'bus') return 'BUS';
+  if (tags.highway === 'bus_stop' || tags.bus === 'yes' || tags.route === 'bus') return null;
   if (tags.public_transport === 'station') {
     if (tags.subway === 'yes') return 'SUBWAY';
     if (tags.railway) return 'RAIL';
-    return 'BUS';
+    return null;
   }
-  return 'BUS';
+  return null;
 }
 
 function osmColor(mode: TransitMode, tags: Record<string, string>): string | undefined {
@@ -73,6 +73,7 @@ function elementToStop(el: OverpassElement): OtpStop | null {
   if (lat == null || lon == null) return null;
 
   const mode = osmModeToTransit(tags);
+  if (!mode) return null;
   const color = osmColor(mode, tags);
 
   return {
@@ -110,15 +111,13 @@ async function fetchTransitStopsOverpass(
 
   const bbox = `${minLat},${minLng},${maxLat},${maxLng}`;
 
-  // Query for subway stations, railway stations/stops, tram stops, bus stops, ferry terminals
+  // Query for subway stations, railway stations/stops, tram stops (no bus or ferry)
   const query = `[out:json][timeout:25];
 (
   node["railway"="station"](${bbox});
   node["railway"="halt"](${bbox});
   node["railway"="tram_stop"](${bbox});
   node["station"="subway"](${bbox});
-  node["highway"="bus_stop"](${bbox});
-  node["amenity"="ferry_terminal"](${bbox});
   node["public_transport"="stop_position"]["name"](${bbox});
   way["railway"="station"](${bbox});
   way["station"="subway"](${bbox});
@@ -128,52 +127,37 @@ async function fetchTransitStopsOverpass(
 );
 out body center;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+  if (__DEV__) console.warn('[Overpass] fetching transit stops for bbox:', bbox);
 
-  try {
-    if (__DEV__) console.warn('[Overpass] fetching transit stops for bbox:', bbox);
+  const data = await overpassFetch<{ elements: OverpassElement[] }>({
+    query,
+    timeoutMs: OVERPASS_TIMEOUT_MS,
+  });
 
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
+  if (__DEV__) console.warn('[Overpass] elements:', data.elements?.length ?? 0);
 
-    if (__DEV__) console.warn('[Overpass] response status:', res.status);
-
-    if (!res.ok) throw new Error(`Overpass ${res.status}`);
-
-    const data = (await res.json()) as { elements: OverpassElement[] };
-
-    if (__DEV__) console.warn('[Overpass] elements:', data.elements?.length ?? 0);
-
-    // Deduplicate — OSM often has overlapping node/way/relation for the same station
-    const seen = new Map<string, OtpStop>();
-    for (const el of data.elements) {
-      const stop = elementToStop(el);
-      if (!stop) continue;
-      // Deduplicate by rounding to ~50m grid
-      const dedupeKey = `${stop.name}:${(stop.lat * 200).toFixed(0)},${(stop.lon * 200).toFixed(0)}`;
-      if (!seen.has(dedupeKey)) {
-        seen.set(dedupeKey, stop);
-      }
+  // Deduplicate — OSM often has overlapping node/way/relation for the same station
+  const seen = new Map<string, OtpStop>();
+  for (const el of data.elements) {
+    const stop = elementToStop(el);
+    if (!stop) continue;
+    // Deduplicate by rounding to ~50m grid
+    const dedupeKey = `${stop.name}:${(stop.lat * 200).toFixed(0)},${(stop.lon * 200).toFixed(0)}`;
+    if (!seen.has(dedupeKey)) {
+      seen.set(dedupeKey, stop);
     }
-
-    const stops = [...seen.values()];
-
-    // Cache the result
-    if (stopCache.size >= CACHE_MAX) {
-      const first = stopCache.keys().next().value;
-      if (first) stopCache.delete(first);
-    }
-    stopCache.set(key, { stops, expiresAt: Date.now() + CACHE_TTL_MS });
-
-    return stops;
-  } finally {
-    clearTimeout(timer);
   }
+
+  const stops = [...seen.values()];
+
+  // Cache the result
+  if (stopCache.size >= CACHE_MAX) {
+    const first = stopCache.keys().next().value;
+    if (first) stopCache.delete(first);
+  }
+  stopCache.set(key, { stops, expiresAt: Date.now() + CACHE_TTL_MS });
+
+  return stops;
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -189,7 +173,9 @@ export async function fetchTransitStops(
   maxLng: number,
 ): Promise<OtpStop[]> {
   if (isUserOtpConfigured()) {
-    return getStopsInBounds(minLat, minLng, maxLat, maxLng);
+    const stops = await getStopsInBounds(minLat, minLng, maxLat, maxLng);
+    // Exclude bus stops and ferry terminals from map display
+    return stops.filter((s) => s.vehicleMode !== 'BUS' && s.vehicleMode !== 'FERRY');
   }
   return fetchTransitStopsOverpass(minLat, minLng, maxLat, maxLng);
 }

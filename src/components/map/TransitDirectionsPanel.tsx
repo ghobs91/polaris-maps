@@ -254,7 +254,7 @@ function ModeFilterBar({ isDark }: { isDark: boolean }) {
   const enabledModes = useTransitStore((s) => s.enabledModes);
   const toggleMode = useTransitStore((s) => s.toggleMode);
 
-  const modes: TransitMode[] = ['BUS', 'RAIL', 'SUBWAY', 'TRAM', 'FERRY'];
+  const modes: TransitMode[] = ['RAIL', 'SUBWAY', 'TRAM'];
   const textColor = isDark ? '#E0E0E0' : '#333';
 
   return (

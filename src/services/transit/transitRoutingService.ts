@@ -611,7 +611,7 @@ async function planViaGtfsGraphql(
     from,
     to,
     departureTime = new Date().toISOString(),
-    modes = ['BUS', 'RAIL', 'SUBWAY', 'TRAM', 'FERRY'],
+    modes = ['RAIL', 'SUBWAY', 'TRAM'],
     numItineraries = 5,
   } = options;
 
@@ -669,7 +669,7 @@ async function planViaUserConfiguredOtp(options: PlanTransitOptions): Promise<Ot
     from,
     to,
     departureTime = new Date().toISOString(),
-    modes = ['BUS', 'RAIL', 'SUBWAY', 'TRAM', 'FERRY'],
+    modes = ['RAIL', 'SUBWAY', 'TRAM'],
     numItineraries = 5,
   } = options;
 

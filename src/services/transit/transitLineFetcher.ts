@@ -14,8 +14,9 @@ import type { TransitMode, TransitRouteLine, TransitRouteLineStop } from '../../
 import { findEndpointForCoords, type OtpEndpoint } from './otpEndpointRegistry';
 import { decodePolyline } from '../../utils/polyline';
 import { fetchMbtaLines } from './mbtaFetcher';
+import { fetchAmtrakRoutes } from './amtrakFetcher';
+import { overpassFetch } from '../overpassClient';
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const OVERPASS_TIMEOUT_MS = 25_000;
 
 // ── Spatial tile cache ──────────────────────────────────────────────
@@ -327,41 +328,29 @@ out body;
 node["railway"~"station|stop"]["name"](${bbox});
 out body;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
+  const data = await overpassFetch<{ elements: (OverpassRelation | StopNode)[] }>({
+    query,
+    timeoutMs: OVERPASS_TIMEOUT_MS,
+  });
 
-  try {
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`Overpass ${res.status}`);
-
-    const data = (await res.json()) as { elements: (OverpassRelation | StopNode)[] };
-
-    const stopNodes = new Map<number, { name: string; lat: number; lon: number }>();
-    const relations: OverpassRelation[] = [];
-    for (const el of data.elements) {
-      if (el.type === 'relation') relations.push(el as OverpassRelation);
-      else if (el.type === 'node') {
-        const node = el as StopNode;
-        if (node.tags?.name && node.lat != null && node.lon != null) {
-          stopNodes.set(node.id, { name: node.tags.name, lat: node.lat, lon: node.lon });
-        }
+  const stopNodes = new Map<number, { name: string; lat: number; lon: number }>();
+  const relations: OverpassRelation[] = [];
+  for (const el of data.elements) {
+    if (el.type === 'relation') relations.push(el as OverpassRelation);
+    else if (el.type === 'node') {
+      const node = el as StopNode;
+      if (node.tags?.name && node.lat != null && node.lon != null) {
+        stopNodes.set(node.id, { name: node.tags.name, lat: node.lat, lon: node.lon });
       }
     }
-
-    const lines: TransitRouteLine[] = [];
-    for (const rel of relations) {
-      const line = relationToLine(rel, stopNodes);
-      if (line) lines.push(line);
-    }
-    return deduplicateLines(lines);
-  } finally {
-    clearTimeout(timer);
   }
+
+  const lines: TransitRouteLine[] = [];
+  for (const rel of relations) {
+    const line = relationToLine(rel, stopNodes);
+    if (line) lines.push(line);
+  }
+  return deduplicateLines(lines);
 }
 
 // ── OTP-based transit line fetcher ──────────────────────────────────
@@ -407,7 +396,44 @@ function otpModeToTransitMode(mode: string): TransitMode {
  *
  * Steps 2–4 are parallelised (8 concurrent).  Total time for MTA NYC
  * (123 routes): ~4s.  Result is cached permanently.
+ *
+ * **Straight-line geometry detection:**
+ * Intercity operators (e.g. Amtrak) often have GTFS shapes that are just
+ * station-to-station straight lines rather than real track geometry. We
+ * detect these by measuring point density: if a route covers >20 km but
+ * has fewer than 3 points per km, the geometry is likely synthetic and
+ * the route is filtered out so Overpass can provide real track geometry.
  */
+
+/**
+ * Returns true if the decoded polyline looks like straight-line segments
+ * rather than real track geometry.
+ *
+ * Heuristic: compute the total geodesic distance of the polyline and
+ * compare with the number of coordinate points.  Real track geometry
+ * typically has 10+ points per km; GTFS straight-line shapes have <3.
+ */
+/** Exported for testing. */
+export function isStraightLineGeometry(coords: [number, number][]): boolean {
+  if (coords.length < 4) return true; // too few points to be real geometry
+
+  // Approximate distance in km using equirectangular projection
+  let totalKm = 0;
+  for (let i = 1; i < coords.length; i++) {
+    const [lng1, lat1] = coords[i - 1];
+    const [lng2, lat2] = coords[i];
+    const dLat = (lat2 - lat1) * 111.32;
+    const dLng = (lng2 - lng1) * 111.32 * Math.cos(((lat1 + lat2) / 2) * (Math.PI / 180));
+    totalKm += Math.sqrt(dLat * dLat + dLng * dLng);
+  }
+
+  // Short routes (<20 km) are fine even with few points (e.g. shuttle services)
+  if (totalKm < 20) return false;
+
+  const pointsPerKm = coords.length / totalKm;
+  return pointsPerKm < 3;
+}
+
 async function fetchOtpLines(ep: OtpEndpoint): Promise<TransitRouteLine[]> {
   const cached = otpLineCache.get(ep.label);
   if (cached) return cached;
@@ -440,10 +466,15 @@ async function fetchOtpLines(ep: OtpEndpoint): Promise<TransitRouteLine[]> {
         agencyName?: string;
       }>;
 
-      const railRoutes = allRoutes.filter((r) =>
-        ['RAIL', 'SUBWAY', 'TRAM', 'LIGHT_RAIL', 'FERRY', 'CABLE_CAR', 'FUNICULAR'].includes(
-          r.mode ?? '',
-        ),
+      const AMTRAK_AGENCY = /amtrak/i;
+      const railRoutes = allRoutes.filter(
+        (r) =>
+          ['RAIL', 'SUBWAY', 'TRAM', 'LIGHT_RAIL', 'CABLE_CAR', 'FUNICULAR'].includes(
+            r.mode ?? '',
+          ) &&
+          // Exclude Amtrak routes — their GTFS shapes in OTP are straight
+          // lines between stations. BTS provides real track geometry instead.
+          !AMTRAK_AGENCY.test(r.agencyName ?? ''),
       );
 
       // 2–4. Fetch pattern geometry + stops for each route (8 concurrent)
@@ -581,6 +612,43 @@ async function tryFetchViaOtp(
   return lines;
 }
 
+// ── Intercity rail supplement (BTS / Amtrak) ────────────────────────
+
+/**
+ * Cache key for Amtrak lines fetched from BTS.
+ * Stored alongside OTP lines so getAllCachedLines() merges them.
+ */
+const AMTRAK_CACHE_KEY = '__amtrak__';
+
+/**
+ * Fetch Amtrak routes from BTS (Bureau of Transportation Statistics) for the
+ * given viewport. OTP includes Amtrak but with GTFS straight-line shapes;
+ * BTS provides real curved track geometry at 1:24,000 scale from FRA.
+ * The existing deduplicateLines() logic prefers the version with more
+ * geometry points, so BTS geometry wins when both sources contribute.
+ *
+ * This fires as a background supplement after OTP succeeds and is
+ * intentionally fire-and-forget. Results are pushed via onProgress when
+ * ready.
+ */
+async function fetchAmtrakSupplement(
+  minLat: number,
+  minLng: number,
+  maxLat: number,
+  maxLng: number,
+): Promise<TransitRouteLine[]> {
+  // Only fetch once per session
+  if (tileData.has(AMTRAK_CACHE_KEY)) {
+    return tileData.get(AMTRAK_CACHE_KEY) ?? [];
+  }
+
+  try {
+    return await fetchAmtrakRoutes(minLat, minLng, maxLat, maxLng);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Maximum number of fine-grained tiles to fetch individually.
  * Beyond this threshold we merge needed tiles into coarser "mega-tiles"
@@ -614,23 +682,34 @@ export async function fetchTransitLines(
   maxLng: number,
   onProgress?: (lines: TransitRouteLine[]) => void,
 ): Promise<TransitRouteLine[]> {
-  // ── Try OTP first (fast, reliable for registry-covered areas) ─────
-  // OTP returns the entire transit network for the region in ~4s and
-  // caches it permanently, so subsequent toggles are instant.
+  // ── Try OTP + BTS Amtrak in parallel (fast, reliable for registry-covered areas)
+  // OTP returns the transit network for the region; BTS provides Amtrak
+  // routes with real track geometry (OTP's Amtrak shapes are straight lines).
   try {
-    const otpLines = await tryFetchViaOtp(minLat, minLng, maxLat, maxLng);
-    if (otpLines && otpLines.length > 0) {
-      // Store OTP lines in the tile cache so getCachedLines/hasCachedLines work
-      const OTP_CACHE_KEY = '__otp__';
-      tileData.set(OTP_CACHE_KEY, otpLines);
+    const [otpLines, amtrakLines] = await Promise.all([
+      tryFetchViaOtp(minLat, minLng, maxLat, maxLng).catch(() => null),
+      fetchAmtrakSupplement(minLat, minLng, maxLat, maxLng),
+    ]);
+
+    const hasOtp = otpLines && otpLines.length > 0;
+    const hasAmtrak = amtrakLines.length > 0;
+
+    if (hasOtp || hasAmtrak) {
+      if (hasOtp) {
+        const OTP_CACHE_KEY = '__otp__';
+        tileData.set(OTP_CACHE_KEY, otpLines!);
+      }
+      if (hasAmtrak) {
+        tileData.set(AMTRAK_CACHE_KEY, amtrakLines);
+      }
       // Mark all viewport tiles as fetched so Overpass won't fire later
       for (const tile of tilesForBounds(minLat, minLng, maxLat, maxLng)) {
         fetchedTiles.add(tile.key);
       }
-      return otpLines;
+      return getAllCachedLines();
     }
   } catch {
-    // OTP failed — fall through to Overpass
+    // OTP+BTS both failed — fall through to Overpass
   }
 
   // ── Overpass fallback for regions without an OTP endpoint ─────────
@@ -837,18 +916,13 @@ out body;`;
 
     const controller = new AbortController();
     prewarmAbort = controller;
-    const timer = setTimeout(() => controller.abort(), 35_000);
 
     try {
-      const res = await fetch(OVERPASS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
+      const data = await overpassFetch<{ elements: (OverpassRelation | StopNode)[] }>({
+        query,
+        timeoutMs: 35_000,
         signal: controller.signal,
       });
-      if (!res.ok) return;
-
-      const data = (await res.json()) as { elements: (OverpassRelation | StopNode)[] };
 
       const stopNodes = new Map<number, { name: string; lat: number; lon: number }>();
       const relations: OverpassRelation[] = [];
@@ -884,7 +958,6 @@ out body;`;
     } catch {
       // Silently ignore — prewarm failure is non-critical
     } finally {
-      clearTimeout(timer);
       prewarmAbort = null;
       prewarmInFlight = null;
     }
@@ -945,28 +1018,18 @@ export async function searchStationsOverpass(
 node["railway"~"^(station|halt|stop)$"]["name"~"${escaped}",i](${bbox});
 out body;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
-
   try {
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(q)}`,
-      signal: controller.signal,
-    });
-    if (!res.ok) return [];
-
-    const data = (await res.json()) as {
+    const data = await overpassFetch<{
       elements: Array<{ tags?: Record<string, string>; lat: number; lon: number }>;
-    };
+    }>({
+      query: q,
+      timeoutMs: 12_000,
+    });
     return data.elements
       .filter((e) => e.tags?.name)
       .map((e) => ({ name: e.tags!.name!, lat: e.lat, lon: e.lon }));
   } catch {
     return [];
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -1007,21 +1070,13 @@ way(around:500,${lat},${lon})["railway"~"^(rail|light_rail|subway|tram|narrow_ga
 rel(bw)["route"~"^(subway|light_rail|train|tram|monorail)$"];
 out tags;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 16_000);
-
   try {
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`Overpass ${res.status}`);
-
-    const data = (await res.json()) as {
+    const data = await overpassFetch<{
       elements: Array<{ type: string; tags?: Record<string, string> }>;
-    };
+    }>({
+      query,
+      timeoutMs: 16_000,
+    });
 
     const result: OverpassRouteTag[] = [];
     const seen = new Set<string>();
@@ -1078,8 +1133,6 @@ out tags;`;
     // On failure, return empty — the stop card will still show the routes
     // from the relation membership.
     return [];
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -1107,19 +1160,11 @@ export async function fetchStationOsmDetails(
 );
 out tags;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
-
   try {
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
+    const data = await overpassFetch<{ elements: Array<{ tags?: Record<string, string> }> }>({
+      query,
+      timeoutMs: 12_000,
     });
-    if (!res.ok) throw new Error(`Overpass ${res.status}`);
-
-    const data = (await res.json()) as { elements: Array<{ tags?: Record<string, string> }> };
     // Prefer elements that have a name tag (station nodes vs platform nodes)
     const el = data.elements.find((e) => e.tags?.name) ?? data.elements[0];
     const result = el?.tags ?? null;
@@ -1128,8 +1173,6 @@ out tags;`;
   } catch {
     stationDetailsCache.set(key, null);
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

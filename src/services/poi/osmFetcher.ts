@@ -1,4 +1,4 @@
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+import { overpassFetch } from '../overpassClient';
 
 // ---------------------------------------------------------------------------
 // Bbox-keyed response cache
@@ -92,24 +92,10 @@ export async function fetchOsmPois(
 );
 out body center;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) throw new Error(`Overpass API ${res.status}`);
-
-  const data = await res.json();
+  const data = await overpassFetch<{ elements: any[] }>({
+    query,
+    timeoutMs: OVERPASS_TIMEOUT_MS,
+  });
 
   const pois = (data.elements as any[])
     .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)
@@ -170,24 +156,10 @@ export async function fetchOsmPoisByTags(
 
   const query = `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout body center;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) throw new Error(`Overpass API ${res.status}`);
-
-  const data = await res.json();
+  const data = await overpassFetch<{ elements: any[] }>({
+    query,
+    timeoutMs: OVERPASS_TIMEOUT_MS,
+  });
 
   const pois = (data.elements as any[])
     .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)
@@ -260,24 +232,10 @@ export async function fetchOsmPoisByName(
 );
 out body center;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), OVERPASS_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!res.ok) throw new Error(`Overpass API ${res.status}`);
-
-  const data = await res.json();
+  const data = await overpassFetch<{ elements: any[] }>({
+    query,
+    timeoutMs: OVERPASS_TIMEOUT_MS,
+  });
 
   const pois = (data.elements as any[])
     .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)

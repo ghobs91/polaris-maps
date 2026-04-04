@@ -37,9 +37,24 @@ export interface OtpEndpoint {
 
 export const OTP_ENDPOINTS: OtpEndpoint[] = [
   // ─── United States ──────────────────────────────────────────────
+  // Coverage map for major US transit systems (by ridership):
+  //   NYC Subway (NYCTA)        → MTA OTP endpoint below
+  //   PATH (PANYNJ)             → MTA OTP endpoint below (PATH prefix)
+  //   Staten Island Railway     → MTA OTP endpoint below (SIF prefix)
+  //   MBTA ("the T", Boston)    → Dedicated MBTA V3 API below
+  //   Washington Metro (WMATA)  → Overpass fallback (lines + stops)
+  //   Chicago "L" (CTA)         → Overpass fallback (lines + stops)
+  //   SEPTA Metro (Philadelphia)→ Overpass fallback (lines + stops)
+  //   BART (SF Bay Area)        → Overpass fallback (lines + stops)
+  //   MARTA rail (Atlanta)      → Overpass fallback (lines + stops)
+  //   Metro Rail (LACMTA, LA)   → Overpass fallback (lines + stops)
+  //   Metrorail (Miami-Dade)    → Overpass fallback (lines + stops)
+  //   PATCO Speedline           → Overpass fallback (lines + stops)
+  //   Baltimore Metro SubwayLink→ Overpass fallback (lines + stops)
+
   {
     label: 'MTA New York City & Long Island',
-    // Covers NYC metro + Long Island + lower Hudson Valley
+    // Covers NYC Subway, PATH, Staten Island Railway, LIRR, Metro-North, NJ Transit rail
     bbox: [40.4, -74.3, 41.4, -72.0],
     url: 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/plan',
     apiStyle: 'rest-v1',
@@ -53,7 +68,7 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
 
   {
     label: 'MBTA Boston & Massachusetts',
-    // Covers greater Boston + commuter rail extent
+    // Covers greater Boston + commuter rail extent (Red, Orange, Blue, Green lines + commuter rail)
     bbox: [41.0, -72.0, 43.0, -70.0],
     url: 'https://api-v3.mbta.com',
     apiStyle: 'mbta-v3',
@@ -137,7 +152,7 @@ async function ensureStopsLoaded(ep: OtpEndpoint): Promise<void> {
       // Known rail prefixes from MTA OTP: LI (LIRR), MTASBWY (subway),
       // MNR (Metro-North), NJT (NJ Transit rail), JFK, PATH, RI, HRL, EWR, SIF.
       // Also exclude entrance/platform sub-nodes (id contains "-entrance" or "-ent-").
-      const RAIL_PREFIXES = /^(LI|MTASBWY|MNR|NJT|JFK|PATH|RI|HRL|EWR|SIF):/;
+      const RAIL_PREFIXES = /^(LI|MTASBWY|MNR|NJT|JFK|PATH|RI|HRL|EWR|SIF|AMK):/;
       const ENTRANCE_RE = /-entrance|-ent-/;
       const stops = data
         .filter(
@@ -215,12 +230,20 @@ export async function searchOtpStops(
     deduped.push(s);
   }
 
-  // Sort: prefix match first, then by distance
+  // Sort: exact match first, then prefix match, then substring, then by distance
   return deduped
     .sort((a, b) => {
-      const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-      const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const an = a.name.toLowerCase();
+      const bn = b.name.toLowerCase();
+      // Exact match (query IS the full name)
+      const aExact = an === q ? 0 : 1;
+      const bExact = bn === q ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      // Prefix match (name starts with query)
+      const ap = an.startsWith(q) ? 0 : 1;
+      const bp = bn.startsWith(q) ? 0 : 1;
       if (ap !== bp) return ap - bp;
+      // By distance
       const da = (a.lat - nearLat) ** 2 + (a.lon - nearLon) ** 2;
       const db = (b.lat - nearLat) ** 2 + (b.lon - nearLon) ** 2;
       return da - db;
