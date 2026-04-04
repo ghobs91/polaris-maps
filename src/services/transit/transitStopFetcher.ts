@@ -9,7 +9,7 @@
  * render them identically.
  */
 
-import { getStopsInBounds, isOtpConfigured } from './transitRoutingService';
+import { getStopsInBounds, isUserOtpConfigured } from './transitRoutingService';
 import type { OtpStop, TransitMode } from '../../models/transit';
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
@@ -188,7 +188,7 @@ export async function fetchTransitStops(
   maxLat: number,
   maxLng: number,
 ): Promise<OtpStop[]> {
-  if (isOtpConfigured()) {
+  if (isUserOtpConfigured()) {
     return getStopsInBounds(minLat, minLng, maxLat, maxLng);
   }
   return fetchTransitStopsOverpass(minLat, minLng, maxLat, maxLng);

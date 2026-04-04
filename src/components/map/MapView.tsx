@@ -1,4 +1,11 @@
-import React, { useRef, useCallback, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, {
+  useRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  forwardRef,
+  useMemo,
+} from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Dimensions } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
@@ -26,7 +33,10 @@ Logger.setLogCallback((log) => {
   return false;
 });
 
-const POI_MIN_ZOOM = 13;
+// Match Google Maps behaviour: POIs only appear at street level (~zoom 15).
+// Below this the viewport covers too large an area to fetch meaningfully and
+// the pill badges would be too sparse/cluttered to be useful.
+const POI_MIN_ZOOM = 15;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
 
@@ -95,6 +105,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const lastProgrammaticMove = useRef(0);
   // Debounce timer for OSM POI fetching
   const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track last fetched bounds to skip re-fetch for small pans (~1 km threshold)
+  const lastFetchBounds = useRef<{
+    minLat: number;
+    minLng: number;
+    maxLat: number;
+    maxLng: number;
+  } | null>(null);
+  // Prevent redundant POI clears during a single zoom gesture
+  const zoomClearedRef = useRef(false);
 
   // In navigation mode, follow navPosition with tilt + heading.
   // paddingTop shifts the focal point downward in screen space so the marker
@@ -178,8 +197,27 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     return unsub;
   }, []);
 
+  // Clear stale POI pills as soon as zoom changes significantly. Without this,
+  // the old fixed-pixel pills converge and visually overlap during the animation
+  // since onRegionDidChange only fires when the gesture fully settles.
+  const handleRegionIsChanging = useCallback(
+    (event: any) => {
+      if (navigationMode || zoomClearedRef.current) return;
+      const zoom: number = event?.properties?.zoomLevel ?? 0;
+      const { currentZoom, categorySearchResults } = useOsmPoiStore.getState();
+      if (!categorySearchResults && Math.abs(zoom - currentZoom) >= 1) {
+        useOsmPoiStore.getState().setPois([]);
+        zoomClearedRef.current = true;
+      }
+    },
+    [navigationMode],
+  );
+
   const handleRegionDidChange = useCallback(
     (event: any) => {
+      // Reset the zoom-clear guard so the next gesture can clear again.
+      zoomClearedRef.current = false;
+
       // Don't fetch POIs while actively navigating — camera moves constantly and
       // POI annotations would fight the nav UI.
       if (navigationMode) return;
@@ -220,10 +258,26 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       // this is fast for areas the user has already visited. A single setPois call
       // avoids the double annotation teardown that triggers the MapLibre
       // "Unknown annotation found nearby tap" fault.
+      //
+      // Skip re-fetch if the viewport hasn't shifted more than ~1 km from the
+      // last successful fetch — eliminates redundant requests on small pans.
+      const POI_FETCH_THRESHOLD = 0.01; // ~1.1 km
+      const lastB = lastFetchBounds.current;
+      if (
+        lastB &&
+        Math.abs(minLat - lastB.minLat) < POI_FETCH_THRESHOLD &&
+        Math.abs(maxLat - lastB.maxLat) < POI_FETCH_THRESHOLD &&
+        Math.abs(minLng - lastB.minLng) < POI_FETCH_THRESHOLD &&
+        Math.abs(maxLng - lastB.maxLng) < POI_FETCH_THRESHOLD
+      ) {
+        return;
+      }
+
       if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
       poiFetchTimer.current = setTimeout(async () => {
         try {
           useOsmPoiStore.getState().setIsLoading(true);
+          lastFetchBounds.current = { minLat, minLng, maxLat, maxLng };
 
           // Try Overpass + local Overture + online Overture in parallel.
           // Online Overture fetch also upserts into SQLite so subsequent
@@ -265,12 +319,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   );
 
   // Resolve the map style based on user preference and dark mode
-  const resolvedMapStyle =
-    mapStylePref === 'satellite'
-      ? SATELLITE_STYLE_JSON
-      : isDark
-        ? DARK_MAP_STYLE_JSON
-        : OPENFREEMAP_STYLE_URL;
+  const resolvedMapStyle = useMemo(
+    () =>
+      mapStylePref === 'satellite'
+        ? SATELLITE_STYLE_JSON
+        : isDark
+          ? DARK_MAP_STYLE_JSON
+          : OPENFREEMAP_STYLE_URL,
+    [mapStylePref, isDark],
+  );
 
   return (
     <View style={styles.container}>
@@ -279,6 +336,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         style={styles.map}
         mapStyle={resolvedMapStyle}
         onPress={handlePress}
+        onRegionIsChanging={handleRegionIsChanging}
         onRegionDidChange={handleRegionDidChange}
       >
         <MapLibreGL.Camera

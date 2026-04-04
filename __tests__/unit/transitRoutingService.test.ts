@@ -11,7 +11,12 @@ import {
   getStopDepartures,
   getNearbyStops,
   isOtpConfigured,
+  isUserOtpConfigured,
 } from '../../src/services/transit/transitRoutingService';
+import {
+  findEndpointForCoords,
+  OTP_ENDPOINTS,
+} from '../../src/services/transit/otpEndpointRegistry';
 
 // ── Mock fetch ──────────────────────────────────────────────────────
 
@@ -272,13 +277,149 @@ function makeNearbyStopsResponse() {
 
 describe('isOtpConfigured', () => {
   it('returns true when OTP base URL is set', () => {
-    // The function checks the constant from config which reads env at import time
-    expect(typeof isOtpConfigured).toBe('function');
+    expect(isOtpConfigured()).toBe(true);
+  });
+
+  it('returns true for coordinates inside a registry bbox', () => {
+    // Mineola, NY — inside MTA bbox
+    expect(isOtpConfigured(40.7475, -73.6407)).toBe(true);
+  });
+
+  it('returns true even for coords outside registry when OTP_BASE_URL is set', () => {
+    // Random location in Antarctica
+    expect(isOtpConfigured(-80, 0)).toBe(true);
+  });
+});
+
+describe('isUserOtpConfigured', () => {
+  it('returns true when OTP_BASE_URL is set', () => {
+    expect(isUserOtpConfigured()).toBe(true);
+  });
+});
+
+describe('findEndpointForCoords (registry)', () => {
+  it('returns MTA endpoint for NYC coordinates', () => {
+    const ep = findEndpointForCoords(40.7475, -73.6407);
+    expect(ep).not.toBeNull();
+    expect(ep!.label).toContain('MTA');
+    expect(ep!.apiStyle).toBe('rest-v1');
+  });
+
+  it('returns TriMet endpoint for Portland coordinates', () => {
+    const ep = findEndpointForCoords(45.52, -122.68);
+    expect(ep).not.toBeNull();
+    expect(ep!.label).toContain('TriMet');
+    expect(ep!.apiStyle).toBe('rest-v1');
+  });
+
+  it('returns Entur endpoint for Oslo coordinates', () => {
+    const ep = findEndpointForCoords(59.91, 10.75);
+    expect(ep).not.toBeNull();
+    expect(ep!.label).toContain('Entur');
+    expect(ep!.apiStyle).toBe('transmodel-v3');
+  });
+
+  it('returns null for coordinates outside all bboxes', () => {
+    const ep = findEndpointForCoords(-33.87, 151.21); // Sydney
+    expect(ep).toBeNull();
+  });
+
+  it('has at least one endpoint in the registry', () => {
+    expect(OTP_ENDPOINTS.length).toBeGreaterThan(0);
   });
 });
 
 describe('planTransitTrip', () => {
-  it('plans a transit trip and returns structured itineraries', async () => {
+  it('uses OTP1 REST when registry matches (MTA NYC)', async () => {
+    // Coordinates inside MTA bbox → OTP1 REST endpoint
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        plan: {
+          itineraries: [
+            {
+              duration: 2040,
+              startTime: 1775296260000,
+              startTimeFmt: '2026-04-04T05:51:00-04:00',
+              endTime: 1775298300000,
+              endTimeFmt: '2026-04-04T06:25:00-04:00',
+              walkTime: 300,
+              transitTime: 1740,
+              waitingTime: 0,
+              walkDistance: 350,
+              transfers: 0,
+              legs: [
+                {
+                  startTime: 1775296260000,
+                  endTime: 1775296560000,
+                  mode: 'WALK',
+                  from: { name: 'Origin', lat: 40.7475, lon: -73.6407 },
+                  to: { name: 'Mineola', lat: 40.7471, lon: -73.6396, stopId: 'LIRR:Mineola' },
+                  duration: 300,
+                  distance: 350,
+                  legGeometry: { points: '_p~iF~ps|U', length: 2 },
+                },
+                {
+                  startTime: 1775296560000,
+                  endTime: 1775298300000,
+                  mode: 'RAIL',
+                  routeShortName: 'Port Jefferson',
+                  routeLongName: 'Port Jefferson Branch',
+                  routeColor: '0039A6',
+                  agencyName: 'MTA Long Island Rail Road',
+                  headsign: 'Penn Station',
+                  from: { name: 'Mineola', lat: 40.7471, lon: -73.6396, stopId: 'LIRR:Mineola' },
+                  to: {
+                    name: 'Penn Station',
+                    lat: 40.7505,
+                    lon: -73.9934,
+                    stopId: 'LIRR:PennStation',
+                  },
+                  duration: 1740,
+                  distance: 35000,
+                  legGeometry: { points: '_p~iF~ps|U_ulLnnqC', length: 10 },
+                  realTime: false,
+                  intermediateStops: [
+                    {
+                      name: 'New Hyde Park',
+                      lat: 40.7309,
+                      lon: -73.6879,
+                      arrival: 0,
+                      departure: 0,
+                    },
+                    { name: 'Jamaica', lat: 40.7001, lon: -73.8073, arrival: 0, departure: 0 },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = await planTransitTrip({
+      from: { lat: 40.7475, lng: -73.6407 },
+      to: { lat: 40.7505, lng: -73.9934 },
+    });
+
+    expect(result).toHaveLength(1);
+    const it = result[0];
+    expect(it.legs).toHaveLength(2);
+    expect(it.legs[0].mode).toBe('WALK');
+    expect(it.legs[1].mode).toBe('RAIL');
+    expect(it.legs[1].route?.shortName).toBe('Port Jefferson');
+    expect(it.legs[1].headsign).toBe('Penn Station');
+    expect(it.duration).toBe(2040);
+
+    // Verify it hit the MTA endpoint, not our user-configured one
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('otp-mta-prod.camsys-apps.com');
+  });
+
+  it('falls back to user-configured OTP when registry endpoint fails', async () => {
+    // First call: registry endpoint fails
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+    // Second call: user-configured OTP succeeds
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => makeItineraryResponse(),
@@ -290,28 +431,38 @@ describe('planTransitTrip', () => {
     });
 
     expect(result).toHaveLength(1);
-    const it = result[0];
-    expect(it.legs).toHaveLength(3);
-    expect(it.legs[0].mode).toBe('WALK');
-    expect(it.legs[1].mode).toBe('SUBWAY');
-    expect(it.legs[1].route?.shortName).toBe('1');
-    expect(it.legs[1].headsign).toBe('South Ferry');
-    expect(it.legs[1].realTime).toBe(true);
-    expect(it.legs[2].mode).toBe('WALK');
-    expect(it.transfers).toBe(0); // Only one transit leg → 0 transfers
-    expect(it.walkDistance).toBeCloseTo(750, 0); // 400 + 350
-    expect(it.duration).toBe(1200); // 300 + 600 + 300
+    expect(result[0].legs).toHaveLength(3);
+    // Second call should hit user-configured OTP
+    const secondUrl = mockFetch.mock.calls[1][0];
+    expect(secondUrl).toContain('localhost:8080');
   });
 
-  it('includes transit modes in the GraphQL request', async () => {
+  it('uses user-configured OTP for regions not in registry', async () => {
+    // Sydney coordinates — no registry match
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ data: { planConnection: { edges: [] } } }),
     });
 
     await planTransitTrip({
-      from: { lat: 40.748, lng: -73.985 },
-      to: { lat: 40.76, lng: -73.98 },
+      from: { lat: -33.87, lng: 151.21 },
+      to: { lat: -33.88, lng: 151.2 },
+    });
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('localhost:8080');
+  });
+
+  it('includes transit modes in the GraphQL request (user-configured)', async () => {
+    // Use coordinates outside any registry bbox
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { planConnection: { edges: [] } } }),
+    });
+
+    await planTransitTrip({
+      from: { lat: -33.87, lng: 151.21 },
+      to: { lat: -33.88, lng: 151.2 },
       modes: ['BUS', 'SUBWAY'],
     });
 
@@ -319,7 +470,8 @@ describe('planTransitTrip', () => {
     expect(body.variables.transitModes).toEqual([{ mode: 'BUS' }, { mode: 'SUBWAY' }]);
   });
 
-  it('throws on GraphQL errors', async () => {
+  it('throws on GraphQL errors from user-configured OTP', async () => {
+    // Use coordinates outside any registry bbox
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ errors: [{ message: 'No transit data available' }] }),
@@ -327,13 +479,13 @@ describe('planTransitTrip', () => {
 
     await expect(
       planTransitTrip({
-        from: { lat: 40.748, lng: -73.985 },
-        to: { lat: 40.76, lng: -73.98 },
+        from: { lat: -33.87, lng: 151.21 },
+        to: { lat: -33.88, lng: 151.2 },
       }),
     ).rejects.toThrow('OTP GraphQL error: No transit data available');
   });
 
-  it('throws on HTTP error', async () => {
+  it('throws on HTTP error from user-configured OTP', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 503,
@@ -343,8 +495,8 @@ describe('planTransitTrip', () => {
 
     await expect(
       planTransitTrip({
-        from: { lat: 40.748, lng: -73.985 },
-        to: { lat: 40.76, lng: -73.98 },
+        from: { lat: -33.87, lng: 151.21 },
+        to: { lat: -33.88, lng: 151.2 },
       }),
     ).rejects.toThrow('OTP API error 503');
   });

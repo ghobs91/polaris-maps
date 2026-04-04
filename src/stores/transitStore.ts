@@ -38,6 +38,9 @@ interface TransitState {
   transitOrigin: { lat: number; lng: number; name?: string } | null;
   transitDestination: { lat: number; lng: number; name?: string } | null;
 
+  // Directions panel active (hides FloatingSearchPanel)
+  directionsActive: boolean;
+
   // Actions
   setTransitLayerVisible: (visible: boolean) => void;
   setRouteLines: (lines: TransitRouteLine[]) => void;
@@ -53,6 +56,7 @@ interface TransitState {
   toggleMode: (mode: TransitMode) => void;
   setTransitOrigin: (origin: TransitState['transitOrigin']) => void;
   setTransitDestination: (destination: TransitState['transitDestination']) => void;
+  setDirectionsActive: (active: boolean) => void;
   clearTransitPlan: () => void;
 }
 
@@ -70,6 +74,7 @@ export const useTransitStore = create<TransitState>()((set, get) => ({
   enabledModes: ['RAIL', 'SUBWAY', 'TRAM'],
   transitOrigin: null,
   transitDestination: null,
+  directionsActive: false,
 
   setTransitLayerVisible: (visible) => {
     set({ transitLayerVisible: visible });
@@ -99,6 +104,7 @@ export const useTransitStore = create<TransitState>()((set, get) => ({
   },
   setTransitOrigin: (origin) => set({ transitOrigin: origin }),
   setTransitDestination: (destination) => set({ transitDestination: destination }),
+  setDirectionsActive: (active) => set({ directionsActive: active }),
   clearTransitPlan: () =>
     set({
       itineraries: [],

@@ -11,6 +11,8 @@ import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { useTransitStops } from '@/hooks/useTransitStops';
 import { useTransitStore } from '@/stores/transitStore';
+import { prewarmTransitCache } from '@/services/transit/transitLineFetcher';
+import { preloadOtpStops } from '@/services/transit/otpEndpointRegistry';
 import { ErrorBoundary } from '@/components/common';
 
 export default function MapScreen() {
@@ -30,6 +32,10 @@ export default function MapScreen() {
       if (status !== 'granted') return;
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 13 });
+      // Pre-warm transit cache for metro area in background — non-blocking
+      prewarmTransitCache(loc.coords.latitude, loc.coords.longitude).catch(() => {});
+      // Pre-load OTP stops index so station search is instant
+      preloadOtpStops(loc.coords.latitude, loc.coords.longitude);
     })();
   }, [setViewport]);
 

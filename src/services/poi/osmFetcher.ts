@@ -62,7 +62,7 @@ export interface OsmPoi {
 
 /**
  * Fetch named POIs from the OSM Overpass API for a bounding box.
- * Only called when zoom >= 14 to avoid huge result sets.
+ * Only called when zoom >= 15 (POI_MIN_ZOOM) to avoid huge result sets.
  */
 export async function fetchOsmPois(
   south: number,

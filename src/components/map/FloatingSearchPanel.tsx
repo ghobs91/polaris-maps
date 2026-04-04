@@ -53,6 +53,7 @@ import {
 } from '../../services/regions/regionRepository';
 import { extractTar } from '../../utils/archiveExtract';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
+import { searchOtpStops, fetchOtpRoutesAtStop } from '../../services/transit/otpEndpointRegistry';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
 import type { GeocodingEntry } from '../../models/geocoding';
@@ -486,6 +487,7 @@ export function FloatingSearchPanel({
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
   const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
+  const transitDirectionsActive = useTransitStore((s) => s.directionsActive);
 
   const [mode, setMode] = useState<PanelMode>('idle');
   const [query, setQuery] = useState('');
@@ -599,19 +601,42 @@ export function FloatingSearchPanel({
       const vp = useMapStore.getState().viewport;
       const vb = useOsmPoiStore.getState().viewportBounds;
 
-      // Run unified search — scores and ranks results from local DB,
-      // category search, Photon geocoder, and address geocoding.
+      // Run unified search + OTP station search in parallel
       useOsmPoiStore.getState().setIsCategorySearching(true);
       try {
-        const unified = await unifiedSearch(text, {
-          lat: vp.lat,
-          lng: vp.lng,
-          zoom: vp.zoom,
-          limit: 20,
-          viewportBounds: vb
-            ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
-            : undefined,
-        });
+        const [unified, otpStops] = await Promise.all([
+          unifiedSearch(text, {
+            lat: vp.lat,
+            lng: vp.lng,
+            zoom: vp.zoom,
+            limit: 20,
+            viewportBounds: vb
+              ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
+              : undefined,
+          }),
+          searchOtpStops(text, vp.lat, vp.lng).catch(
+            () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
+          ),
+        ]);
+
+        // Convert OTP stops to GeocodingResult with type 'station'
+        const stationResults: GeocodingResult[] = otpStops.map((s, i) => ({
+          entry: {
+            id: -(1_000_000 + i),
+            text: s.name,
+            type: 'station' as const,
+            housenumber: null,
+            street: null,
+            city: null,
+            state: null,
+            postcode: null,
+            country: null,
+            lat: s.lat,
+            lng: s.lon,
+            otpStopId: s.id,
+          },
+          rank: 100 + i,
+        }));
 
         // Show map markers for ALL results with coordinates
         const markerPois: OsmPoi[] = unified.map(
@@ -632,8 +657,14 @@ export function FloatingSearchPanel({
           useOsmPoiStore.getState().clearCategorySearch();
         }
 
-        // Convert to GeocodingResult for the existing result list UI
-        setResults(unified.map(unifiedToGeocodingResult));
+        // Station results first, then unified search results
+        const unifiedResults = unified.map(unifiedToGeocodingResult);
+        // Dedupe: remove unified results that duplicate a station by name+proximity
+        const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
+        const filteredUnified = unifiedResults.filter(
+          (r) => !stationNames.has(r.entry.text.toLowerCase()),
+        );
+        setResults([...stationResults, ...filteredUnified]);
       } catch {
         useOsmPoiStore.getState().clearCategorySearch();
         setResults([]);
@@ -713,6 +744,36 @@ export function FloatingSearchPanel({
       Keyboard.dismiss();
       setQuery('');
       setResults([]);
+
+      // Transit station — open the transit stop card directly
+      if (result.entry.type === 'station') {
+        navigateToResult(result);
+        // Fetch routes from OTP so the stop card shows route badges + departures
+        const otpId = result.entry.otpStopId;
+        const routesPromise = otpId
+          ? fetchOtpRoutesAtStop(otpId, result.entry.lat, result.entry.lng)
+          : Promise.resolve([]);
+        routesPromise
+          .then((routes) => {
+            useTransitStore.getState().setSelectedStop({
+              name: result.entry.text,
+              lat: result.entry.lat,
+              lon: result.entry.lng,
+              routes,
+            });
+          })
+          .catch(() => {
+            useTransitStore.getState().setSelectedStop({
+              name: result.entry.text,
+              lat: result.entry.lat,
+              lon: result.entry.lng,
+              routes: [],
+            });
+          });
+        setMode('idle');
+        return;
+      }
+
       navigateToResult(result);
       setSelectedResult(result);
       setRouteError(null);
@@ -848,10 +909,6 @@ export function FloatingSearchPanel({
   // ── Transit Directions ───────────────────────
   const handleTransitDirections = useCallback(async () => {
     if (!selectedResult) return;
-    if (!isOtpConfigured()) {
-      setRouteError('Transit routing not configured (set EXPO_PUBLIC_OTP_BASE_URL)');
-      return;
-    }
     setIsTransitRouting(true);
     setRouteError(null);
     try {
@@ -1030,26 +1087,37 @@ export function FloatingSearchPanel({
   const showHistory = mode === 'searching' && query.length < 2 && history.length > 0;
 
   const renderResultItem = useCallback(
-    ({ item }: { item: GeocodingResult }) => (
-      <TouchableOpacity
-        style={st.resultRow}
-        onPress={() => handleSelectResult(item)}
-        activeOpacity={0.65}
-      >
-        <View style={st.resultIconWrap}>
-          <Ionicons name="location-outline" size={18} color={colors.primary} />
-        </View>
-        <View style={st.resultText}>
-          <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
-            {item.entry.text}
-          </Text>
-          <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
-            {[item.entry.city, item.entry.state, item.entry.country].filter(Boolean).join(', ')}
-          </Text>
-        </View>
-        <Ionicons name="arrow-back" size={15} color={subColor} />
-      </TouchableOpacity>
-    ),
+    ({ item }: { item: GeocodingResult }) => {
+      const isStation = item.entry.type === 'station';
+      return (
+        <TouchableOpacity
+          style={st.resultRow}
+          onPress={() => handleSelectResult(item)}
+          activeOpacity={0.65}
+        >
+          <View style={st.resultIconWrap}>
+            <Ionicons
+              name={isStation ? 'train' : 'location-outline'}
+              size={18}
+              color={isStation ? '#007AFF' : colors.primary}
+            />
+          </View>
+          <View style={st.resultText}>
+            <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
+              {item.entry.text}
+            </Text>
+            <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
+              {isStation
+                ? 'Transit Station'
+                : [item.entry.city, item.entry.state, item.entry.country]
+                    .filter(Boolean)
+                    .join(', ')}
+            </Text>
+          </View>
+          <Ionicons name="arrow-back" size={15} color={subColor} />
+        </TouchableOpacity>
+      );
+    },
     [st, colors, textColor, subColor, handleSelectResult],
   );
 
@@ -1090,6 +1158,9 @@ export function FloatingSearchPanel({
     if (minimized) expandPanel();
     handleFocus();
   }, [minimized, expandPanel, handleFocus]);
+
+  // ── Hide when transit directions panel is active ──
+  if (transitDirectionsActive) return null;
 
   // ── Location detail view (Apple Maps style) ──
   if (mode === 'location' && selectedResult) {

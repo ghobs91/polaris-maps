@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
+import { useShallow } from 'zustand/react/shallow';
 import { filterPoisForDisplay } from '../../utils/poiSpatialFilter';
 import { getPoiCategory } from '../../utils/poiCategories';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
@@ -37,10 +38,14 @@ function PoiBadge({ poi, onPress }: PoiBadgeProps) {
 }
 
 export function POILayer() {
-  const pois = useOsmPoiStore((s) => s.pois);
-  const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
-  const zoom = useOsmPoiStore((s) => s.currentZoom);
-  const bounds = useOsmPoiStore((s) => s.viewportBounds);
+  const { pois, categorySearchResults, zoom, bounds } = useOsmPoiStore(
+    useShallow((s) => ({
+      pois: s.pois,
+      categorySearchResults: s.categorySearchResults,
+      zoom: s.currentZoom,
+      bounds: s.viewportBounds,
+    })),
+  );
 
   const handlePress = useCallback((poi: OsmPoi) => {
     useOsmPoiStore.getState().setSelectedPoi(poi);

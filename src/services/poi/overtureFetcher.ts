@@ -301,6 +301,12 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           status, source, author_pubkey, signature, created_at, updated_at`;
 
   await db.withExclusiveTransactionAsync(async (txn) => {
+    // Temporarily disable FTS triggers during bulk upsert to avoid
+    // O(2n) delete+insert FTS index operations per row. We rebuild
+    // the FTS index once after the transaction completes.
+    await txn.runAsync('DROP TRIGGER IF EXISTS places_fts_insert');
+    await txn.runAsync('DROP TRIGGER IF EXISTS places_fts_update');
+
     for (let i = 0; i < places.length; i += CHUNK_SIZE) {
       const chunk = places.slice(i, i + CHUNK_SIZE);
       const rowPlaceholders = `(${Array(colCount).fill('?').join(', ')})`;
@@ -356,4 +362,20 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
       );
     }
   });
+
+  // Rebuild FTS index in one pass (faster than per-row trigger updates)
+  // then re-create the triggers for single-row inserts/updates.
+  await db.execAsync(`INSERT INTO places_fts(places_fts) VALUES('rebuild')`);
+  await db.execAsync(`
+    CREATE TRIGGER IF NOT EXISTS places_fts_insert AFTER INSERT ON places BEGIN
+      INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+        VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
+    END;
+    CREATE TRIGGER IF NOT EXISTS places_fts_update AFTER UPDATE ON places BEGIN
+      INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+        VALUES ('delete', OLD.rowid, OLD.name, OLD.brand_name, OLD.category, OLD.address_city);
+      INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+        VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
+    END
+  `);
 }

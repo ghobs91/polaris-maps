@@ -30,6 +30,36 @@ const EMPTY_POINT_COLLECTION: GeoJSON.FeatureCollection = {
 
 // ── Route lines layer (always mounted, visibility toggled) ──────────
 
+const ROUTE_LINE_WIDTH = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  8,
+  1,
+  10,
+  1.5,
+  13,
+  2.5,
+  16,
+  4,
+  18,
+  6,
+] as any;
+const ROUTE_LINE_COLOR = ['get', 'color'] as any;
+
+const ROUTE_LINE_STYLE_VISIBLE = {
+  lineColor: ROUTE_LINE_COLOR,
+  lineWidth: ROUTE_LINE_WIDTH,
+  lineCap: 'round' as const,
+  lineJoin: 'round' as const,
+  lineOpacity: 0.9,
+  visibility: 'visible' as const,
+};
+const ROUTE_LINE_STYLE_HIDDEN = {
+  ...ROUTE_LINE_STYLE_VISIBLE,
+  visibility: 'none' as const,
+};
+
 function RouteLinesLayer({ lines, visible }: { lines: TransitRouteLine[]; visible: boolean }) {
   const geoJson = useMemo(() => {
     if (lines.length === 0) return EMPTY_LINE_COLLECTION;
@@ -56,34 +86,60 @@ function RouteLinesLayer({ lines, visible }: { lines: TransitRouteLine[]; visibl
         id="transit-lines-color"
         minZoomLevel={8}
         maxZoomLevel={20}
-        style={{
-          lineColor: ['get', 'color'] as any,
-          lineWidth: [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            8,
-            1,
-            10,
-            1.5,
-            13,
-            2.5,
-            16,
-            4,
-            18,
-            6,
-          ] as any,
-          lineCap: 'round',
-          lineJoin: 'round',
-          lineOpacity: 0.9,
-          visibility: visible ? 'visible' : 'none',
-        }}
+        style={visible ? ROUTE_LINE_STYLE_VISIBLE : ROUTE_LINE_STYLE_HIDDEN}
       />
     </MapLibreGL.ShapeSource>
   );
 }
 
 // ── Stop dots (always mounted, visibility toggled) ──────────────────
+
+const STOP_CIRCLE_RADIUS = ['interpolate', ['linear'], ['zoom'], 12, 3, 15, 5, 18, 8] as any;
+const STOP_CIRCLE_STROKE_WIDTH = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  12,
+  1.5,
+  15,
+  2.5,
+  18,
+  3,
+] as any;
+
+const STOP_CIRCLE_STYLE_VISIBLE = {
+  circleRadius: STOP_CIRCLE_RADIUS,
+  circleColor: '#FFFFFF',
+  circleStrokeWidth: STOP_CIRCLE_STROKE_WIDTH,
+  circleStrokeColor: '#666666',
+  visibility: 'visible' as const,
+};
+const STOP_CIRCLE_STYLE_HIDDEN = {
+  ...STOP_CIRCLE_STYLE_VISIBLE,
+  visibility: 'none' as const,
+};
+
+const STOP_LABEL_TEXT_SIZE = ['interpolate', ['linear'], ['zoom'], 14, 10, 16, 12] as any;
+const STOP_LABEL_TEXT_FIELD = ['get', 'name'] as any;
+const STOP_LABEL_TEXT_OFFSET = [0, 1.3] as any;
+const STOP_LABEL_TEXT_FONT = ['Noto Sans Bold'] as any;
+
+const STOP_LABEL_STYLE_VISIBLE = {
+  textField: STOP_LABEL_TEXT_FIELD,
+  textSize: STOP_LABEL_TEXT_SIZE,
+  textOffset: STOP_LABEL_TEXT_OFFSET,
+  textAnchor: 'top' as const,
+  textColor: '#FFFFFF',
+  textHaloColor: '#000000',
+  textHaloWidth: 1.5,
+  textMaxWidth: 10,
+  textFont: STOP_LABEL_TEXT_FONT,
+  visibility: 'visible' as const,
+};
+const STOP_LABEL_STYLE_HIDDEN = {
+  ...STOP_LABEL_STYLE_VISIBLE,
+  visibility: 'none' as const,
+};
 
 /**
  * Approximate degree-distance threshold for stop↔route association.
@@ -95,7 +151,52 @@ function RouteLinesLayer({ lines, visible }: { lines: TransitRouteLine[]; visibl
  */
 const PROXIMITY_DEG = 0.003;
 
-/** Check whether any point in a route's geometry is within PROXIMITY_DEG of (lat, lon). */
+// ── Spatial grid index for fast geometry-proximity lookups ──────────
+// Buckets route geometry points into ~1 km cells so stop↔route
+// association avoids the previous O(stops × lines × points) brute-force.
+const GRID_SIZE = 0.01; // ~1 km per grid cell
+
+interface RouteGridIndex {
+  /** Map from "gridRow,gridCol" → Set of line indices */
+  grid: Map<string, Set<number>>;
+}
+
+function buildRouteGrid(lines: TransitRouteLine[]): RouteGridIndex {
+  const grid = new Map<string, Set<number>>();
+  for (let li = 0; li < lines.length; li++) {
+    for (const seg of lines[li].geometry) {
+      for (const [pLon, pLat] of seg) {
+        const key = `${Math.floor(pLat / GRID_SIZE)},${Math.floor(pLon / GRID_SIZE)}`;
+        let bucket = grid.get(key);
+        if (!bucket) {
+          bucket = new Set<number>();
+          grid.set(key, bucket);
+        }
+        bucket.add(li);
+      }
+    }
+  }
+  return { grid };
+}
+
+/** Return indices of lines whose geometry passes near (lat, lon). */
+function getNearbyLineIndices(index: RouteGridIndex, lat: number, lon: number): Set<number> {
+  const result = new Set<number>();
+  const r = Math.ceil(PROXIMITY_DEG / GRID_SIZE);
+  const baseLat = Math.floor(lat / GRID_SIZE);
+  const baseLon = Math.floor(lon / GRID_SIZE);
+  for (let i = -r; i <= r; i++) {
+    for (let j = -r; j <= r; j++) {
+      const bucket = index.grid.get(`${baseLat + i},${baseLon + j}`);
+      if (bucket) {
+        for (const li of bucket) result.add(li);
+      }
+    }
+  }
+  return result;
+}
+
+/** Fine-grained check: does any point in line's geometry fall within PROXIMITY_DEG? */
 function routePassesNear(line: TransitRouteLine, lat: number, lon: number): boolean {
   for (const seg of line.geometry) {
     for (const [pLon, pLat] of seg) {
@@ -128,42 +229,49 @@ function RouteStopsLayer({
         lat: number;
         lon: number;
         routes: SelectedTransitStop['routes'];
+        routeSet: Set<string>;
       }
     >();
 
     for (const line of lines) {
       for (const s of line.stops) {
         const key = `${s.name}:${(s.lat * 200).toFixed(0)},${(s.lon * 200).toFixed(0)}`;
-        const existing = seen.get(key);
-        if (existing) {
-          if (!existing.routes.some((r) => r.ref === line.ref && r.name === line.name)) {
-            existing.routes.push({
-              ref: line.ref,
-              name: line.name,
-              color: line.color,
-              mode: line.mode,
-            });
-          }
-        } else {
-          seen.set(key, {
+        let existing = seen.get(key);
+        if (!existing) {
+          existing = {
             name: s.name,
             lat: s.lat,
             lon: s.lon,
-            routes: [{ ref: line.ref, name: line.name, color: line.color, mode: line.mode }],
+            routes: [],
+            routeSet: new Set<string>(),
+          };
+          seen.set(key, existing);
+        }
+        const routeKey = `${line.ref}\0${line.name}`;
+        if (!existing.routeSet.has(routeKey)) {
+          existing.routeSet.add(routeKey);
+          existing.routes.push({
+            ref: line.ref,
+            name: line.name,
+            color: line.color,
+            mode: line.mode,
           });
         }
       }
     }
 
-    // ── Geometry-proximity enrichment ──────────────────────────────
-    // For each stop, check if any route's geometry passes nearby.
-    // This catches routes whose OSM relations don't list the stop as
-    // a member even though their tracks physically pass through.
+    // ── Geometry-proximity enrichment (spatial-indexed) ─────────────
+    // For each stop, check only lines whose geometry passes nearby
+    // using the grid index, then confirm with fine-grained check.
+    const grid = buildRouteGrid(lines);
     for (const stop of seen.values()) {
-      for (const line of lines) {
-        // Already associated?
-        if (stop.routes.some((r) => r.ref === line.ref && r.name === line.name)) continue;
+      const candidateIndices = getNearbyLineIndices(grid, stop.lat, stop.lon);
+      for (const li of candidateIndices) {
+        const line = lines[li];
+        const routeKey = `${line.ref}\0${line.name}`;
+        if (stop.routeSet.has(routeKey)) continue;
         if (routePassesNear(line, stop.lat, stop.lon)) {
+          stop.routeSet.add(routeKey);
           stop.routes.push({
             ref: line.ref,
             name: line.name,
@@ -221,30 +329,13 @@ function RouteStopsLayer({
         id="transit-route-stops-ring"
         minZoomLevel={12}
         maxZoomLevel={20}
-        style={{
-          circleRadius: ['interpolate', ['linear'], ['zoom'], 12, 3, 15, 5, 18, 8] as any,
-          circleColor: '#FFFFFF',
-          circleStrokeWidth: ['interpolate', ['linear'], ['zoom'], 12, 1.5, 15, 2.5, 18, 3] as any,
-          circleStrokeColor: '#666666',
-          visibility: visible ? 'visible' : 'none',
-        }}
+        style={visible ? STOP_CIRCLE_STYLE_VISIBLE : STOP_CIRCLE_STYLE_HIDDEN}
       />
       <MapLibreGL.SymbolLayer
         id="transit-route-stops-label"
         minZoomLevel={14}
         maxZoomLevel={20}
-        style={{
-          textField: ['get', 'name'] as any,
-          textSize: ['interpolate', ['linear'], ['zoom'], 14, 10, 16, 12] as any,
-          textOffset: [0, 1.3] as any,
-          textAnchor: 'top',
-          textColor: '#FFFFFF',
-          textHaloColor: '#000000',
-          textHaloWidth: 1.5,
-          textMaxWidth: 10,
-          textFont: ['Noto Sans Bold'] as any,
-          visibility: visible ? 'visible' : 'none',
-        }}
+        style={visible ? STOP_LABEL_STYLE_VISIBLE : STOP_LABEL_STYLE_HIDDEN}
       />
     </MapLibreGL.ShapeSource>
   );

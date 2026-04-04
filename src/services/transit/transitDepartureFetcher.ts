@@ -7,6 +7,7 @@
  */
 
 import type { TransitMode } from '../../models/transit';
+import { isInMbtaArea, fetchMbtaDepartures } from './mbtaFetcher';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -79,8 +80,8 @@ function estimateHeadwayDepartures(routes: StopDepartureInfo['routes']): Departu
 /**
  * Fetch upcoming departures for a transit stop.
  *
- * Uses headway estimation based on route mode. GTFS-RT real-time
- * predictions can be layered on top later without heavy downloads.
+ * In the MBTA service area, uses real schedule + prediction data from
+ * the MBTA V3 API. Elsewhere, falls back to headway estimation.
  */
 export async function fetchDepartures(
   stopName: string,
@@ -90,6 +91,16 @@ export async function fetchDepartures(
   routeColors: (string | undefined)[],
   modes: TransitMode[],
 ): Promise<StopDepartureInfo> {
+  // Try MBTA real departures for Boston area stops
+  if (isInMbtaArea(_lat, _lon)) {
+    try {
+      const mbtaInfo = await fetchMbtaDepartures(stopName, _lat, _lon);
+      if (mbtaInfo && mbtaInfo.departures.length > 0) return mbtaInfo;
+    } catch {
+      // Fall through to headway estimation
+    }
+  }
+
   const routes = routeNames.map((name, i) => ({
     name,
     color: routeColors[i],

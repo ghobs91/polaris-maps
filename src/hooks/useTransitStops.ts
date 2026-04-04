@@ -84,12 +84,15 @@ async function fetchAndMergeLines(bounds: {
   const store = useTransitStore.getState();
   store.setIsLoadingLines(true);
   try {
-    // fetchTransitLines returns the globally accumulated & deduplicated set
+    // fetchTransitLines returns the globally accumulated & deduplicated set.
+    // The onProgress callback pushes partial results after each batch so
+    // lines appear progressively instead of all-at-once after the last fetch.
     const lines = await fetchTransitLines(
       bounds.minLat,
       bounds.minLng,
       bounds.maxLat,
       bounds.maxLng,
+      (partial) => useTransitStore.getState().setRouteLines(partial),
     );
     useTransitStore.getState().setRouteLines(lines);
   } catch {
