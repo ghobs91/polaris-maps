@@ -31,6 +31,8 @@ interface MapState {
   fitBounds: [number, number, number, number] | null;
   // Set from outside the map tab (e.g. POI detail) to auto-trigger directions
   pendingDirectionsTarget: { lat: number; lng: number; name: string } | null;
+  // Set to pre-fill and auto-trigger the search panel from outside the map
+  pendingSearchQuery: string | null;
   // Incremented by locateTo so MapView always flies even when position/zoom unchanged
   locateTrigger: number;
 
@@ -43,6 +45,7 @@ interface MapState {
   setTrafficLayerVisible: (visible: boolean) => void;
   setFitBounds: (bounds: [number, number, number, number] | null) => void;
   setPendingDirectionsTarget: (target: MapState['pendingDirectionsTarget']) => void;
+  setPendingSearchQuery: (query: string | null) => void;
 }
 
 export const useMapStore = create<MapState>()((set) => ({
@@ -59,6 +62,7 @@ export const useMapStore = create<MapState>()((set) => ({
   trafficLayerVisible: loadLayerToggles().trafficLayerVisible,
   fitBounds: null,
   pendingDirectionsTarget: null,
+  pendingSearchQuery: null,
   locateTrigger: 0,
 
   setViewport: (viewport) => set((state) => ({ viewport: { ...state.viewport, ...viewport } })),
@@ -76,4 +80,5 @@ export const useMapStore = create<MapState>()((set) => ({
   },
   setFitBounds: (fitBounds) => set({ fitBounds }),
   setPendingDirectionsTarget: (pendingDirectionsTarget) => set({ pendingDirectionsTarget }),
+  setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
 }));

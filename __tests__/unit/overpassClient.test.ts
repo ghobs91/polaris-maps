@@ -28,7 +28,7 @@ describe('overpassFetch', () => {
 
     expect(result).toEqual(sampleResponse);
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch.mock.calls[0][0]).toBe('https://overpass.private.coffee/api/interpreter');
+    expect(mockFetch.mock.calls[0][0]).toBe('https://overpass-api.de/api/interpreter');
   });
 
   it('falls back to secondary when primary returns non-OK status', async () => {
@@ -44,8 +44,8 @@ describe('overpassFetch', () => {
 
     expect(result).toEqual(sampleResponse);
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch.mock.calls[0][0]).toBe('https://overpass.private.coffee/api/interpreter');
-    expect(mockFetch.mock.calls[1][0]).toBe('https://overpass-api.de/api/interpreter');
+    expect(mockFetch.mock.calls[0][0]).toBe('https://overpass-api.de/api/interpreter');
+    expect(mockFetch.mock.calls[1][0]).toBe('https://overpass.private.coffee/api/interpreter');
   });
 
   it('falls back to secondary when primary throws a network error', async () => {

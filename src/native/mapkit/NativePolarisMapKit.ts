@@ -35,6 +35,14 @@ export interface NativeMapKitPoi {
 
 export interface Spec extends TurboModule {
   searchPOI(query: string, latitude: number, longitude: number): Promise<NativeMapKitPoi | null>;
+  searchPlace(query: string, regionHint: string | null): Promise<NativeMapKitPoi | null>;
+  searchPlaceAll(query: string, regionHint: string | null): Promise<NativeMapKitPoi[]>;
+  searchNearby(
+    query: string,
+    latitude: number,
+    longitude: number,
+    radiusMeters: number,
+  ): Promise<NativeMapKitPoi[]>;
 }
 
 export default TurboModuleRegistry.get<Spec>('PolarisMapKit');

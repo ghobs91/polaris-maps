@@ -19,7 +19,8 @@ import { attestPOI } from '../../src/services/poi/attestationService';
 import { getImageryNearby } from '../../src/services/imagery/browseService';
 import { ReviewCard } from '../../src/components/poi/ReviewCard';
 import { RatingWidget } from '../../src/components/poi/RatingWidget';
-import { Button, LoadingSpinner, ErrorBoundary } from '../../src/components/common';
+import { Button, LoadingSpinner, ErrorBoundary, Modal } from '../../src/components/common';
+import { SaveToListSheet } from '../../src/components/places';
 import { colors, spacing, typography, borderRadius } from '../../src/constants/theme';
 import type { StreetImagery } from '../../src/models/imagery';
 
@@ -38,6 +39,7 @@ export default function POIDetailScreen() {
     setIsLoadingPlace,
   } = usePOIStore();
   const [nearbyImages, setNearbyImages] = useState<StreetImagery[]>([]);
+  const [showSaveSheet, setShowSaveSheet] = useState(false);
 
   const loadPlace = useCallback(async () => {
     if (!id) return;
@@ -205,7 +207,24 @@ export default function POIDetailScreen() {
             variant="outline"
           />
           <Button title="Verify I'm Here" onPress={handleAttest} variant="outline" />
+          <Button title="Save to List" onPress={() => setShowSaveSheet(true)} variant="outline" />
         </View>
+
+        <Modal visible={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Save to List">
+          <SaveToListSheet
+            poiUuid={selectedPlace.uuid}
+            placeName={selectedPlace.name}
+            lat={selectedPlace.lat}
+            lng={selectedPlace.lng}
+            address={
+              [selectedPlace.addressStreet, selectedPlace.addressCity, selectedPlace.addressState]
+                .filter(Boolean)
+                .join(', ') || undefined
+            }
+            category={selectedPlace.category}
+            onDone={() => setShowSaveSheet(false)}
+          />
+        </Modal>
 
         {pendingEdits.length > 0 && (
           <View style={styles.section}>

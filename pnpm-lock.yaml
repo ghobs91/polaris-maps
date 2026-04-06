@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@maplibre/maplibre-react-native':
-    hash: 14a98708680772730d9db2670070c3217855b5475993ebf5f706dfc1f1dc006b
+    hash: 87cc547fc3ba63c94117c754d341411fa41e368ccee4fe5cc5ed6d2e8612c24e
     path: patches/@maplibre__maplibre-react-native.patch
 
 importers:
@@ -21,7 +21,7 @@ importers:
         version: 14.1.0(expo-font@13.0.4(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
       '@maplibre/maplibre-react-native':
         specifier: ^10.0.0-alpha.2
-        version: 10.4.2(patch_hash=14a98708680772730d9db2670070c3217855b5475993ebf5f706dfc1f1dc006b)(@expo/config-plugins@55.0.6)(@types/geojson@7946.0.16)(@types/react@18.3.28)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
+        version: 10.4.2(patch_hash=87cc547fc3ba63c94117c754d341411fa41e368ccee4fe5cc5ed6d2e8612c24e)(@expo/config-plugins@55.0.6)(@types/geojson@7946.0.16)(@types/react@18.3.28)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
       '@noble/curves':
         specifier: ^1.8.0
         version: 1.9.7
@@ -61,6 +61,9 @@ importers:
       expo-crypto:
         specifier: ^14.0.2
         version: 14.0.2(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))
+      expo-document-picker:
+        specifier: ^55.0.11
+        version: 55.0.11(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))
       expo-file-system:
         specifier: ^18.0.12
         version: 18.0.12(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))
@@ -3046,6 +3049,11 @@ packages:
 
   expo-crypto@14.0.2:
     resolution: {integrity: sha512-WRc9PBpJraJN29VD5Ef7nCecxJmZNyRKcGkNiDQC1nhY5agppzwhqh7zEzNFarE/GqDgSiaDHS8yd5EgFhP9AQ==}
+    peerDependencies:
+      expo: '*'
+
+  expo-document-picker@55.0.11:
+    resolution: {integrity: sha512-0po1UceUMKzHOOppXN5y35KXhF2zQN91cje/yxyoJaTgZPPFM7VZ+0Z4xd1JiO1WTbB+w6mb21RaPWriit/67w==}
     peerDependencies:
       expo: '*'
 
@@ -7726,7 +7734,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@maplibre/maplibre-react-native@10.4.2(patch_hash=14a98708680772730d9db2670070c3217855b5475993ebf5f706dfc1f1dc006b)(@expo/config-plugins@55.0.6)(@types/geojson@7946.0.16)(@types/react@18.3.28)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)':
+  '@maplibre/maplibre-react-native@10.4.2(patch_hash=87cc547fc3ba63c94117c754d341411fa41e368ccee4fe5cc5ed6d2e8612c24e)(@expo/config-plugins@55.0.6)(@types/geojson@7946.0.16)(@types/react@18.3.28)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)':
     dependencies:
       '@turf/distance': 7.3.4
       '@turf/helpers': 7.3.4
@@ -9938,6 +9946,10 @@ snapshots:
   expo-crypto@14.0.2(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)):
     dependencies:
       base64-js: 1.5.1
+      expo: 52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
+
+  expo-document-picker@55.0.11(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)):
+    dependencies:
       expo: 52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1)
 
   expo-file-system@18.0.12(expo@52.0.49(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(react@18.3.1)):

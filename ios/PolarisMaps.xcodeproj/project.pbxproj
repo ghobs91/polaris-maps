@@ -15,6 +15,14 @@
 		B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		C8ED41102F5AECDC007C52BB /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 8A0A563B84AA28C0D87990D5 /* MapLibre */; };
+		CP001A0000000001CARPLAY01 /* CarPlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP001A0000000002CARPLAY01 /* CarPlayController.swift */; };
+		CP001A0000000003CARPLAY01 /* PolarisCarPlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CP001A0000000004CARPLAY01 /* PolarisCarPlay.swift */; };
+		CP001A0000000005CARPLAY01 /* PolarisCarPlay.m in Sources */ = {isa = PBXBuildFile; fileRef = CP001A0000000006CARPLAY01 /* PolarisCarPlay.m */; };
+		CP001A0000000007CARPLAY01 /* CarPlayBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = CP001A0000000008CARPLAY01 /* CarPlayBridge.mm */; };
+		MK001A0000000001MAPKIT01 /* PolarisMapKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = MK001A0000000002MAPKIT01 /* PolarisMapKit.swift */; };
+		MK001A0000000003MAPKIT01 /* PolarisMapKit.m in Sources */ = {isa = PBXBuildFile; fileRef = MK001A0000000004MAPKIT01 /* PolarisMapKit.m */; };
+		CS001A0000000001CLOUDS01 /* PolarisCloudStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CS001A0000000002CLOUDS01 /* PolarisCloudStore.swift */; };
+		CS001A0000000003CLOUDS01 /* PolarisCloudStore.m in Sources */ = {isa = PBXBuildFile; fileRef = CS001A0000000004CLOUDS01 /* PolarisCloudStore.m */; };
 		EEDF2AFD1DC6CAD0E723F162 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7275106F1535F6D6CBE69E8F /* PrivacyInfo.xcprivacy */; };
 		FD1A5B3BECAD4B83B1AAFA5D /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFDE744C3B3444DB9D59AC1 /* noop-file.swift */; };
 /* End PBXBuildFile section */
@@ -34,6 +42,15 @@
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = PolarisMaps/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		BEFDE744C3B3444DB9D59AC1 /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "PolarisMaps/noop-file.swift"; sourceTree = "<group>"; };
+		CP001A0000000002CARPLAY01 /* CarPlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CarPlayController.swift; path = PolarisMaps/CarPlayController.swift; sourceTree = "<group>"; };
+		CP001A0000000004CARPLAY01 /* PolarisCarPlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PolarisCarPlay.swift; path = PolarisMaps/PolarisCarPlay.swift; sourceTree = "<group>"; };
+		CP001A0000000006CARPLAY01 /* PolarisCarPlay.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PolarisCarPlay.m; path = PolarisMaps/PolarisCarPlay.m; sourceTree = "<group>"; };
+		CP001A0000000008CARPLAY01 /* CarPlayBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = CarPlayBridge.mm; path = PolarisMaps/CarPlayBridge.mm; sourceTree = "<group>"; };
+		CP001A0000000009CARPLAY01 /* CarPlayBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = CarPlayBridge.h; path = PolarisMaps/CarPlayBridge.h; sourceTree = "<group>"; };
+		MK001A0000000002MAPKIT01 /* PolarisMapKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PolarisMapKit.swift; path = PolarisMaps/PolarisMapKit.swift; sourceTree = "<group>"; };
+		MK001A0000000004MAPKIT01 /* PolarisMapKit.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PolarisMapKit.m; path = PolarisMaps/PolarisMapKit.m; sourceTree = "<group>"; };
+		CS001A0000000002CLOUDS01 /* PolarisCloudStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PolarisCloudStore.swift; path = PolarisMaps/PolarisCloudStore.swift; sourceTree = "<group>"; };
+		CS001A0000000004CLOUDS01 /* PolarisCloudStore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PolarisCloudStore.m; path = PolarisMaps/PolarisCloudStore.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PolarisMaps/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -64,6 +81,15 @@
 				BEFDE744C3B3444DB9D59AC1 /* noop-file.swift */,
 				0BF4C7475ADA4C639FD65147 /* PolarisMaps-Bridging-Header.h */,
 				7275106F1535F6D6CBE69E8F /* PrivacyInfo.xcprivacy */,
+				CP001A0000000002CARPLAY01 /* CarPlayController.swift */,
+				CP001A0000000004CARPLAY01 /* PolarisCarPlay.swift */,
+				CP001A0000000006CARPLAY01 /* PolarisCarPlay.m */,
+				CP001A0000000008CARPLAY01 /* CarPlayBridge.mm */,
+				CP001A0000000009CARPLAY01 /* CarPlayBridge.h */,
+				MK001A0000000002MAPKIT01 /* PolarisMapKit.swift */,
+				MK001A0000000004MAPKIT01 /* PolarisMapKit.m */,
+				CS001A0000000002CLOUDS01 /* PolarisCloudStore.swift */,
+				CS001A0000000004CLOUDS01 /* PolarisCloudStore.m */,
 			);
 			name = PolarisMaps;
 			sourceTree = "<group>";
@@ -356,6 +382,14 @@
 				13B07FC11A68108700A75B9A /* main.m in Sources */,
 				B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */,
 				FD1A5B3BECAD4B83B1AAFA5D /* noop-file.swift in Sources */,
+				CP001A0000000001CARPLAY01 /* CarPlayController.swift in Sources */,
+				CP001A0000000003CARPLAY01 /* PolarisCarPlay.swift in Sources */,
+				CP001A0000000005CARPLAY01 /* PolarisCarPlay.m in Sources */,
+				CP001A0000000007CARPLAY01 /* CarPlayBridge.mm in Sources */,
+				MK001A0000000001MAPKIT01 /* PolarisMapKit.swift in Sources */,
+				MK001A0000000003MAPKIT01 /* PolarisMapKit.m in Sources */,
+				CS001A0000000001CLOUDS01 /* PolarisCloudStore.swift in Sources */,
+				CS001A0000000003CLOUDS01 /* PolarisCloudStore.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -372,7 +406,7 @@
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -387,7 +421,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -415,7 +449,7 @@
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				INFOPLIST_FILE = PolarisMaps/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps";
@@ -425,7 +459,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",

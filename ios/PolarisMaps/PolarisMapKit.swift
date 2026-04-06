@@ -1,5 +1,7 @@
 import Foundation
 import MapKit
+import Contacts
+import CoreLocation
 
 /// Native module that exposes MKLocalSearch POI data to React Native.
 /// Uses MKLocalSearch.Request with resultType = .pointOfInterest to get rich
@@ -19,7 +21,7 @@ class PolarisMapKit: NSObject {
   ) {
     let request = MKLocalSearch.Request()
     request.naturalLanguageQuery = query
-    request.resultTypeFilter = .pointOfInterest
+    request.pointOfInterestFilter = .includingAll
     request.region = MKCoordinateRegion(
       center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
       latitudinalMeters: 500,
@@ -63,6 +65,155 @@ class PolarisMapKit: NSObject {
     }
   }
 
+  /// Search for a place by name, optionally scoped to a region hint.
+  /// The regionHint is geocoded first (e.g. "Long Island") to bias results.
+  /// Returns the top result from MKLocalSearch.
+  @objc
+  func searchPlace(
+    _ query: String,
+    regionHint: NSString?,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    let hint = regionHint as String?
+    let geocoder = CLGeocoder()
+
+    let runSearch = { (region: MKCoordinateRegion?) in
+      let request = MKLocalSearch.Request()
+      request.naturalLanguageQuery = query
+      request.pointOfInterestFilter = .includingAll
+      if let region = region {
+        request.region = region
+      }
+
+      let search = MKLocalSearch(request: request)
+      search.start { response, error in
+        guard let response = response, let first = response.mapItems.first else {
+          resolve(nil)
+          return
+        }
+        resolve(Self.serializeMapItem(first))
+      }
+    }
+
+    // If we have a region hint, geocode it first to bias the search
+    if let hint = hint, !hint.isEmpty {
+      geocoder.geocodeAddressString(hint) { placemarks, error in
+        if let placemark = placemarks?.first, let location = placemark.location {
+          // Use the geocoded region, or a 50km radius around the point
+          let region: MKCoordinateRegion
+          if let circularRegion = placemark.region as? CLCircularRegion {
+            region = MKCoordinateRegion(
+              center: circularRegion.center,
+              latitudinalMeters: circularRegion.radius * 2,
+              longitudinalMeters: circularRegion.radius * 2
+            )
+          } else {
+            region = MKCoordinateRegion(
+              center: location.coordinate,
+              latitudinalMeters: 50_000,
+              longitudinalMeters: 50_000
+            )
+          }
+          runSearch(region)
+        } else {
+          // Geocoding failed — search globally
+          runSearch(nil as MKCoordinateRegion?)
+        }
+      }
+    } else {
+      runSearch(nil as MKCoordinateRegion?)
+    }
+  }
+
+  /// Search nearby: returns up to 20 POI results near a coordinate.
+  /// Used for augmented place search ("coffeeshop near me").
+  @objc
+  func searchNearby(
+    _ query: String,
+    latitude: Double,
+    longitude: Double,
+    radiusMeters: Double,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    let request = MKLocalSearch.Request()
+    request.naturalLanguageQuery = query
+    request.pointOfInterestFilter = .includingAll
+    request.region = MKCoordinateRegion(
+      center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+      latitudinalMeters: radiusMeters * 2,
+      longitudinalMeters: radiusMeters * 2
+    )
+
+    let search = MKLocalSearch(request: request)
+    search.start { response, error in
+      guard let response = response, !response.mapItems.isEmpty else {
+        resolve([])
+        return
+      }
+      let items = Array(response.mapItems.prefix(20))
+      resolve(items.map { Self.serializeMapItem($0) })
+    }
+  }
+
+  /// Search for a place by name and return ALL results (up to 10) for disambiguation.
+  @objc
+  func searchPlaceAll(
+    _ query: String,
+    regionHint: NSString?,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    let hint = regionHint as String?
+    let geocoder = CLGeocoder()
+
+    let runSearch = { (region: MKCoordinateRegion?) in
+      let request = MKLocalSearch.Request()
+      request.naturalLanguageQuery = query
+      request.pointOfInterestFilter = .includingAll
+      if let region = region {
+        request.region = region
+      }
+
+      let search = MKLocalSearch(request: request)
+      search.start { response, error in
+        guard let response = response, !response.mapItems.isEmpty else {
+          resolve([])
+          return
+        }
+        let items = Array(response.mapItems.prefix(10))
+        resolve(items.map { Self.serializeMapItem($0) })
+      }
+    }
+
+    if let hint = hint, !hint.isEmpty {
+      geocoder.geocodeAddressString(hint) { placemarks, error in
+        if let placemark = placemarks?.first, let location = placemark.location {
+          let region: MKCoordinateRegion
+          if let circularRegion = placemark.region as? CLCircularRegion {
+            region = MKCoordinateRegion(
+              center: circularRegion.center,
+              latitudinalMeters: circularRegion.radius * 2,
+              longitudinalMeters: circularRegion.radius * 2
+            )
+          } else {
+            region = MKCoordinateRegion(
+              center: location.coordinate,
+              latitudinalMeters: 50_000,
+              longitudinalMeters: 50_000
+            )
+          }
+          runSearch(region)
+        } else {
+          runSearch(nil as MKCoordinateRegion?)
+        }
+      }
+    } else {
+      runSearch(nil as MKCoordinateRegion?)
+    }
+  }
+
   /// Convert an MKMapItem into a JSON-safe dictionary.
   private static func serializeMapItem(_ item: MKMapItem) -> [String: Any?] {
     var result: [String: Any?] = [
@@ -91,31 +242,6 @@ class PolarisMapKit: NSObject {
     if let lines = pm.postalAddress {
       let formatter = CNPostalAddressFormatter()
       result["formattedAddress"] = formatter.string(from: lines)
-    }
-
-    // Opening hours (iOS 16+)
-    if #available(iOS 16.0, *) {
-      if let hours = item.openingHours as? MKOHHours {
-        var periods: [[String: String]] = []
-        for period in hours.periods {
-          var p: [String: String] = [:]
-          let cal = Calendar.current
-          let openComps = period.open
-          if let day = openComps.day, let hour = openComps.hour, let minute = openComps.minute {
-            p["openDay"] = "\(day.rawValue)"
-            p["openTime"] = String(format: "%02d:%02d", hour, minute)
-          }
-          if let closeComps = period.close,
-             let day = closeComps.day, let hour = closeComps.hour, let minute = closeComps.minute {
-            p["closeDay"] = "\(day.rawValue)"
-            p["closeTime"] = String(format: "%02d:%02d", hour, minute)
-          }
-          if !p.isEmpty { periods.append(p) }
-        }
-        if !periods.isEmpty {
-          result["openingHoursPeriods"] = periods
-        }
-      }
     }
 
     return result

@@ -10,7 +10,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 20;
 
 /** Client-side timeout for Overpass API requests (ms). */
-const OVERPASS_TIMEOUT_MS = 8_000;
+const OVERPASS_TIMEOUT_MS = 5_000;
 
 interface CacheEntry {
   pois: OsmPoi[];

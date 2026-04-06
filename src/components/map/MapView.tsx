@@ -46,17 +46,53 @@ const DEDUP_THRESHOLD_DEG = 0.0003;
 /**
  * Deduplicate POIs that are very close together and share similar names.
  * Earlier entries in the array take priority (Overture before OSM).
+ *
+ * Uses a spatial grid (cell size = DEDUP_THRESHOLD_DEG) so the average
+ * complexity is O(n) instead of the previous O(n²) linear scan.
  */
 function deduplicatePois(pois: OsmPoi[]): OsmPoi[] {
+  const CELL = DEDUP_THRESHOLD_DEG;
+  const grid = new Map<number, OsmPoi[]>();
   const result: OsmPoi[] = [];
+
+  // Cantor-style pairing function — avoids string key allocation
+  const pairKey = (a: number, b: number): number => {
+    const ua = a >= 0 ? 2 * a : -2 * a - 1;
+    const ub = b >= 0 ? 2 * b : -2 * b - 1;
+    return ((ua + ub) * (ua + ub + 1)) / 2 + ub;
+  };
+
   for (const poi of pois) {
-    const isDup = result.some(
-      (existing) =>
-        Math.abs(existing.lat - poi.lat) < DEDUP_THRESHOLD_DEG &&
-        Math.abs(existing.lng - poi.lng) < DEDUP_THRESHOLD_DEG &&
-        existing.name.toLowerCase() === poi.name.toLowerCase(),
-    );
-    if (!isDup) result.push(poi);
+    const cx = Math.floor(poi.lat / CELL);
+    const cy = Math.floor(poi.lng / CELL);
+    const nameLower = poi.name.toLowerCase();
+    let isDup = false;
+
+    // Check 3×3 neighbourhood
+    outer: for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const cell = grid.get(pairKey(cx + dx, cy + dy));
+        if (!cell) continue;
+        for (const existing of cell) {
+          if (
+            Math.abs(existing.lat - poi.lat) < DEDUP_THRESHOLD_DEG &&
+            Math.abs(existing.lng - poi.lng) < DEDUP_THRESHOLD_DEG &&
+            existing.name.toLowerCase() === nameLower
+          ) {
+            isDup = true;
+            break outer;
+          }
+        }
+      }
+    }
+
+    if (!isDup) {
+      const k = pairKey(cx, cy);
+      const cell = grid.get(k);
+      if (cell) cell.push(poi);
+      else grid.set(k, [poi]);
+      result.push(poi);
+    }
   }
   return result;
 }
@@ -105,6 +141,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const lastProgrammaticMove = useRef(0);
   // Debounce timer for OSM POI fetching
   const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Abort controller to cancel stale in-flight fetches when viewport changes
+  const abortRef = useRef<AbortController | null>(null);
   // Track last fetched bounds to skip re-fetch for small pans (~1 km threshold)
   const lastFetchBounds = useRef<{
     minLat: number;
@@ -274,28 +312,53 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
 
       if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
+      // Cancel any in-flight fetch from a previous viewport — its results are
+      // stale and would overwrite the data we're about to request.
+      if (abortRef.current) abortRef.current.abort();
+
       poiFetchTimer.current = setTimeout(async () => {
+        const controller = new AbortController();
+        abortRef.current = controller;
+
         try {
           useOsmPoiStore.getState().setIsLoading(true);
           lastFetchBounds.current = { minLat, minLng, maxLat, maxLng };
 
-          // Try Overpass + local Overture + online Overture in parallel.
-          // Online Overture fetch also upserts into SQLite so subsequent
-          // pans over the same area are instant from the local cache.
-          const [osmPois, cachedPlaces, onlineOverture] = await Promise.all([
-            fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => [] as OsmPoi[]),
-            getPlacesInBounds(minLat, minLng, maxLat, maxLng, 500).catch(() => []),
-            fetchOverturePlaces(minLat, minLng, maxLat, maxLng, 500).catch(() => []),
-          ]);
+          // Phase 1: Instant local results — SQLite cached Overture places.
+          // Show these immediately so the map feels responsive even when the
+          // network is slow.
+          const cachedPlaces = await getPlacesInBounds(minLat, minLng, maxLat, maxLng, 500).catch(
+            () => [],
+          );
+          if (controller.signal.aborted) return;
 
-          const overturePois = [...cachedPlaces, ...onlineOverture].map(placeToOsmPoi);
-          let merged = deduplicatePois([...overturePois, ...osmPois]);
+          const cachedOverturePois = cachedPlaces.map(placeToOsmPoi);
+          if (cachedOverturePois.length > 0) {
+            useOsmPoiStore.getState().setPois(cachedOverturePois);
+          }
+
+          // Phase 2: Parallel network fetches — OSM Overpass + online Overture.
+          // Skip online Overture if the local cache already has ≥ 20 results
+          // (the area has been visited before — no need to re-fetch).
+          const skipOnlineOverture = cachedPlaces.length >= 20;
+          const [osmPois, onlineOverture] = await Promise.all([
+            fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => [] as OsmPoi[]),
+            skipOnlineOverture
+              ? ([] as OsmPoi[])
+              : fetchOverturePlaces(minLat, minLng, maxLat, maxLng, 500)
+                  .then((places) => places.map(placeToOsmPoi))
+                  .catch(() => [] as OsmPoi[]),
+          ]);
+          if (controller.signal.aborted) return;
+
+          let merged = deduplicatePois([...cachedOverturePois, ...onlineOverture, ...osmPois]);
 
           // If both Overpass and local DB returned nothing, try Nominatim
           if (merged.length === 0) {
             const nominatimPois = await fetchNominatimPois(minLat, minLng, maxLat, maxLng).catch(
               () => [],
             );
+            if (controller.signal.aborted) return;
             merged = nominatimPois;
           }
 

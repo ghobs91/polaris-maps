@@ -59,6 +59,7 @@ export default function TabLayout() {
         <Tabs.Screen name="index" options={{ title: 'Map' }} />
         <Tabs.Screen name="search" options={{ title: 'Search' }} />
         <Tabs.Screen name="navigation" options={{ title: 'Navigate' }} />
+        <Tabs.Screen name="places" options={{ title: 'My Places' }} />
         <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
       </Tabs>
 

@@ -39,6 +39,7 @@
     "expo-camera": "~16.0.0",
     "expo-constants": "~17.0.0",
     "expo-crypto": "^14.0.2",
+    "expo-document-picker": "^55.0.11",
     "expo-file-system": "^18.0.12",
     "expo-font": "~13.0.0",
     "expo-image-manipulator": "^13.0.6",

@@ -34,7 +34,7 @@ interface OsmPoiState {
   clearCategorySearch: () => void;
 }
 
-export const useOsmPoiStore = create<OsmPoiState>((set) => ({
+export const useOsmPoiStore = create<OsmPoiState>((set, get) => ({
   pois: [],
   selectedPoi: null,
   isLoading: false,
@@ -46,7 +46,15 @@ export const useOsmPoiStore = create<OsmPoiState>((set) => ({
   categorySearchResults: null,
   categorySearchLocalPrimary: false,
   isCategorySearching: false,
-  setPois: (pois) => set({ pois }),
+  setPois: (pois) => {
+    const state = get();
+    // Skip update if POI IDs haven't changed — avoids re-renders when the
+    // same results come back from repeated fetches of the same viewport.
+    if (state.pois.length === pois.length && state.pois.every((p, i) => p.id === pois[i].id)) {
+      return;
+    }
+    set({ pois });
+  },
   setSelectedPoi: (selectedPoi) => set({ selectedPoi, enrichedData: null }),
   setIsLoading: (isLoading) => set({ isLoading }),
   setZoomAndBounds: (zoom, bounds) => set({ currentZoom: zoom, viewportBounds: bounds }),

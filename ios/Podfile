@@ -11,6 +11,8 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
 install! 'cocoapods',
   :deterministic_uuids => false
 
+project 'PolarisMaps'
+
 prepare_react_native_project!
 
 target 'PolarisMaps' do
@@ -71,6 +73,9 @@ target 'PolarisMaps' do
         # FMT_CPLUSPLUS < 201709L → FMT_USE_CONSTEVAL=0, fixing the errors.
         lang = target.name == 'fmt' ? 'c++17' : 'c++20'
         config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = lang
+        if target.name == 'fmt'
+          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) FMT_USE_CONSTEVAL=0'
+        end
         config.build_settings['OTHER_CPPFLAGS'] = '$(inherited) -DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1 -DFOLLY_CFG_NO_COROUTINES=1'
         config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
         config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'

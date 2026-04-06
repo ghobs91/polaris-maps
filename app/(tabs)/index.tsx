@@ -25,13 +25,15 @@ export default function MapScreen() {
   // Fetch transit stops when transit layer is toggled on
   useTransitStops();
 
-  // Center on user location at startup
+  // Center on user location at startup (skip if a programmatic locate is pending,
+  // e.g. navigating here from My Places with resolved coordinates)
   useEffect(() => {
     (async () => {
+      if (useMapStore.getState().locateTrigger > 0) return;
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 13 });
+      setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 15 });
       // Pre-warm transit cache for metro area in background — non-blocking
       prewarmTransitCache(loc.coords.latitude, loc.coords.longitude).catch(() => {});
       // Pre-load OTP stops index so station search is instant

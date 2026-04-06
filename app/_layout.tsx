@@ -1,11 +1,22 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect } from 'react';
+import { InteractionManager } from 'react-native';
 import { ConnectivityBanner } from '@/components/common';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { initCarPlay } from '@/services/carplay/carPlayManager';
 
 function RootLayoutInner() {
   const { isDark } = useTheme();
+
+  useEffect(() => {
+    // Defer CarPlay init until after the initial render & layout pass completes.
+    // This avoids interfering with MapLibre's first camera setup.
+    const task = InteractionManager.runAfterInteractions(() => {
+      initCarPlay();
+    });
+    return () => task.cancel();
+  }, []);
   return (
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />

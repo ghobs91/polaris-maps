@@ -2,6 +2,7 @@
 
 #import <React/RCTBundleURLProvider.h>
 #import <React/RCTLinkingManager.h>
+#import "CarPlayBridge.h"
 
 @implementation AppDelegate
 
@@ -57,6 +58,22 @@
 - (void)application:(UIApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler
 {
   return [super application:application didReceiveRemoteNotification:userInfo fetchCompletionHandler:completionHandler];
+}
+
+// CarPlay — uses CPApplicationDelegate (non-scene API) to avoid interfering
+// with React Native's traditional UIApplicationDelegate window lifecycle.
+- (void)application:(UIApplication *)application
+    didConnectCarInterfaceController:(CPInterfaceController *)interfaceController
+                            toWindow:(CPWindow *)window
+{
+  PolarisCarPlayConnect(interfaceController, window);
+}
+
+- (void)application:(UIApplication *)application
+    didDisconnectCarInterfaceController:(CPInterfaceController *)interfaceController
+                             fromWindow:(CPWindow *)window
+{
+  PolarisCarPlayDisconnect();
 }
 
 @end

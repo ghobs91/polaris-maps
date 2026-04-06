@@ -1,58 +1,45 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
-import { fetchRouteTrafficGeoJSON } from '../../services/traffic/routeTrafficService';
+import {
+  buildRouteTrafficGeoJSON,
+  type TrafficFeatureCollection,
+} from '../../services/traffic/routeTrafficService';
+import { useTrafficStore } from '../../stores/trafficStore';
 import { decodePolyline } from '../../utils/polyline';
-
-/** How often (ms) to re-fetch traffic conditions along the route. */
-const REFRESH_INTERVAL_MS = 60_000;
 
 interface TrafficRouteLayerProps {
   geometry: string;
 }
 
-type TrafficGeoJSON = NonNullable<Awaited<ReturnType<typeof fetchRouteTrafficGeoJSON>>>;
-
 /**
- * Renders the route as color-coded line segments based on live TomTom traffic
- * flow data.  Intended to be placed inside a MapLibreGL.MapView.
+ * Renders the route as color-coded line segments based on live traffic data
+ * from the traffic store.  Intended to be placed inside a MapLibreGL.MapView.
  *
  * Always shows a plain blue fallback line immediately so the route is visible
- * while traffic data is loading or if the API is unavailable.  Once traffic
- * data arrives, the colored segments are rendered on top.
+ * while traffic data is loading or if no data is available.  Once the traffic
+ * store has normalized segments nearby, colored segments are rendered on top.
  */
 export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
-  const [geoJSON, setGeoJSON] = useState<TrafficGeoJSON | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    // Reset when geometry changes so we don't flash stale colors
-    setGeoJSON(null);
-    let cancelled = false;
-
-    const load = async () => {
-      const data = await fetchRouteTrafficGeoJSON(geometry);
-      if (!cancelled && data) setGeoJSON(data);
-    };
-
-    load();
-    intervalRef.current = setInterval(load, REFRESH_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [geometry]);
+  const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
 
   // Decode once for the fallback plain line
-  const coordinates = decodePolyline(geometry);
-  const fallbackShape = {
-    type: 'Feature' as const,
-    properties: {},
-    geometry: { type: 'LineString' as const, coordinates },
-  };
+  const coordinates = useMemo(() => decodePolyline(geometry), [geometry]);
+
+  const fallbackShape = useMemo(
+    () => ({
+      type: 'Feature' as const,
+      properties: {},
+      geometry: { type: 'LineString' as const, coordinates },
+    }),
+    [coordinates],
+  );
+
+  // Build traffic-colored GeoJSON from store segments (reactive)
+  const trafficGeoJSON: TrafficFeatureCollection | null = useMemo(() => {
+    if (normalizedSegments.length === 0) return null;
+    const result = buildRouteTrafficGeoJSON(coordinates, normalizedSegments);
+    return result.features.length > 0 ? result : null;
+  }, [coordinates, normalizedSegments]);
 
   return (
     <>
@@ -79,8 +66,8 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
       </MapLibreGL.ShapeSource>
 
       {/* Traffic-colored segments — rendered on top once data is available */}
-      {geoJSON && (
-        <MapLibreGL.ShapeSource id="route-traffic" shape={geoJSON as any}>
+      {trafficGeoJSON && (
+        <MapLibreGL.ShapeSource id="route-traffic" shape={trafficGeoJSON as any}>
           <MapLibreGL.LineLayer
             id="route-traffic-casing"
             style={{

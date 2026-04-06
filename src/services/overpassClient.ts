@@ -8,8 +8,8 @@
  * is retried once against the fallback instance before propagating the error.
  */
 
-const OVERPASS_PRIMARY = 'https://overpass.private.coffee/api/interpreter';
-const OVERPASS_FALLBACK = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_PRIMARY = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_FALLBACK = 'https://overpass.private.coffee/api/interpreter';
 
 export interface OverpassRequestOptions {
   /** Overpass QL query string (without the `data=` prefix). */

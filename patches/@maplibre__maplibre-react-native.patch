@@ -1,3 +1,57 @@
+diff --git a/ios/MLRN/CameraUpdateItem.m b/ios/MLRN/CameraUpdateItem.m
+index 7511c45dd0fb2e9a01312badab075d9890087963..5fe44de6205f4a38095fa10525f0794cf9913980 100644
+--- a/ios/MLRN/CameraUpdateItem.m
++++ b/ios/MLRN/CameraUpdateItem.m
+@@ -80,20 +80,37 @@ - (MLRNCameraWithPadding *)_makeCamera:(MLRNMapView *)mapView {
+ 
+   bool hasSetAltitude = false;
+ 
++  // Guard: camera:fittingCoordinateBounds:edgePadding: crashes (SIGABRT) when
++  // the map view has a zero-size frame (not yet laid out). Fall back to setting
++  // centerCoordinate directly when the view hasn't been sized.
++  BOOL mapHasLayout = mapView.frame.size.width > 0 && mapView.frame.size.height > 0;
++
+   if ([self _isCoordValid:_cameraStop.coordinate]) {
+-    MLNCoordinateBounds boundsFromCoord = {.sw = _cameraStop.coordinate,
+-                                           .ne = _cameraStop.coordinate};
+-    MLNMapCamera *boundsCamera = [mapView camera:nextCamera
+-                         fittingCoordinateBounds:boundsFromCoord
+-                                     edgePadding:padding];
+-    nextCamera.centerCoordinate = boundsCamera.centerCoordinate;
++    if (mapHasLayout) {
++      MLNCoordinateBounds boundsFromCoord = {.sw = _cameraStop.coordinate,
++                                             .ne = _cameraStop.coordinate};
++      MLNMapCamera *boundsCamera = [mapView camera:nextCamera
++                           fittingCoordinateBounds:boundsFromCoord
++                                       edgePadding:padding];
++      if (boundsCamera != nil) {
++        nextCamera.centerCoordinate = boundsCamera.centerCoordinate;
++      } else {
++        nextCamera.centerCoordinate = _cameraStop.coordinate;
++      }
++    } else {
++      nextCamera.centerCoordinate = _cameraStop.coordinate;
++    }
+   } else if ([self _areBoundsValid:_cameraStop.bounds]) {
+-    MLNMapCamera *boundsCamera = [mapView camera:nextCamera
+-                         fittingCoordinateBounds:_cameraStop.bounds
+-                                     edgePadding:padding];
+-    nextCamera.centerCoordinate = boundsCamera.centerCoordinate;
+-    nextCamera.altitude = boundsCamera.altitude;
+-    hasSetAltitude = true;
++    if (mapHasLayout) {
++      MLNMapCamera *boundsCamera = [mapView camera:nextCamera
++                           fittingCoordinateBounds:_cameraStop.bounds
++                                       edgePadding:padding];
++      if (boundsCamera != nil) {
++        nextCamera.centerCoordinate = boundsCamera.centerCoordinate;
++        nextCamera.altitude = boundsCamera.altitude;
++        hasSetAltitude = true;
++      }
++    }
+   }
+ 
+   if (_cameraStop.pitch != nil) {
 diff --git a/package.json b/package.json
 index 48af535f1e9b1620a4a0290ad58e1df179f7b07c..b8c89ecb0fc2b357aa19b6be6b6e1fb04931fbe2 100644
 --- a/package.json

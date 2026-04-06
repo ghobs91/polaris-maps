@@ -20,6 +20,8 @@ import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
+import { Modal } from '../common/Modal';
+import { SaveToListSheet } from '../places/SaveToListSheet';
 
 const SCREEN_H = Dimensions.get('window').height;
 // Two snap points: peek (40%) and expanded (85%)
@@ -303,6 +305,7 @@ export function POIInfoCard() {
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
+  const [showSaveSheet, setShowSaveSheet] = useState(false);
   // Track whether the Clearbit logo failed to load (e.g. 404 for unknown brands)
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   // Use a ref so PanResponder closures always read the latest value
@@ -626,7 +629,32 @@ export function POIInfoCard() {
                 bg={pillBg}
               />
             )}
+            <ActionPill
+              icon="bookmark-outline"
+              label="Save"
+              onPress={() => setShowSaveSheet(true)}
+              color={primary}
+              bg={pillBg}
+            />
           </View>
+
+          <Modal
+            visible={showSaveSheet}
+            onClose={() => setShowSaveSheet(false)}
+            title="Save to list"
+          >
+            {poi && (
+              <SaveToListSheet
+                poiUuid={String(poi.id)}
+                placeName={poi.name}
+                lat={poi.lat}
+                lng={poi.lng}
+                address={parsed?.address ?? undefined}
+                category={poi.subtype}
+                onDone={() => setShowSaveSheet(false)}
+              />
+            )}
+          </Modal>
 
           {/* ── Description ───────────────────────────────────────────── */}
           {parsed.description && (

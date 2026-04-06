@@ -18,6 +18,8 @@ PODS:
     - ZXingObjC/PDF417
   - ExpoCrypto (14.0.2):
     - ExpoModulesCore
+  - ExpoDocumentPicker (55.0.11):
+    - ExpoModulesCore
   - ExpoFileSystem (18.0.12):
     - ExpoModulesCore
   - ExpoFont (13.0.4):
@@ -1950,6 +1952,7 @@ DEPENDENCIES:
   - "ExpoBlur (from `../node_modules/.pnpm/expo-blur@55.0.8_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core@7_6026384de5b2c54da21799b0ac48e069/node_modules/expo-blur/ios`)"
   - "ExpoCamera (from `../node_modules/.pnpm/expo-camera@16.0.18_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+cor_1065ec90748f9cc7471b869316c8d3e7/node_modules/expo-camera/ios`)"
   - "ExpoCrypto (from `../node_modules/.pnpm/expo-crypto@14.0.2_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core_e88627839d788670d7799341c05b8e1b/node_modules/expo-crypto/ios`)"
+  - "ExpoDocumentPicker (from `../node_modules/.pnpm/expo-document-picker@55.0.11_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@_b912939890a48de0de07690776453afb/node_modules/expo-document-picker/ios`)"
   - "ExpoFileSystem (from `../node_modules/.pnpm/expo-file-system@18.0.12_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babe_67024957f5b23bb7d2c75217a55b8820/node_modules/expo-file-system/ios`)"
   - "ExpoFont (from `../node_modules/.pnpm/expo-font@13.0.4_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core@7_5164106a8c029ad4eb2f4345f3780db6/node_modules/expo-font/ios`)"
   - "ExpoHead (from `../node_modules/.pnpm/expo-router@4.0.22_9644a46d7b1a0b3b362fc0e0ca901f8c/node_modules/expo-router/ios`)"
@@ -2063,6 +2066,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-camera@16.0.18_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+cor_1065ec90748f9cc7471b869316c8d3e7/node_modules/expo-camera/ios"
   ExpoCrypto:
     :path: "../node_modules/.pnpm/expo-crypto@14.0.2_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core_e88627839d788670d7799341c05b8e1b/node_modules/expo-crypto/ios"
+  ExpoDocumentPicker:
+    :path: "../node_modules/.pnpm/expo-document-picker@55.0.11_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@_b912939890a48de0de07690776453afb/node_modules/expo-document-picker/ios"
   ExpoFileSystem:
     :path: "../node_modules/.pnpm/expo-file-system@18.0.12_expo@52.0.49_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babe_67024957f5b23bb7d2c75217a55b8820/node_modules/expo-file-system/ios"
   ExpoFont:
@@ -2241,6 +2246,7 @@ SPEC CHECKSUMS:
   ExpoBlur: aaa1443160dec73e53850f1f7010463d645c97d9
   ExpoCamera: 0a3e78de7b1ca8c438ee6784fa6f22c5b1b36966
   ExpoCrypto: e97e864c8d7b9ce4a000bca45dddb93544a1b2b4
+  ExpoDocumentPicker: 4adc0e1e21dc03c5468b334613e757a9f8f6609f
   ExpoFileSystem: 42d363d3b96f9afab980dcef60d5657a4443c655
   ExpoFont: f354e926f8feae5e831ec8087f36652b44a0b188
   ExpoHead: 2a14db58219c0a506e4a409ea83f884eab23f555
@@ -2330,6 +2336,6 @@ SPEC CHECKSUMS:
   Yoga: feb4910aba9742cfedc059e2b2902e22ffe9954a
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
-PODFILE CHECKSUM: d58690af9ba9526efaa4dbf0d6b1b395d85083e1
+PODFILE CHECKSUM: eedb523615c3c3e535934e77ae33c5fdd973c586
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.15.2

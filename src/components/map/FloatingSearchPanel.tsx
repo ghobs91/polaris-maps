@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Switch,
   PanResponder,
+  Modal,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +28,7 @@ import { type GeocodingResult } from '../../services/geocoding/geocodingService'
 import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
+import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
   getSearchHistory,
   addSearchHistory,
@@ -53,6 +55,7 @@ import {
 } from '../../services/regions/regionRepository';
 import { extractTar } from '../../utils/archiveExtract';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
+import { SaveToListSheet } from '../places/SaveToListSheet';
 import { searchOtpStops, fetchOtpRoutesAtStop } from '../../services/transit/otpEndpointRegistry';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
@@ -79,6 +82,43 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
+
+/** Map Apple MKPointOfInterestCategory raw values to OSM-style subtypes for POI pill icons. */
+function mapAppleCategory(category?: string): string {
+  if (!category) return 'place';
+  const map: Record<string, string> = {
+    MKPOICategoryRestaurant: 'restaurant',
+    MKPOICategoryCafe: 'cafe',
+    MKPOICategoryBakery: 'bakery',
+    MKPOICategoryNightlife: 'bar',
+    MKPOICategoryGasStation: 'fuel',
+    MKPOICategoryParking: 'parking',
+    MKPOICategoryHospital: 'hospital',
+    MKPOICategoryPharmacy: 'pharmacy',
+    MKPOICategorySchool: 'school',
+    MKPOICategoryUniversity: 'university',
+    MKPOICategoryLibrary: 'library',
+    MKPOICategoryMuseum: 'museum',
+    MKPOICategoryTheater: 'theatre',
+    MKPOICategoryPark: 'park',
+    MKPOICategoryBeach: 'beach',
+    MKPOICategoryStore: 'shop',
+    MKPOICategoryGrocery: 'supermarket',
+    MKPOICategoryFitnessCenter: 'fitness_centre',
+    MKPOICategoryHotel: 'hotel',
+    MKPOICategoryBank: 'bank',
+    MKPOICategoryATM: 'atm',
+    MKPOICategoryPostOffice: 'post_office',
+    MKPOICategoryLaundry: 'laundry',
+    MKPOICategoryCarRental: 'car_rental',
+    MKPOICategoryAmusementPark: 'theme_park',
+    MKPOICategoryAquarium: 'aquarium',
+    MKPOICategoryZoo: 'zoo',
+    MKPOICategoryMovieTheater: 'cinema',
+  };
+  return map[category] ?? 'place';
+}
+
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`;
   const mins = Math.round(seconds / 60);
@@ -482,6 +522,8 @@ export function FloatingSearchPanel({
   const setFitBounds = useMapStore((s) => s.setFitBounds);
   const pendingDirectionsTarget = useMapStore((s) => s.pendingDirectionsTarget);
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
+  const pendingSearchQuery = useMapStore((s) => s.pendingSearchQuery);
+  const setPendingSearchQuery = useMapStore((s) => s.setPendingSearchQuery);
   const routePreview = useNavigationStore((s) => s.routePreview);
   const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
@@ -500,6 +542,7 @@ export function FloatingSearchPanel({
   const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
   const [isTransitRouting, setIsTransitRouting] = useState(false);
   const [recentsExpanded, setRecentsExpanded] = useState(false);
+  const [showSaveSheet, setShowSaveSheet] = useState(false);
 
   const inputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -601,10 +644,10 @@ export function FloatingSearchPanel({
       const vp = useMapStore.getState().viewport;
       const vb = useOsmPoiStore.getState().viewportBounds;
 
-      // Run unified search + OTP station search in parallel
+      // Run unified search + OTP station search + Apple Maps in parallel
       useOsmPoiStore.getState().setIsCategorySearching(true);
       try {
-        const [unified, otpStops] = await Promise.all([
+        const [unified, otpStops, appleResults] = await Promise.all([
           unifiedSearch(text, {
             lat: vp.lat,
             lng: vp.lng,
@@ -617,6 +660,7 @@ export function FloatingSearchPanel({
           searchOtpStops(text, vp.lat, vp.lng).catch(
             () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
           ),
+          searchNearby(text, vp.lat, vp.lng, 15000).catch(() => [] as NativeMapKitPoi[]),
         ]);
 
         // Convert OTP stops to GeocodingResult with type 'station'
@@ -638,8 +682,41 @@ export function FloatingSearchPanel({
           rank: 100 + i,
         }));
 
+        // Convert Apple Maps results to OsmPoi markers + GeocodingResult list items
+        // Use negative IDs starting at -2_000_000 to avoid collisions
+        const applePois: OsmPoi[] = appleResults.map((r, i) => ({
+          id: -(2_000_000 + i),
+          lat: r.latitude,
+          lng: r.longitude,
+          name: r.name ?? text,
+          type: 'amenity',
+          subtype: mapAppleCategory(r.pointOfInterestCategory),
+          tags: {
+            ...(r.phoneNumber ? { phone: r.phoneNumber } : {}),
+            ...(r.url ? { website: r.url } : {}),
+            ...(r.formattedAddress ? { 'addr:full': r.formattedAddress } : {}),
+          },
+        }));
+
+        const appleGeoResults: GeocodingResult[] = appleResults.map((r, i) => ({
+          entry: {
+            id: -(2_000_000 + i),
+            text: r.name ?? text,
+            type: 'place' as const,
+            housenumber: r.subThoroughfare ?? null,
+            street: r.thoroughfare ?? null,
+            city: r.locality ?? null,
+            state: r.administrativeArea ?? null,
+            postcode: r.postalCode ?? null,
+            country: r.country ?? null,
+            lat: r.latitude,
+            lng: r.longitude,
+          },
+          rank: 95 - i, // High rank, decreasing by position
+        }));
+
         // Show map markers for ALL results with coordinates
-        const markerPois: OsmPoi[] = unified.map(
+        const unifiedPois: OsmPoi[] = unified.map(
           (r, i) =>
             r.poi ?? {
               id: -(i + 1),
@@ -651,20 +728,69 @@ export function FloatingSearchPanel({
               tags: {},
             },
         );
-        if (markerPois.length > 0) {
-          useOsmPoiStore.getState().setCategorySearch([], markerPois, false);
+
+        // Only show POI pills for results near the user (within ~20km ≈ 0.18°)
+        const MAX_DEG = 0.18;
+        const isNearby = (p: OsmPoi) =>
+          Math.abs(p.lat - vp.lat) < MAX_DEG && Math.abs(p.lng - vp.lng) < MAX_DEG;
+
+        // Merge Apple + nearby unified POIs, deduplicating by proximity (~50m)
+        const allPois = [...applePois];
+        for (const up of unifiedPois) {
+          if (!isNearby(up)) continue;
+          const isDupe = allPois.some(
+            (ap) =>
+              Math.abs(ap.lat - up.lat) < 0.0005 &&
+              Math.abs(ap.lng - up.lng) < 0.0005 &&
+              ap.name.toLowerCase() === up.name.toLowerCase(),
+          );
+          if (!isDupe) allPois.push(up);
+        }
+
+        if (allPois.length > 0) {
+          useOsmPoiStore.getState().setCategorySearch([], allPois, false);
+
+          // Zoom to fit Apple results (already proximity-filtered by MKLocalSearch)
+          if (applePois.length >= 2) {
+            let minLat = Infinity,
+              maxLat = -Infinity;
+            let minLng = Infinity,
+              maxLng = -Infinity;
+            for (const p of applePois) {
+              if (p.lat < minLat) minLat = p.lat;
+              if (p.lat > maxLat) maxLat = p.lat;
+              if (p.lng < minLng) minLng = p.lng;
+              if (p.lng > maxLng) maxLng = p.lng;
+            }
+            // Add ~10% padding
+            const latPad = (maxLat - minLat) * 0.1 || 0.005;
+            const lngPad = (maxLng - minLng) * 0.1 || 0.005;
+            useMapStore
+              .getState()
+              .setFitBounds([minLng - lngPad, minLat - latPad, maxLng + lngPad, maxLat + latPad]);
+          }
         } else {
           useOsmPoiStore.getState().clearCategorySearch();
         }
 
-        // Station results first, then unified search results
+        // Merge result lists: stations first, then Apple Maps (deduped), then unified
         const unifiedResults = unified.map(unifiedToGeocodingResult);
-        // Dedupe: remove unified results that duplicate a station by name+proximity
         const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
         const filteredUnified = unifiedResults.filter(
           (r) => !stationNames.has(r.entry.text.toLowerCase()),
         );
-        setResults([...stationResults, ...filteredUnified]);
+
+        // Dedupe Apple results against unified by name+proximity
+        const filteredApple = appleGeoResults.filter((ar) => {
+          return !filteredUnified.some(
+            (ur) =>
+              Math.abs(ur.entry.lat - ar.entry.lat) < 0.0005 &&
+              Math.abs(ur.entry.lng - ar.entry.lng) < 0.0005 &&
+              ur.entry.text.toLowerCase() === ar.entry.text.toLowerCase(),
+          );
+        });
+
+        setResults([...stationResults, ...filteredApple, ...filteredUnified]);
       } catch {
         useOsmPoiStore.getState().clearCategorySearch();
         setResults([]);
@@ -976,6 +1102,16 @@ export function FloatingSearchPanel({
     performDirections(target);
   }, [pendingDirectionsTarget, setPendingDirectionsTarget, performDirections]);
 
+  // Handle search pre-fill triggered from My Places (place with no coordinates)
+  useEffect(() => {
+    if (!pendingSearchQuery) return;
+    setPendingSearchQuery(null);
+    setQuery(pendingSearchQuery);
+    setMode('searching');
+    handleQueryChange(pendingSearchQuery);
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, [pendingSearchQuery, setPendingSearchQuery, handleQueryChange]);
+
   const handleStartNavigation = useCallback(() => {
     if (!routePreview) return;
     const { routePreviewAlternates, routePreviewDestination, routePreviewCosting } =
@@ -1241,8 +1377,33 @@ export function FloatingSearchPanel({
               <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
               <Text style={[st.locSecondaryLabel, { color: colors.primary }]}>Add POI</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={st.locSecondaryBtn}
+              onPress={() => setShowSaveSheet(true)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="bookmark-outline" size={20} color={colors.primary} />
+              <Text style={[st.locSecondaryLabel, { color: colors.primary }]}>Save to list</Text>
+            </TouchableOpacity>
           </View>
         </GlassPanel>
+
+        <Modal
+          visible={showSaveSheet}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowSaveSheet(false)}
+        >
+          <SaveToListSheet
+            placeName={entry.text}
+            lat={entry.lat}
+            lng={entry.lng}
+            address={
+              [entry.city, entry.state, entry.country].filter(Boolean).join(', ') || undefined
+            }
+            onDone={() => setShowSaveSheet(false)}
+          />
+        </Modal>
       </View>
     );
   }
@@ -1384,6 +1545,18 @@ export function FloatingSearchPanel({
                   <Ionicons name="person" size={16} color="#EBEBF0" />
                 </View>
               </TouchableOpacity>
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  router.push('/(tabs)/places');
+                }}
+                activeOpacity={0.7}
+                style={styles.miniProfileBtn}
+              >
+                <View style={[styles.miniProfileCircle, { backgroundColor: '#3A3A3C' }]}>
+                  <Ionicons name="bookmark" size={16} color="#EBEBF0" />
+                </View>
+              </TouchableOpacity>
             </GlassPanel>
           </TouchableOpacity>
         </View>
@@ -1424,15 +1597,26 @@ export function FloatingSearchPanel({
               <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              onPress={onProfilePress ?? (() => router.push('/(tabs)/profile'))}
-              activeOpacity={0.7}
-              style={styles.profileBtn}
-            >
-              <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
-                <Ionicons name="person" size={18} color="#EBEBF0" />
-              </View>
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+              <TouchableOpacity
+                onPress={() => router.push('/(tabs)/places')}
+                activeOpacity={0.7}
+                style={styles.placesBtn}
+              >
+                <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
+                  <Ionicons name="bookmark" size={18} color="#EBEBF0" />
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onProfilePress ?? (() => router.push('/(tabs)/profile'))}
+                activeOpacity={0.7}
+                style={styles.profileBtn}
+              >
+                <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
+                  <Ionicons name="person" size={18} color="#EBEBF0" />
+                </View>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -1888,6 +2072,13 @@ const styles = StyleSheet.create({
   },
   profileBtn: {
     marginLeft: spacing.sm,
+  },
+  placesBtn: {
+    marginLeft: spacing.sm,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   profileCircle: {
     width: 34,

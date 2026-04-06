@@ -51,18 +51,49 @@ function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
   };
 }
 
-/** Returns true if (cx, cy) falls within the exclusion zone of any placed pill. */
-function overlaps(
-  cx: number,
-  cy: number,
-  placed: Array<{ x: number; y: number }>,
-  gapX: number,
-  gapY: number,
-): boolean {
-  for (const p of placed) {
-    if (Math.abs(cx - p.x) < gapX && Math.abs(cy - p.y) < gapY) return true;
+/**
+ * Grid-based spatial index for O(1) amortised overlap checks.
+ * Cells are sized to the exclusion gap so only a 3×3 neighbourhood
+ * needs to be inspected per candidate.
+ */
+class PlacementGrid {
+  private cells = new Map<number, Array<{ x: number; y: number }>>();
+
+  constructor(
+    private cellW: number,
+    private cellH: number,
+  ) {}
+
+  private key(cx: number, cy: number): number {
+    // Cantor-style pairing — avoids string allocation per lookup
+    const a = cx >= 0 ? 2 * cx : -2 * cx - 1;
+    const b = cy >= 0 ? 2 * cy : -2 * cy - 1;
+    return ((a + b) * (a + b + 1)) / 2 + b;
   }
-  return false;
+
+  insert(x: number, y: number): void {
+    const cx = Math.floor(x / this.cellW);
+    const cy = Math.floor(y / this.cellH);
+    const k = this.key(cx, cy);
+    const cell = this.cells.get(k);
+    if (cell) cell.push({ x, y });
+    else this.cells.set(k, [{ x, y }]);
+  }
+
+  hasOverlap(x: number, y: number, gapX: number, gapY: number): boolean {
+    const cx = Math.floor(x / this.cellW);
+    const cy = Math.floor(y / this.cellH);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const cell = this.cells.get(this.key(cx + dx, cy + dy));
+        if (!cell) continue;
+        for (const p of cell) {
+          if (Math.abs(x - p.x) < gapX && Math.abs(y - p.y) < gapY) return true;
+        }
+      }
+    }
+    return false;
+  }
 }
 
 /**
@@ -114,16 +145,16 @@ export function filterPoisForDisplay(
     }
   }
 
-  // -- 3. Greedy pixel-exclusion selection ----------------------------------
-  const placed: Array<{ x: number; y: number }> = [];
-  const result: OsmPoi[] = [];
+  // -- 3. Greedy pixel-exclusion selection (grid-accelerated) ---------------
   const maxTotal = maxTotalForZoom(zoom);
   const { gapX, gapY } = exclusionGaps(zoom);
+  const grid = new PlacementGrid(gapX, gapY);
+  const result: OsmPoi[] = [];
 
   for (const { poi, x, y } of candidates) {
     if (result.length >= maxTotal) break;
-    if (overlaps(x, y, placed, gapX, gapY)) continue;
-    placed.push({ x, y });
+    if (grid.hasOverlap(x, y, gapX, gapY)) continue;
+    grid.insert(x, y);
     result.push(poi);
   }
 

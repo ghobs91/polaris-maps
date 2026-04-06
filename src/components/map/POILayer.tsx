@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +19,7 @@ interface PoiBadgeProps {
   onPress: (poi: OsmPoi) => void;
 }
 
-function PoiBadge({ poi, onPress }: PoiBadgeProps) {
+const PoiBadge = memo(function PoiBadge({ poi, onPress }: PoiBadgeProps) {
   const { icon, color } = getPoiCategory(poi.type, poi.subtype);
 
   return (
@@ -35,7 +35,7 @@ function PoiBadge({ poi, onPress }: PoiBadgeProps) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 export function POILayer() {
   const { pois, categorySearchResults, zoom, bounds } = useOsmPoiStore(
