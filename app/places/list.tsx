@@ -14,6 +14,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
 import { useMapStore } from '../../src/stores/mapStore';
+import { useOsmPoiStore } from '../../src/stores/osmPoiStore';
+import { savedPlaceToOsmPoi } from '../../src/utils/placeToOsmPoi';
 import { searchPlaceAll } from '../../src/native/mapkit';
 import type { NativeMapKitPoi } from '../../src/native/mapkit';
 import { SavedPlaceRow } from '../../src/components/places';
@@ -39,6 +41,7 @@ export default function PlaceListDetailScreen() {
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
   const setPendingSearchQuery = useMapStore((s) => s.setPendingSearchQuery);
   const updatePlace = usePlaceListStore((s) => s.updatePlace);
+  const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
 
   const list = lists.find((l) => l.id === id);
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -120,9 +123,19 @@ export default function PlaceListDetailScreen() {
         lng: result.longitude,
         name: place.name,
       });
+      // Show the full POI info card for the resolved place
+      const resolvedPlace: SavedPlace = {
+        ...place,
+        lat: result.latitude,
+        lng: result.longitude,
+        address,
+        phone: result.phoneNumber ?? place.phone,
+        website: result.url ?? place.website,
+      };
+      setSelectedPoi(savedPlaceToOsmPoi(resolvedPlace));
       router.replace('/(tabs)');
     },
-    [router, locateTo, setSelectedLocation, updatePlace, list],
+    [router, locateTo, setSelectedLocation, setSelectedPoi, updatePlace, list],
   );
 
   const handlePlacePress = useCallback(
@@ -132,6 +145,7 @@ export default function PlaceListDetailScreen() {
       if (hasCoords) {
         locateTo(place.lat, place.lng, 15);
         setSelectedLocation({ lat: place.lat, lng: place.lng, name: place.name });
+        setSelectedPoi(savedPlaceToOsmPoi(place));
         router.replace('/(tabs)');
         return;
       }
@@ -163,7 +177,7 @@ export default function PlaceListDetailScreen() {
       setPendingSearchQuery(place.name);
       router.replace('/(tabs)');
     },
-    [router, locateTo, setSelectedLocation, setPendingSearchQuery, navigateToResult, regionHint],
+    [router, locateTo, setSelectedLocation, setSelectedPoi, setPendingSearchQuery, navigateToResult, regionHint],
   );
 
   const handleDisambigSelect = useCallback(

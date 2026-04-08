@@ -15,6 +15,7 @@ export interface Region {
   downloadedAt: number | null;
   lastUpdated: number | null;
   driveKey: string | null;
+  geocodingUrl: string | null;
 }
 
 export type RegionDownloadStatus = 'none' | 'downloading' | 'complete' | 'failed';

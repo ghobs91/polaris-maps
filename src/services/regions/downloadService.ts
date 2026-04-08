@@ -86,6 +86,11 @@ export async function downloadRegion(
     // Uses OVERTURE_PLACES_URL if configured; skips silently otherwise.
     await prefetchOverturePlaces(region, onProgress).catch(() => {});
 
+    checkAborted(signal);
+
+    // Download and import geocoding bundle if the region has a geocoding URL.
+    await downloadAndImportGeocodingBundle(region, destDir, onProgress, signal).catch(() => {});
+
     // Calculate total size
     const dirInfo = await FileSystem.getInfoAsync(destDir);
     const totalSize = (dirInfo as { size?: number }).size ?? 0;
@@ -336,4 +341,164 @@ export async function deleteRegionData(regionId: string): Promise<void> {
     'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Geocoding bundle download & import
+// ---------------------------------------------------------------------------
+
+import * as SQLite from 'expo-sqlite';
+import { NativeEventEmitter, NativeModules } from 'react-native';
+
+/**
+ * Send a gunzip command to the Node.js sidecar via NodeChannel and wait for the result.
+ * Uses a unique requestId to avoid races when multiple gunzips run concurrently.
+ */
+function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
+  const { NodeChannel } = NativeModules;
+  if (!NodeChannel) return Promise.reject(new Error('NodeChannel not available'));
+
+  const requestId = `gunzip_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  return new Promise((resolve, reject) => {
+    const emitter = new NativeEventEmitter(NodeChannel);
+    const sub = emitter.addListener('message', (raw: string) => {
+      try {
+        const data = JSON.parse(raw);
+        if (data.requestId !== requestId) return;
+        sub.remove();
+        if (data.action === 'gunzip_done') {
+          resolve();
+        } else if (data.action === 'gunzip_error') {
+          reject(new Error(data.error));
+        }
+      } catch {
+        // Ignore non-JSON messages
+      }
+    });
+
+    NodeChannel.send(
+      JSON.stringify({ type: 'gunzip', inputPath, outputPath, requestId }),
+    );
+  });
+}
+
+/**
+ * Download and import a geocoding SQLite bundle for a region.
+ *
+ * - Downloads the gzipped SQLite from the region's geocodingUrl.
+ * - Decompresses via Node.js IPC bridge.
+ * - Batch-imports all rows into the main app DB.
+ * - Rebuilds the FTS index and cleans up temp files.
+ */
+async function downloadAndImportGeocodingBundle(
+  region: Region,
+  destDir: string,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!region.geocodingUrl) return;
+
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: 0,
+    downloadedBytes: 0,
+    percent: 0,
+    stage: 'geocoding',
+  });
+
+  const gzPath = `${destDir}geocoding-data.sqlite.gz`;
+  const dbPath = `${destDir}geocoding-data.sqlite`;
+
+  // Download the gzipped bundle
+  checkAborted(signal);
+  await FileSystem.downloadAsync(region.geocodingUrl, gzPath);
+
+  // Decompress via Node.js IPC
+  checkAborted(signal);
+  await gunzipViaNode(gzPath, dbPath);
+
+  // Open the downloaded SQLite as read-only
+  const srcDb = await SQLite.openDatabaseAsync(dbPath, { enableChangeListener: false });
+  const appDb = await getDatabase();
+
+  try {
+    // Count total rows for progress
+    const countRow = await srcDb.getFirstAsync<{ cnt: number }>(
+      'SELECT COUNT(*) as cnt FROM geocoding_data',
+    );
+    const totalRows = countRow?.cnt ?? 0;
+    let imported = 0;
+
+    // Batch-insert in chunks of 500
+    const BATCH = 500;
+    let offset = 0;
+
+    while (offset < totalRows) {
+      checkAborted(signal);
+
+      const rows = await srcDb.getAllAsync<{
+        id: number; text: string; type: string;
+        housenumber: string | null; street: string | null;
+        city: string | null; state: string | null;
+        postcode: string | null; country: string | null;
+        lat: number; lng: number; region_id: string | null;
+      }>(
+        `SELECT id, text, type, housenumber, street, city, state, postcode, country, lat, lng, region_id
+         FROM geocoding_data LIMIT ? OFFSET ?`,
+        [BATCH, offset],
+      );
+
+      if (rows.length === 0) break;
+
+      for (const row of rows) {
+        await appDb.runAsync(
+          `INSERT OR IGNORE INTO geocoding_data
+             (text, type, housenumber, street, city, state, postcode, country, lat, lng, region_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            row.text, row.type, row.housenumber, row.street,
+            row.city, row.state, row.postcode, row.country,
+            row.lat, row.lng, region.id,
+          ],
+        );
+      }
+
+      imported += rows.length;
+      offset += BATCH;
+
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: totalRows,
+        downloadedBytes: imported,
+        percent: Math.round((imported / totalRows) * 100),
+        stage: 'geocoding',
+      });
+    }
+
+    // Rebuild FTS index
+    await appDb.execAsync("INSERT INTO geocoding_entries(geocoding_entries) VALUES('rebuild')");
+
+    // Update geocoding_size_bytes for the region
+    const fileInfo = await FileSystem.getInfoAsync(gzPath);
+    const fileSize = (fileInfo as { size?: number }).size ?? 0;
+    await appDb.runAsync(
+      'UPDATE regions SET geocoding_size_bytes = ? WHERE id = ?',
+      [fileSize, region.id],
+    );
+  } finally {
+    await srcDb.closeAsync();
+  }
+
+  // Clean up temp files
+  await FileSystem.deleteAsync(gzPath, { idempotent: true });
+  await FileSystem.deleteAsync(dbPath, { idempotent: true });
+
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: 0,
+    downloadedBytes: 0,
+    percent: 100,
+    stage: 'geocoding',
+  });
 }

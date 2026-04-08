@@ -7,6 +7,7 @@
  */
 
 import type { OsmPoi } from '../poi/osmFetcher';
+import { isAddressQuery } from './queryParser';
 
 const PHOTON_BASE_URL = 'https://photon.komoot.io/api';
 const PHOTON_TIMEOUT_MS = 5_000;
@@ -50,8 +51,10 @@ export async function searchPhoton(
   query: string,
   lat: number,
   lng: number,
+  zoom: number = 14,
   limit: number = 20,
   lang: string = 'en',
+  osmTagFilter?: string,
 ): Promise<PhotonResult[]> {
   if (!query.trim()) return [];
 
@@ -59,9 +62,21 @@ export async function searchPhoton(
     q: query,
     lat: String(lat),
     lon: String(lng),
+    zoom: String(Math.round(zoom)),
     limit: String(limit),
     lang,
   });
+
+  // Address-layer heuristic: restrict to house + street layers
+  if (isAddressQuery(query)) {
+    params.append('layer', 'house');
+    params.append('layer', 'street');
+  }
+
+  // Category OSM tag filter
+  if (osmTagFilter) {
+    params.append('osm_tag', osmTagFilter);
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PHOTON_TIMEOUT_MS);

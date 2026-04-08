@@ -9,10 +9,10 @@ import { getPoiCategory } from '../../utils/poiCategories';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 /**
- * Anchor positions the pill so the icon circle (left side of pill) sits at
- * the map coordinate.  x=0.1 ≈ icon centre / total pill width.
+ * Anchor positions the icon circle (bottom of the label+icon stack) at the
+ * map coordinate.  x=0.5 (horizontal centre), y=1.0 (bottom edge).
  */
-const ANCHOR = { x: 0.1, y: 0.5 } as const;
+const ANCHOR = { x: 0.5, y: 1.0 } as const;
 
 interface PoiBadgeProps {
   poi: OsmPoi;
@@ -24,14 +24,15 @@ const PoiBadge = memo(function PoiBadge({ poi, onPress }: PoiBadgeProps) {
 
   return (
     <TouchableOpacity onPress={() => onPress(poi)} activeOpacity={0.75} style={styles.hitArea}>
-      <View style={[styles.pill, { backgroundColor: color }]}>
-        {/* Icon circle — semi-transparent white background separates it from pill colour */}
-        <View style={styles.iconWrap}>
-          <Ionicons name={icon} size={12} color="#FFFFFF" />
-        </View>
-        <Text style={styles.label} numberOfLines={1}>
+      <View style={styles.marker}>
+        {/* Label above icon — category-coloured text with dark outline for readability */}
+        <Text style={[styles.label, { color }]} numberOfLines={1}>
           {poi.name}
         </Text>
+        {/* Small coloured icon circle at the map coordinate */}
+        <View style={[styles.iconWrap, { backgroundColor: color }]}>
+          <Ionicons name={icon} size={11} color="#FFFFFF" />
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -81,45 +82,35 @@ export function POILayer() {
 }
 
 const styles = StyleSheet.create({
-  /** Generous hit area so small pills are easily tappable */
+  /** Generous hit area so small markers are easily tappable */
   hitArea: {
     padding: 4,
   },
-  pill: {
-    flexDirection: 'row',
+  marker: {
     alignItems: 'center',
-    borderRadius: 16,
-    paddingVertical: 4,
-    paddingLeft: 4,
-    paddingRight: 9,
-    gap: 5,
-    maxWidth: 170,
-    // Crisp white border for contrast against any map background
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.55)',
-    // Shadow lifts the pill off the map surface
-    shadowColor: '#000000',
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 5,
+    maxWidth: 120,
   },
   iconWrap: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.5,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
   },
   label: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#FFFFFF',
-    flexShrink: 1,
-    textShadowColor: 'rgba(0,0,0,0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
+    marginBottom: 2,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 3,
   },
 });

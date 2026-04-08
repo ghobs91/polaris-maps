@@ -78,3 +78,13 @@ export const TRANSIT_FETCH_DEBOUNCE_MS = 500;
 
 /** Cache TTL (ms) for transit feed discovery results. */
 export const TRANSIT_FEED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// ── Offline Region Data CDN ─────────────────────────────────────────
+
+/** URL for the master region catalog manifest (JSON). */
+export const REGION_CATALOG_URL =
+  process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? 'https://cdn.example.com/regions/catalog.json';
+
+/** URL for the global GeoNames SQLite database (gzipped). */
+export const GEONAMES_DB_URL =
+  process.env.EXPO_PUBLIC_GEONAMES_DB_URL ?? 'https://cdn.example.com/global/geonames.sqlite.gz';

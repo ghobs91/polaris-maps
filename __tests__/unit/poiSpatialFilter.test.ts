@@ -61,18 +61,24 @@ describe('filterPoisForDisplay', () => {
     const atZoom14 = filterPoisForDisplay(pois, NYC_BOUNDS, 14);
     const atZoom17 = filterPoisForDisplay(pois, NYC_BOUNDS, 17);
 
-    // At zoom 17, the max cap is 200 and exclusion zones are smaller,
+    // At zoom 17, the max cap is 300 and exclusion zones are smaller,
     // so significantly more POIs should be visible.
     expect(atZoom17.length).toBeGreaterThan(atZoom14.length);
   });
 
-  it('caps at 80 for low zoom levels (< 15)', () => {
-    const pois = generatePois(200);
-    const result = filterPoisForDisplay(pois, NYC_BOUNDS, 13);
-    expect(result.length).toBeLessThanOrEqual(80);
+  it('caps at 180 for zoom 14', () => {
+    const pois = generatePois(300);
+    const result = filterPoisForDisplay(pois, NYC_BOUNDS, 14);
+    expect(result.length).toBeLessThanOrEqual(180);
   });
 
-  it('allows up to 200 POIs at street-level zoom', () => {
+  it('caps at 100 for low zoom levels (< 14)', () => {
+    const pois = generatePois(200);
+    const result = filterPoisForDisplay(pois, NYC_BOUNDS, 13);
+    expect(result.length).toBeLessThanOrEqual(100);
+  });
+
+  it('allows up to 500 POIs at street-level zoom', () => {
     // Generate a large set of well-spaced POIs across a wider area
     const wideBounds: ViewportBounds = {
       minLat: 40.7,
@@ -80,11 +86,11 @@ describe('filterPoisForDisplay', () => {
       maxLat: 40.8,
       maxLng: -73.92,
     };
-    const pois = generatePois(400, wideBounds);
+    const pois = generatePois(700, wideBounds);
     const result = filterPoisForDisplay(pois, wideBounds, 18);
-    // Should be able to display well over 80 at street level
-    expect(result.length).toBeGreaterThan(80);
-    expect(result.length).toBeLessThanOrEqual(200);
+    // Should be able to display well over 100 at street level
+    expect(result.length).toBeGreaterThan(100);
+    expect(result.length).toBeLessThanOrEqual(500);
   });
 
   it('maintains category diversity via round-robin', () => {

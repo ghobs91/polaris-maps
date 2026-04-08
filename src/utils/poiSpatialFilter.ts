@@ -8,16 +8,16 @@ export interface ViewportBounds {
 }
 
 /**
- * Zoom-adaptive cap on total displayed POI pills.
- * At street level (zoom ≥ 17) we allow up to 200 pills since the viewport
- * covers a small area and users expect to see every nearby business —
- * matching the density shown by Overture Maps Explorer.
+ * Zoom-adaptive cap on total displayed POI markers.
+ * At street level (zoom ≥ 17) we allow up to 500 markers since the compact
+ * icon+label design takes much less space than the previous pill style.
  */
 function maxTotalForZoom(zoom: number): number {
-  if (zoom >= 17) return 200;
-  if (zoom >= 16) return 160;
-  if (zoom >= 15) return 120;
-  return 80;
+  if (zoom >= 17) return 500;
+  if (zoom >= 16) return 400;
+  if (zoom >= 15) return 300;
+  if (zoom >= 14) return 180;
+  return 100;
 }
 
 /**
@@ -34,20 +34,20 @@ function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number
 }
 
 /**
- * Approximate pill dimensions in screen pixels (icon + average-length label
- * + padding). At high zoom, tighten spacing so more POIs fit on screen.
+ * Approximate marker dimensions in screen pixels (label text above a small
+ * icon circle). Much more compact than the previous pill design.
  */
-const PILL_W = 120; // typical rendered width
-const PILL_H = 28; // rendered height
+const MARKER_W = 70;  // typical rendered width (label text)
+const MARKER_H = 22;  // rendered height (label + icon + gap)
 
 function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
-  // At zoom ≥ 17 (street level), shrink gaps to ~60% of default so dense
-  // shopping centres render all storefronts. Scale linearly between z15–z17.
-  const t = Math.min(1, Math.max(0, (zoom - 15) / 2)); // 0 at z15, 1 at z17+
-  const scale = 1 - t * 0.4; // 1.0 → 0.6
+  // At zoom ≥ 17 (street level), shrink gaps to ~35% of default so dense
+  // shopping centres render all storefronts. Scale linearly between z14–z17.
+  const t = Math.min(1, Math.max(0, (zoom - 14) / 3)); // 0 at z14, 1 at z17+
+  const scale = 1 - t * 0.65; // 1.0 → 0.35
   return {
-    gapX: (PILL_W + 8) * scale,
-    gapY: (PILL_H + 6) * scale,
+    gapX: (MARKER_W + 4) * scale,
+    gapY: (MARKER_H + 3) * scale,
   };
 }
 
@@ -98,7 +98,7 @@ class PlacementGrid {
 
 /**
  * Filters a raw POI list down to a non-overlapping, category-diverse subset
- * suitable for display as pill badges on the map.
+ * suitable for display as icon+label markers on the map.
  *
  * Algorithm:
  *  1. Convert every POI's lat/lng to absolute Mercator pixel coordinates.

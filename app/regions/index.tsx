@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
-import { getDownloadedRegions } from '../../src/services/regions/regionRepository';
+import { getAllRegions } from '../../src/services/regions/regionRepository';
 import {
+  downloadRegion,
   deleteRegionData,
   type DownloadProgress,
 } from '../../src/services/regions/downloadService';
+import { fetchAndSeedCatalog } from '../../src/services/regions/catalogService';
 import { RegionCard, DownloadProgressBar } from '../../src/components/regions';
 import { ErrorBoundary, LoadingSpinner } from '../../src/components/common';
 import { colors, spacing, typography } from '../../src/constants/theme';
@@ -13,12 +15,13 @@ import type { Region } from '../../src/models/region';
 export default function RegionsScreen() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [loading, setLoading] = useState(true);
-  const [downloadProgress] = useState<DownloadProgress | null>(null);
+  const [activeProgress, setActiveProgress] = useState<DownloadProgress | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   const loadRegions = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getDownloadedRegions();
+      const data = await getAllRegions();
       setRegions(data);
     } finally {
       setLoading(false);
@@ -27,7 +30,52 @@ export default function RegionsScreen() {
 
   useEffect(() => {
     loadRegions();
+    // Seed available regions from catalog in background, then refresh the list
+    fetchAndSeedCatalog()
+      .then(() => loadRegions())
+      .catch(() => {
+        // Network may be unavailable — silently continue with local data
+      });
   }, [loadRegions]);
+
+  const handleDownload = useCallback(
+    (region: Region) => {
+      const controller = new AbortController();
+      abortControllersRef.current.set(region.id, controller);
+
+      downloadRegion(
+        region,
+        (progress) => {
+          setActiveProgress(progress);
+          if (progress.stage === 'complete' || progress.stage === 'error') {
+            abortControllersRef.current.delete(region.id);
+            loadRegions().then(() => setActiveProgress(null));
+          }
+        },
+        controller.signal,
+      ).catch((err: unknown) => {
+        abortControllersRef.current.delete(region.id);
+        if (err instanceof Error && err.name !== 'AbortError') {
+          Alert.alert('Download Failed', err.message);
+        }
+        loadRegions().then(() => setActiveProgress(null));
+      });
+    },
+    [loadRegions],
+  );
+
+  const handleCancel = useCallback(
+    (region: Region) => {
+      const controller = abortControllersRef.current.get(region.id);
+      if (controller) {
+        controller.abort();
+        abortControllersRef.current.delete(region.id);
+      }
+      setActiveProgress(null);
+      loadRegions();
+    },
+    [loadRegions],
+  );
 
   const handleDelete = useCallback(
     (region: Region) => {
@@ -69,20 +117,27 @@ export default function RegionsScreen() {
       <View style={styles.container}>
         <Text style={styles.heading}>Offline Regions</Text>
         <Text style={styles.description}>
-          Maps are powered by OpenFreeMap and available globally online. Downloaded regions are
-          saved for offline use.
+          Maps are powered by OpenFreeMap and available globally online. Download regions to use
+          them offline.
         </Text>
 
-        {downloadProgress && <DownloadProgressBar progress={downloadProgress} />}
+        {activeProgress && <DownloadProgressBar progress={activeProgress} />}
 
         <FlatList
           data={regions}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <RegionCard region={item} onDelete={handleDelete} />}
+          renderItem={({ item }) => (
+            <RegionCard
+              region={item}
+              onDownload={handleDownload}
+              onCancel={handleCancel}
+              onDelete={handleDelete}
+            />
+          )}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Text style={styles.emptyText}>No regions saved for offline use</Text>
+              <Text style={styles.emptyText}>No offline regions available</Text>
             </View>
           }
         />

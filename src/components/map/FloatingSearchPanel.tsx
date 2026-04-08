@@ -47,7 +47,7 @@ import {
   initRouting,
   isRoutingInitialized,
 } from '../../services/routing/routingService';
-import { planTransitTrip, isOtpConfigured } from '../../services/transit/transitRoutingService';
+import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
   getRegionContainingPoint,
@@ -55,11 +55,14 @@ import {
 } from '../../services/regions/regionRepository';
 import { extractTar } from '../../utils/archiveExtract';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
+import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { SaveToListSheet } from '../places/SaveToListSheet';
 import { searchOtpStops, fetchOtpRoutesAtStop } from '../../services/transit/otpEndpointRegistry';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
+import { shouldOfferParkAndRide, planParkAndRide } from '../../services/routing/parkAndRideService';
 import type { GeocodingEntry } from '../../models/geocoding';
+import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
@@ -543,9 +546,20 @@ export function FloatingSearchPanel({
   const [isTransitRouting, setIsTransitRouting] = useState(false);
   const [recentsExpanded, setRecentsExpanded] = useState(false);
   const [showSaveSheet, setShowSaveSheet] = useState(false);
+  const [transportMode, setTransportMode] = useState<TransportMode>('drive');
+  const [showParkAndRide, setShowParkAndRide] = useState(false);
+  const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
+  const [showSearchThisArea, setShowSearchThisArea] = useState(false);
+  const searchAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
+  const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
+
+  const viewport = useMapStore((s) => s.viewport);
 
   const inputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  /** Incremented on every query change and on explicit clear; in-flight results
+   * compare against this to detect staleness and discard themselves. */
+  const searchGenRef = useRef(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   // ── Minimized state (drag-to-collapse, like Google/Apple Maps) ──
@@ -631,10 +645,26 @@ export function FloatingSearchPanel({
     }).start();
   }, [mode, fadeAnim]);
 
+  // Show "Search this area" when the map is panned away from the last search location
+  useEffect(() => {
+    const anchor = searchAnchorRef.current;
+    const hasResults = results.length > 0 || (categorySearchResults?.length ?? 0) > 0;
+    if (!anchor || mode !== 'searching' || !hasResults || minimized || keyboardHeight > 0) {
+      setShowSearchThisArea(false);
+      return;
+    }
+    const dlat = viewport.lat - anchor.lat;
+    const dlng = viewport.lng - anchor.lng;
+    setShowSearchThisArea(Math.sqrt(dlat * dlat + dlng * dlng) > 0.015); // ~1.5 km
+  }, [viewport.lat, viewport.lng, mode, results.length, categorySearchResults, minimized, keyboardHeight]);
+
   // ── Search ──────────────────────────────────
   const handleQueryChange = useCallback(async (text: string) => {
     setQuery(text);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    // Advance generation so any in-flight search for a previous query discards
+    // its results instead of overwriting this cleared/changed state.
+    const gen = ++searchGenRef.current;
     if (text.length < 2) {
       setResults([]);
       useOsmPoiStore.getState().clearCategorySearch();
@@ -748,6 +778,7 @@ export function FloatingSearchPanel({
         }
 
         if (allPois.length > 0) {
+          if (searchGenRef.current !== gen) return;
           useOsmPoiStore.getState().setCategorySearch([], allPois, false);
 
           // Zoom to fit Apple results (already proximity-filtered by MKLocalSearch)
@@ -770,6 +801,7 @@ export function FloatingSearchPanel({
               .setFitBounds([minLng - lngPad, minLat - latPad, maxLng + lngPad, maxLat + latPad]);
           }
         } else {
+          if (searchGenRef.current !== gen) return;
           useOsmPoiStore.getState().clearCategorySearch();
         }
 
@@ -790,12 +822,19 @@ export function FloatingSearchPanel({
           );
         });
 
+        if (searchGenRef.current !== gen) return;
         setResults([...stationResults, ...filteredApple, ...filteredUnified]);
+        // Capture anchor so panning after this search shows "Search this area"
+        searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
       } catch {
-        useOsmPoiStore.getState().clearCategorySearch();
-        setResults([]);
+        if (searchGenRef.current === gen) {
+          useOsmPoiStore.getState().clearCategorySearch();
+          setResults([]);
+        }
       } finally {
-        useOsmPoiStore.getState().setIsCategorySearching(false);
+        if (searchGenRef.current === gen) {
+          useOsmPoiStore.getState().setIsCategorySearching(false);
+        }
       }
     }, 320);
   }, []);
@@ -809,8 +848,18 @@ export function FloatingSearchPanel({
     setMode('idle');
     setQuery('');
     setResults([]);
+    searchAnchorRef.current = null;
+    setShowSearchThisArea(false);
+    // Advance generation to discard any in-flight search before clearing.
+    searchGenRef.current++;
     useOsmPoiStore.getState().clearCategorySearch();
   }, []);
+
+  const handleSearchThisArea = useCallback(() => {
+    setShowSearchThisArea(false);
+    searchAnchorRef.current = null;
+    handleQueryChange(query);
+  }, [query, handleQueryChange]);
 
   // ── Dismiss location / route view ────────────
   const dismissLocation = useCallback(() => {
@@ -912,10 +961,12 @@ export function FloatingSearchPanel({
 
   // ── Routing ──────────────────────────────────
   const performDirections = useCallback(
-    async (dest: { lat: number; lng: number; name: string }) => {
+    async (dest: { lat: number; lng: number; name: string }, costingOverride?: 'auto' | 'pedestrian') => {
+      const costing = costingOverride ?? 'auto';
       setIsRouting(true);
       setRouteError(null);
       setUsedOnlineRouting(false);
+      setParkAndRideResult(null);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
@@ -974,7 +1025,7 @@ export function FloatingSearchPanel({
 
         const routes = await computeRoute(
           [{ lat: pos.coords.latitude, lng: pos.coords.longitude }, dest],
-          'auto',
+          costing,
         );
         if (!routes.length) {
           setRouteError('No route found between these points');
@@ -1003,9 +1054,14 @@ export function FloatingSearchPanel({
                 rank: 0,
               },
         );
-        setRoutePreview(routes[0], routes.slice(1), dest, 'auto');
+        setRoutePreview(routes[0], routes.slice(1), dest, costing);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
         setMode('route-preview');
+
+        // Check if park-and-ride should be offered (runs in background)
+        shouldOfferParkAndRide(pos.coords.latitude, pos.coords.longitude)
+          .then((result) => setShowParkAndRide(result.offered))
+          .catch(() => setShowParkAndRide(false));
 
         // Fetch traffic-adjusted ETA in background
         fetchRouteTrafficEta(routes[0].geometry).then((result) => {
@@ -1022,15 +1078,6 @@ export function FloatingSearchPanel({
     },
     [setRoutePreview, setFitBounds],
   );
-
-  const handleDirections = useCallback(async () => {
-    if (!selectedResult) return;
-    await performDirections({
-      lat: selectedResult.entry.lat,
-      lng: selectedResult.entry.lng,
-      name: selectedResult.entry.text,
-    });
-  }, [selectedResult, performDirections]);
 
   // ── Transit Directions ───────────────────────
   const handleTransitDirections = useCallback(async () => {
@@ -1093,6 +1140,79 @@ export function FloatingSearchPanel({
       setIsTransitRouting(false);
     }
   }, [selectedResult, setFitBounds]);
+
+  // ── Park-and-ride routing ────────────────────
+  const handleParkAndRide = useCallback(async () => {
+    if (!selectedResult) return;
+    setIsRouting(true);
+    setRouteError(null);
+    setParkAndRideResult(null);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setRouteError('Location permission required');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const result = await planParkAndRide(
+        pos.coords.latitude,
+        pos.coords.longitude,
+        selectedResult.entry.lat,
+        selectedResult.entry.lng,
+      );
+      setParkAndRideResult(result);
+
+      // Show the driving leg on the map as route preview
+      const dest = {
+        lat: selectedResult.entry.lat,
+        lng: selectedResult.entry.lng,
+        name: selectedResult.entry.text,
+      };
+      setRoutePreview(result.drivingLeg, [], dest, 'auto');
+      if (result.drivingLeg.boundingBox) setFitBounds(result.drivingLeg.boundingBox);
+      setMode('route-preview');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRouteError(msg || 'Park & Ride routing failed');
+    } finally {
+      setIsRouting(false);
+    }
+  }, [selectedResult, setRoutePreview, setFitBounds]);
+
+  // ── Transport mode change handler ──────────
+  const handleTransportModeChange = useCallback(
+    (newMode: TransportMode) => {
+      setTransportMode(newMode);
+      if (!selectedResult) return;
+      const dest = {
+        lat: selectedResult.entry.lat,
+        lng: selectedResult.entry.lng,
+        name: selectedResult.entry.text,
+      };
+
+      clearRoutePreview();
+      setRouteError(null);
+      setParkAndRideResult(null);
+
+      switch (newMode) {
+        case 'drive':
+          performDirections(dest, 'auto');
+          break;
+        case 'walk':
+          performDirections(dest, 'pedestrian');
+          break;
+        case 'transit':
+          handleTransitDirections();
+          break;
+        case 'park-and-ride':
+          handleParkAndRide();
+          break;
+      }
+    },
+    [selectedResult, performDirections, handleTransitDirections, handleParkAndRide, clearRoutePreview],
+  );
 
   // Handle directions triggered from the POI detail screen
   useEffect(() => {
@@ -1329,38 +1449,31 @@ export function FloatingSearchPanel({
             </TouchableOpacity>
           </View>
 
-          {/* Big Directions pill */}
+          {/* Transport mode selector */}
+          <TransportModeSelector
+            selected={transportMode}
+            onSelect={handleTransportModeChange}
+            showParkAndRide={showParkAndRide}
+            isDark={isDark}
+          />
+
+          {/* Directions button */}
           <View style={st.locActions}>
             <TouchableOpacity
               style={st.directionsBtn}
-              onPress={handleDirections}
-              disabled={isRouting}
+              onPress={() => handleTransportModeChange(transportMode)}
+              disabled={isRouting || isTransitRouting}
               activeOpacity={0.85}
             >
-              {isRouting ? (
+              {isRouting || isTransitRouting ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Ionicons name="car" size={22} color="#fff" />
+                <Ionicons name="navigate" size={20} color="#fff" />
               )}
-              <Text style={st.directionsBtnText}>{isRouting ? 'Routing…' : 'Directions'}</Text>
+              <Text style={st.directionsBtnText}>
+                {isRouting || isTransitRouting ? 'Routing…' : 'Directions'}
+              </Text>
             </TouchableOpacity>
-            {isOtpConfigured() && (
-              <TouchableOpacity
-                style={[st.directionsBtn, { backgroundColor: '#1A5BA5', flex: 0.7 }]}
-                onPress={handleTransitDirections}
-                disabled={isTransitRouting}
-                activeOpacity={0.85}
-              >
-                {isTransitRouting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Ionicons name="bus" size={20} color="#fff" />
-                )}
-                <Text style={st.directionsBtnText}>
-                  {isTransitRouting ? 'Finding…' : 'Transit'}
-                </Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           {routeError ? (
@@ -1411,7 +1524,9 @@ export function FloatingSearchPanel({
   // ── Route preview view ────────────────────────
   if (mode === 'route-preview' && routePreview && selectedResult) {
     const entry = selectedResult.entry;
-    const displayEtaSeconds = routePreviewTrafficEta ?? routePreview.summary.durationSeconds;
+    const displayEtaSeconds = parkAndRideResult
+      ? parkAndRideResult.totalDurationSeconds
+      : (routePreviewTrafficEta ?? routePreview.summary.durationSeconds);
     return (
       <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
         <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
@@ -1444,6 +1559,33 @@ export function FloatingSearchPanel({
               </View>
             </TouchableOpacity>
           </View>
+
+          {/* Transport mode selector */}
+          <TransportModeSelector
+            selected={transportMode}
+            onSelect={handleTransportModeChange}
+            showParkAndRide={showParkAndRide}
+            isDark={isDark}
+          />
+
+          {/* Park-and-ride summary */}
+          {parkAndRideResult && transportMode === 'park-and-ride' && (
+            <View style={st.parkAndRideSummary}>
+              <View style={st.parkAndRideLeg}>
+                <Ionicons name="car" size={14} color={isDark ? '#409CFF' : '#007AFF'} />
+                <Text style={[st.parkAndRideText, { color: textColor }]}>
+                  Drive to {parkAndRideResult.stationName} ({formatDuration(parkAndRideResult.drivingLeg.summary.durationSeconds)})
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={12} color={subColor} />
+              <View style={st.parkAndRideLeg}>
+                <Ionicons name="train" size={14} color={isDark ? '#409CFF' : '#007AFF'} />
+                <Text style={[st.parkAndRideText, { color: textColor }]}>
+                  Transit ({formatDuration(parkAndRideResult.transitLeg.duration)})
+                </Text>
+              </View>
+            </View>
+          )}
 
           {usedOnlineRouting && (
             <TouchableOpacity
@@ -1565,7 +1707,23 @@ export function FloatingSearchPanel({
   }
 
   return (
-    <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
+    <>
+      {showSearchThisArea && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.searchThisAreaWrap, { top: insets.top + 8 }]}
+        >
+          <TouchableOpacity
+            style={styles.searchThisAreaBtn}
+            onPress={handleSearchThisArea}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="search" size={14} color="#fff" />
+            <Text style={styles.searchThisAreaText}>Search this area</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
       <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
       <GlassPanel isDark={isDark} style={st.panel}>
         {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
@@ -1752,6 +1910,7 @@ export function FloatingSearchPanel({
         </>
       </GlassPanel>
     </View>
+    </>
   );
 }
 
@@ -1976,6 +2135,26 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       fontSize: 11,
       marginTop: 1,
     },
+    parkAndRideSummary: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginHorizontal: spacing.md,
+      marginBottom: spacing.xs,
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      borderRadius: borderRadius.md,
+      backgroundColor: isDark ? 'rgba(64,156,255,0.1)' : 'rgba(0,122,255,0.06)',
+    },
+    parkAndRideLeg: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    parkAndRideText: {
+      ...typography.caption,
+      fontWeight: '500',
+    },
   });
 
 const styles = StyleSheet.create({
@@ -1983,6 +2162,34 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 12,
+  },
+  searchThisAreaWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  searchThisAreaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(28,28,30,0.92)',
+    borderRadius: 999,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 8,
+  },
+  searchThisAreaText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   glassPanel: {
     borderRadius: 20,

@@ -39,8 +39,8 @@ export async function upsertRegion(region: Region): Promise<void> {
     `INSERT OR REPLACE INTO regions (
        id, name, bounds_min_lat, bounds_max_lat, bounds_min_lng, bounds_max_lng,
        version, download_status, tiles_size_bytes, routing_size_bytes, geocoding_size_bytes,
-       downloaded_at, last_updated, drive_key
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       downloaded_at, last_updated, drive_key, geocoding_url
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       region.id,
       region.name,
@@ -56,6 +56,7 @@ export async function upsertRegion(region: Region): Promise<void> {
       region.downloadedAt,
       region.lastUpdated,
       region.driveKey,
+      region.geocodingUrl,
     ],
   );
 }
@@ -79,6 +80,8 @@ export async function updateDownloadStatus(
 export async function deleteRegion(id: string): Promise<void> {
   const db = await getDatabase();
   await db.runAsync('DELETE FROM regions WHERE id = ?', [id]);
+  await db.runAsync('DELETE FROM geocoding_data WHERE region_id = ?', [id]);
+  await db.runAsync("INSERT INTO geocoding_entries(geocoding_entries) VALUES('rebuild')");
 }
 
 interface RegionRow {
@@ -96,6 +99,7 @@ interface RegionRow {
   downloaded_at: number | null;
   last_updated: number | null;
   drive_key: string | null;
+  geocoding_url: string | null;
 }
 
 function rowToRegion(row: RegionRow): Region {
@@ -116,5 +120,6 @@ function rowToRegion(row: RegionRow): Region {
     downloadedAt: row.downloaded_at,
     lastUpdated: row.last_updated,
     driveKey: row.drive_key ?? null,
+    geocodingUrl: row.geocoding_url ?? null,
   };
 }

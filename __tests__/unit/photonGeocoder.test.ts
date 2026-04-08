@@ -151,16 +151,17 @@ describe('searchPhoton', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('passes location bias and limit to the API', async () => {
+  it('passes location bias, zoom, and limit to the API', async () => {
     mockFetch.mockResolvedValue(photonResponse([]));
 
-    await searchPhoton('test', 51.5, -0.12, 15, 'en');
+    await searchPhoton('test', 51.5, -0.12, 14, 15, 'en');
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).toContain('q=test');
     expect(url).toContain('lat=51.5');
     expect(url).toContain('lon=-0.12');
+    expect(url).toContain('zoom=14');
     expect(url).toContain('limit=15');
     expect(url).toContain('lang=en');
   });

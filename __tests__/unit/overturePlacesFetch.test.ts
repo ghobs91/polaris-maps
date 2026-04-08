@@ -62,6 +62,7 @@ function makeRegion(overrides: Partial<Region> = {}): Region {
     downloadedAt: null,
     lastUpdated: null,
     driveKey: null,
+    geocodingUrl: null,
     ...overrides,
   };
 }

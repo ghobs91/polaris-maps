@@ -19,6 +19,34 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { unifiedSearch, type UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import type { GeocodingEntry } from '@/models/geocoding';
 
+// ---------------------------------------------------------------------------
+// Coordinate & Plus Code pre-flight detection
+// ---------------------------------------------------------------------------
+
+async function tryDetectCoordinates(input: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    if (input.length < 5 || !/\d/.test(input)) return null;
+    const { convert } = await import('geo-coordinates-parser');
+    const c = convert(input);
+    if (c?.decimalLatitude && c?.decimalLongitude)
+      return { lat: c.decimalLatitude, lng: c.decimalLongitude };
+    return null;
+  } catch { return null; }
+}
+
+const PLUS_CODE_RE = /^[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{2,}/i;
+
+async function tryDetectPlusCode(input: string): Promise<{ lat: number; lng: number } | null> {
+  if (!PLUS_CODE_RE.test(input.trim())) return null;
+  try {
+    const { decode } = await import('pluscodes');
+    const result = decode(input.trim());
+    if (result?.latitude && result?.longitude)
+      return { lat: result.latitude, lng: result.longitude };
+    return null;
+  } catch { return null; }
+}
+
 /** Convert a UnifiedSearchResult into a GeocodingResult for the existing UI. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
@@ -47,6 +75,8 @@ export default function SearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const lastQueryRef = useRef<string>('');
+  const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(null);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -57,11 +87,21 @@ export default function SearchScreen() {
   const handleSearch = useCallback(
     async (q: string) => {
       setQuery(q);
+      lastQueryRef.current = q;
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       if (q.length < 2) {
         setResults([]);
         return;
       }
+
+      // Pre-flight: detect raw coordinates or Plus Codes
+      const coordResult = (await tryDetectCoordinates(q)) ?? (await tryDetectPlusCode(q));
+      if (coordResult) {
+        setViewport({ lat: coordResult.lat, lng: coordResult.lng, zoom: 16 });
+        setSelectedLocation({ lat: coordResult.lat, lng: coordResult.lng });
+        return;
+      }
+
       debounceTimer.current = setTimeout(async () => {
         try {
           // Pass the actual map viewport bounds so nearby results get boosted
@@ -79,6 +119,16 @@ export default function SearchScreen() {
                 }
               : undefined,
           });
+
+          // Record the bbox that was used for this search
+          const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, viewport.zoom)) * 2));
+          lastBboxRef.current = {
+            south: viewport.lat - delta,
+            north: viewport.lat + delta,
+            west: viewport.lng - delta,
+            east: viewport.lng + delta,
+          };
+
           setResults(unified.map(unifiedToGeocodingResult));
         } catch {
           setResults([]);
@@ -121,6 +171,24 @@ export default function SearchScreen() {
   }, []);
 
   const showHistory = query.length < 2 && history.length > 0;
+
+  // Viewport-shift triggered refetch (Fix G)
+  useEffect(() => {
+    if (lastQueryRef.current.length < 2 || !lastBboxRef.current || showHistory) return;
+
+    const prev = lastBboxRef.current;
+    const prevCenterLat = (prev.south + prev.north) / 2;
+    const prevCenterLng = (prev.west + prev.east) / 2;
+    const prevHeight = prev.north - prev.south;
+    const prevWidth = prev.east - prev.west;
+
+    const latShift = Math.abs(viewport.lat - prevCenterLat);
+    const lngShift = Math.abs(viewport.lng - prevCenterLng);
+
+    if (latShift > prevHeight * 0.3 || lngShift > prevWidth * 0.3) {
+      handleSearch(lastQueryRef.current);
+    }
+  }, [viewport.lat, viewport.lng, viewport.zoom]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

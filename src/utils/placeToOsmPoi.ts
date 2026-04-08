@@ -1,5 +1,6 @@
 import type { OsmPoi } from '../services/poi/osmFetcher';
 import type { Place } from '../models/poi';
+import type { SavedPlace } from '../models/placeList';
 
 /**
  * Category → OSM tag type/subtype mapping for rendering in POILayer.
@@ -88,6 +89,41 @@ export function placeToOsmPoi(place: Place): OsmPoi {
   let hash = 0;
   for (let i = 0; i < place.uuid.length; i++) {
     hash = ((hash << 5) - hash + place.uuid.charCodeAt(i)) | 0;
+  }
+
+  return {
+    id: -(Math.abs(hash) + 1),
+    lat: place.lat,
+    lng: place.lng,
+    name: place.name,
+    type: mapping.type,
+    subtype: mapping.subtype,
+    tags,
+  };
+}
+
+/**
+ * Convert a SavedPlace (from the user's saved lists) to the OsmPoi format
+ * used by POILayer and POIInfoCard, so tapping a saved place shows the
+ * full place card rather than just a pin.
+ */
+export function savedPlaceToOsmPoi(place: SavedPlace): OsmPoi {
+  const mapping = CATEGORY_TO_OSM[place.category ?? ''] ?? CATEGORY_TO_OSM.other;
+
+  const tags: Record<string, string> = {
+    name: place.name,
+    [mapping.type]: mapping.subtype,
+    'polaris:source': 'saved',
+  };
+
+  if (place.phone) tags['phone'] = place.phone;
+  if (place.website) tags['website'] = place.website;
+  // Store full formatted address in addr:street so buildAddress() renders it
+  if (place.address) tags['addr:street'] = place.address;
+
+  let hash = 0;
+  for (let i = 0; i < place.id.length; i++) {
+    hash = ((hash << 5) - hash + place.id.charCodeAt(i)) | 0;
   }
 
   return {

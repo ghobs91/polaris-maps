@@ -1,15 +1,15 @@
 /**
- * Shared Overpass API client with automatic failover.
+ * Shared Overpass API client with parallel hedged requests.
  *
- * Primary:   https://overpass.private.coffee/api/interpreter
- * Fallback:  https://overpass-api.de/api/interpreter
- *
- * On a network error or non-OK HTTP status from the primary, the request
- * is retried once against the fallback instance before propagating the error.
+ * Sends the query to all known Overpass instances simultaneously and
+ * resolves with whichever responds first (via `Promise.any`).
  */
 
-const OVERPASS_PRIMARY = 'https://overpass-api.de/api/interpreter';
-const OVERPASS_FALLBACK = 'https://overpass.private.coffee/api/interpreter';
+const OVERPASS_INSTANCES = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+];
 
 export interface OverpassRequestOptions {
   /** Overpass QL query string (without the `data=` prefix). */
@@ -21,51 +21,33 @@ export interface OverpassRequestOptions {
 }
 
 /**
- * Send an Overpass QL query with automatic failover.
+ * Send an Overpass QL query with parallel hedging.
  *
- * Returns the parsed JSON response body. Throws on failure from *both*
- * instances.
+ * Fires requests to all instances and returns the first successful response.
+ * Throws an AggregateError if all instances fail.
  */
 export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
-  const urls = [OVERPASS_PRIMARY, OVERPASS_FALLBACK];
+  const encoded = encodeURIComponent(opts.query);
 
-  for (let i = 0; i < urls.length; i++) {
-    const url = urls[i];
-    const isLast = i === urls.length - 1;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
+  const attempts = OVERPASS_INSTANCES.map(async (base) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
 
     // If the caller passed an external signal, abort our controller when it fires.
-    const onExternalAbort = () => controller.abort();
+    const onExternalAbort = () => ctrl.abort();
     opts.signal?.addEventListener('abort', onExternalAbort);
 
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(opts.query)}`,
-        signal: controller.signal,
+      const res = await fetch(`${base}?data=${encoded}`, {
+        signal: ctrl.signal,
       });
-
-      if (!res.ok) {
-        if (isLast) throw new Error(`Overpass API ${res.status}`);
-        // Try fallback
-        continue;
-      }
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return (await res.json()) as T;
-    } catch (err) {
-      // If the *caller* aborted, don't retry — propagate immediately.
-      if (opts.signal?.aborted) throw err;
-      if (isLast) throw err;
-      // Network / timeout error on primary — try fallback
     } finally {
       clearTimeout(timer);
       opts.signal?.removeEventListener('abort', onExternalAbort);
     }
-  }
+  });
 
-  // Unreachable, but TypeScript wants a return.
-  throw new Error('Overpass API: all instances failed');
+  return Promise.any(attempts);
 }

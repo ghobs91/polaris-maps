@@ -15,12 +15,14 @@ import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useTransitStore } from '../../stores/transitStore';
 import * as FileSystem from 'expo-file-system';
 import {
   computeRoute,
   initRouting,
   isRoutingInitialized,
 } from '../../services/routing/routingService';
+import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
   getRegionContainingPoint,
@@ -30,6 +32,8 @@ import { extractTar } from '../../utils/archiveExtract';
 import { getDatabase } from '../../services/database/init';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
+import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
+import { shouldOfferParkAndRide, planParkAndRide, type ParkAndRideResult } from '../../services/routing/parkAndRideService';
 
 export function LocationActionPanel() {
   const selectedLocation = useMapStore((s) => s.selectedLocation);
@@ -44,6 +48,9 @@ export function LocationActionPanel() {
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
+  const [transportMode, setTransportMode] = useState<TransportMode>('drive');
+  const [showParkAndRide, setShowParkAndRide] = useState(false);
+  const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
   const router = useRouter();
 
   const handleDismiss = useCallback(() => {
@@ -54,11 +61,13 @@ export function LocationActionPanel() {
   }, [setSelectedLocation, clearRoutePreview]);
 
   /** Compute route and show it on the map (directions preview) */
-  const handleDirections = useCallback(async () => {
+  const handleDirections = useCallback(async (costingOverride?: 'auto' | 'pedestrian') => {
+    const costing = costingOverride ?? 'auto';
     if (!selectedLocation) return;
     setIsRouting(true);
     setRouteError(null);
     setUsedOnlineRouting(false);
+    setParkAndRideResult(null);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -121,7 +130,7 @@ export function LocationActionPanel() {
           { lat: pos.coords.latitude, lng: pos.coords.longitude },
           { lat: selectedLocation.lat, lng: selectedLocation.lng },
         ],
-        'auto',
+        costing,
       );
       if (!routes.length) {
         setRouteError('No route found between these points');
@@ -130,12 +139,17 @@ export function LocationActionPanel() {
       if (!isRoutingInitialized()) setUsedOnlineRouting(true);
 
       // Store as preview (not active navigation)
-      setRoutePreview(routes[0], routes.slice(1), selectedLocation, 'auto');
+      setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
 
       // Zoom map to show the entire route
       if (routes[0].boundingBox) {
         setFitBounds(routes[0].boundingBox);
       }
+
+      // Check if park-and-ride should be offered (runs in background)
+      shouldOfferParkAndRide(pos.coords.latitude, pos.coords.longitude)
+        .then((result) => setShowParkAndRide(result.offered))
+        .catch(() => setShowParkAndRide(false));
 
       // Fetch traffic-adjusted ETA in background
       fetchRouteTrafficEta(routes[0].geometry).then((result) => {
@@ -178,6 +192,99 @@ export function LocationActionPanel() {
     });
   }, [selectedLocation, router]);
 
+  /** Handle transit directions */
+  const handleTransitDirections = useCallback(async () => {
+    if (!selectedLocation) return;
+    setIsRouting(true);
+    setRouteError(null);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setRouteError('Location permission required');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const dest = { lat: selectedLocation.lat, lng: selectedLocation.lng, name: selectedLocation.name };
+
+      const enabledModes = useTransitStore.getState().enabledModes;
+      const itineraries = await planTransitTrip({ from: origin, to: dest, modes: enabledModes });
+
+      if (itineraries.length === 0) {
+        setRouteError('No transit routes found');
+        return;
+      }
+      useTransitStore.getState().setTransitOrigin(origin);
+      useTransitStore.getState().setTransitDestination(dest);
+      useTransitStore.getState().setItineraries(itineraries);
+      useTransitStore.getState().setTransitLayerVisible(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRouteError(msg || 'Transit routing failed');
+    } finally {
+      setIsRouting(false);
+    }
+  }, [selectedLocation]);
+
+  /** Handle park-and-ride routing */
+  const handleParkAndRide = useCallback(async () => {
+    if (!selectedLocation) return;
+    setIsRouting(true);
+    setRouteError(null);
+    setParkAndRideResult(null);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setRouteError('Location permission required');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const result = await planParkAndRide(
+        pos.coords.latitude,
+        pos.coords.longitude,
+        selectedLocation.lat,
+        selectedLocation.lng,
+      );
+      setParkAndRideResult(result);
+      setRoutePreview(result.drivingLeg, [], selectedLocation, 'auto');
+      if (result.drivingLeg.boundingBox) setFitBounds(result.drivingLeg.boundingBox);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRouteError(msg || 'Park & Ride routing failed');
+    } finally {
+      setIsRouting(false);
+    }
+  }, [selectedLocation, setRoutePreview, setFitBounds]);
+
+  /** Handle transport mode change */
+  const handleTransportModeChange = useCallback(
+    (newMode: TransportMode) => {
+      setTransportMode(newMode);
+      clearRoutePreview();
+      setRouteError(null);
+      setParkAndRideResult(null);
+      switch (newMode) {
+        case 'drive':
+          handleDirections('auto');
+          break;
+        case 'walk':
+          handleDirections('pedestrian');
+          break;
+        case 'transit':
+          handleTransitDirections();
+          break;
+        case 'park-and-ride':
+          handleParkAndRide();
+          break;
+      }
+    },
+    [handleDirections, handleTransitDirections, handleParkAndRide, clearRoutePreview],
+  );
+
   if (!selectedLocation && !routePreview) return null;
 
   const displayLocation =
@@ -211,7 +318,11 @@ export function LocationActionPanel() {
         <View style={styles.summaryItem}>
           <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
           <Text style={styles.summaryText}>
-            {formatDuration(routePreviewTrafficEta ?? routePreview.summary.durationSeconds)}
+            {formatDuration(
+              parkAndRideResult
+                ? parkAndRideResult.totalDurationSeconds
+                : (routePreviewTrafficEta ?? routePreview.summary.durationSeconds),
+            )}
           </Text>
         </View>
         <View style={styles.summaryItem}>
@@ -221,6 +332,33 @@ export function LocationActionPanel() {
           </Text>
         </View>
       </View>
+
+      {/* Transport mode selector */}
+      <TransportModeSelector
+        selected={transportMode}
+        onSelect={handleTransportModeChange}
+        showParkAndRide={showParkAndRide}
+        isDark={false}
+      />
+
+      {/* Park-and-ride summary */}
+      {parkAndRideResult && transportMode === 'park-and-ride' && (
+        <View style={styles.parkAndRideSummary}>
+          <View style={styles.parkAndRideLeg}>
+            <Ionicons name="car" size={14} color={colors.primary} />
+            <Text style={styles.parkAndRideText}>
+              Drive to {parkAndRideResult.stationName} ({formatDuration(parkAndRideResult.drivingLeg.summary.durationSeconds)})
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />
+          <View style={styles.parkAndRideLeg}>
+            <Ionicons name="train" size={14} color={colors.primary} />
+            <Text style={styles.parkAndRideText}>
+              Transit ({formatDuration(parkAndRideResult.transitLeg.duration)})
+            </Text>
+          </View>
+        </View>
+      )}
 
       {usedOnlineRouting && (
         <TouchableOpacity
@@ -291,17 +429,25 @@ export function LocationActionPanel() {
 
       {routeError && <Text style={styles.error}>{routeError}</Text>}
 
+      {/* Transport mode selector */}
+      <TransportModeSelector
+        selected={transportMode}
+        onSelect={handleTransportModeChange}
+        showParkAndRide={showParkAndRide}
+        isDark={false}
+      />
+
       <View style={styles.actions}>
         <TouchableOpacity
           style={[styles.actionBtn, styles.primaryBtn]}
-          onPress={handleDirections}
+          onPress={() => handleTransportModeChange(transportMode)}
           disabled={isRouting}
           activeOpacity={0.8}
         >
           {isRouting ? (
             <ActivityIndicator color={colors.white} size="small" />
           ) : (
-            <Ionicons name="map-outline" size={18} color={colors.white} />
+            <Ionicons name="navigate" size={18} color={colors.white} />
           )}
           <Text style={styles.primaryBtnText}>{isRouting ? 'Routing…' : 'Directions'}</Text>
         </TouchableOpacity>
@@ -477,6 +623,26 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 11,
     marginTop: 1,
+  },
+  parkAndRideSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(0,122,255,0.06)',
+  },
+  parkAndRideLeg: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  parkAndRideText: {
+    ...typography.caption,
+    color: colors.text,
+    fontWeight: '500',
   },
 });
 

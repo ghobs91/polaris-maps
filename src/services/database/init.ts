@@ -236,6 +236,16 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       // Column already exists
     }
   }
+
+  // Add region_id to geocoding_data for per-region cascade deletes
+  await database.execAsync(
+    `ALTER TABLE geocoding_data ADD COLUMN region_id TEXT;`
+  ).catch(() => {});
+
+  // Add geocoding_url to regions for per-region geocoding bundle URL
+  await database.execAsync(
+    `ALTER TABLE regions ADD COLUMN geocoding_url TEXT;`
+  ).catch(() => {});
 }
 
 export async function closeDatabase(): Promise<void> {

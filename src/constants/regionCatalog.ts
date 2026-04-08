@@ -15,6 +15,7 @@ export function catalogEntryToRegion(entry: CatalogEntry): Region {
     downloadedAt: null,
     lastUpdated: null,
     driveKey: null,
+    geocodingUrl: null,
   };
 }
 

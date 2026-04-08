@@ -7,10 +7,11 @@ interface RegionCardProps {
   region: Region;
   onPress?: (region: Region) => void;
   onDownload?: (region: Region) => void;
+  onCancel?: (region: Region) => void;
   onDelete?: (region: Region) => void;
 }
 
-export function RegionCard({ region, onPress, onDownload, onDelete }: RegionCardProps) {
+export function RegionCard({ region, onPress, onDownload, onCancel, onDelete }: RegionCardProps) {
   const sizeMb = region.tilesSizeBytes
     ? Math.round(
         ((region.tilesSizeBytes ?? 0) +
@@ -44,6 +45,15 @@ export function RegionCard({ region, onPress, onDownload, onDelete }: RegionCard
             activeOpacity={0.7}
           >
             <Text style={styles.actionText}>Download</Text>
+          </TouchableOpacity>
+        )}
+        {region.downloadStatus === 'downloading' && (
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.cancelBtn]}
+            onPress={() => onCancel?.(region)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.actionText, styles.cancelText]}>Cancel</Text>
           </TouchableOpacity>
         )}
         {region.downloadStatus === 'failed' && (
@@ -132,4 +142,6 @@ const styles = StyleSheet.create({
   retryText: { color: colors.warning },
   dangerBtn: { borderColor: colors.error },
   dangerText: { color: colors.error },
+  cancelBtn: { borderColor: colors.textSecondary },
+  cancelText: { color: colors.textSecondary },
 });

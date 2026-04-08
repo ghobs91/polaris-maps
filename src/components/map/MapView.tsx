@@ -33,10 +33,10 @@ Logger.setLogCallback((log) => {
   return false;
 });
 
-// Match Google Maps behaviour: POIs only appear at street level (~zoom 15).
+// POIs appear from zoom 14+ to provide denser coverage at neighbourhood level.
 // Below this the viewport covers too large an area to fetch meaningfully and
 // the pill badges would be too sparse/cluttered to be useful.
-const POI_MIN_ZOOM = 15;
+const POI_MIN_ZOOM = 14;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
 

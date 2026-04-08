@@ -48,6 +48,7 @@ export function geoNodeToRegion(node: GeoNode): Region {
     tilesSizeBytes: null,
     routingSizeBytes: null,
     geocodingSizeBytes: null,
+    geocodingUrl: null,
   };
 }
 

@@ -36,6 +36,20 @@ channel.addListener('message', async (msg) => {
       case 'extract-tar':
         await handleExtractTar(command);
         break;
+      case 'gunzip': {
+        const { inputPath, outputPath, requestId } = command;
+        const gunzipStream = zlib.createGunzip();
+        const input = fs.createReadStream(inputPath);
+        const output = fs.createWriteStream(outputPath);
+        input.pipe(gunzipStream).pipe(output);
+        output.on('finish', () =>
+          channel.send(JSON.stringify({ action: 'gunzip_done', outputPath, requestId })),
+        );
+        output.on('error', (err) =>
+          channel.send(JSON.stringify({ action: 'gunzip_error', error: err.message, requestId })),
+        );
+        break;
+      }
       case 'status':
         handleStatus(command);
         break;

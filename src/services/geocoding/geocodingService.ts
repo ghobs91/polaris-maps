@@ -6,7 +6,12 @@ export interface GeocodingResult {
   rank: number;
 }
 
-export async function searchAddress(query: string, limit: number = 10): Promise<GeocodingResult[]> {
+export async function searchAddress(
+  query: string,
+  limit: number = 10,
+  lat?: number,
+  lng?: number,
+): Promise<GeocodingResult[]> {
   if (!query.trim()) return [];
 
   // Try local DB first
@@ -14,7 +19,7 @@ export async function searchAddress(query: string, limit: number = 10): Promise<
   if (localResults.length > 0) return localResults;
 
   // Fall back to Nominatim online geocoding
-  return searchAddressNominatim(query, limit);
+  return searchAddressNominatim(query, limit, lat, lng);
 }
 
 async function searchAddressLocal(query: string, limit: number): Promise<GeocodingResult[]> {
@@ -56,7 +61,12 @@ async function searchAddressLocal(query: string, limit: number): Promise<Geocodi
   }));
 }
 
-async function searchAddressNominatim(query: string, limit: number): Promise<GeocodingResult[]> {
+async function searchAddressNominatim(
+  query: string,
+  limit: number,
+  lat?: number,
+  lng?: number,
+): Promise<GeocodingResult[]> {
   try {
     const params = new URLSearchParams({
       q: query,
@@ -64,6 +74,14 @@ async function searchAddressNominatim(query: string, limit: number): Promise<Geo
       addressdetails: '1',
       limit: String(limit),
     });
+
+    // Proximity bias when reference coordinates are available
+    if (lat != null && lng != null) {
+      params.set('lat', String(lat));
+      params.set('lon', String(lng));
+      params.set('viewbox', `${lng - 0.5},${lat + 0.5},${lng + 0.5},${lat - 0.5}`);
+      params.set('bounded', '0');
+    }
 
     const response = await fetch(
       `https://nominatim.openstreetmap.org/search?${params.toString()}`,

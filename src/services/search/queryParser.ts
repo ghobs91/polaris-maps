@@ -188,6 +188,33 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Address heuristic
+// ---------------------------------------------------------------------------
+
+/**
+ * Regex that matches common street-type abbreviations and full words as
+ * whole tokens — handles commas, end-of-string, and other punctuation
+ * after the token (e.g. "pkwy," or "ave.").
+ */
+const ADDRESS_TOKEN_RE =
+  /\b(st|ave|blvd|rd|dr|ln|ct|pl|pkwy|street|avenue|boulevard|road|drive|lane|court|place|highway|hwy|parkway)\b/i;
+
+/** Starts with a house number (digits, optionally followed by a letter like "314A"). */
+const LEADING_NUMBER_RE = /^\s*\d+[a-z]?\s/i;
+
+/**
+ * Returns true if the query looks like a street address.
+ * Used to boost geocoding results above POI results, and to restrict
+ * Photon results to house + street layers.
+ */
+export function isAddressQuery(query: string): boolean {
+  if (ADDRESS_TOKEN_RE.test(query)) return true;
+  // "314 columbus pkwy" — leading house number + comma (city/state pattern)
+  if (LEADING_NUMBER_RE.test(query) && query.includes(',')) return true;
+  return false;
+}
+
 /**
  * Compute a Levenshtein edit distance between two strings.
  * Used for fuzzy matching — e.g. "starbuks" vs "Starbucks".
