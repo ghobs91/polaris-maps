@@ -22,6 +22,30 @@ export const useImperial = deviceUsesImperial();
  * Imperial: feet below 0.1 mi, miles above.
  * Metric:   metres below 1 km, kilometres above.
  */
+const KMH_PER_MPH = 1.60934;
+
+/**
+ * Format a speed in mph for display, respecting the user's unit preference.
+ * Internal speeds are always stored in mph.
+ */
+export function formatSpeed(mph: number, metric?: boolean): string {
+  if (metric) {
+    const kmh = mph * KMH_PER_MPH;
+    return `${Math.round(kmh)} km/h`;
+  }
+  return `${Math.round(mph)} mph`;
+}
+
+/** Convert mph to km/h. */
+export function mphToKmh(mph: number): number {
+  return mph * KMH_PER_MPH;
+}
+
+/** Convert km/h to mph. */
+export function kmhToMph(kmh: number): number {
+  return kmh / KMH_PER_MPH;
+}
+
 export function formatDistance(meters: number): string {
   if (useImperial) {
     const miles = meters / METERS_PER_MILE;

@@ -1,7 +1,23 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
+import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { fetchTomTomTraffic, type ViewportBounds } from './tomtomFetcher';
 import { convertP2PToNormalized, mergeTrafficSources } from './trafficMerger';
+import {
+  initHyperswarmBridge,
+  disposeHyperswarmBridge,
+  onPeerCount,
+  onAggregatedUpdate,
+  suspend as swarmSuspend,
+  resume as swarmResume,
+} from './hyperswarmBridge';
+import {
+  initNostrFallback,
+  disposeNostrFallback,
+  onProbe as onNostrProbe,
+  getConnectedRelayCount,
+} from './nostrFallback';
+import { ingestProbe } from './trafficAggregator';
 import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../constants/config';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,4 +121,83 @@ export function stopPeriodicRefresh(): void {
 /** Fetch traffic data immediately (no debounce) for a given bounds. */
 export async function fetchTrafficImmediate(viewport: ViewportBounds): Promise<void> {
   await fetchAndUpdateTraffic(viewport);
+}
+
+// ── P2P Lifecycle (Hyperswarm + Nostr fallback) ─────────────────────
+
+let peerCountUnsub: (() => void) | null = null;
+let aggregatedUnsub: (() => void) | null = null;
+let nostrProbeUnsub: (() => void) | null = null;
+let modeCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Initialize the full P2P traffic system:
+ *   1. Start the Bare worklet running Hyperswarm
+ *   2. Connect to Nostr relays as fallback
+ *   3. Wire up event handlers to the traffic store
+ */
+export async function initTrafficP2P(): Promise<void> {
+  // Start Hyperswarm worklet
+  initHyperswarmBridge();
+
+  // Listen for peer count changes from the worklet
+  peerCountUnsub = onPeerCount((count) => {
+    useTrafficStore.getState().setSwarmPeerCount(count);
+    updateTrafficMode(count);
+  });
+
+  // Listen for aggregated traffic state from the worklet
+  aggregatedUnsub = onAggregatedUpdate((states) => {
+    useTrafficStore.getState().bulkUpdateSegments(states);
+  });
+
+  // Start Nostr fallback connections
+  await initNostrFallback();
+
+  // Listen for probes arriving via Nostr relays
+  nostrProbeUnsub = onNostrProbe((probe) => {
+    const state = ingestProbe(probe);
+    if (state) {
+      useTrafficStore.getState().updateSegment(state);
+    }
+  });
+
+  // Periodically check relay count and update mode
+  modeCheckInterval = setInterval(() => {
+    const relayCount = getConnectedRelayCount();
+    useTrafficStore.getState().setNostrRelayCount(relayCount);
+  }, 10_000);
+}
+
+/** Tear down all P2P traffic connections. */
+export function disposeTrafficP2P(): void {
+  peerCountUnsub?.();
+  aggregatedUnsub?.();
+  nostrProbeUnsub?.();
+  peerCountUnsub = null;
+  aggregatedUnsub = null;
+  nostrProbeUnsub = null;
+
+  if (modeCheckInterval) {
+    clearInterval(modeCheckInterval);
+    modeCheckInterval = null;
+  }
+
+  disposeHyperswarmBridge();
+  disposeNostrFallback();
+}
+
+/** Suspend P2P connections (app backgrounded). */
+export function suspendTrafficP2P(): void {
+  swarmSuspend();
+}
+
+/** Resume P2P connections (app foregrounded). */
+export function resumeTrafficP2P(): void {
+  swarmResume();
+}
+
+function updateTrafficMode(swarmPeerCount: number): void {
+  const mode = swarmPeerCount >= MIN_PEER_THRESHOLD ? 'hyperswarm' : 'nostr';
+  useTrafficStore.getState().setTrafficMode(mode);
 }

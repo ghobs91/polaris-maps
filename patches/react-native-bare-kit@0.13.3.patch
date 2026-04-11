@@ -1,0 +1,23 @@
+diff --git a/ios/BareKitModuleProvider.h b/ios/BareKitModuleProvider.h
+index aa6d0c8af8472d027c8526bf343e16f6e13fbf13..8e9f8ded1e3291605d75842277727541eda21c8b 100644
+--- a/ios/BareKitModuleProvider.h
++++ b/ios/BareKitModuleProvider.h
+@@ -1,6 +1,18 @@
+ #import <Foundation/Foundation.h>
+ #import <ReactCommon/RCTTurboModule.h>
+ 
++// Compatibility shim: RCTModuleProvider was introduced after React Native 0.76.
++// Define the protocol here if the SDK does not provide it, so the module
++// compiles against older React Native versions.
++#if !__has_include(<React/RCTModuleProvider.h>) && !defined(RCT_MODULE_PROVIDER_DEFINED)
++#define RCT_MODULE_PROVIDER_DEFINED
++@protocol RCTModuleProvider <NSObject>
++@required
++- (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
++    (const facebook::react::ObjCTurboModule::InitParams &)params;
++@end
++#endif
++
+ @interface BareKitModuleProvider : NSObject <RCTModuleProvider>
+ 
+ @end

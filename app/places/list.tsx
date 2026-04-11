@@ -177,7 +177,15 @@ export default function PlaceListDetailScreen() {
       setPendingSearchQuery(place.name);
       router.replace('/(tabs)');
     },
-    [router, locateTo, setSelectedLocation, setSelectedPoi, setPendingSearchQuery, navigateToResult, regionHint],
+    [
+      router,
+      locateTo,
+      setSelectedLocation,
+      setSelectedPoi,
+      setPendingSearchQuery,
+      navigateToResult,
+      regionHint,
+    ],
   );
 
   const handleDisambigSelect = useCallback(

@@ -183,7 +183,12 @@ export default function MyPlacesScreen() {
     <ErrorBoundary>
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Text style={styles.heading}>My Places</Text>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity onPress={() => router.navigate('/(tabs)')} style={styles.closeBtn}>
+              <Text style={styles.closeBtnText}>✕</Text>
+            </TouchableOpacity>
+            <Text style={styles.heading}>My Places</Text>
+          </View>
           <View style={styles.headerRight}>
             {lists.length > 0 && (
               <TouchableOpacity onPress={handleClearAll} style={styles.clearBtn}>
@@ -305,6 +310,19 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       paddingHorizontal: spacing.lg,
       paddingTop: spacing.sm,
       paddingBottom: spacing.xs,
+    },
+    headerLeft: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      gap: spacing.sm,
+    },
+    closeBtn: {
+      padding: spacing.xs,
+    },
+    closeBtnText: {
+      fontSize: 20,
+      color: colors.textSecondary,
+      fontWeight: '600' as const,
     },
     heading: { ...typography.h1, color: colors.text },
     headerRight: {

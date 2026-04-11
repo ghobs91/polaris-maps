@@ -26,8 +26,8 @@ describe('normalizeTomTomResponse', () => {
     expect(result).not.toBeNull();
     const seg = result as NormalizedTrafficSegment;
     expect(seg.source).toBe('tomtom');
-    expect(seg.currentSpeedKmh).toBe(45);
-    expect(seg.freeFlowSpeedKmh).toBe(60);
+    expect(seg.currentSpeedMph).toBe(45);
+    expect(seg.freeFlowSpeedMph).toBe(60);
     expect(seg.congestionRatio).toBeCloseTo(0.75, 2);
     expect(seg.confidence).toBe(0.95);
     expect(seg.coordinates).toHaveLength(3);

@@ -51,17 +51,8 @@ export function TransportModeSelector({
             onPress={() => onSelect(mode.key)}
             activeOpacity={0.7}
           >
-            <Ionicons
-              name={mode.icon}
-              size={16}
-              color={isActive ? activeText : inactiveText}
-            />
-            <Text
-              style={[
-                styles.label,
-                { color: isActive ? activeText : inactiveText },
-              ]}
-            >
+            <Ionicons name={mode.icon} size={16} color={isActive ? activeText : inactiveText} />
+            <Text style={[styles.label, { color: isActive ? activeText : inactiveText }]}>
               {mode.label}
             </Text>
           </TouchableOpacity>

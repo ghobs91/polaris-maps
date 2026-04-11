@@ -57,8 +57,8 @@ export function normalizeHEREResponse(
     segments.push({
       id: `here:${hashPoints(first, last)}`,
       coordinates: link.points.map((p) => [p.lng, p.lat] as [number, number]),
-      currentSpeedKmh: currentFlow.speed,
-      freeFlowSpeedKmh: currentFlow.freeFlow,
+      currentSpeedMph: currentFlow.speed * 0.621371,
+      freeFlowSpeedMph: currentFlow.freeFlow * 0.621371,
       congestionRatio: ratio,
       confidence: currentFlow.confidence ?? 0.85,
       source: 'here',

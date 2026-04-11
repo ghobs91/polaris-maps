@@ -228,8 +228,6 @@ function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
       }
     });
 
-    NodeChannel.send(
-      JSON.stringify({ type: 'gunzip', inputPath, outputPath, requestId }),
-    );
+    NodeChannel.send(JSON.stringify({ type: 'gunzip', inputPath, outputPath, requestId }));
   });
 }

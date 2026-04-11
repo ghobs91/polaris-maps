@@ -21,7 +21,9 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
 // Mock region repository
 const upsertedRegions: any[] = [];
 jest.mock('../../src/services/regions/regionRepository', () => ({
-  upsertRegion: async (region: any) => { upsertedRegions.push(region); },
+  upsertRegion: async (region: any) => {
+    upsertedRegions.push(region);
+  },
   getRegionById: async () => null,
 }));
 

@@ -6,7 +6,7 @@ import { encode as geohashEncode, neighbors as geohashNeighbors } from './geohas
 const MATCH_THRESHOLD_METERS = 50;
 const EARTH_RADIUS_METERS = 6_371_000;
 const DEG_TO_RAD = Math.PI / 180;
-const DEFAULT_FREE_FLOW_KMH = ROAD_CLASS_SPEEDS.secondary; // 50
+const DEFAULT_FREE_FLOW_MPH = ROAD_CLASS_SPEEDS.secondary; // 30
 
 /** Haversine distance between two [lng, lat] points in meters. */
 function haversineMeters(a: [number, number], b: [number, number]): number {
@@ -81,7 +81,7 @@ function findNearestTrafficSegment(
  */
 export function extractRouteSegments(
   geometry: string,
-  defaultSpeedKmh: number = DEFAULT_FREE_FLOW_KMH,
+  defaultSpeedMph: number = DEFAULT_FREE_FLOW_MPH,
 ): ETARouteSegment[] {
   const coords = decodePolyline(geometry);
   if (coords.length < 2) return [];
@@ -96,7 +96,7 @@ export function extractRouteSegments(
         startCoord: start,
         endCoord: end,
         distanceMeters: dist,
-        freeFlowSpeedKmh: defaultSpeedKmh,
+        freeFlowSpeedMph: defaultSpeedMph,
       });
     }
   }
@@ -143,12 +143,12 @@ export function calculateTrafficETA(
 
   for (const seg of routeSegments) {
     const mid = midpoint(seg.startCoord, seg.endCoord);
-    const freeFlowSeconds = seg.distanceMeters / (seg.freeFlowSpeedKmh / 3.6);
+    const freeFlowSeconds = seg.distanceMeters / (seg.freeFlowSpeedMph * 0.44704);
     freeFlowTotalSeconds += freeFlowSeconds;
 
     const matched = findNearestTrafficSegment(mid, spatialIndex);
-    if (matched && matched.currentSpeedKmh > 0) {
-      totalSeconds += seg.distanceMeters / (matched.currentSpeedKmh / 3.6);
+    if (matched && matched.currentSpeedMph > 0) {
+      totalSeconds += seg.distanceMeters / (matched.currentSpeedMph * 0.44704);
       matchedCount++;
     } else {
       totalSeconds += freeFlowSeconds;

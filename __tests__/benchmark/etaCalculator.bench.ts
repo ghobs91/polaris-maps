@@ -12,7 +12,7 @@ function makeLargeRouteSegments(count: number): ETARouteSegment[] {
       startCoord: [lng, lat],
       endCoord: [nextLng, nextLat],
       distanceMeters: 100,
-      freeFlowSpeedKmh: 60,
+      freeFlowSpeedMph: 60,
     });
     lng = nextLng;
     lat = nextLat;
@@ -33,8 +33,8 @@ function makeLargeTrafficSegments(count: number): NormalizedTrafficSegment[] {
         [lng, lat],
         [nextLng, nextLat],
       ],
-      currentSpeedKmh: 30 + Math.random() * 30,
-      freeFlowSpeedKmh: 60,
+      currentSpeedMph: 30 + Math.random() * 30,
+      freeFlowSpeedMph: 60,
       congestionRatio: 0.5 + Math.random() * 0.5,
       confidence: 0.9,
       source: 'tomtom',

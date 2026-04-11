@@ -28,16 +28,16 @@ function firstCoord(seg: NormalizedTrafficSegment): [number, number] {
  */
 export function convertP2PToNormalized(state: AggregatedTrafficState): NormalizedTrafficSegment {
   const centroid = geohashDecode(state.segmentId);
-  const freeFlowSpeedKmh = ROAD_CLASS_SPEEDS.secondary; // default 50 km/h
+  const freeFlowSpeedMph = ROAD_CLASS_SPEEDS.secondary; // default 30 mph
   const confidence = Math.min(1.0, state.sampleCount / 5) * 0.7;
   const ratio =
-    freeFlowSpeedKmh > 0 ? Math.min(1, Math.max(0, state.avgSpeedKmh / freeFlowSpeedKmh)) : 0;
+    freeFlowSpeedMph > 0 ? Math.min(1, Math.max(0, state.avgSpeedMph / freeFlowSpeedMph)) : 0;
 
   return {
     id: `p2p:${state.segmentId}`,
     coordinates: [[centroid.lng, centroid.lat]],
-    currentSpeedKmh: state.avgSpeedKmh,
-    freeFlowSpeedKmh,
+    currentSpeedMph: state.avgSpeedMph,
+    freeFlowSpeedMph,
     congestionRatio: ratio,
     confidence,
     source: 'p2p',
@@ -97,9 +97,9 @@ export function mergeTrafficSources(
       let latestTimestamp = 0;
 
       for (const seg of group) {
-        weightedSpeed += seg.currentSpeedKmh * seg.confidence;
+        weightedSpeed += seg.currentSpeedMph * seg.confidence;
         totalConfidence += seg.confidence;
-        maxFreeFlow = Math.max(maxFreeFlow, seg.freeFlowSpeedKmh);
+        maxFreeFlow = Math.max(maxFreeFlow, seg.freeFlowSpeedMph);
         latestTimestamp = Math.max(latestTimestamp, seg.timestamp);
       }
 
@@ -108,8 +108,8 @@ export function mergeTrafficSources(
       merged.push({
         id: `merged:${group.map((s) => s.id).join('|')}`,
         coordinates: group[0].coordinates, // Use coordinates from highest-confidence source
-        currentSpeedKmh: avgSpeed,
-        freeFlowSpeedKmh: maxFreeFlow,
+        currentSpeedMph: avgSpeed,
+        freeFlowSpeedMph: maxFreeFlow,
         congestionRatio: ratio,
         confidence: Math.min(1, totalConfidence),
         source: group.reduce((best, s) => (s.confidence > best.confidence ? s : best)).source,

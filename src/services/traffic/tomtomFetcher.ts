@@ -43,8 +43,8 @@ export function normalizeTomTomResponse(
   return {
     id: `tomtom:${hashCoords(coords[0], coords[coords.length - 1])}`,
     coordinates: coords.map((c) => [c.longitude, c.latitude] as [number, number]),
-    currentSpeedKmh: data.currentSpeed,
-    freeFlowSpeedKmh: data.freeFlowSpeed,
+    currentSpeedMph: data.currentSpeed,
+    freeFlowSpeedMph: data.freeFlowSpeed,
     congestionRatio: Math.min(1, Math.max(0, ratio)),
     confidence: data.confidence ?? 0.9,
     source: 'tomtom',
@@ -110,7 +110,7 @@ export async function fetchTomTomTraffic(
   const zoom = Math.round(Math.min(22, Math.max(0, viewport.zoom)));
 
   const promises = points.map(async (pt) => {
-    const url = `${TOMTOM_FLOW_BASE_URL}/${zoom}/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?key=${encodeURIComponent(tomtomApiKey)}&unit=KMPH&thickness=1`;
+    const url = `${TOMTOM_FLOW_BASE_URL}/${zoom}/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?key=${encodeURIComponent(tomtomApiKey)}&unit=MPH&thickness=1`;
     try {
       const res = await fetch(url);
       if (!res.ok) return null;

@@ -4,7 +4,7 @@
     "slug": "polaris-maps",
     "version": "0.1.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/icon.png",
     "scheme": "polaris-maps",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,

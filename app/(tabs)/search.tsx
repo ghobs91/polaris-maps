@@ -31,7 +31,9 @@ async function tryDetectCoordinates(input: string): Promise<{ lat: number; lng: 
     if (c?.decimalLatitude && c?.decimalLongitude)
       return { lat: c.decimalLatitude, lng: c.decimalLongitude };
     return null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 const PLUS_CODE_RE = /^[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{2,}/i;
@@ -44,7 +46,9 @@ async function tryDetectPlusCode(input: string): Promise<{ lat: number; lng: num
     if (result?.latitude && result?.longitude)
       return { lat: result.latitude, lng: result.longitude };
     return null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** Convert a UnifiedSearchResult into a GeocodingResult for the existing UI. */
@@ -76,7 +80,9 @@ export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const lastQueryRef = useRef<string>('');
-  const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(null);
+  const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(
+    null,
+  );
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 

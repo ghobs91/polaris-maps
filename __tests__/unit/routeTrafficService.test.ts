@@ -39,8 +39,8 @@ function makeSeg(
 ): NormalizedTrafficSegment {
   return {
     id: 'seg-1',
-    currentSpeedKmh: 40,
-    freeFlowSpeedKmh: 60,
+    currentSpeedMph: 40,
+    freeFlowSpeedMph: 60,
     confidence: 0.9,
     source: 'tomtom',
     timestamp: Date.now(),

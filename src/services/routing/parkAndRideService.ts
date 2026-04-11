@@ -35,9 +35,7 @@ export async function shouldOfferParkAndRide(
     // Filter to rail/subway stations only
     const railStops = nearbyStops.filter((s) => {
       const routes = s.stop.routes ?? [];
-      return routes.some(
-        (r) => r.mode === 'RAIL' || r.mode === 'SUBWAY',
-      );
+      return routes.some((r) => r.mode === 'RAIL' || r.mode === 'SUBWAY');
     });
 
     if (railStops.length === 0) {

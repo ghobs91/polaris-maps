@@ -33,7 +33,11 @@ import { getDatabase } from '../../services/database/init';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
-import { shouldOfferParkAndRide, planParkAndRide, type ParkAndRideResult } from '../../services/routing/parkAndRideService';
+import {
+  shouldOfferParkAndRide,
+  planParkAndRide,
+  type ParkAndRideResult,
+} from '../../services/routing/parkAndRideService';
 
 export function LocationActionPanel() {
   const selectedLocation = useMapStore((s) => s.selectedLocation);
@@ -61,109 +65,115 @@ export function LocationActionPanel() {
   }, [setSelectedLocation, clearRoutePreview]);
 
   /** Compute route and show it on the map (directions preview) */
-  const handleDirections = useCallback(async (costingOverride?: 'auto' | 'pedestrian') => {
-    const costing = costingOverride ?? 'auto';
-    if (!selectedLocation) return;
-    setIsRouting(true);
-    setRouteError(null);
-    setUsedOnlineRouting(false);
-    setParkAndRideResult(null);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setRouteError('Location permission required');
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      // Try to load local routing tiles if a downloaded region exists
-      const destRegion = await getRegionContainingPoint(selectedLocation.lat, selectedLocation.lng);
-      const originRegion = await getRegionContainingPoint(
-        pos.coords.latitude,
-        pos.coords.longitude,
-      );
-      let region =
-        (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
-        (originRegion?.downloadStatus === 'complete' ? originRegion : null);
-      if (!region) {
-        const downloaded = await getDownloadedRegions();
-        if (downloaded.length > 0) region = downloaded[0];
-      }
-
-      if (region) {
-        const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
-        const graphTilePath = `${regionDir}routing/`;
-        const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
-        if (!graphDirInfo.exists) {
-          const tarPath = `${regionDir}routing.tar`;
-          const tarInfo = await FileSystem.getInfoAsync(tarPath);
-          if (tarInfo.exists) {
-            try {
-              await extractTar(tarPath, graphTilePath);
-              await FileSystem.deleteAsync(tarPath, { idempotent: true });
-            } catch {
-              // Extraction failed — fall through to online routing
-            }
-          } else {
-            const db = await getDatabase();
-            await db.runAsync(
-              'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
-              ['none', Math.floor(Date.now() / 1000), region.id],
-            );
-            await FileSystem.deleteAsync(regionDir, { idempotent: true });
-            region = null;
-          }
+  const handleDirections = useCallback(
+    async (costingOverride?: 'auto' | 'pedestrian') => {
+      const costing = costingOverride ?? 'auto';
+      if (!selectedLocation) return;
+      setIsRouting(true);
+      setRouteError(null);
+      setUsedOnlineRouting(false);
+      setParkAndRideResult(null);
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setRouteError('Location permission required');
+          return;
         }
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+        // Try to load local routing tiles if a downloaded region exists
+        const destRegion = await getRegionContainingPoint(
+          selectedLocation.lat,
+          selectedLocation.lng,
+        );
+        const originRegion = await getRegionContainingPoint(
+          pos.coords.latitude,
+          pos.coords.longitude,
+        );
+        let region =
+          (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
+          (originRegion?.downloadStatus === 'complete' ? originRegion : null);
+        if (!region) {
+          const downloaded = await getDownloadedRegions();
+          if (downloaded.length > 0) region = downloaded[0];
+        }
+
         if (region) {
-          try {
-            await initRouting(graphTilePath);
-          } catch {
-            // initRouting failed — fall through to online routing
+          const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
+          const graphTilePath = `${regionDir}routing/`;
+          const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
+          if (!graphDirInfo.exists) {
+            const tarPath = `${regionDir}routing.tar`;
+            const tarInfo = await FileSystem.getInfoAsync(tarPath);
+            if (tarInfo.exists) {
+              try {
+                await extractTar(tarPath, graphTilePath);
+                await FileSystem.deleteAsync(tarPath, { idempotent: true });
+              } catch {
+                // Extraction failed — fall through to online routing
+              }
+            } else {
+              const db = await getDatabase();
+              await db.runAsync(
+                'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
+                ['none', Math.floor(Date.now() / 1000), region.id],
+              );
+              await FileSystem.deleteAsync(regionDir, { idempotent: true });
+              region = null;
+            }
+          }
+          if (region) {
+            try {
+              await initRouting(graphTilePath);
+            } catch {
+              // initRouting failed — fall through to online routing
+            }
           }
         }
-      }
 
-      const routes = await computeRoute(
-        [
-          { lat: pos.coords.latitude, lng: pos.coords.longitude },
-          { lat: selectedLocation.lat, lng: selectedLocation.lng },
-        ],
-        costing,
-      );
-      if (!routes.length) {
-        setRouteError('No route found between these points');
-        return;
-      }
-      if (!isRoutingInitialized()) setUsedOnlineRouting(true);
-
-      // Store as preview (not active navigation)
-      setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
-
-      // Zoom map to show the entire route
-      if (routes[0].boundingBox) {
-        setFitBounds(routes[0].boundingBox);
-      }
-
-      // Check if park-and-ride should be offered (runs in background)
-      shouldOfferParkAndRide(pos.coords.latitude, pos.coords.longitude)
-        .then((result) => setShowParkAndRide(result.offered))
-        .catch(() => setShowParkAndRide(false));
-
-      // Fetch traffic-adjusted ETA in background
-      fetchRouteTrafficEta(routes[0].geometry).then((result) => {
-        if (result) {
-          useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+        const routes = await computeRoute(
+          [
+            { lat: pos.coords.latitude, lng: pos.coords.longitude },
+            { lat: selectedLocation.lat, lng: selectedLocation.lng },
+          ],
+          costing,
+        );
+        if (!routes.length) {
+          setRouteError('No route found between these points');
+          return;
         }
-      });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setRouteError(msg || 'Could not compute route');
-    } finally {
-      setIsRouting(false);
-    }
-  }, [selectedLocation, setRoutePreview, setFitBounds]);
+        if (!isRoutingInitialized()) setUsedOnlineRouting(true);
+
+        // Store as preview (not active navigation)
+        setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
+
+        // Zoom map to show the entire route
+        if (routes[0].boundingBox) {
+          setFitBounds(routes[0].boundingBox);
+        }
+
+        // Check if park-and-ride should be offered (runs in background)
+        shouldOfferParkAndRide(pos.coords.latitude, pos.coords.longitude)
+          .then((result) => setShowParkAndRide(result.offered))
+          .catch(() => setShowParkAndRide(false));
+
+        // Fetch traffic-adjusted ETA in background
+        fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+          if (result) {
+            useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+          }
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setRouteError(msg || 'Could not compute route');
+      } finally {
+        setIsRouting(false);
+      }
+    },
+    [selectedLocation, setRoutePreview, setFitBounds],
+  );
 
   /** Start turn-by-turn navigation from the previewed route */
   const handleStartNavigation = useCallback(() => {
@@ -207,7 +217,11 @@ export function LocationActionPanel() {
         accuracy: Location.Accuracy.Balanced,
       });
       const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      const dest = { lat: selectedLocation.lat, lng: selectedLocation.lng, name: selectedLocation.name };
+      const dest = {
+        lat: selectedLocation.lat,
+        lng: selectedLocation.lng,
+        name: selectedLocation.name,
+      };
 
       const enabledModes = useTransitStore.getState().enabledModes;
       const itineraries = await planTransitTrip({ from: origin, to: dest, modes: enabledModes });
@@ -347,7 +361,8 @@ export function LocationActionPanel() {
           <View style={styles.parkAndRideLeg}>
             <Ionicons name="car" size={14} color={colors.primary} />
             <Text style={styles.parkAndRideText}>
-              Drive to {parkAndRideResult.stationName} ({formatDuration(parkAndRideResult.drivingLeg.summary.durationSeconds)})
+              Drive to {parkAndRideResult.stationName} (
+              {formatDuration(parkAndRideResult.drivingLeg.summary.durationSeconds)})
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={12} color={colors.textSecondary} />

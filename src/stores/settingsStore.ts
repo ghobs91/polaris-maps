@@ -20,9 +20,12 @@ interface SettingsState {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
   themeMode: ThemeMode;
+  /** When true, display speeds in km/h instead of mph. Default: false (mph). */
+  useMetric: boolean;
   setResourceLimits: (limits: Partial<ResourceLimits>) => void;
   setPermissions: (prefs: Partial<PermissionPreferences>) => void;
   setThemeMode: (mode: ThemeMode) => void;
+  setUseMetric: (metric: boolean) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -31,11 +34,13 @@ function loadSettings(): {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
   themeMode: ThemeMode;
+  useMetric: boolean;
 } {
   const raw = storage.getString(STORAGE_KEY);
   if (raw) {
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      return { useMetric: false, ...parsed };
     } catch {
       // ignore corrupt data
     }
@@ -53,6 +58,7 @@ function loadSettings(): {
       imagerySharingEnabled: false,
     },
     themeMode: 'system',
+    useMetric: false,
   };
 }
 
@@ -60,6 +66,7 @@ function persistSettings(state: {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
   themeMode: ThemeMode;
+  useMetric: boolean;
 }) {
   storage.set(STORAGE_KEY, JSON.stringify(state));
 }
@@ -75,6 +82,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
         resourceLimits: updated,
         permissions: get().permissions,
         themeMode: get().themeMode,
+        useMetric: get().useMetric,
       });
     },
     setPermissions: (prefs) => {
@@ -84,6 +92,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
         resourceLimits: get().resourceLimits,
         permissions: updated,
         themeMode: get().themeMode,
+        useMetric: get().useMetric,
       });
     },
     setThemeMode: (mode) => {
@@ -92,6 +101,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
         resourceLimits: get().resourceLimits,
         permissions: get().permissions,
         themeMode: mode,
+        useMetric: get().useMetric,
+      });
+    },
+    setUseMetric: (useMetric) => {
+      set({ useMetric });
+      persistSettings({
+        resourceLimits: get().resourceLimits,
+        permissions: get().permissions,
+        themeMode: get().themeMode,
+        useMetric,
       });
     },
   };

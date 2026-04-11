@@ -12,28 +12,28 @@ function makeRouteSegment(
   endLng: number,
   endLat: number,
   distanceMeters: number,
-  freeFlowSpeedKmh = 60,
+  freeFlowSpeedMph = 60,
 ): ETARouteSegment {
   return {
     startCoord: [startLng, startLat],
     endCoord: [endLng, endLat],
     distanceMeters,
-    freeFlowSpeedKmh,
+    freeFlowSpeedMph,
   };
 }
 
 function makeTrafficSegment(
   id: string,
   coords: [number, number][],
-  currentSpeedKmh: number,
-  freeFlowSpeedKmh: number,
+  currentSpeedMph: number,
+  freeFlowSpeedMph: number,
 ): NormalizedTrafficSegment {
   return {
     id,
     coordinates: coords,
-    currentSpeedKmh,
-    freeFlowSpeedKmh,
-    congestionRatio: currentSpeedKmh / freeFlowSpeedKmh,
+    currentSpeedMph,
+    freeFlowSpeedMph,
+    congestionRatio: currentSpeedMph / freeFlowSpeedMph,
     confidence: 0.9,
     source: 'tomtom',
     timestamp: Math.floor(Date.now() / 1000),
@@ -65,8 +65,8 @@ describe('formatETA', () => {
 
 describe('calculateTrafficETA', () => {
   it('computes ETA using traffic speeds for fully matched segments', () => {
-    // 1km at free-flow 60km/h = 60s; at current 30km/h = 120s
-    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1000, 60)];
+    // 1 mile (1609m) at free-flow 60 mph = 60s; at current 30 mph = 120s
+    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60)];
     const trafficSegments: NormalizedTrafficSegment[] = [
       makeTrafficSegment('t:1', [[4.845, 52.415]], 30, 60),
     ];
@@ -80,7 +80,7 @@ describe('calculateTrafficETA', () => {
   });
 
   it('falls back to free-flow speed for unmatched segments', () => {
-    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1000, 60)];
+    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60)];
     // Traffic segment too far away
     const trafficSegments: NormalizedTrafficSegment[] = [
       makeTrafficSegment('t:1', [[10.0, 10.0]], 30, 60),
@@ -101,8 +101,8 @@ describe('calculateTrafficETA', () => {
 
   it('handles no traffic data (all fallback to free-flow)', () => {
     const routeSegments: ETARouteSegment[] = [
-      makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1000, 60),
-      makeRouteSegment(4.85, 52.42, 4.86, 52.43, 500, 50),
+      makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60),
+      makeRouteSegment(4.85, 52.42, 4.86, 52.43, 805, 50),
     ];
 
     const result = calculateTrafficETA(routeSegments, []);
@@ -113,8 +113,8 @@ describe('calculateTrafficETA', () => {
 
   it('handles mixed matched and unmatched segments', () => {
     const routeSegments: ETARouteSegment[] = [
-      makeRouteSegment(4.84, 52.41, 4.845, 52.415, 500, 60),
-      makeRouteSegment(10.0, 10.0, 10.01, 10.01, 500, 60),
+      makeRouteSegment(4.84, 52.41, 4.845, 52.415, 805, 60),
+      makeRouteSegment(10.0, 10.0, 10.01, 10.01, 805, 60),
     ];
     const trafficSegments: NormalizedTrafficSegment[] = [
       makeTrafficSegment('t:1', [[4.8425, 52.4125]], 30, 60),
@@ -124,20 +124,20 @@ describe('calculateTrafficETA', () => {
 
     expect(result.segmentCount).toBe(2);
     expect(result.matchedSegmentCount).toBe(1);
-    // First matched at 30km/h: 500m / (30/3.6) ≈ 60s
-    // Second unmatched at 60km/h: 500m / (60/3.6) ≈ 30s
+    // First matched at 30 mph: 805m / (30*0.447) ≈ 60s
+    // Second unmatched at 60 mph: 805m / (60*0.447) ≈ 30s
     expect(result.totalSeconds).toBeGreaterThan(result.freeFlowTotalSeconds);
   });
 
   it('handles all-stopped traffic (very low speed)', () => {
-    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1000, 60)];
+    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60)];
     const trafficSegments: NormalizedTrafficSegment[] = [
       makeTrafficSegment('t:1', [[4.845, 52.415]], 1, 60),
     ];
 
     const result = calculateTrafficETA(routeSegments, trafficSegments);
 
-    // 1km at 1km/h = 3600s
+    // 1 mile at 1 mph ≈ 3600s
     expect(result.totalSeconds).toBeCloseTo(3600, -1);
   });
 
@@ -154,7 +154,7 @@ describe('calculateTrafficETA', () => {
 
   it('produces correctly formatted output', () => {
     const routeSegments: ETARouteSegment[] = [
-      makeRouteSegment(4.84, 52.41, 4.85, 52.42, 10000, 60),
+      makeRouteSegment(4.84, 52.41, 4.85, 52.42, 16090, 60),
     ];
 
     const result = calculateTrafficETA(routeSegments, []);

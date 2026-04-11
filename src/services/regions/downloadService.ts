@@ -377,9 +377,7 @@ function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
       }
     });
 
-    NodeChannel.send(
-      JSON.stringify({ type: 'gunzip', inputPath, outputPath, requestId }),
-    );
+    NodeChannel.send(JSON.stringify({ type: 'gunzip', inputPath, outputPath, requestId }));
   });
 }
 
@@ -438,11 +436,18 @@ async function downloadAndImportGeocodingBundle(
       checkAborted(signal);
 
       const rows = await srcDb.getAllAsync<{
-        id: number; text: string; type: string;
-        housenumber: string | null; street: string | null;
-        city: string | null; state: string | null;
-        postcode: string | null; country: string | null;
-        lat: number; lng: number; region_id: string | null;
+        id: number;
+        text: string;
+        type: string;
+        housenumber: string | null;
+        street: string | null;
+        city: string | null;
+        state: string | null;
+        postcode: string | null;
+        country: string | null;
+        lat: number;
+        lng: number;
+        region_id: string | null;
       }>(
         `SELECT id, text, type, housenumber, street, city, state, postcode, country, lat, lng, region_id
          FROM geocoding_data LIMIT ? OFFSET ?`,
@@ -457,9 +462,17 @@ async function downloadAndImportGeocodingBundle(
              (text, type, housenumber, street, city, state, postcode, country, lat, lng, region_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            row.text, row.type, row.housenumber, row.street,
-            row.city, row.state, row.postcode, row.country,
-            row.lat, row.lng, region.id,
+            row.text,
+            row.type,
+            row.housenumber,
+            row.street,
+            row.city,
+            row.state,
+            row.postcode,
+            row.country,
+            row.lat,
+            row.lng,
+            region.id,
           ],
         );
       }
@@ -482,10 +495,10 @@ async function downloadAndImportGeocodingBundle(
     // Update geocoding_size_bytes for the region
     const fileInfo = await FileSystem.getInfoAsync(gzPath);
     const fileSize = (fileInfo as { size?: number }).size ?? 0;
-    await appDb.runAsync(
-      'UPDATE regions SET geocoding_size_bytes = ? WHERE id = ?',
-      [fileSize, region.id],
-    );
+    await appDb.runAsync('UPDATE regions SET geocoding_size_bytes = ? WHERE id = ?', [
+      fileSize,
+      region.id,
+    ]);
   } finally {
     await srcDb.closeAsync();
   }

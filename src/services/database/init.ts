@@ -52,7 +52,7 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       geohash6 TEXT NOT NULL,
       way_id TEXT,
       road_class TEXT NOT NULL,
-      speed_limit_kmh INTEGER,
+      speed_limit_mph INTEGER,
       is_oneway INTEGER NOT NULL DEFAULT 0,
       start_lat REAL NOT NULL,
       start_lng REAL NOT NULL,
@@ -238,14 +238,10 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
   }
 
   // Add region_id to geocoding_data for per-region cascade deletes
-  await database.execAsync(
-    `ALTER TABLE geocoding_data ADD COLUMN region_id TEXT;`
-  ).catch(() => {});
+  await database.execAsync(`ALTER TABLE geocoding_data ADD COLUMN region_id TEXT;`).catch(() => {});
 
   // Add geocoding_url to regions for per-region geocoding bundle URL
-  await database.execAsync(
-    `ALTER TABLE regions ADD COLUMN geocoding_url TEXT;`
-  ).catch(() => {});
+  await database.execAsync(`ALTER TABLE regions ADD COLUMN geocoding_url TEXT;`).catch(() => {});
 }
 
 export async function closeDatabase(): Promise<void> {

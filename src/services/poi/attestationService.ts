@@ -1,7 +1,7 @@
 import * as Location from 'expo-location';
 import { sign, verify, createSigningPayload } from '../identity/signing';
 import { getOrCreateKeypair } from '../identity/keypair';
-import { publish, subscribe, unsubscribe, onMessage } from '../traffic/wakuBridge';
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { recordConfirmation } from './reputationService';
 
@@ -67,7 +67,18 @@ export async function attestPOI(
   const geohash6 = geohashEncode(placeLat, placeLng, 6);
   const topic = `/polaris/1/poi-attest/${geohash6}/proto`;
 
-  await publish(topic, new TextEncoder().encode(JSON.stringify(attestation)));
+  // Publish via nodejs-mobile NodeChannel (attestations use the existing sidecar)
+  const { NodeChannel } = NativeModules;
+  if (NodeChannel) {
+    NodeChannel.send(
+      JSON.stringify({
+        type: 'publish',
+        topic,
+        payload: Array.from(new TextEncoder().encode(JSON.stringify(attestation))),
+        requestId: `attest_${Date.now()}`,
+      }),
+    );
+  }
   await recordConfirmation();
 
   return attestation;
@@ -77,25 +88,47 @@ export async function subscribeToAttestations(lat: number, lng: number): Promise
   const geohash6 = geohashEncode(lat, lng, 6);
   const topic = `/polaris/1/poi-attest/${geohash6}/proto`;
 
-  await subscribe(topic);
+  // Subscribe via nodejs-mobile NodeChannel
+  const { NodeChannel } = NativeModules;
+  if (NodeChannel) {
+    NodeChannel.send(
+      JSON.stringify({
+        type: 'subscribe',
+        topic,
+        requestId: `sub_${Date.now()}`,
+      }),
+    );
 
-  void onMessage((msgTopic: string, payload: Uint8Array) => {
-    if (msgTopic !== topic) return;
-    try {
-      const attestation: POIAttestation = JSON.parse(new TextDecoder().decode(payload));
-      if (attestation.placeUuid && attestation.pubkey && attestation.signature) {
-        validateAndDispatch(attestation);
+    const emitter = new NativeEventEmitter(NodeChannel);
+    emitter.addListener('message', (raw: string) => {
+      try {
+        const event = JSON.parse(raw);
+        if (event.type !== 'message' || event.topic !== topic) return;
+        const payload = new Uint8Array(event.payload);
+        const attestation: POIAttestation = JSON.parse(new TextDecoder().decode(payload));
+        if (attestation.placeUuid && attestation.pubkey && attestation.signature) {
+          validateAndDispatch(attestation);
+        }
+      } catch {
+        // Ignore malformed messages
       }
-    } catch {
-      // Ignore malformed messages
-    }
-  });
+    });
+  }
 
   return topic;
 }
 
 export async function unsubscribeFromAttestations(topic: string): Promise<void> {
-  await unsubscribe(topic);
+  const { NodeChannel } = NativeModules;
+  if (NodeChannel) {
+    NodeChannel.send(
+      JSON.stringify({
+        type: 'unsubscribe',
+        topic,
+        requestId: `unsub_${Date.now()}`,
+      }),
+    );
+  }
 }
 
 async function validateAndDispatch(attestation: POIAttestation): Promise<void> {

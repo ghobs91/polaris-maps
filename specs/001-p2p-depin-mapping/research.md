@@ -290,3 +290,355 @@ Use Arweave for all immutable base data (PMTiles archives, Valhalla routing grap
 4. Gun.js + Hermes polyfills + MMKV adapter (proves POI sync)
 5. Hypercore bare-kit feed replication (proves delta-sync)
 6. SQLite FTS5 geocoding (low risk — prove last)
+
+---
+
+## Topic 9: Deep Dive — Waku vs Nostr vs Holepunch/Pears for Decentralized Traffic Flow Tracking
+
+**Date**: 2026-04-10  
+**Objective**: Determine whether Holepunch/Pears (Hyperswarm + Hypercore + Autobase) is a better foundation for a decentralized, mostly-P2P traffic flow tracking system than the current plan of Waku v2 light push/filter via nodejs-mobile, and whether Nostr relays could serve as a viable alternative.
+
+### 9.1 Requirements Recap
+
+The traffic flow system must:
+
+1. **Ingest speed probes** from mobile devices (~40-60 byte protobuf, 1 per 5 seconds while moving)
+2. **Distribute probes geographically** — devices only receive probes relevant to their viewport (~1-5 km radius)
+3. **Sub-10-second latency** from probe publish to consumption by nearby peers
+4. **Work on mobile** (iOS + Android, React Native, battery < 1% overhead/hour)
+5. **Be mostly P2P** — no developer-hosted servers required for operation
+6. **Handle cold-start** — work even when few peers are online in a given area
+7. **Support aggregation** — raw probes must be aggregated into per-segment speed estimates for Valhalla traffic costing
+
+---
+
+### 9.2 Waku v2 — Deep Analysis
+
+#### Architecture for Traffic
+
+Waku uses a **pub/sub gossip relay network** (based on libp2p GossipSub) with a light client tier:
+
+- Mobile devices use **Light Push** (fire-and-forget publish to a service node) and **Filter** (subscribe to content topics on a service node)
+- Service nodes (full relay nodes) form the gossip backbone
+- Content topics provide per-geohash routing: `/polaris/1/traffic/{geohash6}/proto`
+
+#### Strengths
+
+| Strength                                       | Detail                                                                                                                                                                  |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose-built for ephemeral messaging**      | Messages are transient by design. The `ephemeral` flag on Waku messages tells relays not to store them — perfect for traffic probes that expire in minutes              |
+| **Content topic filtering**                    | Native support for geohash-based topic partitioning. Mobile devices subscribe only to geohash cells they care about. Service nodes handle the routing                   |
+| **Light client protocol is production-proven** | Status Messenger (millions of messages/day) uses the same light push/filter protocol on mobile                                                                          |
+| **RLN (Rate Limit Nullifiers)**                | Built-in economic spam prevention via zero-knowledge proofs. Prevents a single bad actor from flooding the network with fake probes. Crucial for traffic data integrity |
+| **No relay operator trust required**           | Messages are end-to-end verifiable via Nostr keypair signatures. Service nodes can't tamper with probes                                                                 |
+| **Bandwidth-efficient on mobile**              | Light clients only send their own probes and receive filtered messages. No gossip forwarding duty                                                                       |
+
+#### Weaknesses
+
+| Weakness                                               | Detail                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Requires nodejs-mobile**                             | js-waku (now logos-delivery-js) is a pure TypeScript/JS implementation, but it depends on libp2p which requires a Node.js runtime. Cannot run directly in Hermes. nodejs-mobile adds ~30-50 MB to app size and spawns a separate V8 thread                     |
+| **No official React Native SDK**                       | There is no `react-native-waku` package. The approach is DIY: run js-waku inside nodejs-mobile with a JSON message bridge to RN. Multiple developers (nicobao et al.) attempted React Native integrations but none shipped to production outside of Status     |
+| **Service node dependency**                            | Light clients cannot function without at least one reachable service node. If no service nodes are online for a geohash region, probes are lost. Not truly P2P — it's a client/server model with decentralized servers                                         |
+| **Cold-start problem**                                 | A new Polaris Maps deployment must either (a) ship hardcoded service node addresses or (b) rely on existing Waku network service nodes. The Waku network prioritizes messaging use cases — traffic probes at scale may not be welcome on shared infrastructure |
+| **Latency unpredictability**                           | Light push → service node → gossip relay mesh → filter subscriber. Each hop adds latency. Under load, GossipSub heartbeats (1-second intervals) add buffering. Realistic: 1-5 seconds in good conditions, potentially 10+ seconds through multiple relay hops  |
+| **js-waku repo recently renamed to logos-delivery-js** | Suggests organizational restructuring. The project was moved under the Logos umbrella (IFT). Ongoing but signals potential priority shifts                                                                                                                     |
+
+#### Mobile Battery/Bandwidth Profile
+
+- **Outbound**: 1 probe/5s × 60 bytes = 720 bytes/min = ~43 KB/hour
+- **Inbound (filtering)**: Depends on peer density. 10 nearby peers × 12 msg/min × 60 bytes = ~430 KB/hour
+- **Connection overhead**: Persistent WebSocket to service node. Keep-alive pings. ~50 KB/hour
+- **Total**: ~500 KB - 1 MB/hour. Battery: < 1% on modern devices (comparable to a background chat app)
+
+---
+
+### 9.3 Nostr — Deep Analysis
+
+#### Architecture for Traffic
+
+Nostr uses **WebSocket connections to relay servers**. Clients publish signed events and subscribe via filters (REQ messages). The protocol is simple: JSON events with kind numbers, tags, and content.
+
+A traffic probe would be a custom event kind (e.g., kind 30078 for app-specific data, or a new custom kind in the 20000-29999 ephemeral range):
+
+```json
+{
+  "pubkey": "<hex>",
+  "created_at": 1712764800,
+  "kind": 20100,
+  "tags": [
+    ["g", "9q5ctr"],
+    ["expiration", "1712765100"]
+  ],
+  "content": "<protobuf-base64-encoded-probe>",
+  "id": "<event-id>"
+}
+```
+
+Key NIPs relevant to traffic:
+
+- **NIP-01**: Basic protocol, REQ/EVENT/CLOSE
+- **NIP-40**: Expiration timestamps (relays MAY delete expired events) — probes expire after 5 minutes
+- **NIP-52**: Geohash `g` tag for geospatial filtering — relays can filter by geohash prefix
+- **Ephemeral events (kinds 20000-29999)**: Events not expected to be stored long-term
+
+#### Strengths
+
+| Strength                                  | Detail                                                                                                                                                                                        |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Extreme simplicity**                    | The protocol is just WebSocket + JSON + Schnorr signatures. No libp2p, no GossipSub, no DHT. A full client can be written in ~200 lines                                                       |
+| **Already in the app**                    | Polaris already uses Nostr keypairs (NIP-01) for identity. The same keypair signs traffic probes. Zero additional cryptographic infrastructure                                                |
+| **Geohash filtering via `g` tag**         | NIP-52 defines geohash tags. A relay can efficiently filter events by `#g` tag prefix. `REQ ["REQ", "traffic", {"kinds": [20100], "#g": ["9q5c"]}]` returns only probes in that geohash4 area |
+| **Works directly in Hermes**              | Pure WebSocket connections — no nodejs-mobile, no libp2p, no extra runtime. The entire client is ~2 KB of JS. Eliminates 30-50 MB of nodejs-mobile overhead                                   |
+| **Expiration (NIP-40)**                   | Probes tagged with `expiration` tell relays to garbage-collect them. Relays don't accumulate stale traffic data                                                                               |
+| **Massive existing relay infrastructure** | Thousands of Nostr relays already exist. Traffic probes can piggyback on existing infrastructure, or dedicated "traffic relays" can be stood up                                               |
+| **NIP-42 AUTH**                           | Relays can require authentication, allowing Polaris-specific relays to restrict traffic events to verified app users                                                                          |
+| **Rich ecosystem of RN clients**          | Damus, Amethyst, Primal — all React Native or mobile-native. The protocol is proven on mobile                                                                                                 |
+
+#### Weaknesses
+
+| Weakness                               | Detail                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Relay-dependent (not P2P)**          | Nostr is fundamentally a **client-relay** architecture, not peer-to-peer. If all relays go offline, the network stops. This is a weaker decentralization guarantee than Waku or Hyperswarm                                                                                                                    |
+| **Relay operators see content topics** | Relay operators can read traffic probes (they're signed but not encrypted). Privacy concern: relay operators can track user movement patterns. Mitigation: encrypt probe content, use geohash prefix only in tags                                                                                             |
+| **No built-in spam prevention**        | Unlike Waku's RLN, Nostr has no protocol-level rate limiting. Must implement at the relay level (NIP-13 proof-of-work, or custom relay policies). A spammer can flood fake probes                                                                                                                             |
+| **Latency model**                      | Client → relay is fast (WebSocket, ~50-200 ms). But the subscriber must also be connected to the **same relay** or a relay that mirrors the data. No automatic gossip between relays — each relay is independent. For coverage, clients must connect to multiple relays                                       |
+| **No native pub/sub fan-out**          | Relays independently serve subscriptions. There's no relay-to-relay forwarding like GossipSub. If Device A publishes to Relay X and Device B subscribes to Relay Y, Device B never sees Device A's probe unless both relays are bridged or both devices connect to both relays                                |
+| **Event overhead**                     | A Nostr event has JSON overhead: `pubkey` (64 hex chars), `id` (64 hex chars), `sig` (128 hex chars), `created_at`, `kind`, `tags`, `content`. A 60-byte probe becomes a ~400-500 byte JSON event after signing. ~8x overhead vs raw protobuf. At 12 events/min, this is still only ~360 KB/hour — acceptable |
+| **Ephemeral events are advisory**      | Relays MAY store ephemeral events anyway. No guarantee of deletion. Not a functional issue, but a privacy concern                                                                                                                                                                                             |
+
+#### Mobile Battery/Bandwidth Profile
+
+- **Outbound**: 1 event/5s × 500 bytes (JSON) = 6 KB/min = ~360 KB/hour
+- **Inbound**: 10 peers × 12 events/min × 500 bytes = ~3.6 MB/hour (higher than Waku due to JSON overhead)
+- **Connection**: 2-3 WebSocket connections to relays. Keep-alive: ~20 KB/hour
+- **Total**: ~4 MB/hour. Higher than Waku but still acceptable for a navigation session
+- **Battery**: < 1% on modern devices. WebSocket connections are lightweight
+
+---
+
+### 9.4 Holepunch/Pears (Hyperswarm + Hypercore + Autobase) — Deep Analysis
+
+#### Architecture for Traffic
+
+The Holepunch stack offers a fundamentally different approach: **true peer-to-peer connections** via the Hyperswarm DHT with encrypted Noise streams, backed by Hypercore append-only logs.
+
+**Proposed Architecture**:
+
+1. **Peer discovery**: Each device joins a Hyperswarm topic per geohash region: `sha256("polaris-traffic-" + geohash4)`. The DHT facilitates NAT traversal and direct connection establishment.
+
+2. **Direct probe exchange**: Once connected, peers exchange traffic probes directly over encrypted Noise streams using Protomux (protocol multiplexer). No relay intermediary.
+
+3. **Aggregation via Autobase**: An Autobase instance per region collects probes from all connected writers. The `apply` function aggregates raw probes into per-segment speed summaries. The resulting `view` (a Hypercore) is the materialized traffic speed map.
+
+4. **Sparse replication**: Devices only replicate the geohash regions they're interested in. Hypercore's sparse sync means they only download data they need.
+
+**Mobile Integration**: The `react-native-bare-kit` package embeds the Bare runtime (a lightweight C-based JS runtime, not Node.js) into React Native. Communication between RN (Hermes) and Bare is via an IPC stream with RPC on top. This is the same approach used by Keet (Holepunch's messaging app) on iOS and Android.
+
+```
+React Native (Hermes) ←→ IPC/RPC ←→ Bare Worklet (Hyperswarm + Hypercore + Autobase)
+```
+
+#### Strengths
+
+| Strength                                          | Detail                                                                                                                                                                                                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **True P2P — no relay/service nodes required**    | Hyperswarm uses a DHT for peer discovery and UDP hole-punching for direct connections. Once peers are connected, data flows directly between them. No servers in the middle                                                                      |
+| **Noise-encrypted streams**                       | Every connection is end-to-end encrypted with the Noise protocol by default. No additional encryption layer needed. Relay operators (there are none) can't read probes                                                                           |
+| **DHT-based peer discovery per geohash**          | Join a topic per geohash region. The DHT automatically handles peer discovery — connecting you to other devices interested in the same geographic area. Natural geographic clustering                                                            |
+| **Autobase solves multi-writer aggregation**      | Autobase is purpose-built for exactly this use case: many writers (devices) contributing to a shared data structure (traffic speed map). Deterministic linearization means all peers converge on the same aggregated view                        |
+| **Hypercore's sparse replication**                | Only download traffic data for regions you care about. Efficient incremental sync — only new entries are transferred                                                                                                                             |
+| **react-native-bare-kit is production-tested**    | Used by Keet on iOS and Android. The Bare runtime is lighter than nodejs-mobile (~10 MB vs ~30-50 MB). It provides native UDP sockets (which Hermes lacks), critical for DHT operation                                                           |
+| **Hyperswarm has suspend/resume**                 | `swarm.suspend()` and `swarm.resume()` are first-class APIs for mobile lifecycle management. When the app backgrounds, the swarm suspends cleanly. On resume, it reconnects and re-announces                                                     |
+| **Eliminates the service node bootstrap problem** | The DHT itself is the bootstrap. The default Hyperswarm DHT has 3 public bootstrap nodes. Any Polaris desktop user running a full node becomes a persistent DHT node, strengthening the network                                                  |
+| **Protobuf-native messages**                      | Probes are exchanged as raw protobuf over the wire. No JSON serialization overhead. 60-byte probes stay 60 bytes                                                                                                                                 |
+| **Bandwidth: only exchange with direct peers**    | No gossip forwarding to uninvolved nodes. You only send/receive data from peers in your geohash area                                                                                                                                             |
+| **Autobase quorum & signed length**               | Autobase provides checkpoint guarantees — once a majority of indexers sign off on a state, it's immutable. This prevents retroactive manipulation of historical traffic data                                                                     |
+| **Mutable DHT records**                           | HyperDHT supports `mutablePut`/`mutableGet` — devices can publish their current speed as a mutable record keyed by their public key. Other devices can look up nearby peers' speeds directly from the DHT without establishing a full connection |
+
+#### Weaknesses
+
+| Weakness                                 | Detail                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **NAT traversal isn't 100%**             | UDP hole-punching works for most consumer NATs but fails behind symmetric NATs (carrier-grade NAT, some corporate networks). Fallback is relay through reachable peers, but this adds latency and is not guaranteed. Hyperswarm's success rate is ~85-90% based on Keet telemetry      |
+| **Cold-start peer density**              | If only 2 drivers are on the road in a geohash4 area, they may connect but the traffic data is too sparse. Waku/Nostr service nodes can aggregate data from many regions; Hyperswarm peers only see peers in their topic                                                               |
+| **Autobase complexity**                  | Autobase is the most complex piece. It requires indexer nodes to sign checkpoints. In a traffic system, who are the indexers? Options: (a) any peer with sufficient uptime, (b) desktop "full node" users, (c) dedicated community nodes. The indexer selection problem is non-trivial |
+| **Autobase stability**                   | Autobase was marked `stable` in docs.pears.com as of 2026. However, the git history shows commits as recent as last month (v7.27.3) with fixes to recovery flows. The API surface is large and the reordering behavior is complex. Production use outside of Keet is limited           |
+| **No built-in spam prevention**          | Like Nostr, Hyperswarm has no protocol-level rate limiting. The DHT `firewall` callback can reject connections from unknown pubkeys, but this requires a reputation/whitelist system                                                                                                   |
+| **Bare runtime is a separate JS engine** | Communication between Hermes (RN) and Bare (worklet) crosses a process boundary via IPC/RPC. Serialization overhead for every probe that needs to reach the RN UI. However, traffic data flows Bare→RN only when the UI needs updated speed overlays, not per-probe                    |
+| **react-native-bare-kit documentation**  | Docs exist (the Making a Bare Mobile App guide is solid) but third-party usage outside Holepunch's own apps is still limited. Community support is growing but thin                                                                                                                    |
+| **DHT queries have latency**             | Initial peer discovery via DHT lookup takes 1-5 seconds. Subsequent connections are cached. This means the first traffic update after opening the app may be delayed. Hyperswarm's `findingPeers()` hook helps manage this                                                             |
+| **Bandwidth for Autobase replication**   | Autobase replicates the full causal DAG between writers, not just the latest state. For a high-throughput traffic system (thousands of probes/minute in a metro area), the DAG could grow large. Need aggressive pruning/rolling window                                                |
+
+#### Mobile Battery/Bandwidth Profile
+
+- **Outbound**: 1 probe/5s × 60 bytes (raw protobuf) = 720 bytes/min = ~43 KB/hour
+- **Inbound**: 10 peers × 12 probes/min × 60 bytes = ~430 KB/hour
+- **DHT maintenance**: Periodic queries and keep-alive. ~100-200 KB/hour
+- **Autobase sync**: Depends on DAG size. For a rolling 5-minute window with aggressive GC: ~200 KB/hour
+- **Total**: ~800 KB - 1 MB/hour. Comparable to Waku, much less than Nostr
+- **Battery**: UDP is more battery-efficient than TCP WebSockets. NAT traversal pings add some overhead. Estimated: < 1% per hour
+
+---
+
+### 9.5 Comparative Analysis
+
+| Dimension                   | Waku v2                                                 | Nostr                                   | Holepunch/Pears                                       |
+| --------------------------- | ------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------- |
+| **Decentralization**        | Medium — requires service nodes (decentralized servers) | Low-Medium — requires relay servers     | **High** — true P2P via DHT + hole-punching           |
+| **Latency**                 | 1-5s (gossip hops)                                      | 50-200ms (WebSocket to relay)           | **200ms-2s** (direct peer connection after discovery) |
+| **Mobile runtime**          | nodejs-mobile (30-50 MB, V8 thread)                     | **Native WebSocket (0 overhead)**       | Bare worklet (10-15 MB, Bare thread)                  |
+| **Bandwidth (mobile)**      | ~500 KB-1 MB/hr                                         | ~4 MB/hr (JSON overhead)                | **~800 KB-1 MB/hr**                                   |
+| **Spam prevention**         | **RLN (built-in ZK-based)**                             | None (must build)                       | None (must build)                                     |
+| **Aggregation**             | Application-level                                       | Application-level                       | **Autobase (built-in CRDT-like multi-writer)**        |
+| **Geographic filtering**    | Content topics by geohash                               | `g` tag filtering on relays             | Swarm topics by geohash + direct peer exchange        |
+| **Cold-start resilience**   | Medium — depends on service nodes                       | **High** — thousands of existing relays | Low — needs peers in your area                        |
+| **Privacy**                 | Medium — service nodes see content topics               | Low — relays see full event content     | **High** — E2E encrypted, no intermediary             |
+| **Complexity**              | High (libp2p + nodejs-mobile + bridge)                  | **Low** (WebSocket + JSON)              | High (Bare worklet + Hyperswarm + Autobase)           |
+| **Production mobile proof** | Status Messenger                                        | Damus, Amethyst, Primal                 | Keet                                                  |
+| **RN integration maturity** | DIY via nodejs-mobile                                   | **Trivial** (WebSocket)                 | Documented via react-native-bare-kit                  |
+| **App size impact**         | +30-50 MB                                               | **+0 MB**                               | +10-15 MB                                             |
+| **Protocol overhead**       | ~100 bytes/msg (protobuf + libp2p)                      | ~400-500 bytes/msg (JSON + sig)         | **~60 bytes/msg** (raw protobuf)                      |
+
+---
+
+### 9.6 Hybrid Architecture Recommendation
+
+**No single protocol optimally serves all traffic system requirements.** The optimal architecture is a _hybrid_ that uses Holepunch/Pears as the primary P2P layer and Nostr as the fallback/bootstrap layer:
+
+#### Tier 1: Holepunch/Pears (Primary — Peer-Rich Areas)
+
+Use Hyperswarm + Autobase as the primary traffic data exchange when sufficient peers are available:
+
+- **Probe publishing**: Device joins Hyperswarm topic `sha256("polaris-traffic-v1-" + geohash4)`. Directly exchanges probes with connected peers.
+- **Aggregation**: An Autobase per geohash4 region. Mobile peers are writers; desktop "full node" users serve as indexers. The Autobase `apply` function computes per-segment average speeds from the probe stream.
+- **Traffic speed map**: The Autobase view is a Hyperbee (B-tree on Hypercore) keyed by segment ID → current speed. Valhalla reads this on route computation.
+- **Runtime**: `react-native-bare-kit` Worklet runs the entire P2P stack. Communication to RN via RPC for UI updates (traffic overlay colors, ETA updates).
+
+**Why primary**: True P2P, lowest bandwidth, native aggregation, best privacy, no service infrastructure.
+
+#### Tier 2: Nostr (Fallback — Sparse Areas + Cold Start)
+
+When the Hyperswarm topic has < 3 connected peers (common in low-density areas or cold-start), fall back to Nostr:
+
+- **Probe publishing**: Publish traffic probes as ephemeral Nostr events (kind 20100) with `g` tag (geohash) and `expiration` tag (5-minute TTL) to 2-3 Nostr relays.
+- **Subscription**: Subscribe via `REQ` with `#g` filter to receive probes from the same geohash area from other users who are also in fallback mode.
+- **Relay selection**: Use a mix of (a) dedicated Polaris community relays and (b) public relays that support geohash filtering.
+- **Aggregation**: Client-side aggregation of received Nostr probes, same algorithm as the Autobase `apply` function but without multi-writer consensus.
+
+**Why fallback**: Zero additional runtime overhead (pure WebSocket in Hermes), massive existing relay infrastructure handles the cold-start problem, works even when no nearby P2P peers exist.
+
+#### Tier 3: Waku — Removed from Architecture
+
+Waku is **not recommended** for the traffic system:
+
+1. **nodejs-mobile is redundant** — react-native-bare-kit already provides a side runtime for P2P code. Running both nodejs-mobile (for Waku) and Bare (for Hyperswarm) would be absurd — two extra JS runtimes.
+2. **Service node dependency** provides weaker decentralization than Hyperswarm's DHT.
+3. **No aggregation primitive** — would need to build what Autobase provides out of the box.
+4. **Organizational uncertainty** — js-waku's rename to logos-delivery-js and restructuring under IFT/Logos suggests shifting priorities.
+
+The only Waku advantage (RLN spam prevention) can be replicated via:
+
+- NIP-13 proof-of-work on Nostr events
+- Hyperswarm `firewall` callback + reputation checking on Autobase peers
+- Application-level probe validation (speed < 200 km/h, bearing consistent with road geometry, etc.)
+
+---
+
+### 9.7 Revised Stack for Traffic System
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    React Native (Hermes)                    │
+│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  │
+│  │ Traffic UI   │  │ Valhalla Bridge  │  │ Nostr Client │  │
+│  │ (Map overlay)│  │ (JSI → C++)     │  │ (WebSocket)  │  │
+│  └──────┬───────┘  └────────┬─────────┘  └──────┬───────┘  │
+│         │ IPC/RPC           │                    │          │
+├─────────┼───────────────────┼────────────────────┼──────────┤
+│         ▼                   │                    │          │
+│  ┌──────────────────────┐   │                    │          │
+│  │  Bare Worklet         │   │                    │          │
+│  │  (react-native-bare-kit) │                    │          │
+│  │  ┌──────────────────┐ │   │                    │          │
+│  │  │ Hyperswarm       │ │   │    ┌──────────────┼────┐     │
+│  │  │ (topic/geohash4) │ │   │    │ Nostr Relays │    │     │
+│  │  └────────┬─────────┘ │   │    │ (fallback)   │    │     │
+│  │  ┌────────▼─────────┐ │   │    └──────────────┘    │     │
+│  │  │ Autobase         │ │   │                         │     │
+│  │  │ (probe → speed)  │◄├───┤   Traffic Speed Map     │     │
+│  │  └────────┬─────────┘ │   │   (segment → speed)     │     │
+│  │  ┌────────▼─────────┐ │   │                         │     │
+│  │  │ Hyperbee View    │ │   │    Valhalla reads       │     │
+│  │  │ (speed map)      │─├───┼──► traffic overrides    │     │
+│  │  └──────────────────┘ │   │                         │     │
+│  └──────────────────────┘   │                         │     │
+└─────────────────────────────┼─────────────────────────┘     │
+                              │                               │
+                    ┌─────────▼───────────┐                   │
+                    │ Valhalla (C++ native)│                   │
+                    │ traffic.tar speed map│                   │
+                    └─────────────────────┘                   │
+```
+
+**Mode selection logic** (runs in Bare worklet):
+
+```
+peerCount = swarm.connections.size for current geohash4 topic
+
+if (peerCount >= 3) {
+  mode = "hyperswarm"  // Primary: direct P2P exchange via Autobase
+} else {
+  mode = "nostr"       // Fallback: publish/subscribe via relays
+}
+
+// Both modes feed the same aggregation pipeline
+// Autobase view OR client-side aggregation → Hyperbee speed map
+```
+
+---
+
+### 9.8 Migration Path from Current Architecture
+
+The current research (Topic 3) planned Waku v2 via nodejs-mobile. The revised recommendation:
+
+| Component           | Was                     | Now                                       | Migration Effort                                                               |
+| ------------------- | ----------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+| P2P runtime         | nodejs-mobile (V8)      | react-native-bare-kit (Bare)              | **Medium** — already planned for Hypercore (Topic 5). Now also handles traffic |
+| Traffic pub/sub     | Waku light push/filter  | Hyperswarm topics + direct exchange       | **Medium** — different API but simpler (no GossipSub)                          |
+| Traffic aggregation | Application-level in RN | Autobase in Bare worklet                  | **Low** — Autobase handles the hard parts (ordering, consensus)                |
+| Fallback messaging  | None (single-stack)     | Nostr ephemeral events                    | **Low** — WebSocket + JSON, trivial to implement                               |
+| Spam prevention     | Waku RLN                | Application-level validation + NIP-13 PoW | **Low** — simpler, with tradeoffs acknowledged                                 |
+| nodejs-mobile       | Required                | **Eliminated**                            | **Positive** — removes 30-50 MB and a full V8 runtime                          |
+
+**Key benefit**: By using react-native-bare-kit for both Hypercore data sync (Topic 5) **and** traffic (this topic), we eliminate nodejs-mobile entirely from the app. One side runtime instead of two.
+
+---
+
+### 9.9 Risk Assessment
+
+| Risk                           | Severity | Mitigation                                                                                                                                               |
+| ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Autobase instability           | Medium   | Use single-writer Hypercore as fallback if Autobase misbehaves. Client-side aggregation works without consensus                                          |
+| NAT traversal failures         | Medium   | Nostr fallback ensures traffic data flows even when hole-punching fails. Monitor success rates in telemetry                                              |
+| Hyperswarm DHT bootstrap       | Low      | 3 public bootstrap nodes + any Polaris desktop user as a persistent node. DHT is self-healing                                                            |
+| react-native-bare-kit maturity | Medium   | Keet ships with it on both platforms. The Autopass mobile example (docs.pears.com) demonstrates the exact integration pattern we need                    |
+| Spam/fake probes               | Medium   | Validate: speed ∈ [0, 200] km/h, bearing consistent with road geometry (segment snap), probe timestamp within ±30s of current time, reputation weighting |
+| High-density metro areas       | Low      | Hyperswarm handles 100+ connections well. Autobase's `bigBatches` mode handles high-throughput apply functions                                           |
+
+---
+
+### 9.10 Conclusion
+
+**Holepunch/Pears is the better system for decentralized traffic flow tracking**, replacing Waku as the primary protocol. The key advantages are:
+
+1. **True P2P** — no service node dependency, strongest decentralization guarantee
+2. **Unified runtime** — react-native-bare-kit replaces nodejs-mobile for both traffic AND Hypercore data sync, saving 30-50 MB of app size
+3. **Native aggregation** — Autobase provides built-in multi-writer consensus, solving the hardest problem in distributed traffic aggregation
+4. **Best bandwidth efficiency** — raw protobuf over encrypted streams, no JSON or GossipSub overhead
+5. **Best privacy** — E2E encrypted connections, no intermediary can observe traffic patterns
+6. **Mobile-first design** — `swarm.suspend()`/`swarm.resume()`, Bare's small footprint, Keet proves it works
+
+**Nostr serves as the essential fallback layer** for cold-start and sparse-peer scenarios, leveraging its zero-overhead WebSocket integration and massive existing relay network.
+
+**Waku is removed from the traffic architecture** — it adds complexity without sufficient benefit over the Holepunch + Nostr hybrid.

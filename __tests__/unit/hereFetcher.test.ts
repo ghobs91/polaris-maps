@@ -28,8 +28,8 @@ describe('normalizeHEREResponse', () => {
     const segments = normalizeHEREResponse(validResult);
     expect(segments).toHaveLength(1);
     expect(segments[0].source).toBe('here');
-    expect(segments[0].currentSpeedKmh).toBe(35);
-    expect(segments[0].freeFlowSpeedKmh).toBe(50);
+    expect(segments[0].currentSpeedMph).toBeCloseTo(35 * 0.621371);
+    expect(segments[0].freeFlowSpeedMph).toBeCloseTo(50 * 0.621371);
     expect(segments[0].congestionRatio).toBeCloseTo(0.7);
     expect(segments[0].confidence).toBe(0.92);
     expect(segments[0].coordinates).toHaveLength(3);

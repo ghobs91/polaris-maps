@@ -1,9 +1,15 @@
 export type CongestionLevel = 'free_flow' | 'slow' | 'congested' | 'stopped';
 
+/** Mode the traffic system is currently operating in for a given geohash area. */
+export type TrafficMode = 'hyperswarm' | 'nostr';
+
+/** Minimum Hyperswarm peers before falling back to Nostr relays. */
+export const MIN_PEER_THRESHOLD = 3;
+
 export interface TrafficProbe {
   geohash6: string;
   segmentId: string;
-  speedKmh: number;
+  speedMph: number;
   bearing: number;
   timestamp: number;
   probeId: Uint8Array; // 32-byte ephemeral session ID
@@ -11,7 +17,7 @@ export interface TrafficProbe {
 
 export interface AggregatedTrafficState {
   segmentId: string;
-  avgSpeedKmh: number;
+  avgSpeedMph: number;
   sampleCount: number;
   congestionLevel: CongestionLevel;
   lastUpdated: number;
@@ -45,8 +51,8 @@ export type TrafficSource = 'tomtom' | 'here' | 'p2p';
 export interface NormalizedTrafficSegment {
   id: string;
   coordinates: [number, number][];
-  currentSpeedKmh: number;
-  freeFlowSpeedKmh: number;
+  currentSpeedMph: number;
+  freeFlowSpeedMph: number;
   congestionRatio: number;
   confidence: number;
   source: TrafficSource;
@@ -57,7 +63,7 @@ export interface ETARouteSegment {
   startCoord: [number, number];
   endCoord: [number, number];
   distanceMeters: number;
-  freeFlowSpeedKmh: number;
+  freeFlowSpeedMph: number;
 }
 
 export interface ETAResult {
@@ -75,13 +81,13 @@ export const CONGESTION_THRESHOLDS = {
   congested: 0.25,
 } as const;
 
-/** Default free-flow speeds (km/h) per road class. */
+/** Default free-flow speeds (mph) per road class. */
 export const ROAD_CLASS_SPEEDS: Record<string, number> = {
-  motorway: 110,
-  trunk: 90,
-  primary: 70,
-  secondary: 50,
-  tertiary: 40,
-  residential: 30,
-  service: 20,
+  motorway: 70,
+  trunk: 55,
+  primary: 45,
+  secondary: 30,
+  tertiary: 25,
+  residential: 20,
+  service: 12,
 };

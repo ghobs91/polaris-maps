@@ -1,6 +1,6 @@
 import { storage } from '../storage/mmkv';
 import { isOnline } from '../regions/connectivityService';
-import { publish } from '../traffic/wakuBridge';
+import { publishProbe } from '../traffic/hyperswarmBridge';
 
 interface QueueEntry {
   id: string;
@@ -54,8 +54,8 @@ export async function flushQueue(): Promise<{ flushed: number; failed: number }>
 
   for (const entry of queue) {
     try {
-      if (entry.type === 'traffic_probe' && entry.topic) {
-        await publish(entry.topic, new TextEncoder().encode(entry.payload));
+      if (entry.type === 'traffic_probe' && entry.payload) {
+        publishProbe(entry.payload);
       }
       // POI edits, reviews, and attestations write to Gun.js which auto-syncs
       // when connectivity resumes, so those are implicitly flushed

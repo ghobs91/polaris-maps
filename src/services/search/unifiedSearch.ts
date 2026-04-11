@@ -20,7 +20,12 @@ import { searchPlacesFts } from '../poi/poiService';
 import { searchByCategory } from '../poi/categorySearchService';
 import { searchAddress } from '../geocoding/geocodingService';
 import { searchPhoton } from './photonGeocoder';
-import { parseSearchQuery, fuzzyMatchBrand, isAddressQuery, type ParsedSearchQuery } from './queryParser';
+import {
+  parseSearchQuery,
+  fuzzyMatchBrand,
+  isAddressQuery,
+  type ParsedSearchQuery,
+} from './queryParser';
 import { fetchOverturePlaces } from '../poi/overtureFetcher';
 import { fetchOsmPoisByName } from '../poi/osmFetcher';
 import { scoreAndRank, deduplicateResults, type ScoredResult } from './searchRanker';
@@ -82,10 +87,18 @@ export async function unifiedSearch(
 
   // Category → OSM tag mapping for Photon filtering
   const CATEGORY_TO_OSM_TAG: Partial<Record<string, string>> = {
-    cafe: 'amenity:cafe', restaurant: 'amenity:restaurant', fast_food: 'amenity:fast_food',
-    bar: 'amenity:bar', pharmacy: 'amenity:pharmacy', hospital: 'amenity:hospital',
-    fuel: 'amenity:fuel', parking: 'amenity:parking', supermarket: 'shop:supermarket',
-    hotel: 'tourism:hotel', atm: 'amenity:atm', bank: 'amenity:bank',
+    cafe: 'amenity:cafe',
+    restaurant: 'amenity:restaurant',
+    fast_food: 'amenity:fast_food',
+    bar: 'amenity:bar',
+    pharmacy: 'amenity:pharmacy',
+    hospital: 'amenity:hospital',
+    fuel: 'amenity:fuel',
+    parking: 'amenity:parking',
+    supermarket: 'shop:supermarket',
+    hotel: 'tourism:hotel',
+    atm: 'amenity:atm',
+    bank: 'amenity:bank',
     gym: 'leisure:fitness_centre',
   };
 
@@ -136,7 +149,7 @@ export async function unifiedSearch(
     (() => {
       const osmTagFilter =
         parsed.categories?.length === 1
-          ? CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined
+          ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
           : undefined;
       return searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter);
     })(),
@@ -151,9 +164,7 @@ export async function unifiedSearch(
 
     // Source 5: Online Overture fetch — populates local DB and returns fresh places
     // Skip for address queries — same name-matching pollution as Source 1
-    addressQuery
-      ? Promise.resolve([])
-      : fetchOverturePlaces(south, west, north, east, 500),
+    addressQuery ? Promise.resolve([]) : fetchOverturePlaces(south, west, north, east, 500),
 
     // Source 6: Overpass name search — finds POIs with the search term in their name
     // Skip for address queries — catches "Knights of Columbus" for "columbus pkwy"
@@ -247,7 +258,8 @@ export async function unifiedSearch(
     for (const gr of geocodingResults.value) {
       // Skip if already covered by a Photon address result nearby
       const isDup = addressResults.some(
-        (ar) => Math.abs(ar.lat - gr.entry.lat) < 0.0003 && Math.abs(ar.lng - gr.entry.lng) < 0.0003,
+        (ar) =>
+          Math.abs(ar.lat - gr.entry.lat) < 0.0003 && Math.abs(ar.lng - gr.entry.lng) < 0.0003,
       );
       if (!isDup) {
         addressResults.push({
@@ -285,9 +297,10 @@ export async function unifiedSearch(
   if (addressQuery && addressResults.length > 0) {
     // Deduplicate: skip address results already covered by a nearby POI
     const dedupedAddresses = addressResults.filter(
-      (ar) => !poiResults.some(
-        (r) => Math.abs(r.lat - ar.lat) < 0.0003 && Math.abs(r.lng - ar.lng) < 0.0003,
-      ),
+      (ar) =>
+        !poiResults.some(
+          (r) => Math.abs(r.lat - ar.lat) < 0.0003 && Math.abs(r.lng - ar.lng) < 0.0003,
+        ),
     );
     results = [...dedupedAddresses, ...poiResults].slice(0, limit);
   } else {

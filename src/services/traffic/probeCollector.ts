@@ -1,12 +1,15 @@
 import * as Location from 'expo-location';
 import { randomBytes } from '@noble/curves/abstract/utils';
 import { encode as geohashEncode } from '../../utils/geohash';
-import { publish } from './wakuBridge';
+import { publishProbe as hyperswarmPublish, isStarted as isSwarmStarted } from './hyperswarmBridge';
+import { publishProbe as nostrPublish } from './nostrFallback';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useTrafficStore } from '../../stores/trafficStore';
 import type { TrafficProbe } from '../../models/traffic';
+import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 
 const PUBLISH_INTERVAL_MS = 5_000;
-const MIN_SPEED_KMH = 5;
+const MIN_SPEED_MPH = 3;
 const PROBE_ID_ROTATION_MS = 60 * 60 * 1000; // 1 hour
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -21,17 +24,16 @@ function getProbeId(): Uint8Array {
   return currentProbeId;
 }
 
-function encodeTrafficProbe(probe: TrafficProbe): Uint8Array {
-  // Lightweight encoding: JSON for now, migrate to protobuf in production
-  const json = JSON.stringify({
-    geohash6: probe.geohash6,
-    segment_id: probe.segmentId,
-    speed_kmh: probe.speedKmh,
-    bearing: probe.bearing,
-    timestamp: probe.timestamp,
-    probe_id: Array.from(probe.probeId),
+function encodeTrafficProbe(probe: TrafficProbe): string {
+  // Compact JSON for Hyperswarm exchange (migrate to protobuf in production)
+  return JSON.stringify({
+    g6: probe.geohash6,
+    sid: probe.segmentId,
+    spd: probe.speedMph,
+    brg: probe.bearing,
+    ts: probe.timestamp,
+    pid: Array.from(probe.probeId),
   });
-  return new TextEncoder().encode(json);
 }
 
 async function collectAndPublish(): Promise<void> {
@@ -44,24 +46,32 @@ async function collectAndPublish(): Promise<void> {
     });
 
     const speedMps = location.coords.speed ?? 0;
-    const speedKmh = Math.max(0, speedMps * 3.6);
-    if (speedKmh < MIN_SPEED_KMH) return;
+    const speedMph = Math.max(0, speedMps * 2.23694);
+    if (speedMph < MIN_SPEED_MPH) return;
 
     const bearing = Math.round(location.coords.heading ?? 0) % 360;
     const geohash6 = geohashEncode(location.coords.latitude, location.coords.longitude, 6);
+    const geohash4 = geohash6.slice(0, 4);
 
     const probe: TrafficProbe = {
       geohash6,
-      segmentId: '', // resolved via nearest-segment lookup (T042)
-      speedKmh: Math.round(speedKmh * 10) / 10,
+      segmentId: geohash6, // use geohash6 as segment ID until nearest-segment lookup (T042)
+      speedMph: Math.round(speedMph * 10) / 10,
       bearing,
       timestamp: Math.floor(Date.now() / 1000),
       probeId: getProbeId(),
     };
 
-    const topic = `/polaris/1/traffic/${geohash6}/proto`;
-    const payload = encodeTrafficProbe(probe);
-    await publish(topic, payload);
+    const swarmPeerCount = useTrafficStore.getState().swarmPeerCount;
+
+    // Primary: Hyperswarm direct P2P exchange
+    if (isSwarmStarted() && swarmPeerCount >= MIN_PEER_THRESHOLD) {
+      const probeJson = encodeTrafficProbe(probe);
+      hyperswarmPublish(probeJson);
+    } else {
+      // Fallback: Nostr relay broadcast
+      await nostrPublish(probe, geohash4);
+    }
   } catch {
     // location unavailable or publish failed — silently skip
   }

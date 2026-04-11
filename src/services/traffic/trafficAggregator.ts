@@ -3,7 +3,7 @@ import type { TrafficProbe, AggregatedTrafficState, CongestionLevel } from '../.
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute rolling window
 
 interface ProbeEntry {
-  speedKmh: number;
+  speedMph: number;
   timestamp: number;
 }
 
@@ -12,7 +12,7 @@ const aggregated = new Map<string, AggregatedTrafficState>();
 
 export function ingestProbe(probe: TrafficProbe): AggregatedTrafficState | null {
   // Validate
-  if (probe.speedKmh < 0 || probe.speedKmh > 300) return null;
+  if (probe.speedMph < 0 || probe.speedMph > 190) return null;
   if (probe.bearing < 0 || probe.bearing >= 360) return null;
   const now = Math.floor(Date.now() / 1000);
   if (Math.abs(probe.timestamp - now) > 300) return null; // >5 min off
@@ -24,7 +24,7 @@ export function ingestProbe(probe: TrafficProbe): AggregatedTrafficState | null 
     entries = [];
     segmentProbes.set(probe.segmentId, entries);
   }
-  entries.push({ speedKmh: probe.speedKmh, timestamp: probe.timestamp });
+  entries.push({ speedMph: probe.speedMph, timestamp: probe.timestamp });
 
   // Evict old probes
   const cutoff = now - WINDOW_MS / 1000;
@@ -37,13 +37,13 @@ export function ingestProbe(probe: TrafficProbe): AggregatedTrafficState | null 
   }
 
   // Compute rolling average
-  const totalSpeed = fresh.reduce((sum, e) => sum + e.speedKmh, 0);
+  const totalSpeed = fresh.reduce((sum, e) => sum + e.speedMph, 0);
   const avgSpeed = totalSpeed / fresh.length;
   const congestion = classifyCongestion(avgSpeed);
 
   const state: AggregatedTrafficState = {
     segmentId: probe.segmentId,
-    avgSpeedKmh: Math.round(avgSpeed * 10) / 10,
+    avgSpeedMph: Math.round(avgSpeed * 10) / 10,
     sampleCount: fresh.length,
     congestionLevel: congestion,
     lastUpdated: now,
@@ -53,10 +53,10 @@ export function ingestProbe(probe: TrafficProbe): AggregatedTrafficState | null 
   return state;
 }
 
-function classifyCongestion(avgSpeedKmh: number): CongestionLevel {
-  if (avgSpeedKmh < 5) return 'stopped';
-  if (avgSpeedKmh < 25) return 'congested';
-  if (avgSpeedKmh < 50) return 'slow';
+function classifyCongestion(avgSpeedMph: number): CongestionLevel {
+  if (avgSpeedMph < 3) return 'stopped';
+  if (avgSpeedMph < 15) return 'congested';
+  if (avgSpeedMph < 30) return 'slow';
   return 'free_flow';
 }
 
@@ -71,7 +71,7 @@ export function getAllTrafficStates(): AggregatedTrafficState[] {
 export function getTrafficSpeedMap(): Record<string, number> {
   const map: Record<string, number> = {};
   for (const [segmentId, state] of aggregated) {
-    map[segmentId] = state.avgSpeedKmh;
+    map[segmentId] = state.avgSpeedMph;
   }
   return map;
 }

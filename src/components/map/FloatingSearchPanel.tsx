@@ -656,7 +656,15 @@ export function FloatingSearchPanel({
     const dlat = viewport.lat - anchor.lat;
     const dlng = viewport.lng - anchor.lng;
     setShowSearchThisArea(Math.sqrt(dlat * dlat + dlng * dlng) > 0.015); // ~1.5 km
-  }, [viewport.lat, viewport.lng, mode, results.length, categorySearchResults, minimized, keyboardHeight]);
+  }, [
+    viewport.lat,
+    viewport.lng,
+    mode,
+    results.length,
+    categorySearchResults,
+    minimized,
+    keyboardHeight,
+  ]);
 
   // ── Search ──────────────────────────────────
   const handleQueryChange = useCallback(async (text: string) => {
@@ -961,7 +969,10 @@ export function FloatingSearchPanel({
 
   // ── Routing ──────────────────────────────────
   const performDirections = useCallback(
-    async (dest: { lat: number; lng: number; name: string }, costingOverride?: 'auto' | 'pedestrian') => {
+    async (
+      dest: { lat: number; lng: number; name: string },
+      costingOverride?: 'auto' | 'pedestrian',
+    ) => {
       const costing = costingOverride ?? 'auto';
       setIsRouting(true);
       setRouteError(null);
@@ -1211,7 +1222,13 @@ export function FloatingSearchPanel({
           break;
       }
     },
-    [selectedResult, performDirections, handleTransitDirections, handleParkAndRide, clearRoutePreview],
+    [
+      selectedResult,
+      performDirections,
+      handleTransitDirections,
+      handleParkAndRide,
+      clearRoutePreview,
+    ],
   );
 
   // Handle directions triggered from the POI detail screen
@@ -1574,7 +1591,8 @@ export function FloatingSearchPanel({
               <View style={st.parkAndRideLeg}>
                 <Ionicons name="car" size={14} color={isDark ? '#409CFF' : '#007AFF'} />
                 <Text style={[st.parkAndRideText, { color: textColor }]}>
-                  Drive to {parkAndRideResult.stationName} ({formatDuration(parkAndRideResult.drivingLeg.summary.durationSeconds)})
+                  Drive to {parkAndRideResult.stationName} (
+                  {formatDuration(parkAndRideResult.drivingLeg.summary.durationSeconds)})
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={12} color={subColor} />
@@ -1709,10 +1727,7 @@ export function FloatingSearchPanel({
   return (
     <>
       {showSearchThisArea && (
-        <View
-          pointerEvents="box-none"
-          style={[styles.searchThisAreaWrap, { top: insets.top + 8 }]}
-        >
+        <View pointerEvents="box-none" style={[styles.searchThisAreaWrap, { top: insets.top + 8 }]}>
           <TouchableOpacity
             style={styles.searchThisAreaBtn}
             onPress={handleSearchThisArea}
@@ -1724,192 +1739,192 @@ export function FloatingSearchPanel({
         </View>
       )}
       <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
-      <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
-      <GlassPanel isDark={isDark} style={st.panel}>
-        {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
-        <View
-          {...handlePanResponder.panHandlers}
-          style={styles.handleZone}
-          hitSlop={{ top: 8, bottom: 8 }}
-        >
-          <View style={styles.handle} />
-        </View>
+        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
+        <GlassPanel isDark={isDark} style={st.panel}>
+          {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
+          <View
+            {...handlePanResponder.panHandlers}
+            style={styles.handleZone}
+            hitSlop={{ top: 8, bottom: 8 }}
+          >
+            <View style={styles.handle} />
+          </View>
 
-        {/* ── Search row ── */}
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={18} color={subColor} style={styles.searchIcon} />
-          <TextInput
-            ref={inputRef}
-            style={[styles.searchInput, { color: textColor }]}
-            value={query}
-            onChangeText={handleQueryChange}
-            onFocus={handleFocusExpanding}
-            placeholder={placeholder}
-            placeholderTextColor={subColor}
-            autoCorrect={false}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-          />
-          {mode !== 'idle' ? (
-            <TouchableOpacity onPress={dismissSearch} hitSlop={10} style={styles.cancelBtn}>
-              <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.headerButtons}>
-              <TouchableOpacity
-                onPress={() => router.push('/(tabs)/places')}
-                activeOpacity={0.7}
-                style={styles.placesBtn}
-              >
-                <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
-                  <Ionicons name="bookmark" size={18} color="#EBEBF0" />
-                </View>
+          {/* ── Search row ── */}
+          <View style={styles.searchRow}>
+            <Ionicons name="search" size={18} color={subColor} style={styles.searchIcon} />
+            <TextInput
+              ref={inputRef}
+              style={[styles.searchInput, { color: textColor }]}
+              value={query}
+              onChangeText={handleQueryChange}
+              onFocus={handleFocusExpanding}
+              placeholder={placeholder}
+              placeholderTextColor={subColor}
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            {mode !== 'idle' ? (
+              <TouchableOpacity onPress={dismissSearch} hitSlop={10} style={styles.cancelBtn}>
+                <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={onProfilePress ?? (() => router.push('/(tabs)/profile'))}
-                activeOpacity={0.7}
-                style={styles.profileBtn}
-              >
-                <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
-                  <Ionicons name="person" size={18} color="#EBEBF0" />
-                </View>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        {/* ── Body ── */}
-        <>
-          {/* ── Results / history ── */}
-          {(showResults || showHistory) && (
-            <Animated.View style={{ opacity: fadeAnim }}>
-              <View style={st.divider} />
-              <FlatList
-                data={showHistory ? history : results}
-                keyExtractor={(item) => String(item.entry.id)}
-                renderItem={showHistory ? renderHistoryItem : renderResultItem}
-                keyboardShouldPersistTaps="handled"
-                scrollEnabled
-                style={st.resultList}
-                ListHeaderComponent={
-                  showHistory ? (
-                    <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
-                  ) : null
-                }
-              />
-            </Animated.View>
-          )}
-
-          {/* ── Idle: Favorites + Recents ── */}
-          {mode === 'idle' && (
-            <>
-              {/* Favorites row */}
-              <View style={st.divider} />
-              <View style={st.sectionHeaderRow}>
-                <Text style={[st.sectionTitle, { color: textColor }]}>Places</Text>
-                <Ionicons name="chevron-forward" size={15} color={subColor} />
+            ) : (
+              <View style={styles.headerButtons}>
+                <TouchableOpacity
+                  onPress={() => router.push('/(tabs)/places')}
+                  activeOpacity={0.7}
+                  style={styles.placesBtn}
+                >
+                  <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
+                    <Ionicons name="bookmark" size={18} color="#EBEBF0" />
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onProfilePress ?? (() => router.push('/(tabs)/profile'))}
+                  activeOpacity={0.7}
+                  style={styles.profileBtn}
+                >
+                  <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
+                    <Ionicons name="person" size={18} color="#EBEBF0" />
+                  </View>
+                </TouchableOpacity>
               </View>
+            )}
+          </View>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.favRow}
-              >
-                <FavChip
-                  icon="home"
-                  label="Home"
-                  iconBg="#30C7E0"
-                  subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
-                  onPress={handleHomeTap}
-                  onLongPress={handleHomeHold}
-                  unset={!homeEntry}
-                  isDark={isDark}
+          {/* ── Body ── */}
+          <>
+            {/* ── Results / history ── */}
+            {(showResults || showHistory) && (
+              <Animated.View style={{ opacity: fadeAnim }}>
+                <View style={st.divider} />
+                <FlatList
+                  data={showHistory ? history : results}
+                  keyExtractor={(item) => String(item.entry.id)}
+                  renderItem={showHistory ? renderHistoryItem : renderResultItem}
+                  keyboardShouldPersistTaps="handled"
+                  scrollEnabled
+                  style={st.resultList}
+                  ListHeaderComponent={
+                    showHistory ? (
+                      <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
+                    ) : null
+                  }
                 />
-                <FavChip
-                  icon="briefcase"
-                  label="Work"
-                  iconBg="#A47455"
-                  subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
-                  onPress={handleWorkTap}
-                  onLongPress={handleWorkHold}
-                  unset={!workEntry}
-                  isDark={isDark}
-                />
-                {pinnedEntries.map((fav) => (
+              </Animated.View>
+            )}
+
+            {/* ── Idle: Favorites + Recents ── */}
+            {mode === 'idle' && (
+              <>
+                {/* Favorites row */}
+                <View style={st.divider} />
+                <View style={st.sectionHeaderRow}>
+                  <Text style={[st.sectionTitle, { color: textColor }]}>Places</Text>
+                  <Ionicons name="chevron-forward" size={15} color={subColor} />
+                </View>
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.favRow}
+                >
                   <FavChip
-                    key={fav.id}
-                    icon="bookmark"
-                    label={fav.label}
-                    iconBg="#6246EA"
-                    subtitle={shorten(fav.entry.text, 12)}
-                    onPress={() => {
-                      navigateToResult({ entry: fav.entry, rank: 0 });
-                      setSelectedResult({ entry: fav.entry, rank: 0 });
-                      setRouteError(null);
-                      setUsedOnlineRouting(false);
-                      clearRoutePreview();
-                      setMode('location');
-                    }}
+                    icon="home"
+                    label="Home"
+                    iconBg="#30C7E0"
+                    subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
+                    onPress={handleHomeTap}
+                    onLongPress={handleHomeHold}
+                    unset={!homeEntry}
                     isDark={isDark}
                   />
-                ))}
-              </ScrollView>
-
-              {/* Recents — collapsed to 1 item by default */}
-              {history.length > 0 && (
-                <>
-                  <View style={st.divider} />
-                  <TouchableOpacity
-                    style={st.sectionHeaderRow}
-                    onPress={() => setRecentsExpanded((v) => !v)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[st.sectionTitle, { color: textColor }]}>Recents</Text>
-                    <Ionicons
-                      name={recentsExpanded ? 'chevron-down' : 'chevron-forward'}
-                      size={15}
-                      color={subColor}
+                  <FavChip
+                    icon="briefcase"
+                    label="Work"
+                    iconBg="#A47455"
+                    subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
+                    onPress={handleWorkTap}
+                    onLongPress={handleWorkHold}
+                    unset={!workEntry}
+                    isDark={isDark}
+                  />
+                  {pinnedEntries.map((fav) => (
+                    <FavChip
+                      key={fav.id}
+                      icon="bookmark"
+                      label={fav.label}
+                      iconBg="#6246EA"
+                      subtitle={shorten(fav.entry.text, 12)}
+                      onPress={() => {
+                        navigateToResult({ entry: fav.entry, rank: 0 });
+                        setSelectedResult({ entry: fav.entry, rank: 0 });
+                        setRouteError(null);
+                        setUsedOnlineRouting(false);
+                        clearRoutePreview();
+                        setMode('location');
+                      }}
+                      isDark={isDark}
                     />
-                  </TouchableOpacity>
-                  {(recentsExpanded ? history : history.slice(0, 1)).map((item) => (
-                    <TouchableOpacity
-                      key={item.entry.id}
-                      style={st.recentRow}
-                      onPress={() => handleSelectResult(item)}
-                      activeOpacity={0.65}
-                    >
-                      <View style={st.recentIcon}>
-                        <Ionicons name="time-outline" size={18} color={subColor} />
-                      </View>
-                      <View style={st.resultText}>
-                        <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
-                          {item.entry.text}
-                        </Text>
-                        <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
-                          {[item.entry.city, item.entry.state].filter(Boolean).join(', ')}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
                   ))}
-                </>
-              )}
-            </>
-          )}
+                </ScrollView>
 
-          {/* Setting-home/work header when no results yet */}
-          {(mode === 'setting-home' || mode === 'setting-work') && !showResults && (
-            <Animated.View style={{ opacity: fadeAnim }}>
-              <View style={st.divider} />
-              <Text style={[st.settingHint, { color: subColor }]}>
-                {mode === 'setting-home'
-                  ? 'Type your home address to save it'
-                  : 'Type your work address to save it'}
-              </Text>
-            </Animated.View>
-          )}
-        </>
-      </GlassPanel>
-    </View>
+                {/* Recents — collapsed to 1 item by default */}
+                {history.length > 0 && (
+                  <>
+                    <View style={st.divider} />
+                    <TouchableOpacity
+                      style={st.sectionHeaderRow}
+                      onPress={() => setRecentsExpanded((v) => !v)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[st.sectionTitle, { color: textColor }]}>Recents</Text>
+                      <Ionicons
+                        name={recentsExpanded ? 'chevron-down' : 'chevron-forward'}
+                        size={15}
+                        color={subColor}
+                      />
+                    </TouchableOpacity>
+                    {(recentsExpanded ? history : history.slice(0, 1)).map((item) => (
+                      <TouchableOpacity
+                        key={item.entry.id}
+                        style={st.recentRow}
+                        onPress={() => handleSelectResult(item)}
+                        activeOpacity={0.65}
+                      >
+                        <View style={st.recentIcon}>
+                          <Ionicons name="time-outline" size={18} color={subColor} />
+                        </View>
+                        <View style={st.resultText}>
+                          <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
+                            {item.entry.text}
+                          </Text>
+                          <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
+                            {[item.entry.city, item.entry.state].filter(Boolean).join(', ')}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* Setting-home/work header when no results yet */}
+            {(mode === 'setting-home' || mode === 'setting-work') && !showResults && (
+              <Animated.View style={{ opacity: fadeAnim }}>
+                <View style={st.divider} />
+                <Text style={[st.settingHint, { color: subColor }]}>
+                  {mode === 'setting-home'
+                    ? 'Type your home address to save it'
+                    : 'Type your work address to save it'}
+                </Text>
+              </Animated.View>
+            )}
+          </>
+        </GlassPanel>
+      </View>
     </>
   );
 }

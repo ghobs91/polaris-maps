@@ -12,7 +12,7 @@ export interface RoadSegment {
   geohash6: string;
   wayId: string | null;
   roadClass: RoadClass;
-  speedLimitKmh: number | null;
+  speedLimitMph: number | null;
   isOneway: boolean;
   startLat: number;
   startLng: number;

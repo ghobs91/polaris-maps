@@ -37,8 +37,8 @@ function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number
  * Approximate marker dimensions in screen pixels (label text above a small
  * icon circle). Much more compact than the previous pill design.
  */
-const MARKER_W = 70;  // typical rendered width (label text)
-const MARKER_H = 22;  // rendered height (label + icon + gap)
+const MARKER_W = 70; // typical rendered width (label text)
+const MARKER_H = 22; // rendered height (label + icon + gap)
 
 function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
   // At zoom ≥ 17 (street level), shrink gaps to ~35% of default so dense
