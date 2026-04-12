@@ -5,9 +5,6 @@
       location = "group:../../../Downloads/mock route.gpx">
    </FileRef>
    <FileRef
-      location = "group:Location.gpx">
-   </FileRef>
-   <FileRef
       location = "group:PolarisMaps.xcodeproj">
    </FileRef>
    <FileRef

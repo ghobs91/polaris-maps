@@ -11,8 +11,6 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
 install! 'cocoapods',
   :deterministic_uuids => false
 
-project 'PolarisMaps'
-
 prepare_react_native_project!
 
 target 'PolarisMaps' do
@@ -57,31 +55,6 @@ target 'PolarisMaps' do
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
 
-    # Fix C++ compilation issues with Xcode 16+ / Xcode 26
-    # Set at project level to ensure all targets inherit c++20
-    installer.pods_project.build_configurations.each do |config|
-      config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
-      config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
-    end
-
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        # fmt 11 triggers "not a constant expression" consteval errors when built
-        # with C++20 on Apple Clang 16+ (Xcode 16/26) because FMT_USE_CONSTEVAL=1
-        # is enabled and format-inl.h passes basic_string_view lvalues to the
-        # consteval basic_format_string constructor. Building fmt with C++17 keeps
-        # FMT_CPLUSPLUS < 201709L → FMT_USE_CONSTEVAL=0, fixing the errors.
-        lang = target.name == 'fmt' ? 'c++17' : 'c++20'
-        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = lang
-        if target.name == 'fmt'
-          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) FMT_USE_CONSTEVAL=0'
-        end
-        config.build_settings['OTHER_CPPFLAGS'] = '$(inherited) -DFOLLY_NO_CONFIG -DFOLLY_MOBILE=1 -DFOLLY_USE_LIBCPP=1 -DFOLLY_CFG_NO_COROUTINES=1'
-        config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
-        config.build_settings['CLANG_ENABLE_EXPLICIT_MODULES'] = 'NO'
-      end
-    end
-
     # This is necessary for Xcode 14, because it signs resource bundles by default
     # when building for devices.
     installer.target_installation_results.pod_target_installation_results
@@ -93,15 +66,26 @@ target 'PolarisMaps' do
       end
     end
 
-    # Create Package.resolved inside Pods.xcodeproj so Xcode can resolve the
-    # MapLibre SPM product that maplibre-react-native's post_install hook adds.
-    # Without this file the Pods project has an SPM reference but no pin, causing
-    # "Missing package product 'MapLibre'" errors after every pod install.
-    workspace_resolved = File.join(__dir__, 'PolarisMaps.xcworkspace/xcshareddata/swiftpm/Package.resolved')
-    pods_swiftpm_dir = File.join(installer.sandbox.root, '../Pods.xcodeproj/xcshareddata/swiftpm')
-    if File.exist?(workspace_resolved)
-      FileUtils.mkdir_p(pods_swiftpm_dir)
-      FileUtils.cp(workspace_resolved, File.join(pods_swiftpm_dir, 'Package.resolved'))
+    # Fix fmt consteval error with newer Xcode/Clang
+    # Apple Clang's consteval implementation is buggy across versions
+    fmt_base = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base)
+      content = File.read(fmt_base)
+      patched = content.gsub(
+        /defined\(__apple_build_version__\) && __apple_build_version__ < \d+L/,
+        'defined(__apple_build_version__)'
+      )
+      File.write(fmt_base, patched) if patched != content
+    end
+
+    # Ensure all pods use C++20 (required by React Native 0.76+ / Folly)
+    installer.pods_project.build_configurations.each do |bc|
+      bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+    end
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |bc|
+        bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+      end
     end
   end
 end
