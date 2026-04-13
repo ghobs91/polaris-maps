@@ -38,12 +38,27 @@ channel.addListener('message', async (msg) => {
         break;
       case 'gunzip': {
         const { inputPath, outputPath, requestId } = command;
+        // Security: validate outputPath stays under the app home directory
+        const resolvedOut = path.resolve(outputPath);
+        const homeDir = require('os').homedir();
+        if (!resolvedOut.startsWith(homeDir + path.sep) && resolvedOut !== homeDir) {
+          channel.send(
+            JSON.stringify({
+              action: 'gunzip_error',
+              error: 'Output path outside app directory',
+              requestId,
+            }),
+          );
+          break;
+        }
         const gunzipStream = zlib.createGunzip();
         const input = fs.createReadStream(inputPath);
-        const output = fs.createWriteStream(outputPath);
+        const output = fs.createWriteStream(resolvedOut);
         input.pipe(gunzipStream).pipe(output);
         output.on('finish', () =>
-          channel.send(JSON.stringify({ action: 'gunzip_done', outputPath, requestId })),
+          channel.send(
+            JSON.stringify({ action: 'gunzip_done', outputPath: resolvedOut, requestId }),
+          ),
         );
         output.on('error', (err) =>
           channel.send(JSON.stringify({ action: 'gunzip_error', error: err.message, requestId })),

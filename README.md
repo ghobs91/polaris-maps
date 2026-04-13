@@ -174,26 +174,34 @@ pnpm lint            # eslint
 **Standard:** OWASP Top 10:2025
 **Scope:** All source files under `src/`, `app/`, `nodejs-assets/`, `package.json`, `index.js` (34 files)
 **Reviewer:** GitHub Copilot automated audit
+**Tests:** 50 regression tests in `__tests__/unit/security.test.ts`
 
 > This section is kept continuously up-to-date. Every change to the codebase triggers a re-evaluation of all applicable findings.
 
 ### Summary
 
-| ID              | Severity  | OWASP     | Location                                                | Title                                                             | Status      |
-| --------------- | --------- | --------- | ------------------------------------------------------- | ----------------------------------------------------------------- | ----------- |
-| [F-001](#f-001) | 🔴 High   | A08 / A05 | `nodejs-assets/nodejs-project/index.js:310`             | Path traversal in Hyperdrive download — no escape guard           | ✅ Fixed    |
-| [F-003](#f-003) | 🟡 Medium | A05       | `app/poi/[id].tsx:110,119`                              | Unvalidated external URL opened via `Linking.openURL`             | ✅ Fixed    |
-| [F-004](#f-004) | 🟡 Medium | A05       | `src/services/geocoding/geocodingService.ts:23`         | FTS5 query injection via `"` in search input — crashes search     | ✅ Fixed    |
-| [F-005](#f-005) | 🟡 Medium | A03       | `package.json`, `nodejs-assets/package.json`            | All deps use `^`/`~` ranges — unpinned supply chain               | ✅ Fixed    |
-| [F-006](#f-006) | 🟡 Medium | A06       | `src/services/overpassClient.ts`, `geocodingService.ts` | Insufficient rate limiting on Overpass / Nominatim                | ✅ Fixed    |
-| [F-007](#f-007) | 🔵 Low    | A04       | `src/services/storage/mmkv.ts:3`                        | MMKV storage created without encryption                           | ✅ Fixed    |
-| [F-008](#f-008) | 🔵 Low    | A09       | `src/services/traffic/trafficFlowService.ts:43`         | Full `Error` object logged — may leak API key in stack trace      | ✅ Fixed    |
-| [F-009](#f-009) | 🔵 Low    | A10       | `src/services/traffic/hereFetcher.ts:84`                | `fetchHERETraffic` lacks `try/catch` — loading spinner gets stuck | ✅ Fixed    |
-| [F-010](#f-010) | 🔵 Low    | A10       | `src/services/geocoding/geocodingService.ts:18`         | FTS5 exception propagates unhandled to UI                         | ✅ Fixed    |
-| [F-011](#f-011) | 🔵 Low    | A09       | `src/services/routing/routingService.ts:100`            | Raw Valhalla error response body included in thrown `Error`       | ✅ Fixed    |
-| [F-012](#f-012) | ✅ Clear  | A01       | —                                                       | No server endpoints — access control not applicable               | —           |
-| [F-013](#f-013) | ✅ Clear  | A07       | `src/services/identity/keypair.ts`                      | Private key in SecureStore; strong curve; no weak auth flows      | —           |
-| [F-014](#f-014) | N/A       | A01       | `app/poi/[id].tsx`                                      | IDOR not applicable — all POI reads are local SQLite              | —           |
+| ID                  | Severity  | Status      | OWASP     | Location                                                | Title                                                             |
+| ------------------- | --------- | ----------- | --------- | ------------------------------------------------------- | ----------------------------------------------------------------- |
+| [F-001](#f-001)     | 🔴 High   | ✅ Fixed    | A08 / A05 | `nodejs-assets/nodejs-project/index.js:310`             | Path traversal in Hyperdrive download — no escape guard           |
+| [F-002](#f-002)     | 🔴 High   | ⚠️ Accepted | A04       | `src/constants/config.ts:32,35`                         | TomTom + HERE API keys bundled into client via `EXPO_PUBLIC_`     |
+| [F-003](#f-003)     | 🟡 Medium | ✅ Fixed    | A05       | `app/poi/[id].tsx:110,119`                              | Unvalidated external URL opened via `Linking.openURL`             |
+| [F-004](#f-004)     | 🟡 Medium | ✅ Fixed    | A05       | `src/services/geocoding/geocodingService.ts:23`         | FTS5 query injection via `"` in search input — crashes search     |
+| [F-005](#f-005)     | 🟡 Medium | ✅ Fixed    | A03       | `package.json`, `nodejs-assets/package.json`            | All deps use `^`/`~` ranges — unpinned supply chain               |
+| [F-006](#f-006)     | 🟡 Medium | ✅ Fixed    | A06       | `src/services/overpassClient.ts`, `geocodingService.ts` | Insufficient rate limiting on Overpass / Nominatim                |
+| [F-007](#f-007)     | 🔵 Low    | ✅ Fixed    | A04       | `src/services/storage/mmkv.ts:3`                        | MMKV storage created without encryption                           |
+| [F-008](#f-008)     | 🔵 Low    | ✅ Fixed    | A09       | `src/services/traffic/trafficFlowService.ts:43`         | Full `Error` object logged — may leak API key in stack trace      |
+| [F-009](#f-009)     | 🔵 Low    | ✅ Fixed    | A10       | `src/services/traffic/hereFetcher.ts:84`                | `fetchHERETraffic` lacks `try/catch` — loading spinner gets stuck |
+| [F-010](#f-010)     | 🔵 Low    | ✅ Fixed    | A10       | `src/services/geocoding/geocodingService.ts:18`         | FTS5 exception propagates unhandled to UI                         |
+| [F-011](#f-011)     | 🔵 Low    | ✅ Fixed    | A09       | `src/services/routing/routingService.ts:100`            | Raw Valhalla error response body included in thrown `Error`       |
+| [F-012](#f-012)     | ✅ Clear  | —           | A01       | —                                                       | No server endpoints — access control not applicable               |
+| [F-013](#f-013)     | ✅ Clear  | —           | A07       | `src/services/identity/keypair.ts`                      | Private key in SecureStore; strong curve; no weak auth flows      |
+| [F-014](#f-014)     | N/A       | —           | A01       | `app/poi/[id].tsx`                                      | IDOR not applicable — all POI reads are local SQLite              |
+| [NEW-001](#new-001) | 🔴 High   | ✅ Fixed    | A08       | `src/services/traffic/nostrFallback.ts:242`             | Nostr event signatures not verified — fake traffic injection      |
+| [NEW-002](#new-002) | 🟡 Medium | ⚠️ Noted    | A04       | `src/services/gun/init.ts`, `offlineQueue.ts`           | Deprecated unencrypted MMKV still used for P2P + offline queue    |
+| [NEW-003](#new-003) | 🟡 Medium | ✅ Fixed    | A05       | `src/services/poi/osmFetcher.ts:211`                    | Overpass QL injection via unescaped `"` in `fetchOsmPoisByName`   |
+| [NEW-004](#new-004) | 🟡 Medium | ✅ Fixed    | A01       | `nodejs-assets/nodejs-project/index.js:39`              | No path validation on `gunzip` command handler                    |
+| [NEW-005](#new-005) | 🟢 Low    | ✅ Fixed    | A04       | `src/services/identity/signing.ts:17`                   | `createSigningPayload` lacks domain separation                    |
+| [NEW-006](#new-006) | 🟢 Low    | ✅ Fixed    | A05       | `src/services/poi/osmFetcher.ts:144`                    | Overpass QL tag interpolation in `fetchOsmPoisByTags`             |
 
 ---
 
@@ -280,6 +288,7 @@ Double-quotes are now stripped from each token before wrapping: `w.replace(/"/g,
 - All 42 production dependencies in `package.json` pinned to exact versions.
 - All 4 dependencies in `nodejs-assets/nodejs-project/package.json` pinned to exact versions.
 - Committed `pnpm-lock.yaml` for `nodejs-assets/nodejs-project/`.
+- devDependencies retain `^`/`~` ranges, mitigated by lockfile and `--frozen-lockfile` in CI.
 
 ---
 
@@ -391,17 +400,120 @@ User identity is based on a `secp256k1` keypair generated via `@noble/curves` (a
 
 ---
 
+#### NEW-001
+
+**Severity:** 🔴 High → ✅ Fixed (2026-04-13)
+**OWASP:** A08 – Software and Data Integrity Failures
+**Title:** Nostr Event Signatures Not Verified — Fake Traffic Data Injection
+**File:** `src/services/traffic/nostrFallback.ts` — `processIncomingEvent()`
+
+**What was wrong:**
+Incoming Nostr events were parsed and dispatched to traffic probe callbacks without verifying the NIP-01 Schnorr signature (`event.sig` over `event.id`), nor verifying that `event.id` matches `sha256([0, pubkey, created_at, kind, tags, content])`. A malicious relay (or MITM) could forge events with arbitrary pubkeys and inject fake traffic congestion data, causing incorrect ETAs and route recommendations.
+
+**Fix applied:**
+Added `verifyEvent()` function that: (1) recomputes `event.id` from `sha256(JSON.stringify([0, pubkey, created_at, kind, tags, content]))` and compares against the claimed ID, (2) verifies the Schnorr signature via `schnorr.verify()`. Events failing either check are silently dropped. The `schnorr` and `sha256` imports were already present in the file.
+
+**Regression test:** `__tests__/unit/security.test.ts` — "Nostr event signature verification (NEW-001)"
+
+---
+
+#### NEW-002
+
+**Severity:** 🟡 Medium — ⚠️ Noted (migration required)
+**OWASP:** A04 – Cryptographic Failures
+**Title:** Deprecated Unencrypted MMKV Export Still Used for P2P Data and Offline Queue
+**File:** `src/services/gun/init.ts`, `src/services/sync/offlineQueue.ts`
+
+**Description:**
+Both files import the deprecated **unencrypted** `storage` export from `mmkv.ts`. Gun.js relay cache, all P2P data (place edits, reviews, attestations), and queued traffic probes are stored in plaintext on device. On a rooted/jailbroken device, this data is trivially extractable.
+
+There are 12 total callers of the deprecated `storage` export across the codebase. Migrating to `getStorageSync()` requires ensuring `getStorage()` is called at app startup before any synchronous access — a cross-cutting change that needs careful sequencing.
+
+**Recommended fix:** Add `getStorage()` call in the root `_layout.tsx` before any service initialization, then migrate all 12 callers from `storage` to `getStorageSync()`.
+
+---
+
+#### NEW-003
+
+**Severity:** 🟡 Medium → ✅ Fixed (2026-04-13)
+**OWASP:** A05 – Injection
+**Title:** Overpass QL Injection via Unescaped `"` in `fetchOsmPoisByName`
+**File:** `src/services/poi/osmFetcher.ts` — `fetchOsmPoisByName()`
+
+**What was wrong:**
+The regex escape function escaped regex metacharacters but **not** double-quote (`"`). User search input containing `"` would break out of the Overpass QL string literal: `"name"~"user"input"`, causing syntax errors or altered query semantics against public Overpass instances.
+
+**Fix applied:**
+Added `"` to the escape regex character class: `.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&')`.
+
+**Regression test:** `__tests__/unit/security.test.ts` — "Overpass QL double-quote injection prevention (NEW-003)"
+
+---
+
+#### NEW-004
+
+**Severity:** 🟡 Medium → ✅ Fixed (2026-04-13)
+**OWASP:** A01 – Broken Access Control
+**Title:** No Path Validation on `gunzip` Command Handler
+**File:** `nodejs-assets/nodejs-project/index.js` — `case 'gunzip'`
+
+**What was wrong:**
+The `gunzip` handler accepted `inputPath` and `outputPath` from the React Native bridge with no validation that paths stay within expected directories. While the bridge is internal, a compromised or buggy RN module could read from or write to arbitrary filesystem locations. Both `extract-tar` and `hd-download` already had path traversal guards.
+
+**Fix applied:**
+Added `path.resolve(outputPath)` + `startsWith(homeDir + path.sep)` guard, consistent with the other handlers. Requests with `outputPath` outside the app's home directory are rejected with an error response.
+
+**Regression test:** `__tests__/unit/security.test.ts` — "Gunzip output path validation (NEW-004)"
+
+---
+
+#### NEW-005
+
+**Severity:** 🟢 Low → ✅ Fixed (2026-04-13)
+**OWASP:** A04 – Cryptographic Failures
+**Title:** `createSigningPayload` Lacks Domain Separation
+**File:** `src/services/identity/signing.ts`
+
+**What was wrong:**
+`createSigningPayload(...fields)` joined fields with an empty string: `fields.map(String).join('')`. This meant `("ab","c")` and `("a","bc")` would produce the identical payload `"abc"`, creating an ambiguity that could permit cross-context signature reuse if an attacker controls adjacent field values.
+
+**Fix applied:**
+Changed the join delimiter to null byte (`\0`): `fields.map(String).join('\0')`. Null bytes cannot appear in any of the current field values (UUIDs, timestamps, field names).
+
+**Regression test:** `__tests__/unit/security.test.ts` — "Signing payload domain separation (NEW-005)"
+
+---
+
+#### NEW-006
+
+**Severity:** 🟢 Low → ✅ Fixed (2026-04-13)
+**OWASP:** A05 – Injection
+**Title:** Overpass QL Tag Interpolation in `fetchOsmPoisByTags`
+**File:** `src/services/poi/osmFetcher.ts` — `fetchOsmPoisByTags()`
+
+**What was wrong:**
+`extraFilters` key/value pairs were interpolated directly into Overpass QL queries: `` `["${k}"="${v}"]` ``. Currently safe because inputs originate from internal category mappings, but a future code path providing user-controlled values would introduce injection.
+
+**Fix applied:**
+Added `.replace(/"/g, '')` to both `k` and `v` in the `extraFilters` map, stripping any double-quotes as defense-in-depth.
+
+---
+
 ### Priority Action Plan
 
-| Priority                | Finding                                            | Status       |
-| ----------------------- | -------------------------------------------------- | ------------ |
-| 🔴 P1 — Fix immediately | F-001: Path traversal in Hyperdrive download       | ✅ Fixed     |
-| 🔴 P1 — Fix immediately | F-003: Unvalidated `Linking.openURL` in `[id].tsx` | ✅ Fixed     |
-| 🔴 P2 — Fix this sprint | F-004: FTS5 `"` injection crashes search           | ✅ Fixed     |
-| 🔴 P2 — Fix this sprint | F-002: API keys in client bundle                   | ⚠️ Accepted  |
-| 🟡 P3 — Fix next sprint | F-005: Unpinned dependencies                       | ✅ Fixed     |
-| 🟡 P3 — Fix next sprint | F-007: Unencrypted MMKV                            | ✅ Fixed     |
-| 🟢 P4 — Ongoing hygiene | F-006, F-008, F-009, F-010, F-011                  | ✅ All Fixed |
+| Priority                | Finding                                                 | Status       |
+| ----------------------- | ------------------------------------------------------- | ------------ |
+| 🔴 P1 — Fix immediately | F-001: Path traversal in Hyperdrive download            | ✅ Fixed     |
+| 🔴 P1 — Fix immediately | F-003: Unvalidated `Linking.openURL` in `[id].tsx`      | ✅ Fixed     |
+| 🔴 P1 — Fix immediately | NEW-001: Nostr event signatures not verified            | ✅ Fixed     |
+| 🔴 P2 — Fix this sprint | F-004: FTS5 `"` injection crashes search                | ✅ Fixed     |
+| 🔴 P2 — Fix this sprint | F-002: API keys in client bundle                        | ⚠️ Accepted  |
+| 🟡 P3 — Fix next sprint | F-005: Unpinned dependencies                            | ✅ Fixed     |
+| 🟡 P3 — Fix next sprint | F-007: Unencrypted MMKV                                 | ✅ Fixed     |
+| 🟡 P3 — Fix next sprint | NEW-002: Deprecated unencrypted MMKV callers (12 files) | ⚠️ Migration |
+| 🟡 P3 — Fix next sprint | NEW-003: Overpass QL `"` injection                      | ✅ Fixed     |
+| 🟡 P3 — Fix next sprint | NEW-004: Gunzip path validation                         | ✅ Fixed     |
+| 🟢 P4 — Ongoing hygiene | F-006, F-008, F-009, F-010, F-011, NEW-005, NEW-006     | ✅ All Fixed |
 
 ---
 

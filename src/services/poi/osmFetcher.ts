@@ -141,7 +141,9 @@ export async function fetchOsmPoisByTags(
 ): Promise<OsmPoi[]> {
   if (tagPairs.length === 0) return [];
 
-  const filterSuffix = (extraFilters ?? []).map(([k, v]) => `["${k}"="${v}"]`).join('');
+  const filterSuffix = (extraFilters ?? [])
+    .map(([k, v]) => `["${k.replace(/"/g, '')}"="${v.replace(/"/g, '')}"]`)
+    .join('');
   const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}${filterSuffix}:${bboxKey(south, west, north, east)}`;
   const cached = cacheGet(key);
   if (cached) return cached;
@@ -211,7 +213,7 @@ export async function fetchOsmPoisByName(
 
   // Sanitize the pattern for Overpass regex — escape special regex chars
   // except alphanumerics and spaces
-  const safe = namePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const safe = namePattern.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
 
   const key = `name:${safe}:${bboxKey(south, west, north, east)}`;
   const cached = cacheGet(key);

@@ -15,7 +15,7 @@ export function verify(message: string, signature: string, publicKey: string): b
 }
 
 export function createSigningPayload(...fields: (string | number)[]): string {
-  return fields.map(String).join('');
+  return fields.map(String).join('\0');
 }
 
 function hexToBytes(hex: string): Uint8Array {

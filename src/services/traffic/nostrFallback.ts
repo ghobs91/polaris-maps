@@ -241,6 +241,9 @@ function processIncomingEvent(event: NostrEvent): void {
   // Check kind
   if (event.kind !== TRAFFIC_PROBE_KIND) return;
 
+  // Verify NIP-01 event ID and Schnorr signature
+  if (!verifyEvent(event)) return;
+
   // Check expiration
   const expirationTag = event.tags.find((t) => t[0] === 'expiration');
   if (expirationTag) {
@@ -320,4 +323,34 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Verify NIP-01 event: check that id == sha256([0,pubkey,...]) and that
+ * the Schnorr signature over id is valid for event.pubkey.
+ */
+function verifyEvent(event: NostrEvent): boolean {
+  try {
+    const serialized = JSON.stringify([
+      0,
+      event.pubkey,
+      event.created_at,
+      event.kind,
+      event.tags,
+      event.content,
+    ]);
+    const expectedId = bytesToHex(sha256(new TextEncoder().encode(serialized)));
+    if (expectedId !== event.id) return false;
+    return schnorr.verify(hexToBytes(event.sig), hexToBytes(event.id), event.pubkey);
+  } catch {
+    return false;
+  }
 }

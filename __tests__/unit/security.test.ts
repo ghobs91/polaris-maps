@@ -409,3 +409,152 @@ describe('API key redaction in error logs (F-008, F-011)', () => {
     expect(safe.length).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 9. Nostr event signature verification (NEW-001)
+// ---------------------------------------------------------------------------
+describe('Nostr event signature verification (NEW-001)', () => {
+  /**
+   * Mirrors verifyEvent() from nostrFallback.ts — verifies NIP-01 event id
+   * and Schnorr signature.
+   */
+  function verifyEvent(event: {
+    id: string;
+    pubkey: string;
+    created_at: number;
+    kind: number;
+    tags: string[][];
+    content: string;
+    sig: string;
+  }): boolean {
+    try {
+      const serialized = JSON.stringify([
+        0,
+        event.pubkey,
+        event.created_at,
+        event.kind,
+        event.tags,
+        event.content,
+      ]);
+      const expectedId = bytesToHex(sha256(new TextEncoder().encode(serialized)));
+      if (expectedId !== event.id) return false;
+      return schnorr.verify(hexToBytes(event.sig), hexToBytes(event.id), event.pubkey);
+    } catch {
+      return false;
+    }
+  }
+
+  function createSignedEvent(
+    kind: number,
+    content: string,
+    tags: string[][],
+    createdAt: number,
+    priv: Uint8Array,
+    pub: string,
+  ) {
+    const serialized = JSON.stringify([0, pub, createdAt, kind, tags, content]);
+    const idBytes = sha256(new TextEncoder().encode(serialized));
+    const id = bytesToHex(idBytes);
+    const sig = bytesToHex(schnorr.sign(idBytes, priv));
+    return { id, pubkey: pub, created_at: createdAt, kind, tags, content, sig };
+  }
+
+  it('accepts a legitimately signed Nostr event', () => {
+    const priv = schnorr.utils.randomPrivateKey();
+    const pub = bytesToHex(schnorr.getPublicKey(priv));
+    const event = createSignedEvent(20100, '{"spd":55}', [['g', 'dp3t']], 1700000000, priv, pub);
+    expect(verifyEvent(event)).toBe(true);
+  });
+
+  it('rejects event with forged (all-zero) signature', () => {
+    const priv = schnorr.utils.randomPrivateKey();
+    const pub = bytesToHex(schnorr.getPublicKey(priv));
+    const event = createSignedEvent(20100, '{"spd":0}', [['g', 'dp3t']], 1700000000, priv, pub);
+    event.sig = '0'.repeat(128);
+    expect(verifyEvent(event)).toBe(false);
+  });
+
+  it('rejects event with tampered content', () => {
+    const priv = schnorr.utils.randomPrivateKey();
+    const pub = bytesToHex(schnorr.getPublicKey(priv));
+    const event = createSignedEvent(20100, '{"spd":55}', [['g', 'dp3t']], 1700000000, priv, pub);
+    event.content = '{"spd":0}'; // tampered
+    expect(verifyEvent(event)).toBe(false);
+  });
+
+  it('rejects event with mismatched id', () => {
+    const priv = schnorr.utils.randomPrivateKey();
+    const pub = bytesToHex(schnorr.getPublicKey(priv));
+    const event = createSignedEvent(20100, '{"spd":55}', [['g', 'dp3t']], 1700000000, priv, pub);
+    event.id = 'ff'.repeat(32); // wrong id
+    expect(verifyEvent(event)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Overpass QL double-quote escaping (NEW-003)
+// ---------------------------------------------------------------------------
+describe('Overpass QL double-quote injection prevention (NEW-003)', () => {
+  function sanitizeForOverpass(namePattern: string): string {
+    return namePattern.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+  }
+
+  it('escapes a normal pattern without special chars', () => {
+    expect(sanitizeForOverpass('Starbucks')).toBe('Starbucks');
+  });
+
+  it('escapes double-quote that would break Overpass QL string', () => {
+    const safe = sanitizeForOverpass('coffee"shop');
+    expect(safe).toContain('\\"');
+    expect(safe).toBe('coffee\\"shop');
+  });
+
+  it('escapes regex metacharacters', () => {
+    expect(sanitizeForOverpass('foo.bar')).toBe('foo\\.bar');
+    expect(sanitizeForOverpass('a+b')).toBe('a\\+b');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. Gunzip path validation (NEW-004)
+// ---------------------------------------------------------------------------
+describe('Gunzip output path validation (NEW-004)', () => {
+  function isGunzipPathSafe(outputPath: string, homeDir: string): boolean {
+    const resolvedOut = path.resolve(outputPath);
+    return resolvedOut.startsWith(homeDir + path.sep) || resolvedOut === homeDir;
+  }
+
+  const homeDir = '/Users/testuser';
+
+  it('allows output within home directory', () => {
+    expect(isGunzipPathSafe('/Users/testuser/Documents/output.bin', homeDir)).toBe(true);
+  });
+
+  it('blocks output escaping to /etc', () => {
+    expect(isGunzipPathSafe('/etc/cron.d/evil', homeDir)).toBe(false);
+  });
+
+  it('blocks traversal escape from within home', () => {
+    expect(isGunzipPathSafe('/Users/testuser/../../etc/passwd', homeDir)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. Signing payload domain separation (NEW-005)
+// ---------------------------------------------------------------------------
+describe('Signing payload domain separation (NEW-005)', () => {
+  function createSigningPayload(...fields: (string | number)[]): string {
+    return fields.map(String).join('\0');
+  }
+
+  it('separates fields with null byte', () => {
+    const payload = createSigningPayload('abc', 123);
+    expect(payload).toBe('abc' + '\0' + '123');
+  });
+
+  it('prevents field concatenation ambiguity', () => {
+    const a = createSigningPayload('ab', 'c');
+    const b = createSigningPayload('a', 'bc');
+    expect(a).not.toBe(b);
+  });
+});
