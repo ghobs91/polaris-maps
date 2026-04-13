@@ -12,6 +12,7 @@ import {
   PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useMapStore } from '../../stores/mapStore';
@@ -302,6 +303,7 @@ const pillStyles = StyleSheet.create({
 export function POIInfoCard() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
@@ -844,6 +846,26 @@ export function POIInfoCard() {
               <Text style={[styles.noteText, { color: subtextColor }]}>{parsed.note}</Text>
             </View>
           )}
+
+          {/* ── Update Place Info (OSM edit) ──────────────────────── */}
+          {selectedPoi && selectedPoi.id > 0 && (
+            <TouchableOpacity
+              style={[styles.updatePlaceBtn, { backgroundColor: pillBg, borderColor }]}
+              activeOpacity={0.7}
+              onPress={() => {
+                router.push({
+                  pathname: '/poi/osm-edit',
+                  params: {
+                    nodeId: String(selectedPoi.id),
+                    name: selectedPoi.name || '',
+                  },
+                });
+              }}
+            >
+              <Ionicons name="create-outline" size={18} color={primary} />
+              <Text style={[styles.updatePlaceBtnText, { color: primary }]}>Update Place Info</Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       )}
     </Animated.View>
@@ -983,5 +1005,20 @@ const styles = StyleSheet.create({
     ...typography.caption,
     flex: 1,
     lineHeight: 18,
+  },
+  updatePlaceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    paddingVertical: 14,
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  updatePlaceBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

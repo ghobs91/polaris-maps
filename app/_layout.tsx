@@ -26,6 +26,7 @@ function RootLayoutInner() {
         <Stack.Screen name="onboarding/index" options={{ headerShown: false }} />
         <Stack.Screen name="poi/[id]" options={{ title: 'Place Details' }} />
         <Stack.Screen name="poi/edit" options={{ title: 'Edit Place' }} />
+        <Stack.Screen name="poi/osm-edit" options={{ title: 'Update Place Info' }} />
         <Stack.Screen name="poi/reviews" options={{ title: 'Reviews' }} />
         <Stack.Screen name="regions/index" options={{ title: 'Download Regions' }} />
         <Stack.Screen name="regions/offline" options={{ title: 'Offline Regions' }} />
