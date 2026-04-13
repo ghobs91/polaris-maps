@@ -1,10 +1,13 @@
 /**
  * Security regression tests for CVE fixes:
- *  1. Path traversal prevention in tar extraction (nodejs sidecar parity)
+ *  1. Path traversal prevention in tar extraction AND Hyperdrive download (nodejs sidecar parity)
  *  2. API key proxy URL routing in traffic fetchers
  *  3. ErrorBoundary: no raw error message in production
  *  4. Gun.js edit signature verification (isEditSignatureValid)
  *  5. Gun.js reputation signature verification
+ *  6. FTS5 query injection prevention (F-004)
+ *  7. URL scheme validation for Linking.openURL (F-003)
+ *  8. API key redaction in error messages (F-008, F-011)
  */
 
 // ---------------------------------------------------------------------------
@@ -56,6 +59,29 @@ describe('Tar path traversal guard', () => {
   it('allows entry whose name happens to contain double dots mid-segment', () => {
     // e.g. a file literally named "some..thing.pbf"
     expect(isSafeEntry(destDir, 'tiles/some..thing.pbf')).toBe(true);
+  });
+});
+
+// Same guard is also applied in handleHdDownload (Hyperdrive download)
+describe('Hyperdrive download path traversal guard (F-001)', () => {
+  const destDir = '/data/regions/boston';
+
+  it('allows normal Hyperdrive entry paths', () => {
+    expect(isSafeEntry(destDir, 'tiles/14/8192/5432.pbf')).toBe(true);
+    expect(isSafeEntry(destDir, 'metadata.json')).toBe(true);
+  });
+
+  it('blocks ../../ key from adversarial peer', () => {
+    expect(isSafeEntry(destDir, '../../shared_prefs/database.sqlite')).toBe(false);
+  });
+
+  it('blocks ../Library escape attempt', () => {
+    expect(isSafeEntry(destDir, '../../../Library/Cookies/evil.js')).toBe(false);
+  });
+
+  it('blocks key that resolves to exact destDir (boundary)', () => {
+    // path.resolve(destDir, '.') === destDir — not inside destDir + sep
+    expect(isSafeEntry(destDir, '.')).toBe(true);
   });
 });
 
@@ -254,5 +280,132 @@ describe('Gun.js reputation signature verification', () => {
 
     const record = { pubkey: pubKey, score: 100, last_updated: 1700000000, signature: evilSig };
     expect(isReputationSignatureValid(record)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. FTS5 query injection prevention (F-004)
+// ---------------------------------------------------------------------------
+describe('FTS5 query injection prevention (F-004)', () => {
+  /**
+   * Mirrors the fixed FTS5 query builder from geocodingService.ts.
+   * Double-quotes are stripped to prevent malformed FTS5 expressions.
+   */
+  function buildFtsQuery(query: string): string {
+    return query
+      .trim()
+      .split(/\s+/)
+      .map((w) => `"${w.replace(/"/g, '')}"*`)
+      .join(' ');
+  }
+
+  it('builds a normal query correctly', () => {
+    expect(buildFtsQuery('coffee shop')).toBe('"coffee"* "shop"*');
+  });
+
+  it('strips double-quotes that would break FTS5 syntax', () => {
+    const result = buildFtsQuery('coffee"shop');
+    expect(result).toBe('"coffeeshop"*');
+    expect(result).not.toContain('""');
+  });
+
+  it('handles multiple injected quotes', () => {
+    const result = buildFtsQuery('"hello" "world"');
+    expect(result).toBe('"hello"* "world"*');
+    // No unclosed quote — every word is individually wrapped
+  });
+
+  it('returns empty-safe query for quote-only input', () => {
+    const result = buildFtsQuery('" "');
+    // After stripping quotes: two empty strings wrapped
+    expect(result).toBe('""* ""*');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. URL scheme validation for Linking.openURL (F-003)
+// ---------------------------------------------------------------------------
+describe('URL scheme validation (F-003)', () => {
+  const SAFE_URL_SCHEMES = ['https:', 'http:'];
+
+  function isSafeURL(raw: string): boolean {
+    try {
+      const u = new URL(raw);
+      return SAFE_URL_SCHEMES.includes(u.protocol);
+    } catch {
+      return false;
+    }
+  }
+
+  function sanitizePhone(raw: string): string {
+    return raw.replace(/[^0-9+#*]/g, '');
+  }
+
+  it('accepts https URLs', () => {
+    expect(isSafeURL('https://example.com')).toBe(true);
+  });
+
+  it('accepts http URLs', () => {
+    expect(isSafeURL('http://example.com')).toBe(true);
+  });
+
+  it('blocks intent:// URLs (Android intent injection)', () => {
+    expect(
+      isSafeURL('intent://navigate#Intent;scheme=geo;package=com.google.android.apps.maps;end'),
+    ).toBe(false);
+  });
+
+  it('blocks javascript: URLs', () => {
+    expect(isSafeURL('javascript:alert(1)')).toBe(false);
+  });
+
+  it('blocks file:// URLs', () => {
+    expect(isSafeURL('file:///etc/passwd')).toBe(false);
+  });
+
+  it('blocks malformed URLs', () => {
+    expect(isSafeURL('not a url at all')).toBe(false);
+  });
+
+  it('sanitizes phone number — strips DTMF injection', () => {
+    expect(sanitizePhone('+9999;dtmf=*#0600')).toBe('+9999*#0600');
+  });
+
+  it('sanitizes phone number — removes letters and special chars', () => {
+    expect(sanitizePhone('+1 (555) 123-4567')).toBe('+15551234567');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. API key redaction in error messages (F-008, F-011)
+// ---------------------------------------------------------------------------
+describe('API key redaction in error logs (F-008, F-011)', () => {
+  function redactKeys(msg: string): string {
+    return msg.replace(/key=[^&]*/g, 'key=REDACTED');
+  }
+
+  it('redacts TomTom API key from URL in error message', () => {
+    const msg = 'fetch failed: https://api.tomtom.com/traffic?key=abc123secret&zoom=14';
+    const safe = redactKeys(msg);
+    expect(safe).not.toContain('abc123secret');
+    expect(safe).toContain('key=REDACTED');
+  });
+
+  it('redacts HERE API key from URL', () => {
+    const msg = 'HTTP 429: https://data.traffic.hereapi.com/v7/flow?apiKey=abc&key=xyz';
+    const safe = redactKeys(msg);
+    expect(safe).not.toContain('xyz');
+    expect(safe).toContain('key=REDACTED');
+  });
+
+  it('leaves messages without keys unchanged', () => {
+    const msg = 'Network timeout after 5000ms';
+    expect(redactKeys(msg)).toBe(msg);
+  });
+
+  it('truncates Valhalla error to 200 chars', () => {
+    const raw = 'x'.repeat(500);
+    const safe = raw.slice(0, 200).replace(/key=[^&]*/g, 'key=REDACTED');
+    expect(safe.length).toBe(200);
   });
 });

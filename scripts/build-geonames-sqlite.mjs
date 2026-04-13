@@ -100,16 +100,20 @@ function flushBatch() {
   const tx = db.transaction((rows) => {
     for (const r of rows) {
       insertMain.run(
-        r.geonameId, r.name, r.asciiName, r.altNames,
-        r.lat, r.lng, r.featureClass, r.countryCode,
-        r.admin1Code, r.population, r.timezone,
+        r.geonameId,
+        r.name,
+        r.asciiName,
+        r.altNames,
+        r.lat,
+        r.lng,
+        r.featureClass,
+        r.countryCode,
+        r.admin1Code,
+        r.population,
+        r.timezone,
       );
-      insertFts.run(
-        r.geonameId, r.name, r.asciiName, r.altNames, r.countryCode,
-      );
-      insertRtree.run(
-        r.geonameId, r.lat, r.lat, r.lng, r.lng,
-      );
+      insertFts.run(r.geonameId, r.name, r.asciiName, r.altNames, r.countryCode);
+      insertRtree.run(r.geonameId, r.lat, r.lat, r.lng, r.lng);
     }
   });
   tx(batch);

@@ -24,6 +24,22 @@ import { SaveToListSheet } from '../../src/components/places';
 import { colors, spacing, typography, borderRadius } from '../../src/constants/theme';
 import type { StreetImagery } from '../../src/models/imagery';
 
+const SAFE_URL_SCHEMES = ['https:', 'http:'];
+
+function safeOpenURL(raw: string): void {
+  try {
+    const u = new URL(raw);
+    if (SAFE_URL_SCHEMES.includes(u.protocol)) Linking.openURL(raw);
+  } catch {
+    /* malformed — ignore */
+  }
+}
+
+function safePhone(raw: string): void {
+  const cleaned = raw.replace(/[^0-9+#*]/g, '');
+  if (cleaned.length > 0) Linking.openURL(`tel:${cleaned}`);
+}
+
 export default function POIDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -140,7 +156,7 @@ export default function POIDetailScreen() {
         )}
 
         {selectedPlace.phone && (
-          <Pressable onPress={() => Linking.openURL(`tel:${selectedPlace.phone}`)}>
+          <Pressable onPress={() => safePhone(selectedPlace.phone!)}>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Phone</Text>
               <Text style={[styles.sectionBody, styles.link]}>{selectedPlace.phone}</Text>
@@ -152,7 +168,7 @@ export default function POIDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Email</Text>
             {selectedPlace.emails.map((email) => (
-              <Pressable key={email} onPress={() => Linking.openURL(`mailto:${email}`)}>
+              <Pressable key={email} onPress={() => safeOpenURL(`mailto:${email}`)}>
                 <Text style={[styles.sectionBody, styles.link]}>{email}</Text>
               </Pressable>
             ))}
@@ -160,7 +176,7 @@ export default function POIDetailScreen() {
         )}
 
         {selectedPlace.website && (
-          <Pressable onPress={() => Linking.openURL(selectedPlace.website!)}>
+          <Pressable onPress={() => safeOpenURL(selectedPlace.website!)}>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Website</Text>
               <Text style={[styles.sectionBody, styles.link]} numberOfLines={1}>
@@ -174,7 +190,7 @@ export default function POIDetailScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Social Media</Text>
             {selectedPlace.socials.map((url) => (
-              <Pressable key={url} onPress={() => Linking.openURL(url)}>
+              <Pressable key={url} onPress={() => safeOpenURL(url)}>
                 <Text style={[styles.sectionBody, styles.link]} numberOfLines={1}>
                   {url}
                 </Text>

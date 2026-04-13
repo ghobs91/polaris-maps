@@ -11,6 +11,10 @@ const OVERPASS_INSTANCES = [
   'https://overpass.openstreetmap.fr/api/interpreter',
 ];
 
+/** Minimum gap between successive Overpass requests (ms). */
+const OVERPASS_MIN_INTERVAL_MS = 1_000;
+let _lastOverpassRequestAt = 0;
+
 export interface OverpassRequestOptions {
   /** Overpass QL query string (without the `data=` prefix). */
   query: string;
@@ -27,6 +31,14 @@ export interface OverpassRequestOptions {
  * Throws an AggregateError if all instances fail.
  */
 export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
+  // Enforce minimum inter-request gap to respect public API usage policies
+  const now = Date.now();
+  const elapsed = now - _lastOverpassRequestAt;
+  if (elapsed < OVERPASS_MIN_INTERVAL_MS) {
+    await new Promise((r) => setTimeout(r, OVERPASS_MIN_INTERVAL_MS - elapsed));
+  }
+  _lastOverpassRequestAt = Date.now();
+
   const encoded = encodeURIComponent(opts.query);
 
   const attempts = OVERPASS_INSTANCES.map(async (base) => {

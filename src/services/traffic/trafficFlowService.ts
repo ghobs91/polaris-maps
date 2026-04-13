@@ -55,7 +55,9 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
   } catch (error) {
     // Silent failure: keep previous normalizedSegments in store,
     // continue with stale data until next successful refresh.
-    console.warn('[TrafficFlowService] Fetch failed, keeping previous data:', error);
+    const msg =
+      error instanceof Error ? error.message.replace(/key=[^&]*/g, 'key=REDACTED') : String(error);
+    console.warn('[TrafficFlowService] Fetch failed, keeping previous data:', msg);
   } finally {
     useTrafficStore.getState().setExternalFetchLoading(false);
   }

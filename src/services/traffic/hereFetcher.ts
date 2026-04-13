@@ -81,15 +81,19 @@ export async function fetchHERETraffic(
   const bbox = `bbox:${viewport.west},${viewport.south},${viewport.east},${viewport.north}`;
   const url = `${HERE_FLOW_BASE_URL}?apiKey=${encodeURIComponent(hereApiKey)}&in=${encodeURIComponent(bbox)}&locationReferencing=shape`;
 
-  const response = await fetch(url);
-  if (!response.ok) return [];
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return [];
 
-  const data: HEREFlowResponse = await response.json();
-  if (!data.results) return [];
+    const data: HEREFlowResponse = await response.json();
+    if (!data.results) return [];
 
-  const segments: NormalizedTrafficSegment[] = [];
-  for (const result of data.results) {
-    segments.push(...normalizeHEREResponse(result));
+    const segments: NormalizedTrafficSegment[] = [];
+    for (const result of data.results) {
+      segments.push(...normalizeHEREResponse(result));
+    }
+    return segments;
+  } catch {
+    return [];
   }
-  return segments;
 }

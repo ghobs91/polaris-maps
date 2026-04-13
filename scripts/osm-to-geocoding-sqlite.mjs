@@ -78,14 +78,28 @@ function flushBatch() {
   const tx = db.transaction((rows) => {
     for (const row of rows) {
       const result = insertStmt.run(
-        row.text, row.type, row.housenumber, row.street,
-        row.city, row.state, row.postcode, row.country,
-        row.lat, row.lng, row.regionId,
+        row.text,
+        row.type,
+        row.housenumber,
+        row.street,
+        row.city,
+        row.state,
+        row.postcode,
+        row.country,
+        row.lat,
+        row.lng,
+        row.regionId,
       );
       insertFts.run(
         result.lastInsertRowid,
-        row.text, row.type, row.housenumber, row.street,
-        row.city, row.state, row.postcode, row.country,
+        row.text,
+        row.type,
+        row.housenumber,
+        row.street,
+        row.city,
+        row.state,
+        row.postcode,
+        row.country,
       );
     }
   });

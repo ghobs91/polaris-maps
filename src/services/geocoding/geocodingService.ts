@@ -1,6 +1,10 @@
 import { getDatabase } from '../database/init';
 import type { GeocodingEntry } from '../../models/geocoding';
 
+/** Nominatim requires max 1 request per second per their usage policy. */
+const NOMINATIM_MIN_INTERVAL_MS = 1_000;
+let _lastNominatimRequestAt = 0;
+
 export interface GeocodingResult {
   entry: GeocodingEntry;
   rank: number;
@@ -14,8 +18,8 @@ export async function searchAddress(
 ): Promise<GeocodingResult[]> {
   if (!query.trim()) return [];
 
-  // Try local DB first
-  const localResults = await searchAddressLocal(query, limit);
+  // Try local DB first — gracefully fall through to Nominatim on any error
+  const localResults = await searchAddressLocal(query, limit).catch(() => []);
   if (localResults.length > 0) return localResults;
 
   // Fall back to Nominatim online geocoding
@@ -26,11 +30,14 @@ async function searchAddressLocal(query: string, limit: number): Promise<Geocodi
   const db = await getDatabase();
 
   // FTS5 match query — add * for prefix matching
+  // Strip double-quotes to prevent FTS5 syntax injection
   const ftsQuery = query
     .trim()
     .split(/\s+/)
-    .map((w) => `"${w}"*`)
+    .map((w) => `"${w.replace(/"/g, '')}"*`)
     .join(' ');
+
+  if (!ftsQuery.replace(/["* ]/g, '')) return [];
 
   const rows = await db.getAllAsync<GeocodingRow>(
     `SELECT g.id, g.type, g.housenumber, g.street, g.city, g.state, g.postcode, g.country,
@@ -67,6 +74,14 @@ async function searchAddressNominatim(
   lat?: number,
   lng?: number,
 ): Promise<GeocodingResult[]> {
+  // Enforce minimum 1 000 ms inter-request gap (Nominatim usage policy)
+  const now = Date.now();
+  const elapsed = now - _lastNominatimRequestAt;
+  if (elapsed < NOMINATIM_MIN_INTERVAL_MS) {
+    await new Promise((r) => setTimeout(r, NOMINATIM_MIN_INTERVAL_MS - elapsed));
+  }
+  _lastNominatimRequestAt = Date.now();
+
   try {
     const params = new URLSearchParams({
       q: query,

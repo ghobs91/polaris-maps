@@ -103,8 +103,8 @@ async function computeRouteOnline(
   }).finally(() => clearTimeout(timeoutId));
 
   if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText);
-    const safe = text.slice(0, 300);
+    const raw = await res.text().catch(() => '');
+    const safe = raw.slice(0, 200).replace(/key=[^&]*/g, 'key=REDACTED');
     throw new Error(`Online routing error ${res.status}: ${safe}`);
   }
 

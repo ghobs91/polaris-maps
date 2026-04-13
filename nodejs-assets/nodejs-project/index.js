@@ -323,10 +323,14 @@ async function handleHdDownload(command) {
 
     // Download all files from the drive
     fs.mkdirSync(destDir, { recursive: true });
+    const resolvedDest = path.resolve(destDir);
     let totalBytes = 0;
 
     for await (const entry of drive.list('/')) {
-      const filePath = path.join(destDir, entry.key);
+      const filePath = path.resolve(destDir, entry.key);
+      if (!filePath.startsWith(resolvedDest + path.sep)) {
+        continue; // skip path-traversal attempts
+      }
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
 
       const content = await drive.get(entry.key);

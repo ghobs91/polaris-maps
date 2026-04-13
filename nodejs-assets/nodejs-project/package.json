@@ -11,9 +11,9 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "corestore": "^7.9.0",
-    "hypercore": "^11.27.7",
-    "hyperdrive": "^13.3.0",
-    "hyperswarm": "^4.17.0"
+    "corestore": "7.9.0",
+    "hypercore": "11.27.7",
+    "hyperdrive": "13.3.0",
+    "hyperswarm": "4.17.0"
   }
 }
