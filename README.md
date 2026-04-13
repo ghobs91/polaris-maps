@@ -182,7 +182,6 @@ pnpm lint            # eslint
 | ID              | Severity  | OWASP     | Location                                                | Title                                                             | Status      |
 | --------------- | --------- | --------- | ------------------------------------------------------- | ----------------------------------------------------------------- | ----------- |
 | [F-001](#f-001) | 🔴 High   | A08 / A05 | `nodejs-assets/nodejs-project/index.js:310`             | Path traversal in Hyperdrive download — no escape guard           | ✅ Fixed    |
-| [F-002](#f-002) | 🔴 High   | A04       | `src/constants/config.ts:32,35`                         | TomTom + HERE API keys bundled into client via `EXPO_PUBLIC_`     | ⚠️ Accepted |
 | [F-003](#f-003) | 🟡 Medium | A05       | `app/poi/[id].tsx:110,119`                              | Unvalidated external URL opened via `Linking.openURL`             | ✅ Fixed    |
 | [F-004](#f-004) | 🟡 Medium | A05       | `src/services/geocoding/geocodingService.ts:23`         | FTS5 query injection via `"` in search input — crashes search     | ✅ Fixed    |
 | [F-005](#f-005) | 🟡 Medium | A03       | `package.json`, `nodejs-assets/package.json`            | All deps use `^`/`~` ranges — unpinned supply chain               | ✅ Fixed    |
