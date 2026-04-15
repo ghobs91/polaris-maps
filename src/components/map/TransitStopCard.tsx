@@ -155,6 +155,11 @@ export function TransitStopCard() {
     lat: number;
     lon: number;
   } | null>(null);
+  const [originOverride, setOriginOverride] = useState<{
+    name: string;
+    lat: number;
+    lon: number;
+  } | null>(null);
   const [dirItineraries, setDirItinerariesLocal] = useState<OtpItinerary[] | null>(null);
   const [selectedItinerary, setSelectedItineraryLocal] = useState<OtpItinerary | null>(null);
 
@@ -208,6 +213,7 @@ export function TransitStopCard() {
       setDestQuery('');
       setStationResults([]);
       setSelectedDest(null);
+      setOriginOverride(null);
       setDirItineraries(null);
       setSelectedItinerary(null);
       setDirError(null);
@@ -232,6 +238,7 @@ export function TransitStopCard() {
     setDestQuery('');
     setStationResults([]);
     setSelectedDest(null);
+    setOriginOverride(null);
     setDirItineraries(null);
     setSelectedItinerary(null);
     setDirError(null);
@@ -242,6 +249,8 @@ export function TransitStopCard() {
     async (destLat: number, destLng: number, destName?: string) => {
       if (!selectedStop) return;
 
+      const origin = originOverride ?? selectedStop;
+
       Keyboard.dismiss();
       setDirLoading(true);
       setDirError(null);
@@ -250,7 +259,7 @@ export function TransitStopCard() {
       // fall back to local cached-line planner only if OTP fails.
       try {
         const itineraries = await planTransitTrip({
-          from: { lat: selectedStop.lat, lng: selectedStop.lon },
+          from: { lat: origin.lat, lng: origin.lon },
           to: { lat: destLat, lng: destLng },
           modes: useTransitStore.getState().enabledModes,
         });
@@ -265,9 +274,9 @@ export function TransitStopCard() {
       // Local planner using cached transit line data
       try {
         const localRoutes = planLocalTransitRoute(
-          selectedStop.lat,
-          selectedStop.lon,
-          selectedStop.name,
+          origin.lat,
+          origin.lon,
+          origin.name,
           destLat,
           destLng,
           destName,
@@ -282,8 +291,28 @@ export function TransitStopCard() {
         setDirLoading(false);
       }
     },
-    [selectedStop],
+    [selectedStop, originOverride],
   );
+
+  const handleSwapOriginDest = useCallback(() => {
+    if (!selectedStop) return;
+    const currentOrigin = originOverride ?? selectedStop;
+    const currentDest = selectedDest;
+
+    if (!currentDest) return; // nothing to swap if no destination set
+
+    // New origin = old destination, new destination = old origin
+    setOriginOverride(currentDest);
+    setSelectedDest(currentOrigin);
+    setDestQuery(currentOrigin.name);
+    setStationResults([]);
+    setDirItineraries(null);
+    setSelectedItinerary(null);
+    setDirError(null);
+
+    // Re-plan with swapped values
+    planRoute(currentOrigin.lat, currentOrigin.lon, currentOrigin.name);
+  }, [selectedStop, originOverride, selectedDest, planRoute]);
 
   const handleStationSelect = useCallback(
     (station: { name: string; lat: number; lon: number }) => {
@@ -500,46 +529,65 @@ export function TransitStopCard() {
             </TouchableOpacity>
 
             {/* Origin */}
-            <View
-              style={[
-                dirStyles.field,
-                {
-                  backgroundColor: isDark ? 'rgba(50,50,70,0.5)' : 'rgba(0,0,0,0.04)',
-                },
-              ]}
-            >
-              <View style={[dirStyles.dot, { backgroundColor: colors.primary }]} />
-              <Text style={[dirStyles.fieldText, { color: colors.text }]} numberOfLines={1}>
-                {selectedStop.name}
-              </Text>
-            </View>
-
-            {/* Destination input */}
-            <View style={[dirStyles.field, dirStyles.destField, { borderColor: colors.border }]}>
-              <View style={[dirStyles.dot, { backgroundColor: '#FF3B30' }]} />
-              <TextInput
-                ref={destInputRef}
-                style={[dirStyles.destInput, { color: colors.text }]}
-                placeholder="Search destination station"
-                placeholderTextColor={colors.textSecondary}
-                value={destQuery}
-                onChangeText={handleDestQueryChange}
-                returnKeyType="search"
-              />
-              {destQuery.length > 0 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setDestQuery('');
-                    setSelectedDest(null);
-                    setDirItineraries(null);
-                    setSelectedItinerary(null);
-                    setDirError(null);
-                    setStationResults([]);
-                  }}
+            <View style={dirStyles.originDestRow}>
+              <View style={dirStyles.fieldsCol}>
+                <View
+                  style={[
+                    dirStyles.field,
+                    {
+                      backgroundColor: isDark ? 'rgba(50,50,70,0.5)' : 'rgba(0,0,0,0.04)',
+                      marginBottom: 6,
+                    },
+                  ]}
                 >
-                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-                </TouchableOpacity>
-              )}
+                  <View style={[dirStyles.dot, { backgroundColor: colors.primary }]} />
+                  <Text style={[dirStyles.fieldText, { color: colors.text }]} numberOfLines={1}>
+                    {(originOverride ?? selectedStop).name}
+                  </Text>
+                </View>
+
+                {/* Destination input */}
+                <View
+                  style={[dirStyles.field, dirStyles.destField, { borderColor: colors.border }]}
+                >
+                  <View style={[dirStyles.dot, { backgroundColor: '#FF3B30' }]} />
+                  <TextInput
+                    ref={destInputRef}
+                    style={[dirStyles.destInput, { color: colors.text }]}
+                    placeholder="Search destination station"
+                    placeholderTextColor={colors.textSecondary}
+                    value={destQuery}
+                    onChangeText={handleDestQueryChange}
+                    returnKeyType="search"
+                  />
+                  {destQuery.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDestQuery('');
+                        setSelectedDest(null);
+                        setDirItineraries(null);
+                        setSelectedItinerary(null);
+                        setDirError(null);
+                        setStationResults([]);
+                      }}
+                    >
+                      <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* Swap origin/destination */}
+              <TouchableOpacity
+                style={[
+                  dirStyles.swapBtn,
+                  { backgroundColor: isDark ? 'rgba(50,50,70,0.5)' : 'rgba(0,0,0,0.06)' },
+                ]}
+                onPress={handleSwapOriginDest}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="swap-vertical" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
             </View>
 
             <ScrollView
@@ -1451,14 +1499,28 @@ const detailStyles = StyleSheet.create({
 });
 
 const dirStyles = StyleSheet.create({
-  field: {
+  originDestRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
+    gap: 8,
+  },
+  fieldsCol: {
+    flex: 1,
+  },
+  swapBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  field: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
-    marginBottom: 6,
     gap: 10,
   },
   destField: {
