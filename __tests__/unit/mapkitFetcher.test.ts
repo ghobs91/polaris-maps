@@ -1,6 +1,7 @@
 import {
   searchAppleMaps,
   findAppleMatch,
+  fetchAppleMapsPois,
   clearAccessTokenCache,
 } from '../../src/services/poi/mapkitFetcher';
 
@@ -142,5 +143,63 @@ describe('findAppleMatch', () => {
     mockTokenThenSearch({ results: [] });
     const match = await findAppleMatch('Nonexistent', 0, 0);
     expect(match).toBeNull();
+  });
+});
+
+describe('fetchAppleMapsPois', () => {
+  it('merges query groups, clips to bbox, and converts to OsmPoi', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accessToken: 'access-token-xyz', expiresInSeconds: 1800 }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 'apple-1',
+              name: 'IHOP',
+              coordinate: { latitude: 40.7249, longitude: -73.5276 },
+              poiCategory: 'Restaurant',
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 'apple-2',
+              name: 'Panera Bread',
+              coordinate: { latitude: 40.7251, longitude: -73.5271 },
+              poiCategory: 'Cafe',
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              id: 'apple-outside',
+              name: 'Far Away Shop',
+              coordinate: { latitude: 41.0, longitude: -74.0 },
+              poiCategory: 'Store',
+            },
+          ],
+        }),
+      } as Response);
+
+    const result = await fetchAppleMapsPois(40.7244, -73.5278, 40.7267, -73.5264);
+
+    expect(result.map((poi) => poi.name)).toEqual(['IHOP', 'Panera Bread']);
+    expect(result[0]).toMatchObject({ type: 'amenity', subtype: 'restaurant' });
+    expect(result[1]).toMatchObject({ type: 'amenity', subtype: 'cafe' });
   });
 });

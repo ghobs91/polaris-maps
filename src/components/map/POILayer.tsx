@@ -4,7 +4,7 @@ import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useShallow } from 'zustand/react/shallow';
-import { filterPoisForDisplay } from '../../utils/poiSpatialFilter';
+import { filterPoisForDisplay, STREET_LEVEL_POI_ZOOM } from '../../utils/poiSpatialFilter';
 import { getPoiCategory } from '../../utils/poiCategories';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
@@ -59,8 +59,16 @@ export function POILayer() {
 
   /** Non-overlapping, category-diverse subset — recomputed when pois/bounds/zoom change */
   const visiblePois = useMemo(() => {
-    if (!bounds || activePois.length === 0) return [];
-    return filterPoisForDisplay(activePois, bounds, zoom);
+    if (!bounds || activePois.length === 0) {
+      if (__DEV__) console.warn(`[POILayer] skip: bounds=${!!bounds} pois=${activePois.length}`);
+      return [];
+    }
+    const result = filterPoisForDisplay(activePois, bounds, zoom);
+    if (__DEV__)
+      console.warn(
+        `[POILayer] input=${activePois.length} filtered=${result.length} z=${zoom.toFixed(1)}`,
+      );
+    return result;
   }, [activePois, bounds, zoom]);
 
   if (visiblePois.length === 0) return null;
@@ -72,7 +80,7 @@ export function POILayer() {
           key={poi.id}
           coordinate={[poi.lng, poi.lat]}
           anchor={ANCHOR}
-          allowOverlap={false}
+          allowOverlap={zoom >= STREET_LEVEL_POI_ZOOM}
         >
           <PoiBadge poi={poi} onPress={handlePress} />
         </MapLibreGL.MarkerView>

@@ -1,40 +1,44 @@
 import { useEffect } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
 import {
-  startPeriodicRefresh,
   stopPeriodicRefresh,
-  fetchTrafficImmediate,
+  fetchRouteTrafficImmediate,
+  startRoutePeriodicRefresh,
 } from '../services/traffic/trafficFlowService';
+import { decodePolyline } from '../utils/polyline';
 
 /**
- * When navigation is active, fetches traffic immediately for the route
- * bounding box, then starts periodic refresh. Stops on navigation end.
+ * When navigation is active or a route preview is shown, fetches traffic
+ * along the route polyline, then starts periodic refresh during navigation.
+ * Stops on navigation end / preview dismissal.
  */
 export function useNavigationTrafficRefresh(): void {
   const isNavigating = useNavigationStore((s) => s.isNavigating);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
+  const routePreview = useNavigationStore((s) => s.routePreview);
+
+  // The displayed route: active navigation takes priority over preview
+  const route = activeRoute ?? routePreview;
 
   useEffect(() => {
-    if (!isNavigating || !activeRoute) {
+    if (!route) {
       stopPeriodicRefresh();
       return;
     }
 
-    // Fetch immediately so traffic ETA is available right away
-    const bbox = activeRoute.boundingBox;
-    fetchTrafficImmediate({
-      west: bbox[0],
-      south: bbox[1],
-      east: bbox[2],
-      north: bbox[3],
-      zoom: 14,
-    });
+    const routeCoords = decodePolyline(route.geometry);
+    if (routeCoords.length < 2) return;
 
-    // Then keep refreshing periodically
-    startPeriodicRefresh(activeRoute.boundingBox, 14);
+    // Fetch immediately along the route so traffic colors appear right away
+    fetchRouteTrafficImmediate(routeCoords);
+
+    // Only periodically refresh during active navigation (not preview)
+    if (isNavigating) {
+      startRoutePeriodicRefresh(routeCoords);
+    }
 
     return () => {
       stopPeriodicRefresh();
     };
-  }, [isNavigating, activeRoute]);
+  }, [isNavigating, route]);
 }

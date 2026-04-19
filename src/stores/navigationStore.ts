@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { ValhallaRoute, ValhallaManeuver, CostingModel } from '../models/route';
 
+export type Waypoint = { lat: number; lng: number; name?: string; subtitle?: string };
+
 interface NavigationState {
   activeRoute: ValhallaRoute | null;
   alternateRoutes: ValhallaRoute[];
@@ -14,6 +16,10 @@ interface NavigationState {
   costing: CostingModel;
   destination: { lat: number; lng: number; name?: string } | null;
 
+  // Multi-destination waypoints (intermediate stops between origin & destination)
+  waypoints: Waypoint[];
+  currentLegIndex: number;
+
   // Traffic-adjusted ETA
   trafficEtaSeconds: number | null;
   freeFlowEtaSeconds: number | null;
@@ -23,6 +29,7 @@ interface NavigationState {
   routePreview: ValhallaRoute | null;
   routePreviewAlternates: ValhallaRoute[];
   routePreviewDestination: { lat: number; lng: number; name?: string } | null;
+  routePreviewWaypoints: Waypoint[];
   routePreviewCosting: CostingModel;
   routePreviewTrafficEta: number | null;
 
@@ -31,7 +38,9 @@ interface NavigationState {
     alternates: ValhallaRoute[],
     destination: NavigationState['destination'],
     costing: CostingModel,
+    waypoints?: Waypoint[],
   ) => void;
+  setRoutePreviewWaypoints: (waypoints: Waypoint[]) => void;
   setRoutePreviewTrafficEta: (seconds: number | null) => void;
   clearRoutePreview: () => void;
   startNavigation: (
@@ -39,7 +48,9 @@ interface NavigationState {
     alternates: ValhallaRoute[],
     destination: NavigationState['destination'],
     costing: CostingModel,
+    waypoints?: Waypoint[],
   ) => void;
+  advanceLeg: () => void;
   stopNavigation: () => void;
   advanceStep: () => void;
   setCurrentStep: (index: number) => void;
@@ -62,6 +73,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   hasDeviated: false,
   costing: 'auto',
   destination: null,
+  waypoints: [],
+  currentLegIndex: 0,
 
   trafficEtaSeconds: null,
   freeFlowEtaSeconds: null,
@@ -70,17 +83,21 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   routePreview: null,
   routePreviewAlternates: [],
   routePreviewDestination: null,
+  routePreviewWaypoints: [],
   routePreviewCosting: 'auto',
   routePreviewTrafficEta: null,
 
-  setRoutePreview: (route, alternates, destination, costing) =>
+  setRoutePreview: (route, alternates, destination, costing, waypoints) =>
     set({
       routePreview: route,
       routePreviewAlternates: alternates,
       routePreviewDestination: destination,
+      routePreviewWaypoints: waypoints ?? [],
       routePreviewCosting: costing,
       routePreviewTrafficEta: null,
     }),
+
+  setRoutePreviewWaypoints: (waypoints) => set({ routePreviewWaypoints: waypoints }),
 
   setRoutePreviewTrafficEta: (seconds) => set({ routePreviewTrafficEta: seconds }),
 
@@ -89,11 +106,12 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreview: null,
       routePreviewAlternates: [],
       routePreviewDestination: null,
+      routePreviewWaypoints: [],
       routePreviewCosting: 'auto',
       routePreviewTrafficEta: null,
     }),
 
-  startNavigation: (route, alternates, destination, costing) => {
+  startNavigation: (route, alternates, destination, costing, waypoints) => {
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
     const previewTrafficEta = get().routePreviewTrafficEta;
     set({
@@ -108,6 +126,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       hasDeviated: false,
       costing,
       destination,
+      waypoints: waypoints ?? [],
+      currentLegIndex: 0,
       // Carry over traffic ETA from preview so it's immediately available
       trafficEtaSeconds: previewTrafficEta,
       freeFlowEtaSeconds: previewTrafficEta != null ? route.summary.durationSeconds : null,
@@ -116,8 +136,26 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreview: null,
       routePreviewAlternates: [],
       routePreviewDestination: null,
+      routePreviewWaypoints: [],
       routePreviewTrafficEta: null,
     });
+  },
+
+  advanceLeg: () => {
+    const { currentLegIndex, activeRoute } = get();
+    const totalLegs = activeRoute?.legs.length ?? 0;
+    if (currentLegIndex + 1 < totalLegs) {
+      // Move to next leg; compute the maneuver offset
+      const nextLeg = currentLegIndex + 1;
+      const maneuverOffset = activeRoute!.legs
+        .slice(0, nextLeg)
+        .reduce((sum, l) => sum + l.maneuvers.length, 0);
+      set({
+        currentLegIndex: nextLeg,
+        currentStepIndex: maneuverOffset,
+        currentManeuver: activeRoute!.legs[nextLeg]?.maneuvers[0] ?? null,
+      });
+    }
   },
 
   stopNavigation: () =>
@@ -132,6 +170,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isRerouting: false,
       hasDeviated: false,
       destination: null,
+      waypoints: [],
+      currentLegIndex: 0,
       trafficEtaSeconds: null,
       freeFlowEtaSeconds: null,
       trafficMatchRatio: null,

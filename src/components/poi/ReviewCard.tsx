@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { Review } from '../../models/review';
 
@@ -14,7 +15,11 @@ export function ReviewCard({ review }: ReviewCardProps) {
     month: 'short',
     day: 'numeric',
   });
-  const pubkeyShort = review.authorPubkey.slice(0, 8) + '…' + review.authorPubkey.slice(-4);
+
+  const isAtproto = review.source === 'atproto';
+  const authorLabel = isAtproto ? (review.authorHandle ?? review.authorPubkey) : 'Anonymous';
+  const authorIcon = isAtproto ? 'butterfly' : 'incognito';
+  const authorColor = isAtproto ? '#0085FF' : colors.textSecondary;
 
   return (
     <View style={styles.card}>
@@ -28,7 +33,10 @@ export function ReviewCard({ review }: ReviewCardProps) {
 
       {review.text && <Text style={styles.body}>{review.text}</Text>}
 
-      <Text style={styles.author}>{pubkeyShort}</Text>
+      <View style={styles.authorRow}>
+        <MaterialCommunityIcons name={authorIcon} size={14} color={authorColor} />
+        <Text style={[styles.author, { color: authorColor }]}>{authorLabel}</Text>
+      </View>
     </View>
   );
 }
@@ -65,5 +73,10 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
     fontFamily: 'monospace',
+  },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
 });

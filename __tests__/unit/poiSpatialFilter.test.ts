@@ -1,4 +1,8 @@
-import { filterPoisForDisplay, ViewportBounds } from '../../src/utils/poiSpatialFilter';
+import {
+  filterPoisForDisplay,
+  STREET_LEVEL_POI_ZOOM,
+  ViewportBounds,
+} from '../../src/utils/poiSpatialFilter';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
 
 // ---------------------------------------------------------------------------
@@ -109,5 +113,61 @@ describe('filterPoisForDisplay', () => {
     // Both categories should be represented
     expect(restaurants.length).toBeGreaterThan(0);
     expect(cafes.length).toBeGreaterThan(0);
+  });
+
+  it('shows adjacent-building POIs at street level while still collapsing same-building duplicates', () => {
+    const lat = 40.7505;
+    const lng = -73.985;
+    const closeNorth = lat + 0.00001;
+    const nextBuildingLng = lng + 0.00018;
+    const thirdBuildingLng = lng + 0.00036;
+
+    const pois: OsmPoi[] = [
+      makePoi('Ground Floor Cafe', lat, lng, 'cafe'),
+      makePoi('Lobby Coffee', closeNorth, lng, 'cafe'),
+      makePoi('Bookshop', lat, nextBuildingLng, 'shop'),
+      makePoi('Pharmacy', lat, thirdBuildingLng, 'pharmacy'),
+    ];
+
+    const result = filterPoisForDisplay(pois, NYC_BOUNDS, STREET_LEVEL_POI_ZOOM);
+
+    expect(result.map((poi) => poi.name)).toEqual(['Ground Floor Cafe', 'Bookshop', 'Pharmacy']);
+  });
+
+  it('keeps the broader mid-zoom suppression behaviour before street level', () => {
+    const lat = 40.7505;
+    const lng = -73.985;
+    const pois: OsmPoi[] = [
+      makePoi('Ground Floor Cafe', lat, lng, 'cafe'),
+      makePoi('Bookshop', lat, lng + 0.00018, 'shop'),
+      makePoi('Pharmacy', lat, lng + 0.00036, 'pharmacy'),
+    ];
+
+    const result = filterPoisForDisplay(pois, NYC_BOUNDS, 16);
+
+    expect(result.length).toBeLessThan(pois.length);
+  });
+
+  it('ignores off-screen POIs when choosing visible street-level candidates', () => {
+    const bounds: ViewportBounds = {
+      minLat: 40.7244,
+      minLng: -73.5278,
+      maxLat: 40.7267,
+      maxLng: -73.5264,
+    };
+
+    const visiblePois: OsmPoi[] = [
+      makePoi('IHOP', 40.7249, -73.5276, 'restaurant'),
+      makePoi('Sabor A Colombia', 40.7262, -73.5277, 'restaurant'),
+    ];
+    const offscreenPois: OsmPoi[] = [
+      makePoi('Panera Bread', 40.725, -73.5425, 'cafe'),
+      makePoi('Dollar Tree', 40.7253, -73.5404, 'shop'),
+      makePoi('TD Bank', 40.725, -73.5419, 'bank'),
+    ];
+
+    const result = filterPoisForDisplay([...visiblePois, ...offscreenPois], bounds, 17.7);
+
+    expect(result.map((poi) => poi.name)).toEqual(['IHOP', 'Sabor A Colombia']);
   });
 });

@@ -1,4 +1,7 @@
-import { normalizeTomTomResponse } from '../../src/services/traffic/tomtomFetcher';
+import {
+  normalizeTomTomResponse,
+  sampleRoutePoints,
+} from '../../src/services/traffic/tomtomFetcher';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 
 const FIXTURE_RESPONSE = {
@@ -82,5 +85,61 @@ describe('normalizeTomTomResponse', () => {
       },
     };
     expect(normalizeTomTomResponse(response)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sampleRoutePoints
+// ---------------------------------------------------------------------------
+describe('sampleRoutePoints', () => {
+  it('returns empty array for empty input', () => {
+    expect(sampleRoutePoints([])).toHaveLength(0);
+  });
+
+  it('returns start and end for a 2-point route', () => {
+    const coords: [number, number][] = [
+      [-74.0, 40.7],
+      [-73.5, 40.8],
+    ];
+    const points = sampleRoutePoints(coords);
+    expect(points.length).toBeGreaterThanOrEqual(2);
+    expect(points[0]).toEqual({ lng: -74.0, lat: 40.7 });
+    expect(points[points.length - 1]).toEqual({ lng: -73.5, lat: 40.8 });
+  });
+
+  it('skips densely packed points within spacing threshold', () => {
+    // Create 100 points very close together (~0.001° apart = ~100m)
+    const coords: [number, number][] = [];
+    for (let i = 0; i < 100; i++) {
+      coords.push([-74.0 + i * 0.001, 40.7]);
+    }
+    const points = sampleRoutePoints(coords);
+    // 0.001 * 100 = 0.1° total span with 0.008° spacing ≈ 13 points + endpoints
+    expect(points.length).toBeLessThan(coords.length);
+    expect(points.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('always includes first and last coordinate', () => {
+    const coords: [number, number][] = [
+      [-74.0, 40.7],
+      [-74.001, 40.701],
+      [-74.002, 40.702],
+      [-73.5, 40.8],
+    ];
+    const points = sampleRoutePoints(coords);
+    expect(points[0]).toEqual({ lng: -74.0, lat: 40.7 });
+    expect(points[points.length - 1]).toEqual({ lng: -73.5, lat: 40.8 });
+  });
+
+  it('produces samples along a real-length route (~50km)', () => {
+    // Simulate ~50km east-west route: 0.5° of longitude at lat 40.7
+    const coords: [number, number][] = [];
+    for (let i = 0; i <= 500; i++) {
+      coords.push([-74.0 + i * 0.001, 40.7]);
+    }
+    const points = sampleRoutePoints(coords);
+    // 0.5° span with 0.008° spacing ≈ 63 samples
+    expect(points.length).toBeGreaterThanOrEqual(50);
+    expect(points.length).toBeLessThanOrEqual(80);
   });
 });

@@ -1,7 +1,7 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 import { useTrafficStore } from '../../stores/trafficStore';
-import { fetchTomTomTraffic, type ViewportBounds } from './tomtomFetcher';
+import { fetchTomTomTraffic, type ViewportBounds, fetchTomTomRouteTraffic } from './tomtomFetcher';
 import { convertP2PToNormalized, mergeTrafficSources } from './trafficMerger';
 import {
   initHyperswarmBridge,
@@ -123,6 +123,59 @@ export function stopPeriodicRefresh(): void {
 /** Fetch traffic data immediately (no debounce) for a given bounds. */
 export async function fetchTrafficImmediate(viewport: ViewportBounds): Promise<void> {
   await fetchAndUpdateTraffic(viewport);
+}
+
+/**
+ * Fetch traffic data along a specific route polyline.
+ * Samples points along the route geometry so returned segments
+ * align with the actual path (instead of a viewport grid).
+ */
+async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Promise<void> {
+  const store = useTrafficStore.getState();
+  if (store.isExternalFetchLoading) return;
+
+  useTrafficStore.getState().setExternalFetchLoading(true);
+  try {
+    const tomtomSegments = await fetchTomTomRouteTraffic(routeCoords).catch(
+      () => [] as NormalizedTrafficSegment[],
+    );
+
+    const p2pSegments: NormalizedTrafficSegment[] = Object.values(
+      useTrafficStore.getState().segmentTraffic,
+    ).map(convertP2PToNormalized);
+
+    const allSegments = [...tomtomSegments, ...p2pSegments];
+
+    if (allSegments.length > 0) {
+      const previousTimestamp = store.lastExternalFetchAt ?? undefined;
+      const merged = mergeTrafficSources(allSegments, previousTimestamp);
+      if (merged.length > 0) {
+        useTrafficStore.getState().setNormalizedSegments(merged);
+      }
+    }
+  } catch (error) {
+    const msg =
+      error instanceof Error ? error.message.replace(/key=[^&]*/g, 'key=REDACTED') : String(error);
+    console.warn('[TrafficFlowService] Route traffic fetch failed:', msg);
+  } finally {
+    useTrafficStore.getState().setExternalFetchLoading(false);
+  }
+}
+
+/** Fetch route-aligned traffic immediately. */
+export async function fetchRouteTrafficImmediate(routeCoords: [number, number][]): Promise<void> {
+  await fetchAndUpdateRouteTraffic(routeCoords);
+}
+
+/**
+ * Start the periodic traffic refresh timer using route-aligned sampling.
+ * Uses the decoded route coordinates for the fetch area.
+ */
+export function startRoutePeriodicRefresh(routeCoords: [number, number][]): void {
+  stopPeriodicRefresh();
+  refreshInterval = setInterval(() => {
+    fetchAndUpdateRouteTraffic(routeCoords);
+  }, TRAFFIC_REFRESH_INTERVAL_MS);
 }
 
 // ── P2P Lifecycle (Hyperswarm + Nostr fallback) ─────────────────────

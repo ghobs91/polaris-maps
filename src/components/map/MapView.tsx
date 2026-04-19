@@ -13,6 +13,7 @@ import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { fetchOsmPois, fetchNominatimPois } from '../../services/poi/osmFetcher';
 import { getPlacesInBounds } from '../../services/poi/poiService';
 import { fetchOverturePlaces } from '../../services/poi/overtureFetcher';
+import { fetchAppleMapsPois } from '../../services/poi/mapkitFetcher';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
 import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
@@ -23,6 +24,7 @@ import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
+import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 // Suppress noisy MapLibre Native font-loading timeouts (e.g. missing glyph
@@ -104,16 +106,30 @@ export interface MapViewHandle {
 interface MapViewProps {
   routeGeometry?: string;
   onMapPress?: (lat: number, lng: number) => void;
+  onMapLongPress?: (lat: number, lng: number) => void;
   /** When true, tilts the camera, hides user dot, shows chevron at navPosition */
   navigationMode?: boolean;
   /** Current position of the navigation chevron [lng, lat] */
   navPosition?: [number, number] | null;
   /** Bearing in degrees (0 = north, 90 = east) for heading-up rotation */
   navBearing?: number;
+  /** Called when camera follow state changes during navigation (user pan/zoom breaks follow) */
+  onFollowCameraChange?: (following: boolean) => void;
+  /** When true, camera will re-center on navPosition (set by re-center button) */
+  followCamera?: boolean;
 }
 
 export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
-  { routeGeometry, onMapPress, navigationMode, navPosition, navBearing = 0 },
+  {
+    routeGeometry,
+    onMapPress,
+    onMapLongPress,
+    navigationMode,
+    navPosition,
+    navBearing = 0,
+    onFollowCameraChange,
+    followCamera = true,
+  },
   ref,
 ) {
   const mapRef = useRef<any>(null);
@@ -137,27 +153,38 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const viewport = useMapStore((s) => s.viewport);
   const mapStylePref = useMapStore((s) => s.mapStyle);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
+  const stopSearchMarkers = useMapStore((s) => s.stopSearchMarkers);
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
   // Debounce timer for OSM POI fetching
   const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Abort controller to cancel stale in-flight fetches when viewport changes
   const abortRef = useRef<AbortController | null>(null);
-  // Track last fetched bounds to skip re-fetch for small pans (~1 km threshold)
+  // Track last fetched bounds + zoom to skip re-fetch for small pans (~1 km threshold)
   const lastFetchBounds = useRef<{
     minLat: number;
     minLng: number;
     maxLat: number;
     maxLng: number;
+    zoom: number;
   } | null>(null);
   // Prevent redundant POI clears during a single zoom gesture
   const zoomClearedRef = useRef(false);
+  // Track whether camera should follow nav position (breaks on user gesture)
+  const followCameraRef = useRef(true);
+  const suppressNextPressRef = useRef(false);
+  // Sync external followCamera prop into ref
+  useEffect(() => {
+    followCameraRef.current = followCamera;
+  }, [followCamera]);
 
   // In navigation mode, follow navPosition with tilt + heading.
   // paddingTop shifts the focal point downward in screen space so the marker
   // sits in the lower third, showing more of the route ahead (Apple/Google Maps style).
+  // followCamera is in the dep array so pressing re-center triggers immediately.
   useEffect(() => {
     if (!navigationMode || !navPosition || !cameraRef.current) return;
+    if (!followCameraRef.current) return;
     const screenHeight = Dimensions.get('window').height;
     cameraRef.current.setCamera({
       centerCoordinate: navPosition,
@@ -173,7 +200,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       animationDuration: 800,
       animationMode: 'flyTo',
     });
-  }, [navigationMode, navPosition, navBearing]);
+  }, [navigationMode, navPosition, navBearing, followCamera]);
 
   // Listen for programmatic viewport changes (locate, search select) and fly to them
   useEffect(() => {
@@ -189,7 +216,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         cameraRef.current.fitBounds(
           [maxLng, maxLat], // NE
           [minLng, minLat], // SW
-          { paddingTop: 80, paddingBottom: sh * 0.62, paddingLeft: 60, paddingRight: 60 },
+          [80, 60, Math.round(sh * 0.62), 60], // [top, right, bottom, left]
           500, // duration ms
         );
         // Clear after applying so it can be re-triggered
@@ -240,15 +267,33 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // since onRegionDidChange only fires when the gesture fully settles.
   const handleRegionIsChanging = useCallback(
     (event: any) => {
+      // Detect user gesture during navigation → break camera follow
+      if (navigationMode && event?.properties?.isUserInteraction && followCameraRef.current) {
+        followCameraRef.current = false;
+        onFollowCameraChange?.(false);
+      }
       if (navigationMode || zoomClearedRef.current) return;
       const zoom: number = event?.properties?.zoomLevel ?? 0;
       const { currentZoom, categorySearchResults } = useOsmPoiStore.getState();
       if (!categorySearchResults && Math.abs(zoom - currentZoom) >= 1) {
         useOsmPoiStore.getState().setPois([]);
+        // Cancel the pending debounced fetch AND abort any in-flight request.
+        // Without this, a still-running fetch from the previous viewport
+        // re-populates lastFetchBounds after we clear it, causing the
+        // subsequent handleRegionDidChange to skip the re-fetch.
+        if (poiFetchTimer.current) {
+          clearTimeout(poiFetchTimer.current);
+          poiFetchTimer.current = null;
+        }
+        if (abortRef.current) {
+          abortRef.current.abort();
+          abortRef.current = null;
+        }
+        lastFetchBounds.current = null;
         zoomClearedRef.current = true;
       }
     },
-    [navigationMode],
+    [navigationMode, onFollowCameraChange],
   );
 
   const handleRegionDidChange = useCallback(
@@ -282,6 +327,21 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       if (!rawBounds) return;
       const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
 
+      // At high zoom the viewport is very small (z=17.6 ≈ 250 m). Pad the
+      // fetch bounds so we always query at least ~800 m in each direction.
+      // This ensures POIs in adjacent buildings / across the street are
+      // pre-loaded even when the user zooms tightly onto a single structure.
+      // The spatial filter in POILayer already clips to the visible viewport.
+      const MIN_FETCH_SPAN_DEG = 0.008; // ~890 m latitude
+      const latSpan = maxLat - minLat;
+      const lngSpan = maxLng - minLng;
+      const latPad = latSpan < MIN_FETCH_SPAN_DEG ? (MIN_FETCH_SPAN_DEG - latSpan) / 2 : 0;
+      const lngPad = lngSpan < MIN_FETCH_SPAN_DEG ? (MIN_FETCH_SPAN_DEG - lngSpan) / 2 : 0;
+      const fetchMinLat = minLat - latPad;
+      const fetchMaxLat = maxLat + latPad;
+      const fetchMinLng = minLng - lngPad;
+      const fetchMaxLng = maxLng + lngPad;
+
       // If a category search is active, show those results instead of the
       // default POI fetch. The category search already ran against the viewport
       // at search time — we don't re-fetch on every pan because the results
@@ -298,18 +358,27 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       // "Unknown annotation found nearby tap" fault.
       //
       // Skip re-fetch if the viewport hasn't shifted more than ~1 km from the
-      // last successful fetch — eliminates redundant requests on small pans.
+      // last successful fetch AND zoom hasn't changed significantly —
+      // eliminates redundant requests on small pans while ensuring a zoom
+      // change (which shrinks/expands the visible area) triggers a re-fetch.
       const POI_FETCH_THRESHOLD = 0.01; // ~1.1 km
+      const POI_ZOOM_THRESHOLD = 1.0;
       const lastB = lastFetchBounds.current;
       if (
         lastB &&
-        Math.abs(minLat - lastB.minLat) < POI_FETCH_THRESHOLD &&
-        Math.abs(maxLat - lastB.maxLat) < POI_FETCH_THRESHOLD &&
-        Math.abs(minLng - lastB.minLng) < POI_FETCH_THRESHOLD &&
-        Math.abs(maxLng - lastB.maxLng) < POI_FETCH_THRESHOLD
+        Math.abs(zoom - lastB.zoom) < POI_ZOOM_THRESHOLD &&
+        Math.abs(fetchMinLat - lastB.minLat) < POI_FETCH_THRESHOLD &&
+        Math.abs(fetchMaxLat - lastB.maxLat) < POI_FETCH_THRESHOLD &&
+        Math.abs(fetchMinLng - lastB.minLng) < POI_FETCH_THRESHOLD &&
+        Math.abs(fetchMaxLng - lastB.maxLng) < POI_FETCH_THRESHOLD
       ) {
+        if (__DEV__) console.warn('[POI] fetch skipped — within threshold');
         return;
       }
+      if (__DEV__)
+        console.warn(
+          `[POI] fetch starting z=${zoom.toFixed(1)} bounds=${fetchMinLat.toFixed(4)},${fetchMinLng.toFixed(4)} → ${fetchMaxLat.toFixed(4)},${fetchMaxLng.toFixed(4)}`,
+        );
 
       if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
       // Cancel any in-flight fetch from a previous viewport — its results are
@@ -322,15 +391,28 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
         try {
           useOsmPoiStore.getState().setIsLoading(true);
-          lastFetchBounds.current = { minLat, minLng, maxLat, maxLng };
+          lastFetchBounds.current = {
+            minLat: fetchMinLat,
+            minLng: fetchMinLng,
+            maxLat: fetchMaxLat,
+            maxLng: fetchMaxLng,
+            zoom,
+          };
 
           // Phase 1: Instant local results — SQLite cached Overture places.
           // Show these immediately so the map feels responsive even when the
           // network is slow.
-          const cachedPlaces = await getPlacesInBounds(minLat, minLng, maxLat, maxLng, 500).catch(
-            () => [],
-          );
-          if (controller.signal.aborted) return;
+          const cachedPlaces = await getPlacesInBounds(
+            fetchMinLat,
+            fetchMinLng,
+            fetchMaxLat,
+            fetchMaxLng,
+            500,
+          ).catch(() => []);
+          if (controller.signal.aborted) {
+            if (__DEV__) console.warn('[POI] aborted after phase1');
+            return;
+          }
 
           const cachedOverturePois = cachedPlaces.map(placeToOsmPoi);
           if (cachedOverturePois.length > 0) {
@@ -340,31 +422,66 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           // Phase 2: Parallel network fetches — OSM Overpass + online Overture.
           // Skip online Overture if the local cache already has ≥ 20 results
           // (the area has been visited before — no need to re-fetch).
+          // At street level, also run Nominatim in parallel to fill coverage
+          // gaps — Overpass misses businesses that lack amenity/shop tags in
+          // OSM (common for strip mall tenants).
           const skipOnlineOverture = cachedPlaces.length >= 20;
-          const [osmPois, onlineOverture] = await Promise.all([
-            fetchOsmPois(minLat, minLng, maxLat, maxLng).catch(() => [] as OsmPoi[]),
+          const isStreetLevel = zoom >= 17;
+          const [osmPois, onlineOverture, nominatimPois, applePois] = await Promise.all([
+            fetchOsmPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
+              () => [] as OsmPoi[],
+            ),
             skipOnlineOverture
               ? ([] as OsmPoi[])
-              : fetchOverturePlaces(minLat, minLng, maxLat, maxLng, 500)
+              : fetchOverturePlaces(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng, 500)
                   .then((places) => places.map(placeToOsmPoi))
                   .catch(() => [] as OsmPoi[]),
+            isStreetLevel
+              ? fetchNominatimPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
+                  () => [] as OsmPoi[],
+                )
+              : ([] as OsmPoi[]),
+            isStreetLevel
+              ? fetchAppleMapsPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
+                  () => [] as OsmPoi[],
+                )
+              : ([] as OsmPoi[]),
           ]);
-          if (controller.signal.aborted) return;
-
-          let merged = deduplicatePois([...cachedOverturePois, ...onlineOverture, ...osmPois]);
-
-          // If both Overpass and local DB returned nothing, try Nominatim
-          if (merged.length === 0) {
-            const nominatimPois = await fetchNominatimPois(minLat, minLng, maxLat, maxLng).catch(
-              () => [],
-            );
-            if (controller.signal.aborted) return;
-            merged = nominatimPois;
+          if (controller.signal.aborted) {
+            if (__DEV__) console.warn('[POI] aborted after phase2');
+            return;
           }
 
+          if (__DEV__)
+            console.warn(
+              `[POI] phase1=${cachedOverturePois.length} osm=${osmPois.length} overture=${onlineOverture.length} nominatim=${nominatimPois.length} apple=${applePois.length}`,
+            );
+          let merged = deduplicatePois([
+            ...cachedOverturePois,
+            ...onlineOverture,
+            ...applePois,
+            ...osmPois,
+            ...nominatimPois,
+          ]);
+
+          // If all sources returned nothing, try Nominatim with broader queries
+          // (only if we didn't already run it above)
+          if (merged.length === 0 && !isStreetLevel) {
+            const fallbackPois = await fetchNominatimPois(
+              fetchMinLat,
+              fetchMinLng,
+              fetchMaxLat,
+              fetchMaxLng,
+            ).catch(() => []);
+            if (controller.signal.aborted) return;
+            merged = fallbackPois;
+            if (__DEV__) console.warn(`[POI] nominatim fallback=${fallbackPois.length}`);
+          }
+
+          if (__DEV__) console.warn(`[POI] setPois merged=${merged.length}`);
           useOsmPoiStore.getState().setPois(merged);
-        } catch {
-          // Silently ignore — data sources may be unavailable
+        } catch (err) {
+          if (__DEV__) console.warn('[POI] fetch error:', err);
         } finally {
           useOsmPoiStore.getState().setIsLoading(false);
         }
@@ -375,10 +492,21 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   const handlePress = useCallback(
     (event: any) => {
-      const [lng, lat] = event.geometry.coordinates as [number, number];
-      onMapPress?.(lat, lng);
+      const coordinates = consumeMapPress(event, suppressNextPressRef);
+      if (!coordinates) {
+        return;
+      }
+      onMapPress?.(coordinates.lat, coordinates.lng);
     },
     [onMapPress],
+  );
+
+  const handleLongPress = useCallback(
+    (event: any) => {
+      const coordinates = consumeMapLongPress(event, suppressNextPressRef);
+      onMapLongPress?.(coordinates.lat, coordinates.lng);
+    },
+    [onMapLongPress],
   );
 
   // Resolve the map style based on user preference and dark mode
@@ -399,6 +527,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         style={styles.map}
         mapStyle={resolvedMapStyle}
         onPress={handlePress}
+        onLongPress={handleLongPress}
         onRegionIsChanging={handleRegionIsChanging}
         onRegionDidChange={handleRegionDidChange}
       >
@@ -453,6 +582,47 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         )}
 
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
+
+        {/* Stop search markers — shown during add-stop flow when user submits search */}
+        {stopSearchMarkers.length > 0 && (
+          <MapLibreGL.ShapeSource
+            id="stopSearchMarkers"
+            shape={{
+              type: 'FeatureCollection',
+              features: stopSearchMarkers.map((m, i) => ({
+                type: 'Feature' as const,
+                properties: { name: m.name, index: i },
+                geometry: {
+                  type: 'Point' as const,
+                  coordinates: [m.lng, m.lat],
+                },
+              })),
+            }}
+            onPress={(e: any) => {
+              const feature = e.features?.[0];
+              if (feature?.geometry?.coordinates) {
+                const [lng, lat] = feature.geometry.coordinates;
+                const marker = stopSearchMarkers.find(
+                  (m) => Math.abs(m.lng - lng) < 0.0001 && Math.abs(m.lat - lat) < 0.0001,
+                );
+                if (marker) {
+                  useMapStore.getState().setPendingStopSelection(marker);
+                }
+              }
+            }}
+            hitbox={{ width: 30, height: 30 }}
+          >
+            <MapLibreGL.CircleLayer
+              id="stopSearchMarkersCircle"
+              style={{
+                circleRadius: 10,
+                circleColor: '#FF9500',
+                circleStrokeWidth: 3,
+                circleStrokeColor: '#fff',
+              }}
+            />
+          </MapLibreGL.ShapeSource>
+        )}
 
         <TransitLayer />
 

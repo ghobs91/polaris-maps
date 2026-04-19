@@ -104,7 +104,7 @@ describe('buildRouteTrafficGeoJSON', () => {
       [-71.06, 42.36],
       [-71.061, 42.361],
     ];
-    // Segment far away (>0.001° ≈ 100 m)
+    // Segment far away (>0.003° ≈ 300 m)
     const seg = makeSeg({
       coordinates: [[-72.0, 43.0]],
       congestionRatio: 0.9,
@@ -162,5 +162,117 @@ describe('buildRouteTrafficGeoJSON', () => {
       expect(feature.geometry.coordinates.length).toBeGreaterThanOrEqual(2);
       expect(typeof feature.properties.color).toBe('string');
     }
+  });
+
+  it('merges consecutive same-color segments into fewer features', () => {
+    // 5 coordinate pairs, all within threshold of the same segment
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.0601, 42.3601],
+      [-71.0602, 42.3602],
+      [-71.0603, 42.3603],
+      [-71.0604, 42.3604],
+    ];
+    const seg = makeSeg({
+      coordinates: [[-71.0602, 42.3602]],
+      congestionRatio: 0.9, // green
+    });
+
+    const result = buildRouteTrafficGeoJSON(route, [seg]);
+    // All pairs should be green → merged into 1 feature
+    expect(result.features).toHaveLength(1);
+    expect(result.features[0].properties.color).toBe('#00C853');
+    // Merged feature should contain all 5 coordinates
+    expect(result.features[0].geometry.coordinates).toHaveLength(5);
+  });
+
+  it('colors every coordinate pair, not just sampled chunks', () => {
+    // Create a long route with a segment matching only near index 50
+    const route: [number, number][] = [];
+    for (let i = 0; i < 100; i++) {
+      route.push([-71.06 + i * 0.0001, 42.36 + i * 0.0001]);
+    }
+    // Segment near index 50: midpoint of pair [49]-[50] ≈ (-71.0551, 42.3651)
+    const seg = makeSeg({
+      coordinates: [[-71.0551, 42.3651]],
+      congestionRatio: 0.1, // stopped → red
+    });
+
+    const result = buildRouteTrafficGeoJSON(route, [seg]);
+    const colors = result.features.map((f) => f.properties.color);
+    // Should have the red color for pairs near the segment
+    expect(colors).toContain('#D50000');
+    // Should still have default blue for pairs far away
+    expect(colors).toContain(DEFAULT_ROUTE_COLOR);
+  });
+
+  it('colors route segments when traffic data comes from route-aligned sampling', () => {
+    // Simulate a route from point A → B with traffic segments sampled along the path.
+    // This mirrors the real flow: sampleRoutePoints → TomTom API → buildRouteTrafficGeoJSON.
+    const route: [number, number][] = [];
+    for (let i = 0; i < 50; i++) {
+      route.push([-74.0 + i * 0.002, 40.7 + i * 0.001]);
+    }
+
+    // Traffic segments at route-aligned positions — coordinates must be within
+    // MATCH_THRESHOLD_DEG = 0.003 of the midpoint between consecutive route pairs.
+    // Midpoint of pair [i,i+1] = [-74.0 + (i+0.5)*0.002, 40.7 + (i+0.5)*0.001]
+    const segments = [
+      makeSeg({
+        id: 'route-seg-1',
+        coordinates: [
+          [-73.999, 40.7005], // midpoint of pair 0 exactly
+        ],
+        congestionRatio: 0.9, // free flow → green
+      }),
+      makeSeg({
+        id: 'route-seg-2',
+        coordinates: [
+          [-73.959, 40.7205], // midpoint of pair 20 exactly
+        ],
+        congestionRatio: 0.15, // stopped → red
+      }),
+      makeSeg({
+        id: 'route-seg-3',
+        coordinates: [
+          [-73.919, 40.7405], // midpoint of pair 40 exactly
+        ],
+        congestionRatio: 0.6, // slow → yellow
+      }),
+    ];
+
+    const result = buildRouteTrafficGeoJSON(route, segments);
+    const colors = result.features.map((f) => f.properties.color);
+    // Should have multiple colors — not all blue
+    const uniqueColors = new Set(colors);
+    expect(uniqueColors.size).toBeGreaterThan(1);
+    // Should contain traffic colors from the matched segments
+    expect(colors).toContain('#00C853'); // green from seg-1
+    expect(colors).toContain('#D50000'); // red from seg-2
+  });
+
+  it('matches via point-to-line-segment distance for sparse TomTom polylines', () => {
+    // Route runs along a path; the TomTom segment has only 2 endpoints but the
+    // route midpoint falls between them (on the line segment, not near either point).
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+      [-71.062, 42.362],
+      [-71.063, 42.363],
+    ];
+    // Sparse segment: 2 endpoints spanning the route — midpoints of route pairs
+    // are far from both endpoints but close to the line connecting them.
+    const seg = makeSeg({
+      coordinates: [
+        [-71.058, 42.358], // before route start
+        [-71.066, 42.366], // after route end
+      ],
+      congestionRatio: 0.3, // congested → orange
+    });
+
+    const result = buildRouteTrafficGeoJSON(route, [seg]);
+    const colors = result.features.map((f) => f.properties.color);
+    // Should match via line-segment projection, not just endpoint proximity
+    expect(colors).toContain('#FF6D00'); // orange
   });
 });

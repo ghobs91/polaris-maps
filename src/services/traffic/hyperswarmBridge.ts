@@ -27,9 +27,9 @@ let RPCClass:
 function resolveNativeDeps(): boolean {
   if (WorkletClass && RPCClass) return true;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     WorkletClass = (require('react-native-bare-kit') as { Worklet: typeof WorkletClass }).Worklet;
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     RPCClass = require('bare-rpc') as typeof RPCClass;
     return true;
   } catch (e) {
@@ -59,7 +59,6 @@ import {
 import type { AggregatedTrafficState, TrafficProbe } from '../../models/traffic';
 
 // The bundle is produced by `npx bare-pack --target ios --target android --linked`
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 let trafficBundle: string | null = null;
 try {
   // Dynamic require — bare-pack writes this after bundling the backend

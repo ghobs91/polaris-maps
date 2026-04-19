@@ -1,4 +1,5 @@
 import { appleMapkitToken } from '../../constants/config';
+import type { OsmPoi } from './osmFetcher';
 
 const APPLE_MAPS_BASE_URL = 'https://maps-api.apple.com/v1';
 
@@ -9,6 +10,7 @@ const APPLE_MAPS_BASE_URL = 'https://maps-api.apple.com/v1';
 // ---------------------------------------------------------------------------
 let cachedAccessToken: string | null = null;
 let accessTokenExpiresAt = 0; // Unix ms
+let accessTokenPromise: Promise<string | null> | null = null;
 
 async function getAccessToken(): Promise<string | null> {
   const jwt = appleMapkitToken;
@@ -19,23 +21,36 @@ async function getAccessToken(): Promise<string | null> {
     return cachedAccessToken;
   }
 
-  const res = await fetch(`${APPLE_MAPS_BASE_URL}/token`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${jwt}` },
-  });
+  if (accessTokenPromise) {
+    return accessTokenPromise;
+  }
 
-  if (!res.ok) return null;
+  accessTokenPromise = (async () => {
+    const res = await fetch(`${APPLE_MAPS_BASE_URL}/token`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
 
-  const data = await res.json();
-  cachedAccessToken = data.accessToken as string;
-  accessTokenExpiresAt = now + (data.expiresInSeconds as number) * 1000;
-  return cachedAccessToken;
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    cachedAccessToken = data.accessToken as string;
+    accessTokenExpiresAt = Date.now() + (data.expiresInSeconds as number) * 1000;
+    return cachedAccessToken;
+  })();
+
+  try {
+    return await accessTokenPromise;
+  } finally {
+    accessTokenPromise = null;
+  }
 }
 
 /** Clear the cached access token (for tests). */
 export function clearAccessTokenCache() {
   cachedAccessToken = null;
   accessTokenExpiresAt = 0;
+  accessTokenPromise = null;
 }
 
 /**
@@ -67,6 +82,67 @@ export interface AppleMapsPoi {
   countryCode?: string;
 }
 
+function hashAppleId(id: string): number {
+  let hash = 0;
+  for (let index = 0; index < id.length; index++) {
+    hash = ((hash << 5) - hash + id.charCodeAt(index)) | 0;
+  }
+  return -(Math.abs(hash) + 1);
+}
+
+function mapAppleCategoryToOsm(category?: string): { type: string; subtype: string } {
+  const key = category?.trim().toLowerCase() ?? '';
+  const map: Record<string, { type: string; subtype: string }> = {
+    cafe: { type: 'amenity', subtype: 'cafe' },
+    restaurant: { type: 'amenity', subtype: 'restaurant' },
+    bakery: { type: 'shop', subtype: 'bakery' },
+    grocery: { type: 'shop', subtype: 'supermarket' },
+    store: { type: 'shop', subtype: 'shop' },
+    bank: { type: 'amenity', subtype: 'bank' },
+    atm: { type: 'amenity', subtype: 'atm' },
+    pharmacy: { type: 'amenity', subtype: 'pharmacy' },
+    hospital: { type: 'amenity', subtype: 'hospital' },
+    hotel: { type: 'tourism', subtype: 'hotel' },
+    'fitness center': { type: 'leisure', subtype: 'fitness_centre' },
+    parking: { type: 'amenity', subtype: 'parking' },
+    'gas station': { type: 'amenity', subtype: 'fuel' },
+  };
+  return map[key] ?? { type: 'amenity', subtype: 'place' };
+}
+
+function isWithinBounds(
+  poi: AppleMapsPoi,
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+) {
+  return (
+    poi.coordinate.latitude >= south &&
+    poi.coordinate.latitude <= north &&
+    poi.coordinate.longitude >= west &&
+    poi.coordinate.longitude <= east
+  );
+}
+
+function applePoiToOsmPoi(poi: AppleMapsPoi): OsmPoi {
+  const mapping = mapAppleCategoryToOsm(poi.poiCategory);
+  return {
+    id: hashAppleId(`apple:${poi.id}`),
+    lat: poi.coordinate.latitude,
+    lng: poi.coordinate.longitude,
+    name: poi.name,
+    type: mapping.type,
+    subtype: mapping.subtype,
+    tags: {
+      name: poi.name,
+      [mapping.type]: mapping.subtype,
+      'apple:place_id': poi.id,
+      ...(poi.poiCategory ? { 'apple:category': poi.poiCategory } : {}),
+    },
+  };
+}
+
 /**
  * Search Apple Maps for places near a coordinate.
  */
@@ -93,6 +169,39 @@ export async function searchAppleMaps(
 
   const data = await res.json();
   return (data.results ?? []) as AppleMapsPoi[];
+}
+
+/**
+ * Search Apple Maps with a small query set and convert in-bounds results to OsmPoi.
+ * This supplements OSM in areas like strip malls where storefront tenants are
+ * often missing from Overpass.
+ */
+export async function fetchAppleMapsPois(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+): Promise<OsmPoi[]> {
+  if (!appleMapkitToken) return [];
+
+  const centerLat = (south + north) / 2;
+  const centerLng = (west + east) / 2;
+  const queries = ['restaurant', 'cafe', 'grocery', 'store', 'pharmacy', 'bank'];
+
+  const results = await Promise.all(
+    queries.map((query) => searchAppleMaps(query, centerLat, centerLng).catch(() => [])),
+  );
+
+  const deduped = new Map<string, AppleMapsPoi>();
+  for (const group of results) {
+    for (const poi of group) {
+      if (!poi.name || !isWithinBounds(poi, south, west, north, east)) continue;
+      const key = `${poi.name.toLowerCase()}|${poi.coordinate.latitude.toFixed(5)}|${poi.coordinate.longitude.toFixed(5)}`;
+      if (!deduped.has(key)) deduped.set(key, poi);
+    }
+  }
+
+  return [...deduped.values()].map(applePoiToOsmPoi);
 }
 
 /**

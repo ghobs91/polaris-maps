@@ -37,7 +37,8 @@ Deduplication (30m spatial grid, O(n))
     ↓
 poiSpatialFilter.ts:
   - Web Mercator pixel projection
-  - Category-diverse round-robin interleaving
+  - Mid-zoom: category-diverse round-robin interleaving
+  - Street-level: near-building clustering so adjacent storefronts can all render
   - Greedy pixel-exclusion with PlacementGrid
   - Zoom-adaptive caps (80–300 POIs)
     ↓

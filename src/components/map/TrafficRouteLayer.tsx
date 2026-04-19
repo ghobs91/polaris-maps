@@ -41,9 +41,11 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
     return result.features.length > 0 ? result : null;
   }, [coordinates, normalizedSegments]);
 
+  const hasTraffic = !!trafficGeoJSON;
+
   return (
     <>
-      {/* Plain blue fallback — always visible so the route shows immediately */}
+      {/* Plain blue fallback — visible only while traffic data is loading */}
       <MapLibreGL.ShapeSource id="route-base" shape={fallbackShape}>
         <MapLibreGL.LineLayer
           id="route-base-casing"
@@ -52,6 +54,7 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
             lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
             lineCap: 'round',
             lineJoin: 'round',
+            lineOpacity: hasTraffic ? 0 : 1,
           }}
         />
         <MapLibreGL.LineLayer
@@ -61,6 +64,7 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
             lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
             lineCap: 'round',
             lineJoin: 'round',
+            lineOpacity: hasTraffic ? 0 : 1,
           }}
         />
       </MapLibreGL.ShapeSource>

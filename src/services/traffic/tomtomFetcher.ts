@@ -137,3 +137,91 @@ export async function fetchTomTomTraffic(
     return true;
   });
 }
+
+/**
+ * Minimum distance (degrees) between successive sample points along the route.
+ * ~0.008° ≈ 800 m at mid-latitudes — avoids redundant API hits on dense polylines.
+ */
+const ROUTE_SAMPLE_SPACING_DEG = 0.008;
+
+/** Max concurrent TomTom requests per batch to avoid rate-limiting. */
+const ROUTE_BATCH_SIZE = 10;
+
+/**
+ * Sample evenly-spaced points along a decoded route polyline.
+ * Returns points that are at least {@link ROUTE_SAMPLE_SPACING_DEG} apart.
+ */
+export function sampleRoutePoints(coords: [number, number][]): Array<{ lat: number; lng: number }> {
+  if (coords.length === 0) return [];
+  const points: Array<{ lat: number; lng: number }> = [{ lng: coords[0][0], lat: coords[0][1] }];
+  let lastLng = coords[0][0];
+  let lastLat = coords[0][1];
+
+  for (let i = 1; i < coords.length; i++) {
+    const dlng = coords[i][0] - lastLng;
+    const dlat = coords[i][1] - lastLat;
+    if (dlng * dlng + dlat * dlat >= ROUTE_SAMPLE_SPACING_DEG * ROUTE_SAMPLE_SPACING_DEG) {
+      points.push({ lng: coords[i][0], lat: coords[i][1] });
+      lastLng = coords[i][0];
+      lastLat = coords[i][1];
+    }
+  }
+
+  // Always include the last coordinate
+  const last = coords[coords.length - 1];
+  if (last[0] !== lastLng || last[1] !== lastLat) {
+    points.push({ lng: last[0], lat: last[1] });
+  }
+
+  return points;
+}
+
+/**
+ * Fetch traffic data from TomTom for points along a route polyline.
+ * Unlike {@link fetchTomTomTraffic} which samples a viewport grid, this
+ * samples the actual route geometry so returned segments align with the path.
+ */
+export async function fetchTomTomRouteTraffic(
+  routeCoords: [number, number][],
+): Promise<NormalizedTrafficSegment[]> {
+  if (!tomtomApiKey) return [];
+
+  const points = sampleRoutePoints(routeCoords);
+  if (points.length === 0) return [];
+
+  const segments: NormalizedTrafficSegment[] = [];
+  const seen = new Set<string>();
+
+  // Fetch in batches to avoid rate-limiting
+  for (let b = 0; b < points.length; b += ROUTE_BATCH_SIZE) {
+    const batch = points.slice(b, b + ROUTE_BATCH_SIZE);
+    const promises = batch.map(async (pt) => {
+      const url = `${TOMTOM_FLOW_BASE_URL}/14/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?key=${encodeURIComponent(tomtomApiKey)}&unit=MPH&thickness=1`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const json: TomTomFlowResponse = await res.json();
+        const seg = normalizeTomTomResponse(json);
+        if (seg) {
+          // Inject the query point into the segment's coordinates so the
+          // route-matching algorithm always has a coordinate on the route
+          // itself — TomTom's own geometry may be offset or sparse.
+          seg.coordinates.push([pt.lng, pt.lat]);
+        }
+        return seg;
+      } catch {
+        return null;
+      }
+    });
+
+    const results = await Promise.allSettled(promises);
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value && !seen.has(r.value.id)) {
+        seen.add(r.value.id);
+        segments.push(r.value);
+      }
+    }
+  }
+
+  return segments;
+}

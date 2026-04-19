@@ -9,10 +9,13 @@ import { POIInfoCard } from '@/components/map/POIInfoCard';
 import { TransitStopCard } from '@/components/map/TransitStopCard';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
+import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { useTransitStops } from '@/hooks/useTransitStops';
+import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useTransitStore } from '@/stores/transitStore';
 import { prewarmTransitCache } from '@/services/transit/transitLineFetcher';
 import { preloadOtpStops } from '@/services/transit/otpEndpointRegistry';
+import { resolveMapSelectionPoi } from '@/services/poi/mapSelectionPoi';
 import { ErrorBoundary } from '@/components/common';
 
 export default function MapScreen() {
@@ -24,6 +27,9 @@ export default function MapScreen() {
 
   // Fetch transit stops when transit layer is toggled on
   useTransitStops();
+
+  // Fetch route-aligned traffic when a route preview or active route is shown
+  useNavigationTrafficRefresh();
 
   // Center on user location at startup (skip if a programmatic locate is pending,
   // e.g. navigating here from My Places with resolved coordinates)
@@ -43,6 +49,7 @@ export default function MapScreen() {
 
   const locateTo = useMapStore((s) => s.locateTo);
   const mapViewRef = useRef<MapViewHandle>(null);
+  const longPressRequestRef = useRef(0);
 
   const handleLocate = useCallback(async () => {
     // Panel covers ~52% of screen height; offset camera so the dot
@@ -72,10 +79,28 @@ export default function MapScreen() {
     useTransitStore.getState().setSelectedStop(null);
   }, []);
 
+  const handleMapLongPress = useCallback(async (lat: number, lng: number) => {
+    const requestId = longPressRequestRef.current + 1;
+    longPressRequestRef.current = requestId;
+
+    useMapStore.getState().setSelectedLocation(null);
+    useTransitStore.getState().setSelectedStop(null);
+
+    const selectedPoi = await resolveMapSelectionPoi(lat, lng);
+    if (longPressRequestRef.current !== requestId) return;
+
+    useOsmPoiStore.getState().setSelectedPoi(selectedPoi);
+  }, []);
+
   return (
     <ErrorBoundary>
       <View style={styles.container}>
-        <MapView ref={mapViewRef} routeGeometry={routeGeometry} onMapPress={handleMapPress} />
+        <MapView
+          ref={mapViewRef}
+          routeGeometry={routeGeometry}
+          onMapPress={handleMapPress}
+          onMapLongPress={handleMapLongPress}
+        />
         <FloatingSearchPanel
           onProfilePress={() => setShowNodeDrawer(true)}
           onLocatePress={handleLocate}

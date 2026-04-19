@@ -10,6 +10,7 @@ import {
   Dimensions,
   Image,
   PanResponder,
+  Modal as RNModal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,9 +20,9 @@ import { useMapStore } from '../../stores/mapStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
+import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
-import { Modal } from '../common/Modal';
 import { SaveToListSheet } from '../places/SaveToListSheet';
 
 const SCREEN_H = Dimensions.get('window').height;
@@ -34,6 +35,7 @@ const FULL_H = SCREEN_H * 0.85;
 // ---------------------------------------------------------------------------
 
 function buildAddress(tags: Record<string, string>): string | null {
+  const full = tags['addr:full'] ?? tags['address'];
   const num = tags['addr:housenumber'];
   const street = tags['addr:street'];
   const city = tags['addr:city'];
@@ -44,7 +46,7 @@ function buildAddress(tags: Record<string, string>): string | null {
   else if (street) parts.push(street);
   const tail = [city, state, postcode].filter(Boolean).join(' ');
   if (tail) parts.push(tail);
-  return parts.length ? parts.join(', ') : null;
+  return parts.length ? parts.join(', ') : (full ?? null);
 }
 
 function capitalise(s: string) {
@@ -396,7 +398,11 @@ export function POIInfoCard() {
 
   // Trigger Apple Maps enrichment when a POI is selected
   useEffect(() => {
-    if (!poi) return;
+    if (!poi || isMapSelectionPoi(poi)) {
+      setEnrichedData(null);
+      setIsEnriching(false);
+      return;
+    }
     let cancelled = false;
     setIsEnriching(true);
     enrichPoi(poi)
@@ -417,6 +423,7 @@ export function POIInfoCard() {
   // Merge OSM parsed data with Apple Maps enrichment — OSM takes priority
   const parsed = useMemo(() => {
     if (!rawParsed) return null;
+    if (!poi || isMapSelectionPoi(poi)) return rawParsed;
     if (!enrichedData) return rawParsed;
     return {
       ...rawParsed,
@@ -428,7 +435,7 @@ export function POIInfoCard() {
       // Opening hours from MapKit (iOS 16+)
       hours: rawParsed.hours ?? enrichedData.openingHours ?? null,
     };
-  }, [rawParsed, enrichedData]);
+  }, [rawParsed, enrichedData, poi]);
 
   const category = poi ? getPoiCategory(poi.type, poi.subtype) : null;
 
@@ -640,10 +647,11 @@ export function POIInfoCard() {
             />
           </View>
 
-          <Modal
+          <RNModal
             visible={showSaveSheet}
-            onClose={() => setShowSaveSheet(false)}
-            title="Save to list"
+            animationType="slide"
+            presentationStyle="pageSheet"
+            onRequestClose={() => setShowSaveSheet(false)}
           >
             {poi && (
               <SaveToListSheet
@@ -656,7 +664,7 @@ export function POIInfoCard() {
                 onDone={() => setShowSaveSheet(false)}
               />
             )}
-          </Modal>
+          </RNModal>
 
           {/* ── Description ───────────────────────────────────────────── */}
           {parsed.description && (

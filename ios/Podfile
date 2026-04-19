@@ -46,7 +46,7 @@ target 'PolarisMaps' do
 
   post_install do |installer|
 # @generated begin @maplibre/maplibre-react-native:post-install - expo prebuild (DO NOT MODIFY) sync-6e76c80af0d70c0003d06822dd59b7c729fca472
-    $MLRN.post_install(installer)
+    $MLRN.post_install(installer) if defined?($MLRN) && $MLRN.respond_to?(:post_install)
 # @generated end @maplibre/maplibre-react-native:post-install
     react_native_post_install(
       installer,
@@ -66,14 +66,18 @@ target 'PolarisMaps' do
       end
     end
 
-    # Fix fmt consteval error with newer Xcode/Clang
-    # Apple Clang's consteval implementation is buggy across versions
+    # Fix fmt consteval errors with Apple Clang by disabling consteval on all
+    # Apple toolchains, not only older build numbers.
     fmt_base = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
     if File.exist?(fmt_base)
       content = File.read(fmt_base)
-      patched = content.gsub(
-        /defined\(__apple_build_version__\) && __apple_build_version__ < \d+L/,
-        'defined(__apple_build_version__)'
+      patched = content.sub(
+        '#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L',
+        '#elif defined(__apple_build_version__)'
+      )
+      patched = patched.gsub(
+        /#elif defined\(__apple_build_version__\) && __apple_build_version__ < \d+L/,
+        '#elif defined(__apple_build_version__)'
       )
       File.write(fmt_base, patched) if patched != content
     end

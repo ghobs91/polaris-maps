@@ -7,6 +7,8 @@ export interface ViewportBounds {
   maxLng: number;
 }
 
+export const STREET_LEVEL_POI_ZOOM = 17.25;
+
 /**
  * Zoom-adaptive cap on total displayed POI markers.
  * At street level (zoom ≥ 17) we allow up to 500 markers since the compact
@@ -40,7 +42,47 @@ function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number
 const MARKER_W = 70; // typical rendered width (label text)
 const MARKER_H = 22; // rendered height (label + icon + gap)
 
+const METERS_PER_DEG_LAT = 111_320;
+
+function viewportMargin(bounds: ViewportBounds): { lat: number; lng: number } {
+  return {
+    lat: Math.max(0.00015, (bounds.maxLat - bounds.minLat) * 0.08),
+    lng: Math.max(0.00015, (bounds.maxLng - bounds.minLng) * 0.08),
+  };
+}
+
+function isWithinViewport(poi: OsmPoi, bounds: ViewportBounds): boolean {
+  const margin = viewportMargin(bounds);
+  return (
+    poi.lat >= bounds.minLat - margin.lat &&
+    poi.lat <= bounds.maxLat + margin.lat &&
+    poi.lng >= bounds.minLng - margin.lng &&
+    poi.lng <= bounds.maxLng + margin.lng
+  );
+}
+
+function toLocalMeters(lat: number, lng: number, refLat: number): { x: number; y: number } {
+  const metersPerDegLng = Math.max(1, METERS_PER_DEG_LAT * Math.cos((refLat * Math.PI) / 180));
+  return {
+    x: lng * metersPerDegLng,
+    y: lat * METERS_PER_DEG_LAT,
+  };
+}
+
+function streetLevelBuildingGapMeters(zoom: number): number {
+  if (zoom >= 19) return 8;
+  if (zoom >= 18) return 11;
+  if (zoom >= STREET_LEVEL_POI_ZOOM) return 14;
+  return 18;
+}
+
 function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
+  if (zoom >= STREET_LEVEL_POI_ZOOM) {
+    return {
+      gapX: 3,
+      gapY: 3,
+    };
+  }
   // At zoom ≥ 17 (street level), shrink gaps to ~35% of default so dense
   // shopping centres render all storefronts. Scale linearly between z14–z17.
   const t = Math.min(1, Math.max(0, (zoom - 14) / 3)); // 0 at z14, 1 at z17+
@@ -96,6 +138,26 @@ class PlacementGrid {
   }
 }
 
+function selectStreetLevelCandidates(
+  entries: Array<{ poi: OsmPoi; x: number; y: number }>,
+  bounds: ViewportBounds,
+  zoom: number,
+): Array<{ poi: OsmPoi; x: number; y: number }> {
+  const refLat = (bounds.minLat + bounds.maxLat) / 2;
+  const buildingGapMeters = streetLevelBuildingGapMeters(zoom);
+  const buildingGrid = new PlacementGrid(buildingGapMeters, buildingGapMeters);
+  const selected: Array<{ poi: OsmPoi; x: number; y: number }> = [];
+
+  for (const entry of entries) {
+    const { x: meterX, y: meterY } = toLocalMeters(entry.poi.lat, entry.poi.lng, refLat);
+    if (buildingGrid.hasOverlap(meterX, meterY, buildingGapMeters, buildingGapMeters)) continue;
+    buildingGrid.insert(meterX, meterY);
+    selected.push(entry);
+  }
+
+  return selected;
+}
+
 /**
  * Filters a raw POI list down to a non-overlapping, category-diverse subset
  * suitable for display as icon+label markers on the map.
@@ -119,29 +181,45 @@ export function filterPoisForDisplay(
 ): OsmPoi[] {
   if (pois.length === 0) return [];
 
+  // POI fetching may use padded bounds to keep nearby businesses warm in the
+  // cache, but display selection must only consider the actual visible viewport
+  // (plus a tiny margin for edge markers). Otherwise off-screen POIs consume
+  // street-level slots and visible storefronts disappear.
+  const viewportPois = pois.filter((poi) => isWithinViewport(poi, bounds));
+  if (viewportPois.length === 0) return [];
+
   // -- 1. Compute pixel positions -------------------------------------------
   type Entry = { poi: OsmPoi; x: number; y: number };
-  const entries: Entry[] = pois.map((poi) => {
+  const entries: Entry[] = viewportPois.map((poi) => {
     const { x, y } = toPixel(poi.lat, poi.lng, zoom);
     return { poi, x, y };
   });
 
-  // -- 2. Round-robin diversity ordering ------------------------------------
-  // Group by subtype so we interleave categories: restaurant, cafe, pharmacy,
-  // restaurant (2nd), cafe (2nd), … rather than all restaurants first.
-  const groups = new Map<string, Entry[]>();
-  for (const e of entries) {
-    const key = `${e.poi.type}/${e.poi.subtype}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(e);
-  }
+  // -- 2. Candidate ordering -------------------------------------------------
+  let candidates: Entry[];
+  if (zoom >= STREET_LEVEL_POI_ZOOM) {
+    // At street level, Google/Apple-style rendering favours local completeness
+    // over viewport-wide category diversity. Collapse only near-identical
+    // storefront coordinates so adjacent buildings can all remain visible.
+    candidates = selectStreetLevelCandidates(entries, bounds, zoom);
+  } else {
+    // Group by subtype so we interleave categories: restaurant, cafe,
+    // pharmacy, restaurant (2nd), cafe (2nd), … rather than all restaurants
+    // first.
+    const groups = new Map<string, Entry[]>();
+    for (const entry of entries) {
+      const key = `${entry.poi.type}/${entry.poi.subtype}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(entry);
+    }
 
-  const groupArrays = [...groups.values()];
-  const maxLen = Math.max(...groupArrays.map((g) => g.length));
-  const candidates: Entry[] = [];
-  for (let i = 0; i < maxLen; i++) {
-    for (const g of groupArrays) {
-      if (i < g.length) candidates.push(g[i]);
+    const groupArrays = [...groups.values()];
+    const maxLen = Math.max(...groupArrays.map((g) => g.length));
+    candidates = [];
+    for (let i = 0; i < maxLen; i++) {
+      for (const g of groupArrays) {
+        if (i < g.length) candidates.push(g[i]);
+      }
     }
   }
 

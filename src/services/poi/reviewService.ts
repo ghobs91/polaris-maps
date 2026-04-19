@@ -2,7 +2,13 @@ import { getGun } from '../gun/init';
 import { getDatabase } from '../database/init';
 import { sign, createSigningPayload } from '../identity/signing';
 import { getOrCreateKeypair } from '../identity/keypair';
-import type { Review } from '../../models/review';
+import { getBlueskySession } from '../atproto/atprotoAuthService';
+import {
+  publishReviewToAtproto,
+  fetchReviewsFromAtproto,
+  deleteReviewFromAtproto,
+} from '../atproto/atprotoReviewService';
+import type { Review, PlaceReviewContext } from '../../models/review';
 
 export async function getReviewsForPlace(placeUuid: string, limit: number = 50): Promise<Review[]> {
   const db = await getDatabase();
@@ -10,7 +16,32 @@ export async function getReviewsForPlace(placeUuid: string, limit: number = 50):
     'SELECT * FROM reviews WHERE poi_uuid = ? ORDER BY created_at DESC LIMIT ?',
     [placeUuid, limit],
   );
-  return rows.map(rowToReview);
+  const localReviews = rows.map(rowToReview);
+
+  // Fetch ATProto reviews (returns [] if no session — always safe)
+  const atprotoReviews = await fetchReviewsFromAtproto(placeUuid);
+
+  // Merge and deduplicate
+  const merged = new Map<string, Review>();
+  for (const r of localReviews) {
+    merged.set(r.id, r);
+  }
+
+  // Build set of locally-cached ATProto URIs for dedup
+  const localAtprotoUris = new Set(
+    localReviews.filter((r) => r.atprotoUri).map((r) => r.atprotoUri),
+  );
+
+  for (const r of atprotoReviews) {
+    if (r.atprotoUri && localAtprotoUris.has(r.atprotoUri)) continue;
+    if (!merged.has(r.id)) {
+      merged.set(r.id, r);
+    }
+  }
+
+  return Array.from(merged.values())
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit);
 }
 
 export async function getReviewByAuthor(
@@ -29,14 +60,86 @@ export async function createOrUpdateReview(
   placeUuid: string,
   rating: number,
   text?: string,
+  placeContext?: PlaceReviewContext,
 ): Promise<Review> {
   if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
     throw new Error('Rating must be an integer between 1 and 5');
   }
 
-  const keypair = await getOrCreateKeypair();
+  const session = await getBlueskySession();
   const now = Math.floor(Date.now() / 1000);
+  const db = await getDatabase();
+  const gun = getGun();
 
+  if (session) {
+    // ── Bluesky mode ──
+    const review: Review = {
+      id: `${placeUuid}:${session.did}`,
+      poiUuid: placeUuid,
+      authorPubkey: session.did,
+      authorHandle: session.handle,
+      rating,
+      text: text ?? undefined,
+      signature: '',
+      createdAt: now,
+      updatedAt: now,
+      source: 'atproto',
+    };
+
+    const context: PlaceReviewContext = placeContext ?? {
+      poiUuid: placeUuid,
+      source: 'polaris',
+    };
+
+    try {
+      const uri = await publishReviewToAtproto(review, context);
+      review.atprotoUri = uri;
+      review.id = uri;
+    } catch (err) {
+      console.warn('ATProto publish failed, continuing with local-only:', err);
+    }
+
+    (gun as any)
+      .get('polaris')
+      .get('reviews')
+      .get(placeUuid)
+      .get(session.did)
+      .put({
+        place_uuid: review.poiUuid,
+        author_pubkey: review.authorPubkey,
+        rating: review.rating,
+        text: review.text ?? null,
+        signature: review.signature,
+        created_at: review.createdAt,
+        updated_at: review.updatedAt,
+      });
+
+    await db.runAsync(
+      `INSERT OR REPLACE INTO reviews (
+        id, poi_uuid, author_pubkey, rating, text, signature, created_at, updated_at,
+        source, atproto_uri, author_handle
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        review.id,
+        review.poiUuid,
+        review.authorPubkey,
+        review.rating,
+        review.text ?? null,
+        review.signature,
+        review.createdAt,
+        review.updatedAt,
+        review.source,
+        review.atprotoUri ?? null,
+        review.authorHandle ?? null,
+      ],
+    );
+
+    await recomputeAvgRating(placeUuid);
+    return review;
+  }
+
+  // ── Anonymous mode (unchanged logic) ──
+  const keypair = await getOrCreateKeypair();
   const existing = await getReviewByAuthor(placeUuid, keypair.publicKey);
 
   const payload = createSigningPayload(placeUuid, keypair.publicKey, String(rating), String(now));
@@ -51,9 +154,9 @@ export async function createOrUpdateReview(
     signature,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    source: 'anonymous',
   };
 
-  const gun = getGun();
   (gun as any)
     .get('polaris')
     .get('reviews')
@@ -69,11 +172,11 @@ export async function createOrUpdateReview(
       updated_at: review.updatedAt,
     });
 
-  const db = await getDatabase();
   await db.runAsync(
     `INSERT OR REPLACE INTO reviews (
-      id, poi_uuid, author_pubkey, rating, text, signature, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, poi_uuid, author_pubkey, rating, text, signature, created_at, updated_at,
+      source, atproto_uri, author_handle
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       review.id,
       review.poiUuid,
@@ -83,25 +186,47 @@ export async function createOrUpdateReview(
       review.signature,
       review.createdAt,
       review.updatedAt,
+      review.source,
+      null,
+      null,
     ],
   );
 
   await recomputeAvgRating(placeUuid);
-
   return review;
 }
 
 export async function deleteReview(placeUuid: string): Promise<void> {
-  const keypair = await getOrCreateKeypair();
-
+  const session = await getBlueskySession();
   const gun = getGun();
-  (gun as any).get('polaris').get('reviews').get(placeUuid).get(keypair.publicKey).put(null);
-
   const db = await getDatabase();
-  await db.runAsync('DELETE FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?', [
-    placeUuid,
-    keypair.publicKey,
-  ]);
+
+  if (session) {
+    // Check for ATProto URI on the local record
+    const existing = await db.getFirstAsync<{ atproto_uri: string | null }>(
+      'SELECT atproto_uri FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?',
+      [placeUuid, session.did],
+    );
+    if (existing?.atproto_uri) {
+      try {
+        await deleteReviewFromAtproto(existing.atproto_uri);
+      } catch (err) {
+        console.warn('ATProto delete failed:', err);
+      }
+    }
+    (gun as any).get('polaris').get('reviews').get(placeUuid).get(session.did).put(null);
+    await db.runAsync('DELETE FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?', [
+      placeUuid,
+      session.did,
+    ]);
+  } else {
+    const keypair = await getOrCreateKeypair();
+    (gun as any).get('polaris').get('reviews').get(placeUuid).get(keypair.publicKey).put(null);
+    await db.runAsync('DELETE FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?', [
+      placeUuid,
+      keypair.publicKey,
+    ]);
+  }
 
   await recomputeAvgRating(placeUuid);
 }
@@ -136,6 +261,9 @@ interface ReviewRow {
   signature: string;
   created_at: number;
   updated_at: number;
+  source: string | null;
+  atproto_uri: string | null;
+  author_handle: string | null;
 }
 
 function rowToReview(row: ReviewRow): Review {
@@ -148,5 +276,8 @@ function rowToReview(row: ReviewRow): Review {
     signature: row.signature,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    source: (row.source as Review['source']) ?? 'anonymous',
+    atprotoUri: row.atproto_uri ?? undefined,
+    authorHandle: row.author_handle ?? undefined,
   };
 }

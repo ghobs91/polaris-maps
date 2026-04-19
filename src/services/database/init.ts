@@ -242,6 +242,19 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
 
   // Add geocoding_url to regions for per-region geocoding bundle URL
   await database.execAsync(`ALTER TABLE regions ADD COLUMN geocoding_url TEXT;`).catch(() => {});
+
+  // ATProto review columns
+  for (const ddl of [
+    `ALTER TABLE reviews ADD COLUMN source TEXT NOT NULL DEFAULT 'anonymous'`,
+    `ALTER TABLE reviews ADD COLUMN atproto_uri TEXT`,
+    `ALTER TABLE reviews ADD COLUMN author_handle TEXT`,
+  ]) {
+    try {
+      await database.execAsync(ddl);
+    } catch {
+      // Column already exists
+    }
+  }
 }
 
 export async function closeDatabase(): Promise<void> {

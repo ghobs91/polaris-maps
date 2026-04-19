@@ -36,6 +36,7 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
   const router = useRouter();
 
   const [show, setShow] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
   const translateY = useRef(new Animated.Value(DRAWER_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
@@ -87,6 +88,7 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
       }),
     ]).start(() => {
       setShow(false);
+      setShowDashboard(false);
       onClose();
     });
   }, [translateY, backdropOpacity, onClose]);
@@ -178,53 +180,107 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerText}>
-            <Text style={[styles.heading, { color: colors.text }]}>Node Dashboard</Text>
-            <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
+            <Text style={[styles.heading, { color: colors.text }]}>
+              {showDashboard ? 'Node Dashboard' : 'Menu'}
+            </Text>
+            {showDashboard && (
+              <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
+            )}
           </View>
-          <TouchableOpacity onPress={close} hitSlop={12} style={styles.closeBtn}>
-            <Ionicons name="close" size={22} color={colors.textSecondary} />
-          </TouchableOpacity>
+          {showDashboard ? (
+            <TouchableOpacity
+              onPress={() => setShowDashboard(false)}
+              hitSlop={12}
+              style={styles.closeBtn}
+            >
+              <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={close} hitSlop={12} style={styles.closeBtn}>
+              <Ionicons name="close" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Scrollable content */}
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          showsVerticalScrollIndicator={false}
-        >
-          <NodeDashboard
-            node={localNode}
-            activePeers={activePeers}
-            syncingFeeds={syncingFeeds}
-            isOnline={isOnline}
-          />
-
-          <View style={styles.actions}>
+        {showDashboard ? (
+          /* Scrollable dashboard content */
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            showsVerticalScrollIndicator={false}
+          >
+            <NodeDashboard
+              node={localNode}
+              activePeers={activePeers}
+              syncingFeeds={syncingFeeds}
+              isOnline={isOnline}
+            />
+          </ScrollView>
+        ) : (
+          /* Menu buttons */
+          <View style={styles.menuContent}>
             <TouchableOpacity
-              style={[styles.actionBtn, { borderColor: colors.border }]}
+              style={[styles.menuBtn, { backgroundColor: colors.surface }]}
               onPress={() => {
                 close();
                 router.push('/settings');
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name="settings-outline" size={16} color={colors.primary} />
-              <Text style={[styles.actionText, { color: colors.primary }]}>Settings</Text>
+              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+                <Ionicons name="settings-outline" size={22} color={colors.primary} />
+              </View>
+              <View style={styles.menuBtnText}>
+                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Settings</Text>
+                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
+                  Resources, theme, permissions
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
+
             <TouchableOpacity
-              style={[styles.actionBtn, { borderColor: colors.border }]}
+              style={[styles.menuBtn, { backgroundColor: colors.surface }]}
+              onPress={() => {
+                loadNodeData();
+                setShowDashboard(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+                <Ionicons name="pulse-outline" size={22} color={colors.primary} />
+              </View>
+              <View style={styles.menuBtnText}>
+                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Node Dashboard</Text>
+                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
+                  Peers, feeds, network status
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.menuBtn, { backgroundColor: colors.surface }]}
               onPress={() => {
                 close();
                 router.push('/regions');
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name="map-outline" size={16} color={colors.primary} />
-              <Text style={[styles.actionText, { color: colors.primary }]}>Manage Regions</Text>
+              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+                <Ionicons name="map-outline" size={22} color={colors.primary} />
+              </View>
+              <View style={styles.menuBtnText}>
+                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Manage Regions</Text>
+                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
+                  Download offline maps & routing
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
-        </ScrollView>
+        )}
       </Animated.View>
     </View>
   );
@@ -287,20 +343,37 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: spacing.lg,
   },
-  actions: {
-    marginTop: spacing.xl,
+  menuContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     gap: spacing.sm,
   },
-  actionBtn: {
+  menuBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm + 2,
+    gap: spacing.md,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(128,128,128,0.2)',
   },
-  actionText: {
+  menuIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuBtnText: {
+    flex: 1,
+  },
+  menuBtnTitle: {
     ...typography.body,
+    fontWeight: '600',
+  },
+  menuBtnSub: {
+    ...typography.caption,
+    marginTop: 1,
   },
 });

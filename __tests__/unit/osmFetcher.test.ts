@@ -198,4 +198,79 @@ describe('fetchOsmPois', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
+
+  it('parses office-tagged POIs', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        makeOverpassResponse([
+          {
+            type: 'node',
+            id: 50,
+            lat: 40.75,
+            lon: -73.99,
+            tags: { name: 'Acme Insurance', office: 'insurance' },
+          },
+        ]),
+    });
+
+    const result = await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 50,
+      name: 'Acme Insurance',
+      type: 'office',
+      subtype: 'insurance',
+    });
+  });
+
+  it('parses craft-tagged POIs', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        makeOverpassResponse([
+          {
+            type: 'node',
+            id: 51,
+            lat: 40.75,
+            lon: -73.99,
+            tags: { name: 'Quick Tailor', craft: 'tailor' },
+          },
+        ]),
+    });
+
+    const result = await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 51,
+      name: 'Quick Tailor',
+      type: 'craft',
+      subtype: 'tailor',
+    });
+  });
+
+  it('parses healthcare-tagged POIs', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        makeOverpassResponse([
+          {
+            type: 'node',
+            id: 52,
+            lat: 40.75,
+            lon: -73.99,
+            tags: { name: 'Dr. Smith DDS', healthcare: 'dentist' },
+          },
+        ]),
+    });
+
+    const result = await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: 52,
+      name: 'Dr. Smith DDS',
+      type: 'healthcare',
+      subtype: 'dentist',
+    });
+  });
 });

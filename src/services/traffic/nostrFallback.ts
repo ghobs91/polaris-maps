@@ -61,7 +61,6 @@ let probeCallbacks: ProbeCallback[] = [];
 let privateKey: Uint8Array | null = null;
 let publicKey: string | null = null;
 let disposed = false;
-let subscriptionCounter = 0;
 
 // ── Lifecycle ───────────────────────────────────────────────────────
 

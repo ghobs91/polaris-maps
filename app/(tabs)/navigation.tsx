@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
@@ -22,6 +22,7 @@ import {
 import { reroute } from '@/services/routing/routingService';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
@@ -38,6 +39,9 @@ export default function NavigationScreen() {
     isNavigating,
     stopNavigation,
     updateEta,
+    waypoints,
+    currentLegIndex,
+    advanceLeg,
   } = useNavigationStore();
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
@@ -71,6 +75,17 @@ export default function NavigationScreen() {
   // Live remaining distance to the end of the current maneuver step.
   // Updated every animation frame so the banner counts down continuously.
   const [distanceToTurn, setDistanceToTurn] = useState<number | null>(null);
+
+  // Camera follow state — breaks when user pans/zooms, restored by re-center button
+  const [followCamera, setFollowCamera] = useState(true);
+
+  const handleFollowCameraChange = useCallback((following: boolean) => {
+    setFollowCamera(following);
+  }, []);
+
+  const handleRecenter = useCallback(() => {
+    setFollowCamera(true);
+  }, []);
 
   // Initialize navPosition from the route start so the chevron appears immediately
   useEffect(() => {
@@ -369,7 +384,17 @@ export default function NavigationScreen() {
         navigationMode={isNavigating}
         navPosition={navPosition}
         navBearing={navBearing}
+        followCamera={followCamera}
+        onFollowCameraChange={handleFollowCameraChange}
       />
+
+      {/* Re-center button — shown when user has panned/zoomed away */}
+      {!followCamera && (
+        <TouchableOpacity style={styles.recenterBtn} onPress={handleRecenter} activeOpacity={0.85}>
+          <Ionicons name="navigate" size={16} color="#fff" />
+          <Text style={styles.recenterText}>Re-center</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Turn banner overlaid at top */}
       <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
@@ -382,6 +407,18 @@ export default function NavigationScreen() {
 
       {/* ETA / Exit bar — sits above the tab bar */}
       <View style={[styles.etaContainer, { bottom: tabBarHeight }]}>
+        {/* Multi-stop: show next stop name */}
+        {waypoints.length > 0 && currentLegIndex < waypoints.length && (
+          <View style={styles.nextStopBanner}>
+            <Ionicons name="flag-outline" size={14} color="#fff" />
+            <Text style={styles.nextStopText} numberOfLines={1}>
+              Next: {waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`}
+            </Text>
+            <TouchableOpacity onPress={advanceLeg} style={styles.skipStopBtn} activeOpacity={0.7}>
+              <Text style={styles.skipStopText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <EtaDisplay
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
@@ -408,4 +445,52 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
     emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
     emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
+    recenterBtn: {
+      position: 'absolute',
+      left: spacing.md,
+      bottom: 120,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(28,28,30,0.88)',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 22,
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 8,
+    },
+    recenterText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    nextStopBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(28,28,30,0.88)',
+      marginHorizontal: spacing.md,
+      marginBottom: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+    },
+    nextStopText: {
+      flex: 1,
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '500',
+    },
+    skipStopBtn: {
+      paddingVertical: 2,
+      paddingHorizontal: 8,
+    },
+    skipStopText: {
+      color: '#409CFF',
+      fontSize: 13,
+      fontWeight: '600',
+    },
   });

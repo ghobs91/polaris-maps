@@ -191,17 +191,6 @@ export function LocationActionPanel() {
     router.push('/(tabs)/navigation');
   }, [routePreview, startNavigation, setSelectedLocation, router]);
 
-  const handleAddPoi = useCallback(() => {
-    if (!selectedLocation) return;
-    router.push({
-      pathname: '/poi/edit',
-      params: {
-        lat: String(selectedLocation.lat),
-        lng: String(selectedLocation.lng),
-      },
-    });
-  }, [selectedLocation, router]);
-
   /** Handle transit directions */
   const handleTransitDirections = useCallback(async () => {
     if (!selectedLocation) return;
@@ -465,15 +454,6 @@ export function LocationActionPanel() {
             <Ionicons name="navigate" size={18} color={colors.white} />
           )}
           <Text style={styles.primaryBtnText}>{isRouting ? 'Routing…' : 'Directions'}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.secondaryBtn]}
-          onPress={handleAddPoi}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
-          <Text style={styles.secondaryBtnText}>Add POI</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -14,7 +14,7 @@ import {
   ActivityIndicator,
   Switch,
   PanResponder,
-  Modal,
+  InteractionManager,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +37,7 @@ import {
 import {
   getFavorites,
   setFavorite,
+  removeFavorite,
   type FavoriteLocation,
 } from '../../services/favorites/favoritesService';
 import { useMapStore } from '../../stores/mapStore';
@@ -56,13 +57,14 @@ import {
 import { extractTar } from '../../utils/archiveExtract';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
-import { SaveToListSheet } from '../places/SaveToListSheet';
 import { searchOtpStops, fetchOtpRoutesAtStop } from '../../services/transit/otpEndpointRegistry';
 import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
 import { shouldOfferParkAndRide, planParkAndRide } from '../../services/routing/parkAndRideService';
+import { decodePolyline } from '../../utils/polyline';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
+import { destinationToGeocodingResult, isSameDestination } from './floatingSearchPanelHelpers';
 
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
@@ -139,6 +141,7 @@ type PanelMode =
   | 'searching'
   | 'setting-home'
   | 'setting-work'
+  | 'setting-pin'
   | 'location'
   | 'route-preview'
   | 'transit-preview';
@@ -532,6 +535,8 @@ export function FloatingSearchPanel({
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
   const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
+  const routePreviewWaypoints = useNavigationStore((s) => s.routePreviewWaypoints);
+  const setRoutePreviewWaypoints = useNavigationStore((s) => s.setRoutePreviewWaypoints);
   const transitDirectionsActive = useTransitStore((s) => s.directionsActive);
 
   const [mode, setMode] = useState<PanelMode>('idle');
@@ -545,17 +550,23 @@ export function FloatingSearchPanel({
   const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
   const [isTransitRouting, setIsTransitRouting] = useState(false);
   const [recentsExpanded, setRecentsExpanded] = useState(false);
-  const [showSaveSheet, setShowSaveSheet] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
   const [showParkAndRide, setShowParkAndRide] = useState(false);
   const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
   const [showSearchThisArea, setShowSearchThisArea] = useState(false);
+  const [addingStop, setAddingStop] = useState(false);
+  const [stopSearchQuery, setStopSearchQuery] = useState('');
+  const [stopSearchResults, setStopSearchResults] = useState<UnifiedSearchResult[]>([]);
   const searchAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
+  const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
+  const setPendingStopSelection = useMapStore((s) => s.setPendingStopSelection);
+  const setStopSearchMarkers = useMapStore((s) => s.setStopSearchMarkers);
 
   const viewport = useMapStore((s) => s.viewport);
 
   const inputRef = useRef<TextInput>(null);
+  const stopSearchInputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   /** Incremented on every query change and on explicit clear; in-flight results
    * compare against this to detect staleness and discard themselves. */
@@ -921,6 +932,37 @@ export function FloatingSearchPanel({
         navigateToResult(result);
         return;
       }
+      if (mode === 'setting-pin') {
+        // Prompt user for a label name
+        Alert.prompt(
+          'Name this place',
+          result.entry.text,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Save',
+              onPress: (label?: string) => {
+                const trimmed = (label ?? '').trim();
+                if (!trimmed) return;
+                const fav: FavoriteLocation = {
+                  id: `pin-${Date.now()}`,
+                  kind: 'pin',
+                  label: trimmed,
+                  entry: result.entry,
+                };
+                setFavorite(fav);
+                setFavorites(getFavorites());
+                dismissSearch();
+                navigateToResult(result);
+              },
+            },
+          ],
+          'plain-text',
+          '',
+          'default',
+        );
+        return;
+      }
       // Normal search selection — show location detail view
       addSearchHistory(result);
       setHistory(getSearchHistory());
@@ -974,6 +1016,10 @@ export function FloatingSearchPanel({
       costingOverride?: 'auto' | 'pedestrian',
     ) => {
       const costing = costingOverride ?? 'auto';
+      setSelectedResult((prev) =>
+        isSameDestination(prev, dest) ? prev : destinationToGeocodingResult(dest),
+      );
+      setMode('location');
       setIsRouting(true);
       setRouteError(null);
       setUsedOnlineRouting(false);
@@ -1034,38 +1080,20 @@ export function FloatingSearchPanel({
           }
         }
 
-        const routes = await computeRoute(
-          [{ lat: pos.coords.latitude, lng: pos.coords.longitude }, dest],
-          costing,
-        );
+        const currentWaypoints = useNavigationStore.getState().routePreviewWaypoints;
+        const allPoints = [
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          ...currentWaypoints,
+          dest,
+        ];
+        const routes = await computeRoute(allPoints, costing);
         if (!routes.length) {
           setRouteError('No route found between these points');
           return;
         }
         if (!isRoutingInitialized()) setUsedOnlineRouting(true);
 
-        // Ensure selectedResult is populated so the route-preview panel renders
-        setSelectedResult((prev) =>
-          prev
-            ? prev
-            : {
-                entry: {
-                  id: 0,
-                  text: dest.name,
-                  type: 'place' as const,
-                  housenumber: null,
-                  street: null,
-                  city: null,
-                  state: null,
-                  postcode: null,
-                  country: null,
-                  lat: dest.lat,
-                  lng: dest.lng,
-                },
-                rank: 0,
-              },
-        );
-        setRoutePreview(routes[0], routes.slice(1), dest, costing);
+        setRoutePreview(routes[0], routes.slice(1), dest, costing, currentWaypoints);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
         setMode('route-preview');
 
@@ -1249,30 +1277,243 @@ export function FloatingSearchPanel({
     setTimeout(() => inputRef.current?.focus(), 80);
   }, [pendingSearchQuery, setPendingSearchQuery, handleQueryChange]);
 
+  // ── Waypoint management for multi-stop routing ──
+  const rerouteWithWaypoints = useCallback(
+    async (
+      waypoints: Array<{ lat: number; lng: number; name?: string }>,
+      destOverride?: { lat: number; lng: number; name: string },
+    ) => {
+      if (!selectedResult && !destOverride) return;
+      const dest = destOverride ?? {
+        lat: selectedResult!.entry.lat,
+        lng: selectedResult!.entry.lng,
+        name: selectedResult!.entry.text,
+      };
+      const costing = useNavigationStore.getState().routePreviewCosting;
+      setIsRouting(true);
+      setRouteError(null);
+      try {
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        const allPoints = [
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          ...waypoints,
+          dest,
+        ];
+        const routes = await computeRoute(allPoints, costing);
+        if (!routes.length) {
+          setRouteError('No route found');
+          return;
+        }
+        setRoutePreview(routes[0], routes.slice(1), dest, costing, waypoints);
+        if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setRouteError(msg || 'Could not compute route');
+      } finally {
+        setIsRouting(false);
+      }
+    },
+    [selectedResult, setRoutePreview, setFitBounds],
+  );
+
+  const handleAddStop = useCallback(() => {
+    setAddingStop(true);
+    setStopSearchQuery('');
+    setStopSearchResults([]);
+  }, []);
+
+  // Focus stop search input after layout settles (avoids lag from simultaneous re-render + keyboard)
+  useEffect(() => {
+    if (addingStop) {
+      const handle = InteractionManager.runAfterInteractions(() => {
+        stopSearchInputRef.current?.focus();
+      });
+      return () => handle.cancel();
+    }
+  }, [addingStop]);
+
+  // Clear stop search markers when add-stop flow ends
+  useEffect(() => {
+    if (!addingStop) {
+      setStopSearchMarkers([]);
+    }
+  }, [addingStop, setStopSearchMarkers]);
+
+  const handleStopSearchChange = useCallback((text: string) => {
+    setStopSearchQuery(text);
+    if (text.length < 2) {
+      setStopSearchResults([]);
+      return;
+    }
+    const vp = useMapStore.getState().viewport;
+    unifiedSearch(text, { lat: vp.lat, lng: vp.lng, zoom: vp.zoom, limit: 8 }).then(
+      (results) => {
+        // Sort by distance to route polyline if a route preview exists
+        const preview = useNavigationStore.getState().routePreview;
+        if (preview?.geometry) {
+          const routeCoords = decodePolyline(preview.geometry);
+          // Sample every Nth point for performance
+          const step = Math.max(1, Math.floor(routeCoords.length / 50));
+          const sampled = routeCoords.filter((_, i) => i % step === 0);
+          const withDist = results.map((r) => {
+            let minDist = Infinity;
+            for (const [lng, lat] of sampled) {
+              const dlat = r.lat - lat;
+              const dlng = r.lng - lng;
+              const d = dlat * dlat + dlng * dlng;
+              if (d < minDist) minDist = d;
+            }
+            return { r, minDist };
+          });
+          withDist.sort((a, b) => a.minDist - b.minDist);
+          setStopSearchResults(withDist.map((w) => w.r));
+        } else {
+          setStopSearchResults(results);
+        }
+      },
+      () => {},
+    );
+  }, []);
+
+  const handleStopSearchSubmit = useCallback(() => {
+    if (stopSearchResults.length > 0) {
+      setStopSearchMarkers(
+        stopSearchResults.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })),
+      );
+      setStopSearchResults([]);
+      Keyboard.dismiss();
+    }
+  }, [stopSearchResults, setStopSearchMarkers]);
+
+  const handleSelectStop = useCallback(
+    (result: UnifiedSearchResult) => {
+      const wp = {
+        lat: result.lat,
+        lng: result.lng,
+        name: result.name,
+        subtitle: result.subtitle || result.city || undefined,
+      };
+      const updated = [...routePreviewWaypoints, wp];
+      setRoutePreviewWaypoints(updated);
+      setAddingStop(false);
+      setStopSearchQuery('');
+      setStopSearchResults([]);
+      if (mode === 'route-preview') rerouteWithWaypoints(updated);
+    },
+    [routePreviewWaypoints, setRoutePreviewWaypoints, rerouteWithWaypoints, mode],
+  );
+
+  // Handle tap on a stop search marker on the map
+  useEffect(() => {
+    if (!pendingStopSelection || !addingStop) return;
+    handleSelectStop({
+      name: pendingStopSelection.name,
+      lat: pendingStopSelection.lat,
+      lng: pendingStopSelection.lng,
+      type: 'place',
+      score: 1,
+    } as UnifiedSearchResult);
+    setPendingStopSelection(null);
+  }, [pendingStopSelection, addingStop, handleSelectStop, setPendingStopSelection]);
+
+  const handleRemoveStop = useCallback(
+    (index: number) => {
+      const updated = routePreviewWaypoints.filter((_, i) => i !== index);
+      setRoutePreviewWaypoints(updated);
+      if (mode === 'route-preview') rerouteWithWaypoints(updated);
+    },
+    [routePreviewWaypoints, setRoutePreviewWaypoints, rerouteWithWaypoints, mode],
+  );
+
+  const handleMoveStop = useCallback(
+    (fromIndex: number, direction: 'up' | 'down') => {
+      const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+      if (toIndex < 0 || toIndex >= routePreviewWaypoints.length) return;
+      const updated = [...routePreviewWaypoints];
+      [updated[fromIndex], updated[toIndex]] = [updated[toIndex], updated[fromIndex]];
+      setRoutePreviewWaypoints(updated);
+      if (mode === 'route-preview') rerouteWithWaypoints(updated);
+    },
+    [routePreviewWaypoints, setRoutePreviewWaypoints, rerouteWithWaypoints, mode],
+  );
+
+  /**
+   * Reorder the unified list of ALL destinations (intermediate stops + final).
+   * If the final destination shifts position, selectedResult is updated accordingly.
+   */
+  const handleMoveAllDest = useCallback(
+    (fromIndex: number, direction: 'up' | 'down') => {
+      if (!selectedResult) return;
+      const finalEntry = selectedResult.entry;
+      const allDests = [
+        ...routePreviewWaypoints,
+        {
+          lat: finalEntry.lat,
+          lng: finalEntry.lng,
+          name: finalEntry.text,
+          subtitle: [finalEntry.city, finalEntry.state].filter(Boolean).join(', ') || undefined,
+        },
+      ];
+      const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+      if (toIndex < 0 || toIndex >= allDests.length) return;
+      const reordered = [...allDests];
+      [reordered[fromIndex], reordered[toIndex]] = [reordered[toIndex], reordered[fromIndex]];
+
+      const newWaypoints = reordered.slice(0, -1);
+      const newFinal = reordered[reordered.length - 1];
+
+      setRoutePreviewWaypoints(newWaypoints);
+
+      // If the final destination changed, update selectedResult and location pin
+      if (newFinal.lat !== finalEntry.lat || newFinal.lng !== finalEntry.lng) {
+        const newResult = destinationToGeocodingResult({
+          lat: newFinal.lat,
+          lng: newFinal.lng,
+          name: newFinal.name ?? '',
+        });
+        setSelectedResult(newResult);
+        setSelectedLocation({ lat: newFinal.lat, lng: newFinal.lng, name: newFinal.name });
+        if (mode === 'route-preview')
+          rerouteWithWaypoints(newWaypoints, {
+            lat: newFinal.lat,
+            lng: newFinal.lng,
+            name: newFinal.name ?? '',
+          });
+      } else {
+        if (mode === 'route-preview') rerouteWithWaypoints(newWaypoints);
+      }
+    },
+    [
+      selectedResult,
+      routePreviewWaypoints,
+      setRoutePreviewWaypoints,
+      setSelectedResult,
+      setSelectedLocation,
+      rerouteWithWaypoints,
+      mode,
+    ],
+  );
+
   const handleStartNavigation = useCallback(() => {
     if (!routePreview) return;
-    const { routePreviewAlternates, routePreviewDestination, routePreviewCosting } =
-      useNavigationStore.getState();
+    const {
+      routePreviewAlternates,
+      routePreviewDestination,
+      routePreviewCosting,
+      routePreviewWaypoints,
+    } = useNavigationStore.getState();
     startNavigation(
       routePreview,
       routePreviewAlternates,
       routePreviewDestination,
       routePreviewCosting,
+      routePreviewWaypoints,
     );
     dismissLocation();
     router.push('/(tabs)/navigation');
   }, [routePreview, startNavigation, dismissLocation, router]);
-
-  const handleAddPoi = useCallback(() => {
-    if (!selectedResult) return;
-    router.push({
-      pathname: '/poi/edit',
-      params: {
-        lat: String(selectedResult.entry.lat),
-        lng: String(selectedResult.entry.lng),
-      },
-    });
-  }, [selectedResult, router]);
 
   // ── Favorites shortcuts ──────────────────────
   const homeEntry = favorites.find((f) => f.kind === 'home');
@@ -1343,6 +1584,7 @@ export function FloatingSearchPanel({
   const placeholder = useMemo(() => {
     if (mode === 'setting-home') return 'Search for your home address…';
     if (mode === 'setting-work') return 'Search for your work address…';
+    if (mode === 'setting-pin') return 'Search for a place to save…';
     return 'Search';
   }, [mode]);
 
@@ -1467,12 +1709,106 @@ export function FloatingSearchPanel({
           </View>
 
           {/* Transport mode selector */}
-          <TransportModeSelector
-            selected={transportMode}
-            onSelect={handleTransportModeChange}
-            showParkAndRide={showParkAndRide}
-            isDark={isDark}
-          />
+          <View style={{ paddingHorizontal: spacing.md }}>
+            <TransportModeSelector
+              selected={transportMode}
+              onSelect={handleTransportModeChange}
+              showParkAndRide={showParkAndRide}
+              isDark={isDark}
+            />
+          </View>
+
+          {/* Waypoints / stops (add before computing directions) */}
+          <View style={styles.waypointSection}>
+            {routePreviewWaypoints.map((wp, i) => (
+              <View key={`wp-${i}`} style={styles.waypointRow}>
+                <View style={styles.waypointDot}>
+                  <Ionicons name="location" size={16} color={colors.primary} />
+                </View>
+                <Text style={[styles.waypointName, { color: textColor }]} numberOfLines={1}>
+                  {wp.name ?? `Stop ${i + 1}`}
+                </Text>
+                <View style={styles.waypointActions}>
+                  {i > 0 && (
+                    <TouchableOpacity onPress={() => handleMoveStop(i, 'up')} hitSlop={8}>
+                      <Ionicons name="chevron-up" size={18} color={subColor} />
+                    </TouchableOpacity>
+                  )}
+                  {i < routePreviewWaypoints.length - 1 && (
+                    <TouchableOpacity onPress={() => handleMoveStop(i, 'down')} hitSlop={8}>
+                      <Ionicons name="chevron-down" size={18} color={subColor} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => handleRemoveStop(i)} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={colors.error ?? '#FF3B30'} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+            {addingStop ? (
+              <View style={styles.stopSearchWrap}>
+                <TextInput
+                  style={[styles.stopSearchInput, { color: textColor, borderColor: colors.border }]}
+                  placeholder="Search for a stop…"
+                  placeholderTextColor={subColor}
+                  value={stopSearchQuery}
+                  onChangeText={handleStopSearchChange}
+                  ref={stopSearchInputRef}
+                  returnKeyType="search"
+                  onSubmitEditing={handleStopSearchSubmit}
+                />
+                {stopSearchResults.length > 0 && (
+                  <View style={[styles.stopResultsList, { borderColor: colors.border }]}>
+                    {stopSearchResults.slice(0, 5).map((r, i) => (
+                      <TouchableOpacity
+                        key={`stop-${i}`}
+                        style={styles.stopResultRow}
+                        onPress={() => handleSelectStop(r)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="location-outline" size={16} color={colors.primary} />
+                        <View style={styles.stopResultInfo}>
+                          <Text
+                            style={[styles.stopResultText, { color: textColor }]}
+                            numberOfLines={1}
+                          >
+                            {r.name}
+                          </Text>
+                          {r.subtitle || r.city ? (
+                            <Text
+                              style={[styles.stopResultSub, { color: subColor }]}
+                              numberOfLines={1}
+                            >
+                              {r.subtitle || r.city}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={() => {
+                    setAddingStop(false);
+                    setStopSearchQuery('');
+                    setStopSearchResults([]);
+                  }}
+                  style={styles.stopCancelBtn}
+                >
+                  <Text style={{ color: colors.primary, fontSize: 13 }}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.addStopBtn}
+                onPress={handleAddStop}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Text style={[styles.addStopText, { color: colors.primary }]}>Add stop</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Directions button */}
           <View style={st.locActions}>
@@ -1496,44 +1832,7 @@ export function FloatingSearchPanel({
           {routeError ? (
             <Text style={[st.routeError, { color: colors.error }]}>{routeError}</Text>
           ) : null}
-
-          {/* Secondary actions */}
-          <View style={st.locSecondaryRow}>
-            <TouchableOpacity
-              style={st.locSecondaryBtn}
-              onPress={handleAddPoi}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
-              <Text style={[st.locSecondaryLabel, { color: colors.primary }]}>Add POI</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={st.locSecondaryBtn}
-              onPress={() => setShowSaveSheet(true)}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="bookmark-outline" size={20} color={colors.primary} />
-              <Text style={[st.locSecondaryLabel, { color: colors.primary }]}>Save to list</Text>
-            </TouchableOpacity>
-          </View>
         </GlassPanel>
-
-        <Modal
-          visible={showSaveSheet}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setShowSaveSheet(false)}
-        >
-          <SaveToListSheet
-            placeName={entry.text}
-            lat={entry.lat}
-            lng={entry.lng}
-            address={
-              [entry.city, entry.state, entry.country].filter(Boolean).join(', ') || undefined
-            }
-            onDone={() => setShowSaveSheet(false)}
-          />
-        </Modal>
       </View>
     );
   }
@@ -1578,12 +1877,14 @@ export function FloatingSearchPanel({
           </View>
 
           {/* Transport mode selector */}
-          <TransportModeSelector
-            selected={transportMode}
-            onSelect={handleTransportModeChange}
-            showParkAndRide={showParkAndRide}
-            isDark={isDark}
-          />
+          <View style={{ paddingHorizontal: spacing.md }}>
+            <TransportModeSelector
+              selected={transportMode}
+              onSelect={handleTransportModeChange}
+              showParkAndRide={showParkAndRide}
+              isDark={isDark}
+            />
+          </View>
 
           {/* Park-and-ride summary */}
           {parkAndRideResult && transportMode === 'park-and-ride' && (
@@ -1618,32 +1919,144 @@ export function FloatingSearchPanel({
             </TouchableOpacity>
           )}
 
-          {/* Steps */}
-          <FlatList
-            data={routePreview.legs.flatMap((l) => l.maneuvers)}
-            keyExtractor={(_, i) => String(i)}
-            style={st.stepsList}
-            renderItem={({ item, index }) => (
-              <View style={st.stepRow}>
-                <View
-                  style={[
-                    st.stepBadge,
-                    { backgroundColor: isDark ? 'rgba(64,156,255,0.2)' : 'rgba(0,122,255,0.1)' },
-                  ]}
-                >
-                  <Text style={[st.stepBadgeText, { color: colors.primary }]}>{index + 1}</Text>
+          {/* Waypoints / stops */}
+          <View style={styles.waypointSection}>
+            {[
+              ...routePreviewWaypoints,
+              {
+                lat: entry.lat,
+                lng: entry.lng,
+                name: entry.text,
+                subtitle: [entry.city, entry.state].filter(Boolean).join(', ') || undefined,
+                isFinal: true,
+              },
+            ].map((wp, i, all) => (
+              <View key={`wp-${i}`} style={styles.waypointRow}>
+                <View style={styles.waypointDot}>
+                  <Ionicons name="location" size={16} color={colors.primary} />
                 </View>
-                <View style={st.stepContent}>
-                  <Text style={[st.stepInstruction, { color: textColor }]} numberOfLines={2}>
-                    {item.instruction}
+                <View style={styles.waypointLabel}>
+                  <Text style={[styles.waypointName, { color: textColor }]} numberOfLines={1}>
+                    {wp.name ?? `Stop ${i + 1}`}
                   </Text>
-                  <Text style={[st.stepDistance, { color: subColor }]}>
-                    {formatDistance(item.distanceMeters)}
-                  </Text>
+                  {wp.subtitle ? (
+                    <Text style={[styles.waypointSubtitle, { color: subColor }]} numberOfLines={1}>
+                      {wp.subtitle}
+                    </Text>
+                  ) : null}
+                </View>
+                <View style={styles.waypointActions}>
+                  {i > 0 && (
+                    <TouchableOpacity onPress={() => handleMoveAllDest(i, 'up')} hitSlop={8}>
+                      <Ionicons name="chevron-up" size={18} color={subColor} />
+                    </TouchableOpacity>
+                  )}
+                  {i < all.length - 1 && (
+                    <TouchableOpacity onPress={() => handleMoveAllDest(i, 'down')} hitSlop={8}>
+                      <Ionicons name="chevron-down" size={18} color={subColor} />
+                    </TouchableOpacity>
+                  )}
+                  {!('isFinal' in wp) && (
+                    <TouchableOpacity onPress={() => handleRemoveStop(i)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={18} color={colors.error ?? '#FF3B30'} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
+            ))}
+            {addingStop ? (
+              <View style={styles.stopSearchWrap}>
+                <TextInput
+                  style={[styles.stopSearchInput, { color: textColor, borderColor: colors.border }]}
+                  placeholder="Search for a stop…"
+                  placeholderTextColor={subColor}
+                  value={stopSearchQuery}
+                  onChangeText={handleStopSearchChange}
+                  ref={stopSearchInputRef}
+                  returnKeyType="search"
+                  onSubmitEditing={handleStopSearchSubmit}
+                />
+                {stopSearchResults.length > 0 && (
+                  <View style={[styles.stopResultsList, { borderColor: colors.border }]}>
+                    {stopSearchResults.slice(0, 5).map((r, i) => (
+                      <TouchableOpacity
+                        key={`stop-${i}`}
+                        style={styles.stopResultRow}
+                        onPress={() => handleSelectStop(r)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="location-outline" size={16} color={colors.primary} />
+                        <View style={styles.stopResultInfo}>
+                          <Text
+                            style={[styles.stopResultText, { color: textColor }]}
+                            numberOfLines={1}
+                          >
+                            {r.name}
+                          </Text>
+                          {r.subtitle || r.city ? (
+                            <Text
+                              style={[styles.stopResultSub, { color: subColor }]}
+                              numberOfLines={1}
+                            >
+                              {r.subtitle || r.city}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={() => {
+                    setAddingStop(false);
+                    setStopSearchQuery('');
+                    setStopSearchResults([]);
+                  }}
+                  style={styles.stopCancelBtn}
+                >
+                  <Text style={{ color: colors.primary, fontSize: 13 }}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.addStopBtn}
+                onPress={handleAddStop}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Text style={[styles.addStopText, { color: colors.primary }]}>Add stop</Text>
+              </TouchableOpacity>
             )}
-          />
+          </View>
+
+          {/* Steps — hidden while searching for a stop so the panel fits on screen */}
+          {!addingStop && (
+            <FlatList
+              data={routePreview.legs.flatMap((l) => l.maneuvers)}
+              keyExtractor={(_, i) => String(i)}
+              style={st.stepsList}
+              renderItem={({ item, index }) => (
+                <View style={st.stepRow}>
+                  <View
+                    style={[
+                      st.stepBadge,
+                      { backgroundColor: isDark ? 'rgba(64,156,255,0.2)' : 'rgba(0,122,255,0.1)' },
+                    ]}
+                  >
+                    <Text style={[st.stepBadgeText, { color: colors.primary }]}>{index + 1}</Text>
+                  </View>
+                  <View style={st.stepContent}>
+                    <Text style={[st.stepInstruction, { color: textColor }]} numberOfLines={2}>
+                      {item.instruction}
+                    </Text>
+                    <Text style={[st.stepDistance, { color: subColor }]}>
+                      {formatDistance(item.distanceMeters)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            />
+          )}
 
           {/* Navigate CTA */}
           <View style={st.locActions}>
@@ -1865,9 +2278,35 @@ export function FloatingSearchPanel({
                         clearRoutePreview();
                         setMode('location');
                       }}
+                      onLongPress={() => {
+                        Alert.alert('Remove Place', `Remove "${fav.label}"?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Remove',
+                            style: 'destructive',
+                            onPress: () => {
+                              removeFavorite(fav.id);
+                              setFavorites(getFavorites());
+                            },
+                          },
+                        ]);
+                      }}
                       isDark={isDark}
                     />
                   ))}
+                  <FavChip
+                    icon="add"
+                    label="Add Place"
+                    iconBg="#8E8E93"
+                    onPress={() => {
+                      setMode('setting-pin');
+                      setQuery('');
+                      setResults([]);
+                      Keyboard.dismiss();
+                      setTimeout(() => inputRef.current?.focus(), 150);
+                    }}
+                    isDark={isDark}
+                  />
                 </ScrollView>
 
                 {/* Recents — collapsed to 1 item by default */}
@@ -1911,17 +2350,20 @@ export function FloatingSearchPanel({
               </>
             )}
 
-            {/* Setting-home/work header when no results yet */}
-            {(mode === 'setting-home' || mode === 'setting-work') && !showResults && (
-              <Animated.View style={{ opacity: fadeAnim }}>
-                <View style={st.divider} />
-                <Text style={[st.settingHint, { color: subColor }]}>
-                  {mode === 'setting-home'
-                    ? 'Type your home address to save it'
-                    : 'Type your work address to save it'}
-                </Text>
-              </Animated.View>
-            )}
+            {/* Setting-home/work/pin header when no results yet */}
+            {(mode === 'setting-home' || mode === 'setting-work' || mode === 'setting-pin') &&
+              !showResults && (
+                <Animated.View style={{ opacity: fadeAnim }}>
+                  <View style={st.divider} />
+                  <Text style={[st.settingHint, { color: subColor }]}>
+                    {mode === 'setting-home'
+                      ? 'Type your home address to save it'
+                      : mode === 'setting-work'
+                        ? 'Type your work address to save it'
+                        : 'Search for a place, then give it a name'}
+                  </Text>
+                </Animated.View>
+              )}
           </>
         </GlassPanel>
       </View>
@@ -2349,5 +2791,85 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
     marginTop: 1,
+  },
+  // ── Waypoint / multi-stop styles ──
+  waypointSection: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  waypointRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    gap: 8,
+  },
+  waypointDot: {
+    width: 20,
+    alignItems: 'center',
+  },
+  waypointLabel: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  waypointName: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  waypointSubtitle: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  waypointActions: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+  },
+  addStopBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  addStopText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  stopSearchWrap: {
+    paddingVertical: 6,
+  },
+  stopSearchInput: {
+    fontSize: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+  },
+  stopResultsList: {
+    marginTop: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  stopResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  stopResultInfo: {
+    flex: 1,
+  },
+  stopResultText: {
+    fontSize: 14,
+  },
+  stopResultSub: {
+    fontSize: 12,
+    marginTop: 1,
+  },
+  stopCancelBtn: {
+    alignSelf: 'flex-end',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
 });

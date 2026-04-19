@@ -10,7 +10,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 20;
 
 /** Client-side timeout for Overpass API requests (ms). */
-const OVERPASS_TIMEOUT_MS = 5_000;
+const OVERPASS_TIMEOUT_MS = 15_000;
 
 interface CacheEntry {
   pois: OsmPoi[];
@@ -85,10 +85,16 @@ export async function fetchOsmPois(
   node["shop"]["name"](${bbox});
   node["tourism"]["name"](${bbox});
   node["leisure"]["name"](${bbox});
+  node["office"]["name"](${bbox});
+  node["craft"]["name"](${bbox});
+  node["healthcare"]["name"](${bbox});
   way["amenity"]["name"](${bbox});
   way["shop"]["name"](${bbox});
   way["tourism"]["name"](${bbox});
   way["leisure"]["name"](${bbox});
+  way["office"]["name"](${bbox});
+  way["craft"]["name"](${bbox});
+  way["healthcare"]["name"](${bbox});
 );
 out body center;`;
 
@@ -101,7 +107,19 @@ out body center;`;
     .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)
     .map((el) => {
       const t = el.tags as Record<string, string>;
-      const type = t.amenity ? 'amenity' : t.shop ? 'shop' : t.tourism ? 'tourism' : 'leisure';
+      const type = t.amenity
+        ? 'amenity'
+        : t.shop
+          ? 'shop'
+          : t.tourism
+            ? 'tourism'
+            : t.leisure
+              ? 'leisure'
+              : t.office
+                ? 'office'
+                : t.healthcare
+                  ? 'healthcare'
+                  : 'craft';
       const subtype = t[type] ?? 'place';
       // Nodes have lat/lon directly; ways have a `center` object from `out center`
       const lat: number = el.type === 'node' ? el.lat : el.center?.lat;

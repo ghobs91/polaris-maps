@@ -1,6 +1,5 @@
 import { Tabs } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { getDownloadedRegions } from '@/services/regions/regionRepository';
 import { RegionGate } from '@/components/regions';
@@ -51,9 +50,9 @@ export default function TabLayout() {
   return (
     <>
       <Tabs
+        tabBar={() => null}
         screenOptions={{
           headerShown: false,
-          tabBarStyle: styles.hidden,
         }}
       >
         <Tabs.Screen name="index" options={{ title: 'Map' }} />
@@ -74,7 +73,3 @@ export default function TabLayout() {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  hidden: { display: 'none' },
-});

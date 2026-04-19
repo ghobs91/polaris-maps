@@ -1,9 +1,19 @@
-import React, { useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  TouchableOpacity,
+  TextInput,
+} from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../src/stores/settingsStore';
+import { useAtprotoAuthStore } from '../../src/stores/atprotoAuthStore';
 import { syncResourceLimits } from '../../src/services/sync/peerService';
-import { ErrorBoundary } from '../../src/components/common';
-import { spacing, typography } from '../../src/constants/theme';
+import { ErrorBoundary, Button } from '../../src/components/common';
+import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 
 function SliderRow({
@@ -45,6 +55,13 @@ export default function SettingsScreen() {
   } = useSettingsStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const bskySession = useAtprotoAuthStore((s) => s.session);
+  const bskyError = useAtprotoAuthStore((s) => s.error);
+  const bskyIsLoading = useAtprotoAuthStore((s) => s.isLoading);
+  const bskyLogin = useAtprotoAuthStore((s) => s.login);
+  const bskyLogout = useAtprotoAuthStore((s) => s.logout);
+  const [bskyHandle, setBskyHandle] = useState('');
+  const [bskyPassword, setBskyPassword] = useState('');
 
   const handleStorageChange = useCallback(
     (value: number) => {
@@ -159,6 +176,57 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Privacy</Text>
 
+          {/* Bluesky Account */}
+          {bskySession ? (
+            <View style={styles.bskySection}>
+              <View style={styles.bskyLoggedInRow}>
+                <MaterialCommunityIcons name="butterfly" size={20} color="#0085FF" />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.toggleLabel, { fontWeight: '700' }]}>
+                    @{bskySession.handle}
+                  </Text>
+                  <Text style={styles.bskyCaption}>{bskySession.did}</Text>
+                </View>
+              </View>
+              <Text style={styles.bskyBody}>Your reviews are stored on your Bluesky PDS.</Text>
+              <Button title="Disconnect" variant="ghost" onPress={bskyLogout} />
+            </View>
+          ) : (
+            <View style={styles.bskySection}>
+              <Text style={[styles.toggleLabel, { fontWeight: '600' }]}>Connect Bluesky</Text>
+              <Text style={styles.bskyBody}>
+                Sign in to save reviews to your Bluesky account. Reviews are stored on your own PDS
+                and remain yours. You can still leave anonymous reviews without connecting.
+              </Text>
+              <TextInput
+                style={styles.bskyInput}
+                value={bskyHandle}
+                onChangeText={setBskyHandle}
+                placeholder="you.bsky.social"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TextInput
+                style={styles.bskyInput}
+                value={bskyPassword}
+                onChangeText={setBskyPassword}
+                placeholder="App password"
+                placeholderTextColor={colors.textSecondary}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {bskyError ? <Text style={styles.bskyError}>{bskyError}</Text> : null}
+              <Button
+                title={bskyIsLoading ? 'Connecting…' : 'Connect Bluesky'}
+                variant="primary"
+                onPress={() => bskyLogin(bskyHandle.trim(), bskyPassword)}
+                disabled={bskyIsLoading || !bskyHandle.trim() || !bskyPassword}
+              />
+            </View>
+          )}
+
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>Location Access</Text>
             <Switch
@@ -257,4 +325,34 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       borderBottomColor: colors.border,
     },
     toggleLabel: { ...typography.body, color: colors.text },
+    bskySection: {
+      marginBottom: spacing.lg,
+      gap: spacing.sm,
+    },
+    bskyLoggedInRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    bskyCaption: {
+      ...typography.caption,
+      color: colors.textSecondary,
+    },
+    bskyBody: {
+      ...typography.bodySmall,
+      color: colors.textSecondary,
+    },
+    bskyInput: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      ...typography.body,
+      color: colors.text,
+      backgroundColor: colors.surface,
+    },
+    bskyError: {
+      ...typography.caption,
+      color: colors.error,
+    },
   });

@@ -5,9 +5,14 @@ import { InteractionManager } from 'react-native';
 import { ConnectivityBanner } from '@/components/common';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
+import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 
 function RootLayoutInner() {
   const { isDark } = useTheme();
+
+  useEffect(() => {
+    useAtprotoAuthStore.getState().restore();
+  }, []);
 
   useEffect(() => {
     // Defer CarPlay init until after the initial render & layout pass completes.
