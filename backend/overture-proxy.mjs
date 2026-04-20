@@ -11,8 +11,7 @@ const PORT = parseInt(process.env.PORT ?? '4100', 10);
 
 // Overture release used by the project (kept in sync with config.ts)
 const OVERTURE_RELEASE = '2026-02-18.0';
-const OVERTURE_S3 =
-  `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*`;
+const OVERTURE_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*`;
 
 // ---------------------------------------------------------------------------
 // DuckDB singleton with httpfs + spatial
@@ -113,7 +112,11 @@ async function queryPlaces(west, south, east, north, limit) {
 function tryParse(val) {
   if (val == null) return null;
   if (typeof val === 'object') return val;
-  try { return JSON.parse(val); } catch { return val; }
+  try {
+    return JSON.parse(val);
+  } catch {
+    return val;
+  }
 }
 
 // ---------------------------------------------------------------------------

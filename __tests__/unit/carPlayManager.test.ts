@@ -205,6 +205,7 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
       expect.objectContaining({ isNavigating: false }),
     );
+    expect(NativeModules.PolarisCarPlay.endNavigation).toHaveBeenCalled();
   });
 
   it('pushes search results to CarPlay', async () => {

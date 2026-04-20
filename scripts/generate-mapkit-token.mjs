@@ -28,7 +28,13 @@ function base64url(input) {
     .replace(/\//g, '_');
 }
 
-export function buildMapkitJwt({ teamId, keyId, privateKeyPem, now = Math.floor(Date.now() / 1000), ttlDays = 30 }) {
+export function buildMapkitJwt({
+  teamId,
+  keyId,
+  privateKeyPem,
+  now = Math.floor(Date.now() / 1000),
+  ttlDays = 30,
+}) {
   if (!teamId) throw new Error('APPLE_TEAM_ID is required');
   if (!keyId) throw new Error('APPLE_KEY_ID is required');
   if (!privateKeyPem) throw new Error('Apple private key is required');

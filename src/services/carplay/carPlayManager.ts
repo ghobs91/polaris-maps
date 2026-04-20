@@ -79,6 +79,7 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
 
   if (!state.isNavigating || !state.activeRoute || !state.currentManeuver) {
     CarPlay.updateNavigation({ isNavigating: false } as any);
+    CarPlay.endNavigation();
     return;
   }
 

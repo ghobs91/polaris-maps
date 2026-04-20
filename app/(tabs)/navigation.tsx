@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -26,7 +25,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
   const router = useRouter();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -405,8 +403,8 @@ export default function NavigationScreen() {
         />
       </View>
 
-      {/* ETA / Exit bar — sits above the tab bar */}
-      <View style={[styles.etaContainer, { bottom: tabBarHeight }]}>
+      {/* ETA / Exit bar — flush to screen bottom, padded for safe area */}
+      <View style={[styles.etaContainer, { bottom: 0 }]}>
         {/* Multi-stop: show next stop name */}
         {waypoints.length > 0 && currentLegIndex < waypoints.length && (
           <View style={styles.nextStopBanner}>
@@ -423,6 +421,7 @@ export default function NavigationScreen() {
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           onExit={stopNavigation}
+          safeAreaBottom={insets.bottom}
         />
       </View>
     </View>

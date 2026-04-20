@@ -10,6 +10,7 @@ interface EtaDisplayProps {
   onExit?: () => void;
   onPreview?: () => void;
   isPreviewMode?: boolean;
+  safeAreaBottom?: number;
 }
 
 export function EtaDisplay({
@@ -18,6 +19,7 @@ export function EtaDisplay({
   onExit,
   onPreview,
   isPreviewMode,
+  safeAreaBottom = 0,
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
@@ -41,7 +43,7 @@ export function EtaDisplay({
   const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: 16 + safeAreaBottom }]}>
       <View style={styles.info}>
         <Text style={styles.eta}>{formatDuration(displayEta)}</Text>
         <Text style={styles.sub}>
@@ -88,7 +90,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 16,
   },
   info: {
     flex: 1,
