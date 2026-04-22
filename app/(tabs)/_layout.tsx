@@ -4,10 +4,10 @@ import * as Location from 'expo-location';
 import { getDownloadedRegions } from '@/services/regions/regionRepository';
 import { RegionGate } from '@/components/regions';
 
-type GateState = 'checking' | 'needed' | 'clear';
+type GateState = 'needed' | 'clear';
 
 export default function TabLayout() {
-  const [gate, setGate] = useState<GateState>('checking');
+  const [gate, setGate] = useState<GateState>('clear');
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
@@ -17,26 +17,33 @@ export default function TabLayout() {
         // Fast path: if any region has been downloaded, skip the gate entirely.
         // This avoids a slow GPS lookup on every app resume and prevents the
         // gate from flashing when returning from background.
-        const downloaded = await getDownloadedRegions();
+        const downloaded = await Promise.race([
+          getDownloadedRegions(),
+          new Promise<[]>((resolve) => setTimeout(() => resolve([]), 2000)),
+        ]);
         if (downloaded.length > 0) {
           if (!cancelled) setGate('clear');
           return;
         }
 
-        // No downloaded regions — fall through to the GPS-based check to
-        // suggest a region for the user to download.
+        // No downloaded regions. Show the gate immediately, then try to enrich
+        // it with a suggested nearby region when location arrives.
+        if (!cancelled) setGate('needed');
+
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          if (!cancelled) setGate('clear');
           return;
         }
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+
+        const loc = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+        ]);
+        if (!loc) return;
+
         if (cancelled) return;
         const { latitude: lat, longitude: lng } = loc.coords;
         setUserCoords({ lat, lng });
-        setGate('needed');
       } catch {
         // Fail open — don't block the user if the check itself errors.
         if (!cancelled) setGate('clear');
@@ -64,7 +71,7 @@ export default function TabLayout() {
 
       {gate !== 'clear' && (
         <RegionGate
-          checking={gate === 'checking'}
+          checking={false}
           userLat={userCoords?.lat}
           userLng={userCoords?.lng}
           onDismiss={() => setGate('clear')}
