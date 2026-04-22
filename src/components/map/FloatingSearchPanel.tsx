@@ -66,6 +66,10 @@ import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 import { destinationToGeocodingResult, isSameDestination } from './floatingSearchPanelHelpers';
 
+const IOS_MAJOR_VERSION =
+  Platform.OS === 'ios' ? Number.parseInt(String(Platform.Version), 10) || 0 : 0;
+const USE_NATIVE_BLUR = Platform.OS === 'ios' && IOS_MAJOR_VERSION < 26;
+
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
@@ -282,12 +286,13 @@ function MapControlsColumn({
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
   const blurTint = 'systemThickMaterialDark' as const;
+  const fallbackBackground = isDark ? 'rgba(28,28,30,0.94)' : 'rgba(255,255,255,0.96)';
 
   return (
     <View style={ctrlStyles.column}>
       {/* Layers popup — floats above the buttons */}
       {layersOpen &&
-        (Platform.OS === 'ios' ? (
+        (USE_NATIVE_BLUR ? (
           <BlurView intensity={60} tint={blurTint} style={ctrlStyles.layersCard}>
             <LayersCardContent
               trafficVisible={trafficLayerVisible}
@@ -298,12 +303,7 @@ function MapControlsColumn({
             />
           </BlurView>
         ) : (
-          <View
-            style={[
-              ctrlStyles.layersCard,
-              { backgroundColor: isDark ? 'rgba(28,28,30,0.96)' : 'rgba(255,255,255,0.96)' },
-            ]}
-          >
+          <View style={[ctrlStyles.layersCard, { backgroundColor: fallbackBackground }]}>
             <LayersCardContent
               trafficVisible={trafficLayerVisible}
               onTrafficToggle={setTrafficLayerVisible}
@@ -315,19 +315,14 @@ function MapControlsColumn({
         ))}
 
       {/* Stacked glass buttons */}
-      {Platform.OS === 'ios' ? (
+      {USE_NATIVE_BLUR ? (
         <BlurView intensity={60} tint={blurTint} style={ctrlStyles.buttonsContainer}>
           <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
           <View style={ctrlStyles.separator} />
           <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
         </BlurView>
       ) : (
-        <View
-          style={[
-            ctrlStyles.buttonsContainer,
-            { backgroundColor: isDark ? 'rgba(28,28,30,0.93)' : 'rgba(255,255,255,0.93)' },
-          ]}
-        >
+        <View style={[ctrlStyles.buttonsContainer, { backgroundColor: fallbackBackground }]}>
           <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
           <View style={ctrlStyles.separator} />
           <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
@@ -430,13 +425,13 @@ const ctrlStyles = StyleSheet.create({
 function GlassPanel({
   children,
   style,
-  isDark: _isDark,
+  isDark,
 }: {
   children: React.ReactNode;
   style?: object;
   isDark: boolean;
 }) {
-  if (Platform.OS === 'ios') {
+  if (USE_NATIVE_BLUR) {
     return (
       <BlurView intensity={78} tint="systemThickMaterialDark" style={[styles.glassPanel, style]}>
         {children}
@@ -448,7 +443,7 @@ function GlassPanel({
       style={[
         styles.glassPanel,
         {
-          backgroundColor: 'rgba(28,28,30,0.93)',
+          backgroundColor: isDark ? 'rgba(28,28,30,0.93)' : 'rgba(255,255,255,0.96)',
         },
         style,
       ]}
