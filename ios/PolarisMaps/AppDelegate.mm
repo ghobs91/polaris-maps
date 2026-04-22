@@ -3,11 +3,46 @@
 #import <React/RCTBundleURLProvider.h>
 #import <React/RCTLinkingManager.h>
 
+@interface PhoneSceneDelegate : UIResponder <UIWindowSceneDelegate>
+
+@property (nonatomic, strong) UIWindow *window;
+
+@end
+
+@implementation PhoneSceneDelegate
+
+- (void)scene:(UIScene *)scene
+    willConnectToSession:(UISceneSession *)session
+                 options:(UISceneConnectionOptions *)connectionOptions API_AVAILABLE(ios(13.0))
+{
+  if (![scene isKindOfClass:[UIWindowScene class]]) {
+    return;
+  }
+
+  AppDelegate *appDelegate = (AppDelegate *)UIApplication.sharedApplication.delegate;
+  if (appDelegate == nil || appDelegate.rootViewFactory == nil || appDelegate.moduleName == nil) {
+    return;
+  }
+
+  UIView *rootView = [appDelegate.rootViewFactory viewWithModuleName:appDelegate.moduleName
+                                                   initialProperties:appDelegate.initialProps
+                                                       launchOptions:nil];
+  UIViewController *rootViewController = [appDelegate createRootViewController];
+  [appDelegate setRootView:rootView toRootViewController:rootViewController];
+
+  self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+  self.window.rootViewController = rootViewController;
+  [self.window makeKeyAndVisible];
+}
+
+@end
+
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
   self.moduleName = @"main";
+  self.automaticallyLoadReactNativeWindow = NO;
 
   // You can add your custom initial props in the dictionary below.
   // They will be passed down to the ViewController used by React Native.

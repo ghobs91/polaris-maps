@@ -13,6 +13,8 @@ final class PolarisCarPlay: RCTEventEmitter {
   /// Shared instance set when RN creates the module. Used by the scene delegate
   /// to forward CarPlay lifecycle events.
   static weak var shared: PolarisCarPlay?
+  private static var pendingInterfaceController: CPInterfaceController?
+  private static var isSceneConnected = false
 
   // MARK: - State
 
@@ -22,12 +24,14 @@ final class PolarisCarPlay: RCTEventEmitter {
   private var navigationSession: CPNavigationSession?
   private var searchTemplate: CPSearchTemplate?
   private var currentTrip: CPTrip?
+  private var pendingSearchCompletion: (([CPListItem]) -> Void)?
 
   // MARK: - RCTEventEmitter overrides
 
   override init() {
     super.init()
     PolarisCarPlay.shared = self
+    attachPendingSceneIfNeeded()
   }
 
   override static func moduleName() -> String! {
@@ -47,9 +51,23 @@ final class PolarisCarPlay: RCTEventEmitter {
     ]
   }
 
+  static func sceneDidConnect(interfaceController: CPInterfaceController, window: CPWindow) {
+    pendingInterfaceController = interfaceController
+    isSceneConnected = true
+    shared?.didConnect(interfaceController: interfaceController)
+  }
+
+  static func sceneDidDisconnect(interfaceController: CPInterfaceController) {
+    pendingInterfaceController = nil
+    isSceneConnected = false
+    shared?.didDisconnect(interfaceController: interfaceController)
+  }
+
   // MARK: - Scene delegate callbacks (called by CarPlaySceneDelegate)
 
-  func didConnect(interfaceController: CPInterfaceController, window: CPWindow) {
+  func didConnect(interfaceController: CPInterfaceController) {
+    Self.pendingInterfaceController = interfaceController
+    Self.isSceneConnected = true
     self.interfaceController = interfaceController
     self.carPlayConnected = true
 
@@ -71,6 +89,10 @@ final class PolarisCarPlay: RCTEventEmitter {
 
   func didDisconnect(interfaceController: CPInterfaceController) {
     endActiveNavigation()
+    Self.pendingInterfaceController = nil
+    Self.isSceneConnected = false
+    pendingSearchCompletion?([])
+    pendingSearchCompletion = nil
     self.interfaceController = nil
     self.mapTemplate = nil
     self.carPlayConnected = false
@@ -83,6 +105,7 @@ final class PolarisCarPlay: RCTEventEmitter {
   private func presentSearch() {
     let searchTemplate = CPSearchTemplate()
     searchTemplate.delegate = self
+    pendingSearchCompletion = nil
     self.searchTemplate = searchTemplate
 
     interfaceController?.pushTemplate(searchTemplate, animated: true, completion: nil)
@@ -122,9 +145,7 @@ final class PolarisCarPlay: RCTEventEmitter {
         distanceRemaining: Measurement(value: remainingDistance, unit: .meters),
         timeRemaining: etaSeconds
       )
-      if let trip = self.currentTrip {
-        session.updateEstimates(estimates, for: trip)
-      }
+      session.updateTravelEstimates(estimates, forManeuver: maneuver)
 
       session.upcomingManeuvers = [maneuver]
 
@@ -235,7 +256,8 @@ final class PolarisCarPlay: RCTEventEmitter {
         listItems.append(item)
       }
 
-      searchTemplate.updateSections([CPListSection(items: listItems)])
+      self.pendingSearchCompletion?(listItems)
+      self.pendingSearchCompletion = nil
     }
   }
 
@@ -245,10 +267,25 @@ final class PolarisCarPlay: RCTEventEmitter {
 
   @objc func isConnected(_ resolve: @escaping RCTPromiseResolveBlock,
                           reject: @escaping RCTPromiseRejectBlock) {
-    resolve(carPlayConnected)
+    resolve(Self.isSceneConnected)
   }
 
   // MARK: - Private helpers
+
+  private func attachPendingSceneIfNeeded() {
+    guard let interfaceController = Self.pendingInterfaceController else { return }
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self,
+            self.interfaceController == nil,
+            Self.isSceneConnected,
+            Self.pendingInterfaceController === interfaceController else {
+        return
+      }
+
+      self.didConnect(interfaceController: interfaceController)
+    }
+  }
 
   private func endActiveNavigation() {
     navigationSession?.finishTrip()
@@ -293,10 +330,11 @@ extension PolarisCarPlay: CPSearchTemplateDelegate {
   func searchTemplate(_ searchTemplate: CPSearchTemplate,
                       updatedSearchText searchText: String,
                       completionHandler: @escaping ([CPListItem]) -> Void) {
+    pendingSearchCompletion?([])
+    pendingSearchCompletion = completionHandler
+
     // Forward search to JS side; results come back via pushSearchResults
     sendEvent(withName: "searchQuery", body: ["query": searchText])
-    // Return empty immediately — JS will call pushSearchResults asynchronously
-    completionHandler([])
   }
 
   func searchTemplate(_ searchTemplate: CPSearchTemplate,

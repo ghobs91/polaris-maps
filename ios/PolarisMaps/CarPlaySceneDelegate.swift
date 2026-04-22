@@ -16,7 +16,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     to window: CPWindow
   ) {
     self.interfaceController = interfaceController
-    PolarisCarPlay.shared?.didConnect(interfaceController: interfaceController, window: window)
+    PolarisCarPlay.sceneDidConnect(interfaceController: interfaceController, window: window)
   }
 
   func templateApplicationScene(
@@ -24,7 +24,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     didDisconnect interfaceController: CPInterfaceController,
     from window: CPWindow
   ) {
-    PolarisCarPlay.shared?.didDisconnect(interfaceController: interfaceController)
+    PolarisCarPlay.sceneDidDisconnect(interfaceController: interfaceController)
     self.interfaceController = nil
   }
 }
