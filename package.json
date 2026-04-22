@@ -7,6 +7,7 @@
     "start": "expo start",
     "ios": "expo run:ios",
     "android": "expo run:android",
+    "carplay:sim": "sh scripts/install-carplay-simulator.sh",
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:integration": "jest --config jest.integration.config.js",
