@@ -5,6 +5,7 @@ import React, {
   useImperativeHandle,
   forwardRef,
   useMemo,
+  useState,
 } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Dimensions } from 'react-native';
@@ -15,9 +16,6 @@ import { getPlacesInBounds } from '../../services/poi/poiService';
 import { fetchOverturePlaces } from '../../services/poi/overtureFetcher';
 import { fetchAppleMapsPois } from '../../services/poi/mapkitFetcher';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
-import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
-import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
-import { SATELLITE_STYLE_JSON } from '../../constants/satelliteStyle';
 import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
@@ -25,6 +23,7 @@ import { TrafficRouteLayer } from './TrafficRouteLayer';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
+import { resolveMapStyle } from './mapStyleResolver';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 // Suppress noisy MapLibre Native font-loading timeouts (e.g. missing glyph
@@ -150,6 +149,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     },
   }));
   const { isDark } = useTheme();
+  const [styleLoadFailed, setStyleLoadFailed] = useState(false);
   const viewport = useMapStore((s) => s.viewport);
   const mapStylePref = useMapStore((s) => s.mapStyle);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
@@ -512,13 +512,22 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Resolve the map style based on user preference and dark mode
   const resolvedMapStyle = useMemo(
     () =>
-      mapStylePref === 'satellite'
-        ? SATELLITE_STYLE_JSON
-        : isDark
-          ? DARK_MAP_STYLE_JSON
-          : OPENFREEMAP_STYLE_URL,
-    [mapStylePref, isDark],
+      resolveMapStyle({
+        mapStylePref,
+        isDark,
+        styleLoadFailed,
+      }),
+    [mapStylePref, isDark, styleLoadFailed],
   );
+
+  const handleMapLoadFail = useCallback(() => {
+    if (!styleLoadFailed) {
+      setStyleLoadFailed(true);
+      if (__DEV__) {
+        console.warn('[Map] Style load failed, switching to compatibility raster style');
+      }
+    }
+  }, [styleLoadFailed]);
 
   return (
     <View style={styles.container}>
@@ -526,6 +535,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         ref={mapRef}
         style={styles.map}
         mapStyle={resolvedMapStyle}
+        onDidFailLoadingMap={handleMapLoadFail}
         onPress={handlePress}
         onLongPress={handleLongPress}
         onRegionIsChanging={handleRegionIsChanging}
