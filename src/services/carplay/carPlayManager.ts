@@ -37,6 +37,13 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('searchQuery', onSearchQuery),
     CarPlay.emitter.addListener('searchResultSelected', onSearchResultSelected),
   ];
+
+  void CarPlay.isConnected()
+    .then((isConnected) => {
+      if (!initialized || connected || !isConnected) return;
+      onConnected();
+    })
+    .catch(() => {});
 }
 
 /** Tear down all listeners. Primarily for tests. */
@@ -59,9 +66,12 @@ export function isCarPlayConnected(): boolean {
 // ---------------------------------------------------------------------------
 
 function onConnected() {
+  if (connected) return;
+
   connected = true;
 
   // Sync current navigation state whenever it changes
+  navUnsubscribe?.();
   navUnsubscribe = useNavigationStore.subscribe(syncNavigationState);
 
   // If navigation is already active, push initial state

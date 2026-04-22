@@ -22,6 +22,14 @@ jest.mock('react-native', () => {
   };
 });
 jest.mock('expo-sqlite', () => ({}));
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
+jest.mock('expo-crypto', () => ({
+  randomUUID: jest.fn(() => '1234567890abcdef1234567890abcdef'),
+}));
 jest.mock('react-native-mmkv', () => ({
   MMKV: jest.fn().mockImplementation(() => ({
     getString: jest.fn(),
@@ -139,6 +147,7 @@ describe('CarPlayManager', () => {
     teardownCarPlay();
     useNavigationStore.getState().stopNavigation();
     eventListeners = {};
+    NativeModules.PolarisCarPlay.isConnected.mockResolvedValue(false);
 
     // Spy on addListener to capture event handlers registered by initCarPlay
     jest.spyOn(carPlayEmitter, 'addListener').mockImplementation((event: string, handler: any) => {
@@ -178,6 +187,27 @@ describe('CarPlayManager', () => {
     expect(isCarPlayConnected()).toBe(true);
     fireEvent('carPlayDisconnected');
     expect(isCarPlayConnected()).toBe(false);
+  });
+
+  it('hydrates an already-connected native CarPlay session during init', async () => {
+    const route = makeRoute();
+    NativeModules.PolarisCarPlay.isConnected.mockResolvedValue(true);
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+
+    initCarPlay();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(NativeModules.PolarisCarPlay.isConnected).toHaveBeenCalled();
+    expect(isCarPlayConnected()).toBe(true);
+    expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isNavigating: true,
+        instruction: 'Head north on Main St',
+        maneuverType: 'start',
+      }),
+    );
   });
 
   it('syncs active navigation state to CarPlay on connect', () => {
