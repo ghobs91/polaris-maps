@@ -52,6 +52,53 @@ index 7511c45dd0fb2e9a01312badab075d9890087963..5fe44de6205f4a38095fa10525f0794c
    }
  
    if (_cameraStop.pitch != nil) {
+diff --git a/ios/MLRN/MLRNMapView.m b/ios/MLRN/MLRNMapView.m
+index 0c4e8b6c57e33a6c3f6a4c6af6d8fd91a69dcf94..2e12a5742f90e8ee1f49f7f1ea2f9dd2829e3e31 100644
+--- a/ios/MLRN/MLRNMapView.m
++++ b/ios/MLRN/MLRNMapView.m
+@@ -470,13 +470,11 @@ - (MLRNSource *)getTouchableSourceWithHighestZIndex:(NSArray<MLRNSource *> *)to
+ }
+ 
+ - (NSURL *)_getStyleURLFromKey:(NSString *)mapStyle {
+-  NSURL *url = [NSURL URLWithString:mapStyle];
+-  if (url) {
+-    return url;
+-  } else if (RCTJSONParse(mapStyle, nil)) {
++  if (RCTJSONParse(mapStyle, nil)) {
+       return [MLRNUtils styleURLFromStyleJSON:mapStyle];
+    }
+-  return url;
++
++  return [NSURL URLWithString:mapStyle];
+ }
+ 
+ - (void)_removeAllSourcesFromMap {
+diff --git a/ios/MLRN/CameraUpdateItem.m b/ios/MLRN/CameraUpdateItem.m
+index 5fe44de6205f4a38095fa10525f0794cf9913980..9f918582f06b979b4d3da345e1e38f18aeacaa22 100644
+--- a/ios/MLRN/CameraUpdateItem.m
++++ b/ios/MLRN/CameraUpdateItem.m
+@@ -56,9 +56,21 @@ - (void)_moveCamera:(MLRNMapView *)mapView
+                      ease:(BOOL)ease
+     withCompletionHandler:(void (^)(void))completionHandler {
+   MLRNCameraWithPadding *nextCamera = [self _makeCamera:mapView];
++  BOOL hasRequestedPadding = _cameraStop.padding.top > 0 || _cameraStop.padding.left > 0 ||
++      _cameraStop.padding.bottom > 0 || _cameraStop.padding.right > 0;
+   NSString *easeFunctionName =
+       ease ? kCAMediaTimingFunctionEaseInEaseOut : kCAMediaTimingFunctionLinear;
++
++  // Cold-start camera setup can abort inside MapLibre when routed through the
++  // edgePadding variant despite there being no actual requested padding.
++  if (!animated && !hasRequestedPadding) {
++    [mapView setCamera:nextCamera.camera animated:NO];
++    if (completionHandler != nil) {
++      completionHandler();
++    }
++    return;
++  }
+ 
+   [mapView setCamera:nextCamera.camera
+                  withDuration:animated ? _cameraStop.duration : 0
+       animationTimingFunction:[CAMediaTimingFunction functionWithName:easeFunctionName]
 diff --git a/package.json b/package.json
 index 48af535f1e9b1620a4a0290ad58e1df179f7b07c..b8c89ecb0fc2b357aa19b6be6b6e1fb04931fbe2 100644
 --- a/package.json
