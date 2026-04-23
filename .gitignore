@@ -30,6 +30,7 @@ xcuserdata/
 *.xccheckout
 *.moved-aside
 DerivedData/
+build_derived_data/
 ios/.carplay-derived-data/
 ios/.verify-carplay-derived/
 *.hmap

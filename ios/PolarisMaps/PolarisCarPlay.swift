@@ -14,12 +14,14 @@ final class PolarisCarPlay: RCTEventEmitter {
   /// to forward CarPlay lifecycle events.
   static weak var shared: PolarisCarPlay?
   private static var pendingInterfaceController: CPInterfaceController?
+  private static var pendingWindow: CPWindow?
   private static var isSceneConnected = false
 
   // MARK: - State
 
   private var carPlayConnected = false
   private var interfaceController: CPInterfaceController?
+  private var carPlayWindow: CPWindow?
   private var mapTemplate: CPMapTemplate?
   private var navigationSession: CPNavigationSession?
   private var searchTemplate: CPSearchTemplate?
@@ -53,23 +55,32 @@ final class PolarisCarPlay: RCTEventEmitter {
 
   static func sceneDidConnect(interfaceController: CPInterfaceController, window: CPWindow) {
     pendingInterfaceController = interfaceController
+    pendingWindow = window
     isSceneConnected = true
-    shared?.didConnect(interfaceController: interfaceController)
+    shared?.didConnect(interfaceController: interfaceController, window: window)
   }
 
   static func sceneDidDisconnect(interfaceController: CPInterfaceController) {
     pendingInterfaceController = nil
+    pendingWindow = nil
     isSceneConnected = false
     shared?.didDisconnect(interfaceController: interfaceController)
   }
 
   // MARK: - Scene delegate callbacks (called by CarPlaySceneDelegate)
 
-  func didConnect(interfaceController: CPInterfaceController) {
+  func didConnect(interfaceController: CPInterfaceController, window: CPWindow) {
     Self.pendingInterfaceController = interfaceController
     Self.isSceneConnected = true
     self.interfaceController = interfaceController
+    self.carPlayWindow = window
     self.carPlayConnected = true
+
+    // CarPlay template controls render on top of whatever the app draws into the
+    // CPWindow. Without a root view controller the window is entirely black.
+    let mapVC = UIViewController()
+    mapVC.view.backgroundColor = UIColor(red: 0.11, green: 0.13, blue: 0.16, alpha: 1)
+    window.rootViewController = mapVC
 
     // Build the map template with search and navigation buttons
     let mapTemplate = CPMapTemplate()
@@ -82,7 +93,7 @@ final class PolarisCarPlay: RCTEventEmitter {
     mapTemplate.leadingNavigationBarButtons = [searchButton]
     self.mapTemplate = mapTemplate
 
-    interfaceController.setRootTemplate(mapTemplate, animated: true, completion: nil)
+    interfaceController.setRootTemplate(mapTemplate, animated: false, completion: nil)
 
     sendEvent(withName: "carPlayConnected", body: nil)
   }
@@ -90,11 +101,13 @@ final class PolarisCarPlay: RCTEventEmitter {
   func didDisconnect(interfaceController: CPInterfaceController) {
     endActiveNavigation()
     Self.pendingInterfaceController = nil
+    Self.pendingWindow = nil
     Self.isSceneConnected = false
     pendingSearchCompletion?([])
     pendingSearchCompletion = nil
     self.interfaceController = nil
     self.mapTemplate = nil
+    self.carPlayWindow = nil
     self.carPlayConnected = false
 
     sendEvent(withName: "carPlayDisconnected", body: nil)
@@ -145,7 +158,7 @@ final class PolarisCarPlay: RCTEventEmitter {
         distanceRemaining: Measurement(value: remainingDistance, unit: .meters),
         timeRemaining: etaSeconds
       )
-      session.updateTravelEstimates(estimates, forManeuver: maneuver)
+        session.updateEstimates(estimates, for: maneuver)
 
       session.upcomingManeuvers = [maneuver]
 
@@ -273,7 +286,8 @@ final class PolarisCarPlay: RCTEventEmitter {
   // MARK: - Private helpers
 
   private func attachPendingSceneIfNeeded() {
-    guard let interfaceController = Self.pendingInterfaceController else { return }
+    guard let interfaceController = Self.pendingInterfaceController,
+          let window = Self.pendingWindow else { return }
 
     DispatchQueue.main.async { [weak self] in
       guard let self = self,
@@ -283,7 +297,7 @@ final class PolarisCarPlay: RCTEventEmitter {
         return
       }
 
-      self.didConnect(interfaceController: interfaceController)
+      self.didConnect(interfaceController: interfaceController, window: window)
     }
   }
 
