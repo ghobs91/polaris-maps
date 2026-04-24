@@ -5,6 +5,7 @@
 # Xcode
 #
 build/
+.scheme-postaction-proof/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
