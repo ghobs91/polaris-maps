@@ -82,6 +82,12 @@ Thumbs.db
 # Test data (large binary files)
 test-data/
 
+# Entitlement investigation artifacts (repo-local, not for commit)
+/*.entitlements
+/entitlements_tests/
+/test_cases.sh
+/build_output*.txt
+
 # nodejs-mobile build
 nodejs-assets/nodejs-project/node_modules/
 
