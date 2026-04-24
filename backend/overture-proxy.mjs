@@ -10,8 +10,8 @@ import { Database } from 'duckdb-async';
 const PORT = parseInt(process.env.PORT ?? '4100', 10);
 
 // Overture release used by the project (kept in sync with config.ts)
-const OVERTURE_RELEASE = '2026-02-18.0';
-const OVERTURE_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*`;
+const OVERTURE_RELEASE = '2026-04-15.0';
+const OVERTURE_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/type=place/*`;
 
 // ---------------------------------------------------------------------------
 // DuckDB singleton with httpfs + spatial
@@ -25,6 +25,11 @@ async function getDb() {
     INSTALL httpfs;  LOAD httpfs;
     INSTALL spatial; LOAD spatial;
     SET s3_region = 'us-west-2';
+    SET s3_url_style = 'path';
+    SET s3_endpoint = 's3.us-west-2.amazonaws.com';
+    SET s3_use_ssl = true;
+    SET s3_access_key_id = '';
+    SET s3_secret_access_key = '';
   `);
   return db;
 }

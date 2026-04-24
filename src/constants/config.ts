@@ -51,10 +51,10 @@ export const TRAFFIC_REFRESH_INTERVAL_MS = 60_000;
 export const OVERTURE_PLACES_URL: string = process.env.EXPO_PUBLIC_OVERTURE_PLACES_URL ?? '';
 
 /** Overture Maps data release version used for region generation. */
-export const OVERTURE_RELEASE = '2026-02-18.0';
+export const OVERTURE_RELEASE = '2026-04-15.0';
 
 /** Overture GeoParquet S3 path for places. */
-export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/*/*`;
+export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/type=place/*`;
 
 // ── Transit ─────────────────────────────────────────────────────────
 
