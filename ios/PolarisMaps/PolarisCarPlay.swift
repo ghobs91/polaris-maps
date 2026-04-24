@@ -1,3 +1,4 @@
+#if !targetEnvironment(simulator)
 import Foundation
 import CarPlay
 import React
@@ -358,3 +359,4 @@ extension PolarisCarPlay: CPSearchTemplateDelegate {
     completionHandler()
   }
 }
+#endif

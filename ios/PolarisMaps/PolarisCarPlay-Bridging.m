@@ -5,6 +5,7 @@
 //  Obj-C bridge to expose the Swift PolarisCarPlay module to React Native.
 //
 
+#if !TARGET_OS_SIMULATOR
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 
@@ -18,3 +19,4 @@ RCT_EXTERN_METHOD(updateMapCenter:(double)lat lng:(double)lng heading:(double)he
 RCT_EXTERN_METHOD(isConnected:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject)
 
 @end
+#endif

@@ -1,3 +1,4 @@
+#if !targetEnvironment(simulator)
 import UIKit
 import CarPlay
 
@@ -28,3 +29,4 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     self.interfaceController = nil
   }
 }
+#endif
