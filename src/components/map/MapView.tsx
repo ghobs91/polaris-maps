@@ -420,13 +420,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }
 
           // Phase 2: Parallel network fetches — OSM Overpass + online Overture.
-          // Skip online Overture if the local cache already has ≥ 20 results
-          // (the area has been visited before — no need to re-fetch).
-          // At street level, also run Nominatim in parallel to fill coverage
-          // gaps — Overpass misses businesses that lack amenity/shop tags in
-          // OSM (common for strip mall tenants).
-          const skipOnlineOverture = cachedPlaces.length >= 20;
+          // At street level (zoom >= 17), always fetch Overture to fill in gaps
+          // from OSM — Overture has much richer business/POI data for commercial
+          // buildings (strip malls, office parks, etc.) that OSM often misses.
           const isStreetLevel = zoom >= 17;
+          const skipOnlineOverture = !isStreetLevel && cachedPlaces.length >= 20;
           const [osmPois, onlineOverture, nominatimPois, applePois] = await Promise.all([
             fetchOsmPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
               () => [] as OsmPoi[],
