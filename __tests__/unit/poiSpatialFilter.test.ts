@@ -1,4 +1,5 @@
 import {
+  filterPoiLabelsForDisplay,
   filterPoisForDisplay,
   STREET_LEVEL_POI_ZOOM,
   ViewportBounds,
@@ -82,7 +83,7 @@ describe('filterPoisForDisplay', () => {
     expect(result.length).toBeLessThanOrEqual(100);
   });
 
-  it('allows up to 500 POIs at street-level zoom', () => {
+  it('allows up to 420 POIs at street-level zoom', () => {
     // Generate a large set of well-spaced POIs across a wider area
     const wideBounds: ViewportBounds = {
       minLat: 40.7,
@@ -94,7 +95,7 @@ describe('filterPoisForDisplay', () => {
     const result = filterPoisForDisplay(pois, wideBounds, 18);
     // Should be able to display well over 100 at street level
     expect(result.length).toBeGreaterThan(100);
-    expect(result.length).toBeLessThanOrEqual(500);
+    expect(result.length).toBeLessThanOrEqual(420);
   });
 
   it('maintains category diversity via round-robin', () => {
@@ -169,5 +170,22 @@ describe('filterPoisForDisplay', () => {
     const result = filterPoisForDisplay([...visiblePois, ...offscreenPois], bounds, 17.7);
 
     expect(result.map((poi) => poi.name)).toEqual(['IHOP', 'Sabor A Colombia']);
+  });
+
+  it('shows fewer labels than icons at dense street-level clusters', () => {
+    const lat = 40.7505;
+    const lng = -73.985;
+    const pois: OsmPoi[] = [
+      makePoi('Ground Floor Cafe', lat, lng, 'cafe'),
+      makePoi('Bookshop', lat + 0.00002, lng + 0.00016, 'shop'),
+      makePoi('Pharmacy', lat + 0.00001, lng + 0.00032, 'pharmacy'),
+      makePoi('Gym', lat + 0.00002, lng + 0.00048, 'gym'),
+    ];
+
+    const visible = filterPoisForDisplay(pois, NYC_BOUNDS, STREET_LEVEL_POI_ZOOM);
+    const labeled = filterPoiLabelsForDisplay(visible, NYC_BOUNDS, STREET_LEVEL_POI_ZOOM);
+
+    expect(visible.length).toBeGreaterThan(labeled.length);
+    expect(labeled.length).toBeGreaterThan(0);
   });
 });

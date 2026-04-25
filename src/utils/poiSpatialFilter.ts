@@ -7,15 +7,18 @@ export interface ViewportBounds {
   maxLng: number;
 }
 
-export const STREET_LEVEL_POI_ZOOM = 17.25;
+// Keep street-level rendering aligned with the Overture fetch threshold in
+// MapView so dense storefront POIs are not fetched at z17 and then thinned out
+// by the pre-street-level display path until z17.25.
+export const STREET_LEVEL_POI_ZOOM = 17;
 
 /**
  * Zoom-adaptive cap on total displayed POI markers.
- * At street level (zoom ≥ 17) we allow up to 500 markers since the compact
+ * At street level (zoom ≥ 17) we allow up to 420 markers since the compact
  * icon+label design takes much less space than the previous pill style.
  */
 function maxTotalForZoom(zoom: number): number {
-  if (zoom >= 17) return 500;
+  if (zoom >= 17) return 420;
   if (zoom >= 16) return 400;
   if (zoom >= 15) return 300;
   if (zoom >= 14) return 180;
@@ -36,11 +39,14 @@ function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number
 }
 
 /**
- * Approximate marker dimensions in screen pixels (label text above a small
- * icon circle). Much more compact than the previous pill design.
+ * Approximate marker dimensions in screen pixels.
+ * `MARKER_*` covers the icon footprint; `LABEL_*` tracks the actual truncated
+ * text footprint used in POILayer so label filtering matches what users see.
  */
-const MARKER_W = 70; // typical rendered width (label text)
-const MARKER_H = 22; // rendered height (label + icon + gap)
+const MARKER_W = 24;
+const MARKER_H = 24;
+const LABEL_W = 104;
+const LABEL_H = 30;
 
 const METERS_PER_DEG_LAT = 111_320;
 
@@ -79,8 +85,8 @@ function streetLevelBuildingGapMeters(zoom: number): number {
 function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
   if (zoom >= STREET_LEVEL_POI_ZOOM) {
     return {
-      gapX: 3,
-      gapY: 3,
+      gapX: 12,
+      gapY: 10,
     };
   }
   // At zoom ≥ 17 (street level), shrink gaps to ~35% of default so dense
@@ -88,8 +94,26 @@ function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
   const t = Math.min(1, Math.max(0, (zoom - 14) / 3)); // 0 at z14, 1 at z17+
   const scale = 1 - t * 0.65; // 1.0 → 0.35
   return {
-    gapX: (MARKER_W + 4) * scale,
-    gapY: (MARKER_H + 3) * scale,
+    gapX: (LABEL_W + 4) * scale,
+    gapY: (LABEL_H + 3) * scale,
+  };
+}
+
+function labelExclusionGaps(zoom: number): { gapX: number; gapY: number } {
+  if (zoom >= 19) {
+    return { gapX: 58, gapY: 18 };
+  }
+  if (zoom >= 18) {
+    return { gapX: 72, gapY: 22 };
+  }
+  if (zoom >= STREET_LEVEL_POI_ZOOM) {
+    return { gapX: 86, gapY: 24 };
+  }
+
+  const { gapX, gapY } = exclusionGaps(zoom);
+  return {
+    gapX: Math.max(gapX, 32),
+    gapY: Math.max(gapY, 16),
   };
 }
 
@@ -231,6 +255,39 @@ export function filterPoisForDisplay(
 
   for (const { poi, x, y } of candidates) {
     if (result.length >= maxTotal) break;
+    if (grid.hasOverlap(x, y, gapX, gapY)) continue;
+    grid.insert(x, y);
+    result.push(poi);
+  }
+
+  return result;
+}
+
+/**
+ * Selects the subset of already-visible POIs that should render text labels.
+ * Icons can remain denser, but labels need a much wider exclusion zone to
+ * avoid unreadable collisions in strip malls and downtown blocks.
+ */
+export function filterPoiLabelsForDisplay(
+  pois: OsmPoi[],
+  bounds: ViewportBounds,
+  zoom: number,
+): OsmPoi[] {
+  if (pois.length === 0) return [];
+
+  const entries = pois
+    .filter((poi) => isWithinViewport(poi, bounds))
+    .map((poi) => ({
+      poi,
+      ...toPixel(poi.lat, poi.lng, zoom),
+    }));
+  if (entries.length === 0) return [];
+
+  const { gapX, gapY } = labelExclusionGaps(zoom);
+  const grid = new PlacementGrid(gapX, gapY);
+  const result: OsmPoi[] = [];
+
+  for (const { poi, x, y } of entries) {
     if (grid.hasOverlap(x, y, gapX, gapY)) continue;
     grid.insert(x, y);
     result.push(poi);

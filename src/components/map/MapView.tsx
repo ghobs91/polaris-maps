@@ -40,6 +40,7 @@ Logger.setLogCallback((log) => {
 const POI_MIN_ZOOM = 14;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
+const POI_ZOOM_REUSE_THRESHOLD = 0.35;
 
 /** ~30 m threshold for considering two POIs as duplicates. */
 const DEDUP_THRESHOLD_DEG = 0.0003;
@@ -96,6 +97,24 @@ function deduplicatePois(pois: OsmPoi[]): OsmPoi[] {
     }
   }
   return result;
+}
+
+interface PoiFetchBounds {
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
+  zoom: number;
+}
+
+function boundsContain(outer: PoiFetchBounds | null, inner: Omit<PoiFetchBounds, 'zoom'>): boolean {
+  if (!outer) return false;
+  return (
+    inner.minLat >= outer.minLat &&
+    inner.minLng >= outer.minLng &&
+    inner.maxLat <= outer.maxLat &&
+    inner.maxLng <= outer.maxLng
+  );
 }
 
 export interface MapViewHandle {
@@ -160,14 +179,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Abort controller to cancel stale in-flight fetches when viewport changes
   const abortRef = useRef<AbortController | null>(null);
-  // Track last fetched bounds + zoom to skip re-fetch for small pans (~1 km threshold)
-  const lastFetchBounds = useRef<{
-    minLat: number;
-    minLng: number;
-    maxLat: number;
-    maxLng: number;
-    zoom: number;
-  } | null>(null);
+  // Track the last loaded coverage separately from the current in-flight fetch
+  // so overlapping pans can reuse already-fetched PMTiles/POI data.
+  const lastLoadedFetchBounds = useRef<PoiFetchBounds | null>(null);
+  const inFlightFetchBounds = useRef<PoiFetchBounds | null>(null);
   // Prevent redundant POI clears during a single zoom gesture
   const zoomClearedRef = useRef(false);
   // Track whether camera should follow nav position (breaks on user gesture)
@@ -213,10 +228,14 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       if (state.fitBounds && state.fitBounds !== prev.fitBounds) {
         const [minLng, minLat, maxLng, maxLat] = state.fitBounds;
         const sh = Dimensions.get('window').height;
+        const padding =
+          state.fitBoundsMode === 'search'
+            ? [80, 40, Math.round(sh * 0.34), 40]
+            : [80, 60, Math.round(sh * 0.62), 60];
         cameraRef.current.fitBounds(
           [maxLng, maxLat], // NE
           [minLng, minLat], // SW
-          [80, 60, Math.round(sh * 0.62), 60], // [top, right, bottom, left]
+          padding, // [top, right, bottom, left]
           500, // duration ms
         );
         // Clear after applying so it can be re-triggered
@@ -289,7 +308,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           abortRef.current.abort();
           abortRef.current = null;
         }
-        lastFetchBounds.current = null;
+        lastLoadedFetchBounds.current = null;
+        inFlightFetchBounds.current = null;
         zoomClearedRef.current = true;
       }
     },
@@ -327,6 +347,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       if (!rawBounds) return;
       const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
 
+      const visibleBounds = { minLat, minLng, maxLat, maxLng };
+
       // At high zoom the viewport is very small (z=17.6 ≈ 250 m). Pad the
       // fetch bounds so we always query at least ~800 m in each direction.
       // This ensures POIs in adjacent buildings / across the street are
@@ -341,6 +363,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const fetchMaxLat = maxLat + latPad;
       const fetchMinLng = minLng - lngPad;
       const fetchMaxLng = maxLng + lngPad;
+      const nextFetchBounds: PoiFetchBounds = {
+        minLat: fetchMinLat,
+        minLng: fetchMinLng,
+        maxLat: fetchMaxLat,
+        maxLng: fetchMaxLng,
+        zoom,
+      };
 
       // If a category search is active, show those results instead of the
       // default POI fetch. The category search already ran against the viewport
@@ -357,22 +386,16 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       // avoids the double annotation teardown that triggers the MapLibre
       // "Unknown annotation found nearby tap" fault.
       //
-      // Skip re-fetch if the viewport hasn't shifted more than ~1 km from the
-      // last successful fetch AND zoom hasn't changed significantly —
-      // eliminates redundant requests on small pans while ensuring a zoom
-      // change (which shrinks/expands the visible area) triggers a re-fetch.
-      const POI_FETCH_THRESHOLD = 0.01; // ~1.1 km
-      const POI_ZOOM_THRESHOLD = 1.0;
-      const lastB = lastFetchBounds.current;
-      if (
-        lastB &&
-        Math.abs(zoom - lastB.zoom) < POI_ZOOM_THRESHOLD &&
-        Math.abs(fetchMinLat - lastB.minLat) < POI_FETCH_THRESHOLD &&
-        Math.abs(fetchMaxLat - lastB.maxLat) < POI_FETCH_THRESHOLD &&
-        Math.abs(fetchMinLng - lastB.minLng) < POI_FETCH_THRESHOLD &&
-        Math.abs(fetchMaxLng - lastB.maxLng) < POI_FETCH_THRESHOLD
-      ) {
-        if (__DEV__) console.warn('[POI] fetch skipped — within threshold');
+      const canReuseLoadedBounds =
+        lastLoadedFetchBounds.current &&
+        Math.abs(zoom - lastLoadedFetchBounds.current.zoom) < POI_ZOOM_REUSE_THRESHOLD &&
+        boundsContain(lastLoadedFetchBounds.current, visibleBounds);
+      const canReuseInFlightBounds =
+        inFlightFetchBounds.current &&
+        Math.abs(zoom - inFlightFetchBounds.current.zoom) < POI_ZOOM_REUSE_THRESHOLD &&
+        boundsContain(inFlightFetchBounds.current, visibleBounds);
+      if (canReuseLoadedBounds || canReuseInFlightBounds) {
+        if (__DEV__) console.warn('[POI] fetch skipped — viewport already covered');
         return;
       }
       if (__DEV__)
@@ -388,16 +411,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       poiFetchTimer.current = setTimeout(async () => {
         const controller = new AbortController();
         abortRef.current = controller;
+        inFlightFetchBounds.current = nextFetchBounds;
 
         try {
           useOsmPoiStore.getState().setIsLoading(true);
-          lastFetchBounds.current = {
-            minLat: fetchMinLat,
-            minLng: fetchMinLng,
-            maxLat: fetchMaxLat,
-            maxLng: fetchMaxLng,
-            zoom,
-          };
 
           // Phase 1: Instant local results — SQLite cached Overture places.
           // Show these immediately so the map feels responsive even when the
@@ -478,9 +495,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
           if (__DEV__) console.warn(`[POI] setPois merged=${merged.length}`);
           useOsmPoiStore.getState().setPois(merged);
+          lastLoadedFetchBounds.current = nextFetchBounds;
         } catch (err) {
           if (__DEV__) console.warn('[POI] fetch error:', err);
         } finally {
+          if (inFlightFetchBounds.current === nextFetchBounds) {
+            inFlightFetchBounds.current = null;
+          }
           useOsmPoiStore.getState().setIsLoading(false);
         }
       }, OSM_FETCH_DEBOUNCE_MS);

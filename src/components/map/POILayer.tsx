@@ -4,7 +4,11 @@ import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useShallow } from 'zustand/react/shallow';
-import { filterPoisForDisplay, STREET_LEVEL_POI_ZOOM } from '../../utils/poiSpatialFilter';
+import {
+  filterPoiLabelsForDisplay,
+  filterPoisForDisplay,
+  STREET_LEVEL_POI_ZOOM,
+} from '../../utils/poiSpatialFilter';
 import { getPoiCategory } from '../../utils/poiCategories';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
@@ -16,19 +20,21 @@ const ANCHOR = { x: 0.5, y: 1.0 } as const;
 
 interface PoiBadgeProps {
   poi: OsmPoi;
+  showLabel: boolean;
   onPress: (poi: OsmPoi) => void;
 }
 
-const PoiBadge = memo(function PoiBadge({ poi, onPress }: PoiBadgeProps) {
+const PoiBadge = memo(function PoiBadge({ poi, showLabel, onPress }: PoiBadgeProps) {
   const { icon, color } = getPoiCategory(poi.type, poi.subtype);
 
   return (
     <TouchableOpacity onPress={() => onPress(poi)} activeOpacity={0.75} style={styles.hitArea}>
       <View style={styles.marker}>
-        {/* Label above icon — category-coloured text with dark outline for readability */}
-        <Text style={[styles.label, { color }]} numberOfLines={1}>
-          {poi.name}
-        </Text>
+        {showLabel ? (
+          <Text style={[styles.label, { color }]} numberOfLines={1} ellipsizeMode="tail">
+            {poi.name}
+          </Text>
+        ) : null}
         {/* Small coloured icon circle at the map coordinate */}
         <View style={[styles.iconWrap, { backgroundColor: color }]}>
           <Ionicons name={icon} size={11} color="#FFFFFF" />
@@ -71,6 +77,11 @@ export function POILayer() {
     return result;
   }, [activePois, bounds, zoom]);
 
+  const labeledPoiIds = useMemo(() => {
+    if (!bounds || visiblePois.length === 0) return new Set<number>();
+    return new Set(filterPoiLabelsForDisplay(visiblePois, bounds, zoom).map((poi) => poi.id));
+  }, [bounds, visiblePois, zoom]);
+
   if (visiblePois.length === 0) return null;
 
   return (
@@ -82,7 +93,7 @@ export function POILayer() {
           anchor={ANCHOR}
           allowOverlap={zoom >= STREET_LEVEL_POI_ZOOM}
         >
-          <PoiBadge poi={poi} onPress={handlePress} />
+          <PoiBadge poi={poi} showLabel={labeledPoiIds.has(poi.id)} onPress={handlePress} />
         </MapLibreGL.MarkerView>
       ))}
     </>
@@ -96,7 +107,7 @@ const styles = StyleSheet.create({
   },
   marker: {
     alignItems: 'center',
-    maxWidth: 120,
+    maxWidth: 104,
   },
   iconWrap: {
     width: 20,
@@ -117,6 +128,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 2,
     textAlign: 'center',
+    maxWidth: 104,
     textShadowColor: 'rgba(0,0,0,0.85)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 3,

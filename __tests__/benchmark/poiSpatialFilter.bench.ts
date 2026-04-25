@@ -1,4 +1,8 @@
-import { filterPoisForDisplay, ViewportBounds } from '../../src/utils/poiSpatialFilter';
+import {
+  filterPoisForDisplay,
+  STREET_LEVEL_POI_ZOOM,
+  ViewportBounds,
+} from '../../src/utils/poiSpatialFilter';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +62,7 @@ describe('filterPoisForDisplay — performance', () => {
     const elapsed = performance.now() - start;
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(200);
+    expect(result.length).toBeLessThanOrEqual(500);
     expect(elapsed).toBeLessThan(10);
   });
 
@@ -69,7 +73,7 @@ describe('filterPoisForDisplay — performance', () => {
     const elapsed = performance.now() - start;
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(160);
+    expect(result.length).toBeLessThanOrEqual(400);
     expect(elapsed).toBeLessThan(15);
   });
 
@@ -86,7 +90,7 @@ describe('filterPoisForDisplay — performance', () => {
     const elapsed = performance.now() - start;
 
     expect(result.length).toBeGreaterThan(0);
-    expect(result.length).toBeLessThanOrEqual(120);
+    expect(result.length).toBeLessThanOrEqual(300);
     expect(elapsed).toBeLessThan(25);
   });
 
@@ -113,12 +117,12 @@ describe('filterPoisForDisplay — performance', () => {
       return { x, y };
     }
 
-    const PILL_W = 120;
-    const PILL_H = 28;
-    const t = Math.min(1, Math.max(0, (16 - 15) / 2));
-    const gapScale = 1 - t * 0.4;
-    const gapX = (PILL_W + 8) * gapScale;
-    const gapY = (PILL_H + 6) * gapScale;
+    const MARKER_W = 70;
+    const MARKER_H = 22;
+    const t = Math.min(1, Math.max(0, (16 - 14) / 3));
+    const gapScale = 1 - t * 0.65;
+    const gapX = (MARKER_W + 4) * gapScale;
+    const gapY = (MARKER_H + 3) * gapScale;
 
     const placed = result.map((p) => toPixel(p.lat, p.lng));
     for (let i = 0; i < placed.length; i++) {
