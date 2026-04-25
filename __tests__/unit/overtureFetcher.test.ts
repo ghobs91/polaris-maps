@@ -1,15 +1,25 @@
 // Mock native/expo modules that can't parse in Node
 jest.mock('expo-sqlite', () => ({}));
+jest.mock('pmtiles', () => ({ PMTiles: jest.fn() }));
+jest.mock('@mapbox/vector-tile', () => ({ VectorTile: jest.fn() }));
+jest.mock('pbf', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../src/services/database/init', () => ({
   getDatabase: jest.fn(),
 }));
 
 import {
+  fetchOverturePlaces,
   overtureFeatureToPlace,
+  overtureFeatureFromVectorTileGeoJSON,
   mapOvertureCategory,
+  resetOverturePmtilesStateForTests,
 } from '../../src/services/poi/overtureFetcher';
 import { placeToOsmPoi } from '../../src/utils/placeToOsmPoi';
 import type { OverturePlace } from '../../src/types/overture';
+import { PMTiles } from 'pmtiles';
+import { VectorTile } from '@mapbox/vector-tile';
+import Pbf from 'pbf';
+import { getDatabase } from '../../src/services/database/init';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -42,6 +52,18 @@ function makeOverturePlace(overrides: Partial<OverturePlace['properties']> = {})
     },
   };
 }
+
+beforeEach(() => {
+  resetOverturePmtilesStateForTests();
+  jest.clearAllMocks();
+
+  const txn: { runAsync: jest.Mock } = { runAsync: jest.fn().mockResolvedValue(undefined) };
+  (getDatabase as jest.Mock).mockResolvedValue({
+    withExclusiveTransactionAsync: async (cb: (t: { runAsync: jest.Mock }) => Promise<void>) =>
+      cb(txn),
+    execAsync: jest.fn().mockResolvedValue(undefined),
+  });
+});
 
 // ---------------------------------------------------------------------------
 // overtureFeatureToPlace
@@ -109,6 +131,62 @@ describe('overtureFeatureToPlace', () => {
     const result = overtureFeatureToPlace(makeOverturePlace());
     expect(result!.geohash8).toBeDefined();
     expect(result!.geohash8.length).toBe(8);
+  });
+});
+
+describe('overtureFeatureFromVectorTileGeoJSON', () => {
+  it('parses stringified PMTiles properties into an Overture feature', () => {
+    const feature = overtureFeatureFromVectorTileGeoJSON({
+      type: 'Feature',
+      id: 123,
+      geometry: { type: 'Point', coordinates: [-73.52854832, 40.72402722] },
+      properties: {
+        id: 'f4a35e34-75f4-45d2-9ac3-033d50242880',
+        '@name': 'Calda Pizzeria',
+        names: '{"primary":"Calda Pizzeria","common":null,"rules":null}',
+        categories: '{"primary":"pizza_restaurant","alternate":["italian_restaurant"]}',
+        confidence: 0.9793949723243713,
+        addresses:
+          '[{"freeform":"2890 Hempstead Tpke","locality":"Hempstead","postcode":"11756-1356","region":"NY","country":"US"}]',
+      },
+    } as any);
+
+    expect(feature).not.toBeNull();
+    expect(feature!.properties.names?.primary).toBe('Calda Pizzeria');
+    expect(feature!.properties.categories?.primary).toBe('pizza_restaurant');
+    expect(feature!.properties.addresses?.[0]?.freeform).toBe('2890 Hempstead Tpke');
+  });
+});
+
+describe('fetchOverturePlaces', () => {
+  it('reuses decoded PMTiles tile data across overlapping bbox fetches', async () => {
+    const mockGetZxy = jest.fn().mockResolvedValue({ data: new Uint8Array([1, 2, 3]) });
+    (PMTiles as jest.Mock).mockImplementation(() => ({ getZxy: mockGetZxy }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+
+    const geojsonFeature = {
+      type: 'Feature',
+      id: 123,
+      geometry: { type: 'Point', coordinates: [-73.52854832, 40.72402722] },
+      properties: {
+        id: 'f4a35e34-75f4-45d2-9ac3-033d50242880',
+        names: '{"primary":"Calda Pizzeria"}',
+        categories: '{"primary":"pizza_restaurant"}',
+        confidence: 0.98,
+      },
+    };
+    const mockLayer = {
+      length: 1,
+      feature: jest.fn(() => ({ toGeoJSON: jest.fn(() => geojsonFeature) })),
+    };
+    (VectorTile as jest.Mock).mockImplementation(() => ({ layers: { place: mockLayer } }));
+
+    const first = await fetchOverturePlaces(40.7239, -73.5287, 40.7243, -73.5282, 50);
+    const second = await fetchOverturePlaces(40.72395, -73.52865, 40.72435, -73.52815, 50);
+
+    expect(first.map((place) => place.name)).toEqual(['Calda Pizzeria']);
+    expect(second.map((place) => place.name)).toEqual(['Calda Pizzeria']);
+    expect(mockGetZxy).toHaveBeenCalledTimes(1);
   });
 });
 

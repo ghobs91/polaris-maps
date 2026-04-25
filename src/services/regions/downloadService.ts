@@ -2,7 +2,6 @@ import * as FileSystem from 'expo-file-system';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
-import { fetchOverturePlaces } from '../poi/overtureFetcher';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
 
@@ -82,8 +81,8 @@ export async function downloadRegion(
 
     checkAborted(signal);
 
-    // Bulk-fetch Overture places for the region bounds into local SQLite (non-fatal).
-    // Uses OVERTURE_PLACES_URL if configured; skips silently otherwise.
+    // Offline Overture places should come from bundled region assets. Live
+    // viewport POIs now use Overture-hosted PMTiles directly.
     await prefetchOverturePlaces(region, onProgress).catch(() => {});
 
     checkAborted(signal);
@@ -180,18 +179,17 @@ async function tryPeerDownload(
 }
 
 /**
- * Pre-fetch Overture places for the entire region bbox and upsert into
- * local SQLite, so category searches work offline after download.
+ * Placeholder progress stage for Overture region data.
  *
- * Uses the existing OVERTURE_PLACES_URL 3rd-party endpoint.
- * Non-fatal: silently skips if OVERTURE_PLACES_URL is not configured.
+ * Offline Overture places should come from bundled region extracts such as
+ * `overture-places.geojson`, imported separately after download. Live Overture
+ * fetching uses Overture-hosted PMTiles rather than a region-wide query
+ * backend or Polaris-hosted service.
  */
 export async function prefetchOverturePlaces(
   region: Region,
   onProgress?: ProgressCallback,
 ): Promise<void> {
-  const { minLat, maxLat, minLng, maxLng } = region.bounds;
-
   onProgress?.({
     regionId: region.id,
     totalBytes: 0,
@@ -200,19 +198,10 @@ export async function prefetchOverturePlaces(
     stage: 'places',
   });
 
-  // fetchOverturePlaces returns [] immediately if OVERTURE_PLACES_URL is unset
-  const places = await fetchOverturePlaces(
-    minLat, // south
-    minLng, // west
-    maxLat, // north
-    maxLng, // east
-    10_000, // generous limit for region-level seeding
-  );
-
   onProgress?.({
     regionId: region.id,
-    totalBytes: places.length,
-    downloadedBytes: places.length,
+    totalBytes: 0,
+    downloadedBytes: 0,
     percent: 100,
     stage: 'places',
   });

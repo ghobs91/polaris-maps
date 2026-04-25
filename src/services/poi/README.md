@@ -8,8 +8,9 @@ The POI service aggregates place data from multiple sources into a unified brows
 
 1. **Local Overture** — pre-downloaded places stored in SQLite, queried by bounding box with FTS5 search
 2. **OSM Overpass** — real-time viewport queries for nodes/ways with `amenity|shop|tourism|leisure` tags
-3. **MapKit enrichment** — Apple's native MapKit fills missing phone, website, address, hours, and logo when a POI is selected (iOS only)
-4. **Nominatim fallback** — last-resort geocoder when both local and Overpass return empty
+3. **Overture-hosted PMTiles** — visible place features decoded client-side from Overture's published `places.pmtiles` archive
+4. **MapKit enrichment** — Apple's native MapKit fills missing phone, website, address, hours, and logo when a POI is selected (iOS only)
+5. **Nominatim fallback** — last-resort geocoder when both local and Overpass return empty
 
 Users can contribute back to the map through:
 
@@ -24,7 +25,7 @@ Users can contribute back to the map through:
 MapView (viewport change)
     ↓
 Phase 1: poiService.ts → SQLite (instant local)
-Phase 2: osmFetcher.ts → Overpass API + overtureFetcher.ts (parallel network)
+Phase 2: osmFetcher.ts → Overpass API + overtureFetcher.ts PMTiles fetch (parallel network)
 Phase 3: osmFetcher.ts → Nominatim (fallback)
     ↓
 Deduplication (30m spatial grid, O(n))
@@ -48,7 +49,7 @@ Gun.js sync → other peers
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `osmFetcher.ts`            | Overpass API client — fetches nodes/ways by viewport, name regex, or tags. 5-min TTL bbox cache (max 20 entries). Also provides Nominatim fallback.                              |
 | `poiService.ts`            | Local SQLite queries — `getPlacesInBounds()`, `searchPlacesByCategory()`, `searchPlacesFts()` on the Overture places table.                                                      |
-| `overtureFetcher.ts`       | Online Overture Maps place fetcher for supplementing local data.                                                                                                                 |
+| `overtureFetcher.ts`       | Client-side Overture PMTiles reader that fetches visible vector tiles directly from Overture's hosted `places.pmtiles` archive.                                                  |
 | `categorySearchService.ts` | Category search orchestrator — resolves query to categories, queries local SQLite first, falls back to Overpass if <5 local results, deduplicates and ranks.                     |
 | `categoryResolver.ts`      | Maps natural-language category terms to `PlaceCategory` enum values with synonym support.                                                                                        |
 | `mapkitFetcher.ts`         | Apple MapKit native iOS bridge for place search and coordinate-based lookups.                                                                                                    |

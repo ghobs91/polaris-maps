@@ -1,19 +1,194 @@
 import { getDatabase } from '../database/init';
 import { encode as geohashEncode } from '../../utils/geohash';
-import { OVERTURE_PLACES_URL } from '../../constants/config';
+import { OVERTURE_PLACES_PM_TILES_URL } from '../../constants/config';
+import { PMTiles } from 'pmtiles';
+import { VectorTile } from '@mapbox/vector-tile';
+import Pbf from 'pbf';
 import type { Place, PlaceCategory } from '../../models/poi';
 import type { OverturePlace, OverturePlaceCollection } from '../../types/overture';
 import type { SQLiteBindValue } from 'expo-sqlite';
 
+const TILE_ZOOM = 15;
+const MAX_TILE_FEATURE_CACHE_ENTRIES = 256;
+let pmtilesArchive: PMTiles | null = null;
+const tileFeatureCache = new Map<string, Promise<OverturePlace[]>>();
+
+function getPmtilesArchive(): PMTiles | null {
+  if (!OVERTURE_PLACES_PM_TILES_URL) return null;
+  if (!pmtilesArchive) {
+    pmtilesArchive = new PMTiles(OVERTURE_PLACES_PM_TILES_URL);
+  }
+  return pmtilesArchive;
+}
+
+function rememberTileFeatures(
+  key: string,
+  promise: Promise<OverturePlace[]>,
+): Promise<OverturePlace[]> {
+  tileFeatureCache.set(key, promise);
+  if (tileFeatureCache.size > MAX_TILE_FEATURE_CACHE_ENTRIES) {
+    const oldestKey = tileFeatureCache.keys().next().value;
+    if (oldestKey) tileFeatureCache.delete(oldestKey);
+  }
+  return promise;
+}
+
+function lngToTileX(lng: number, zoom: number): number {
+  const n = Math.pow(2, zoom);
+  return Math.floor(((lng + 180) / 360) * n);
+}
+
+function latToTileY(lat: number, zoom: number): number {
+  const latRad = (lat * Math.PI) / 180;
+  const n = Math.pow(2, zoom);
+  return Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
+}
+
+function getTileCoordsForBounds(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  zoom: number,
+): Array<{ z: number; x: number; y: number }> {
+  const minX = lngToTileX(west, zoom);
+  const maxX = lngToTileX(east, zoom);
+  const minY = latToTileY(north, zoom);
+  const maxY = latToTileY(south, zoom);
+  const coords: Array<{ z: number; x: number; y: number }> = [];
+
+  for (let x = minX; x <= maxX; x++) {
+    for (let y = minY; y <= maxY; y++) {
+      coords.push({ z: zoom, x, y });
+    }
+  }
+
+  return coords;
+}
+
+function isFeatureWithinBounds(
+  feature: OverturePlace,
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+) {
+  const [lng, lat] = feature.geometry.coordinates;
+  return lat >= south && lat <= north && lng >= west && lng <= east;
+}
+
+function parseJsonProperty<T>(value: unknown): T | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'object') return value as T;
+  if (typeof value !== 'string' || value.length === 0) return undefined;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function toOvertureFeature(rawFeature: GeoJSON.Feature): OverturePlace | null {
+  if (rawFeature.geometry?.type !== 'Point') return null;
+  const properties = rawFeature.properties ?? {};
+  const coordinates = rawFeature.geometry.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+
+  const id = String(properties.id ?? rawFeature.id ?? '');
+  if (!id) return null;
+
+  return {
+    type: 'Feature',
+    id,
+    geometry: {
+      type: 'Point',
+      coordinates: [Number(coordinates[0]), Number(coordinates[1])],
+    },
+    properties: {
+      id,
+      version:
+        typeof properties.version === 'number'
+          ? properties.version
+          : typeof properties.version === 'string'
+            ? Number(properties.version)
+            : undefined,
+      names: parseJsonProperty(properties.names),
+      categories: parseJsonProperty(properties.categories),
+      basic_category:
+        typeof properties.basic_category === 'string' ? properties.basic_category : undefined,
+      taxonomy: parseJsonProperty(properties.taxonomy),
+      confidence:
+        typeof properties.confidence === 'number'
+          ? properties.confidence
+          : typeof properties.confidence === 'string'
+            ? Number(properties.confidence)
+            : undefined,
+      websites: parseJsonProperty(properties.websites),
+      socials: parseJsonProperty(properties.socials),
+      emails: parseJsonProperty(properties.emails),
+      phones: parseJsonProperty(properties.phones),
+      brand: parseJsonProperty(properties.brand),
+      addresses: parseJsonProperty(properties.addresses),
+      sources: parseJsonProperty(properties.sources),
+      operating_status:
+        typeof properties.operating_status === 'string'
+          ? (properties.operating_status as any)
+          : undefined,
+    },
+  };
+}
+
+async function fetchTileFeatures(z: number, x: number, y: number): Promise<OverturePlace[]> {
+  const cacheKey = `${z}/${x}/${y}`;
+  const cached = tileFeatureCache.get(cacheKey);
+  if (cached) return cached;
+
+  const archive = getPmtilesArchive();
+  if (!archive) return [];
+
+  const promise = (async () => {
+    const tile = await archive.getZxy(z, x, y);
+    if (!tile?.data) return [];
+
+    const bytes = tile.data instanceof Uint8Array ? tile.data : new Uint8Array(tile.data);
+    const vectorTile = new VectorTile(new Pbf(bytes));
+    const layer = vectorTile.layers.place;
+    if (!layer) return [];
+
+    const features: OverturePlace[] = [];
+    for (let index = 0; index < layer.length; index++) {
+      const geojsonFeature = layer.feature(index).toGeoJSON(x, y, z) as GeoJSON.Feature;
+      const overtureFeature = toOvertureFeature(geojsonFeature);
+      if (overtureFeature) features.push(overtureFeature);
+    }
+    return features;
+  })();
+
+  rememberTileFeatures(cacheKey, promise);
+
+  try {
+    return await promise;
+  } catch (error) {
+    tileFeatureCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+export function resetOverturePmtilesStateForTests(): void {
+  pmtilesArchive = null;
+  tileFeatureCache.clear();
+}
+
+export function overtureFeatureFromVectorTileGeoJSON(
+  rawFeature: GeoJSON.Feature,
+): OverturePlace | null {
+  return toOvertureFeature(rawFeature);
+}
+
 /**
- * Fetch Overture Maps places for a bounding box and upsert into the local
- * SQLite cache. Returns the converted Place objects.
- *
- * The endpoint should return GeoJSON FeatureCollection conforming to the
- * Overture Places schema. Typically served by:
- *   - A self-hosted DuckDB/WASM proxy
- *   - A pre-exported GeoJSON file per region
- *   - The Overture STAC-backed tile service
+ * Fetch Overture Maps places for a bounding box from Overture-hosted PMTiles
+ * and upsert them into the local SQLite cache. Returns the converted
+ * Place objects.
  */
 export async function fetchOverturePlaces(
   south: number,
@@ -22,25 +197,30 @@ export async function fetchOverturePlaces(
   east: number,
   limit: number = 200,
 ): Promise<Place[]> {
-  if (!OVERTURE_PLACES_URL) return [];
+  if (!OVERTURE_PLACES_PM_TILES_URL) return [];
 
-  const url = new URL(OVERTURE_PLACES_URL);
-  url.searchParams.set('bbox', `${west},${south},${east},${north}`);
-  url.searchParams.set('limit', String(limit));
+  const tiles = getTileCoordsForBounds(south, west, north, east, TILE_ZOOM);
+  if (tiles.length === 0) return [];
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: 'application/geo+json' },
-    signal: AbortSignal.timeout(15_000),
-  });
+  const responses = await Promise.all(
+    tiles.map(({ z, x, y }) => fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[])),
+  );
 
-  if (!res.ok) {
-    throw new Error(`Overture Places API returned ${res.status}`);
+  const featureMap = new Map<string, OverturePlace>();
+  for (const features of responses) {
+    if (!features.length) continue;
+    for (const feature of features) {
+      if (!isFeatureWithinBounds(feature, south, west, north, east)) continue;
+      featureMap.set(feature.id, feature);
+    }
   }
 
-  const data: OverturePlaceCollection = await res.json();
-  if (!data.features?.length) return [];
+  if (featureMap.size === 0) return [];
 
-  const places = data.features.map(overtureFeatureToPlace).filter((p): p is Place => p !== null);
+  const places = [...featureMap.values()]
+    .map(overtureFeatureToPlace)
+    .filter((p): p is Place => p !== null)
+    .slice(0, limit);
 
   if (places.length > 0) {
     await upsertOverturePlaces(places);

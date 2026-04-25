@@ -39,6 +39,12 @@ jest.mock('../../src/services/sync/hyperdriveBridge', () => ({
   seedRegion: jest.fn(),
   unseedRegion: jest.fn(),
 }));
+jest.mock('react-native', () => ({
+  NativeEventEmitter: jest.fn().mockImplementation(() => ({
+    addListener: jest.fn(() => ({ remove: jest.fn() })),
+  })),
+  NativeModules: {},
+}));
 jest.mock('../../src/services/poi/overtureFetcher', () => ({
   fetchOverturePlaces: jest.fn(),
 }));
@@ -72,37 +78,25 @@ describe('prefetchOverturePlaces', () => {
     jest.clearAllMocks();
   });
 
-  it('calls fetchOverturePlaces with the region bounds and a generous limit', async () => {
-    mockFetch.mockResolvedValue([]);
-
+  it('does not require a live Overture fetch during region download', async () => {
     const region = makeRegion();
     await prefetchOverturePlaces(region);
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      32.5, // south (minLat)
-      -124.5, // west  (minLng)
-      42.0, // north (maxLat)
-      -114.1, // east  (maxLng)
-      10_000,
-    );
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('reports places progress events', async () => {
-    mockFetch.mockResolvedValue(new Array(47).fill({}));
-
     const progress = jest.fn();
     await prefetchOverturePlaces(makeRegion(), progress);
 
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ stage: 'places', percent: 0 }));
     expect(progress).toHaveBeenCalledWith(
-      expect.objectContaining({ stage: 'places', percent: 100, totalBytes: 47 }),
+      expect.objectContaining({ stage: 'places', percent: 100, totalBytes: 0 }),
     );
   });
 
-  it('succeeds when fetchOverturePlaces returns empty (OVERTURE_PLACES_URL unset)', async () => {
-    mockFetch.mockResolvedValue([]);
-
+  it('succeeds without any configured live Overture endpoint', async () => {
     await expect(prefetchOverturePlaces(makeRegion())).resolves.toBeUndefined();
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

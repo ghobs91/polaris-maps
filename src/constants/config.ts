@@ -44,11 +44,13 @@ export const TRAFFIC_FETCH_DEBOUNCE_MS = 800;
 export const TRAFFIC_REFRESH_INTERVAL_MS = 60_000;
 
 /**
- * Overture Maps Places API endpoint.
- * Should serve GeoJSON FeatureCollection for bbox queries.
- * Set EXPO_PUBLIC_OVERTURE_PLACES_URL in .env, or leave empty to skip online Overture queries.
+ * Overture-hosted PMTiles archive for places.
+ * Defaults to Overture's published release artifact so Polaris does not need
+ * to host its own backend or tileset.
  */
-export const OVERTURE_PLACES_URL: string = process.env.EXPO_PUBLIC_OVERTURE_PLACES_URL ?? '';
+export const OVERTURE_PLACES_PM_TILES_URL: string =
+  process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL ??
+  'https://tiles.overturemaps.org/2026-04-15.0/places.pmtiles';
 
 /** Overture Maps data release version used for region generation. */
 export const OVERTURE_RELEASE = '2026-04-15.0';
