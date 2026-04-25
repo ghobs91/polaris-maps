@@ -46,7 +46,7 @@ target 'PolarisMaps' do
 
   post_install do |installer|
 # @generated begin @maplibre/maplibre-react-native:post-install - expo prebuild (DO NOT MODIFY) sync-6e76c80af0d70c0003d06822dd59b7c729fca472
-    $MLRN.post_install(installer) if defined?($MLRN) && $MLRN.respond_to?(:post_install)
+    $MLRN.post_install(installer)
 # @generated end @maplibre/maplibre-react-native:post-install
     react_native_post_install(
       installer,
@@ -54,6 +54,16 @@ target 'PolarisMaps' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
+
+    # Fix fmt 11.x consteval issue with iOS 26 SDK / Xcode 26
+    # fmt 11 uses consteval which breaks with newer clang versions
+    installer.pods_project.targets.each do |target|
+      if target.name == 'fmt'
+        target.build_configurations.each do |config|
+          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)', 'FMT_USE_CONSTEVAL=0']
+        end
+      end
+    end
 
     # This is necessary for Xcode 14, because it signs resource bundles by default
     # when building for devices.
@@ -63,32 +73,6 @@ target 'PolarisMaps' do
         resource_bundle_target.build_configurations.each do |config|
           config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         end
-      end
-    end
-
-    # Fix fmt consteval errors with Apple Clang by disabling consteval on all
-    # Apple toolchains, not only older build numbers.
-    fmt_base = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
-    if File.exist?(fmt_base)
-      content = File.read(fmt_base)
-      patched = content.sub(
-        '#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L',
-        '#elif defined(__apple_build_version__)'
-      )
-      patched = patched.gsub(
-        /#elif defined\(__apple_build_version__\) && __apple_build_version__ < \d+L/,
-        '#elif defined(__apple_build_version__)'
-      )
-      File.write(fmt_base, patched) if patched != content
-    end
-
-    # Ensure all pods use C++20 (required by React Native 0.76+ / Folly)
-    installer.pods_project.build_configurations.each do |bc|
-      bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
-    end
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |bc|
-        bc.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
       end
     end
   end
