@@ -29,6 +29,7 @@ interface MapState {
   trafficLayerVisible: boolean;
   // [minLng, minLat, maxLng, maxLat] — set to trigger camera fitBounds
   fitBounds: [number, number, number, number] | null;
+  fitBoundsMode: 'default' | 'search';
   // Set from outside the map tab (e.g. POI detail) to auto-trigger directions
   pendingDirectionsTarget: { lat: number; lng: number; name: string } | null;
   // Set to pre-fill and auto-trigger the search panel from outside the map
@@ -47,7 +48,10 @@ interface MapState {
   setSelectedLocation: (location: MapState['selectedLocation']) => void;
   setMapStyle: (style: MapState['mapStyle']) => void;
   setTrafficLayerVisible: (visible: boolean) => void;
-  setFitBounds: (bounds: [number, number, number, number] | null) => void;
+  setFitBounds: (
+    bounds: [number, number, number, number] | null,
+    mode?: MapState['fitBoundsMode'],
+  ) => void;
   setPendingDirectionsTarget: (target: MapState['pendingDirectionsTarget']) => void;
   setPendingSearchQuery: (query: string | null) => void;
   setStopSearchMarkers: (markers: MapState['stopSearchMarkers']) => void;
@@ -67,6 +71,7 @@ export const useMapStore = create<MapState>()((set) => ({
   mapStyle: 'default',
   trafficLayerVisible: loadLayerToggles().trafficLayerVisible,
   fitBounds: null,
+  fitBoundsMode: 'default',
   pendingDirectionsTarget: null,
   pendingSearchQuery: null,
   locateTrigger: 0,
@@ -86,7 +91,7 @@ export const useMapStore = create<MapState>()((set) => ({
     set({ trafficLayerVisible });
     storage.set(LAYER_KEY, JSON.stringify({ trafficLayerVisible }));
   },
-  setFitBounds: (fitBounds) => set({ fitBounds }),
+  setFitBounds: (fitBounds, fitBoundsMode = 'default') => set({ fitBounds, fitBoundsMode }),
   setPendingDirectionsTarget: (pendingDirectionsTarget) => set({ pendingDirectionsTarget }),
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setStopSearchMarkers: (stopSearchMarkers) => set({ stopSearchMarkers }),

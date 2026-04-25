@@ -10,7 +10,7 @@
 
 import type { OsmPoi } from '../poi/osmFetcher';
 import type { ParsedSearchQuery } from './queryParser';
-import { levenshtein } from './queryParser';
+import { levenshtein, normalizeSearchText } from './queryParser';
 
 export interface ScoredResult {
   poi: OsmPoi;
@@ -27,6 +27,15 @@ export interface ViewportRect {
   east: number;
 }
 
+export interface RankingContext {
+  viewport?: ViewportRect;
+  userLocation?: { lat: number; lng: number };
+  proximityAnchor?: 'viewport' | 'user' | 'mixed';
+  locationSensitivityKm?: number;
+  queryDensity?: 'dense' | 'normal' | 'sparse';
+  inViewportProximityFloor?: number;
+}
+
 /**
  * Score and rank a list of POIs against a parsed search query.
  *
@@ -41,11 +50,11 @@ export function scoreAndRank(
   parsed: ParsedSearchQuery,
   refLat: number,
   refLng: number,
-  viewport?: ViewportRect,
+  context?: RankingContext,
 ): ScoredResult[] {
   const scored = pois.map((poi) => {
-    const distanceKm = haversineKm(refLat, refLng, poi.lat, poi.lng);
-    const score = computeScore(poi, parsed, distanceKm, viewport);
+    const distanceKm = getEffectiveDistanceKm(poi, refLat, refLng, context);
+    const score = computeScore(poi, parsed, distanceKm, context, refLat, refLng);
     return { poi, score, distanceKm };
   });
 
@@ -70,24 +79,38 @@ function computeScore(
   poi: OsmPoi,
   parsed: ParsedSearchQuery,
   distanceKm: number,
-  viewport?: ViewportRect,
+  context: RankingContext | undefined,
+  refLat: number,
+  refLng: number,
 ): number {
   let score = 0;
+  const viewport = context?.viewport;
+  const inView =
+    !!viewport &&
+    poi.lat >= viewport.south &&
+    poi.lat <= viewport.north &&
+    poi.lng >= viewport.west &&
+    poi.lng <= viewport.east;
 
   // --- Text match (0–40) ---
   const textScore = textMatchScore(poi, parsed);
   score += textScore * W_TEXT;
 
   // --- Distance (0–30) ---
-  // Adaptive distance weighting: when the text match is very strong, distance
-  // matters much less (user is searching for a specific place by name).
-  // Gentler decay: ~50% at 5 km, ~25% at 10 km, ~10% at 20 km.
-  const distanceFactor = Math.exp(-distanceKm / 8);
-  // Reduce distance weight when text match is strong (>0.7 = near-exact name)
-  const effectiveDistanceWeight =
-    textScore > 0.7
-      ? W_DISTANCE * (1 - textScore * 0.7) // e.g. exact match (1.0) → 30% of weight
-      : W_DISTANCE;
+  const sensitivityKm = context?.locationSensitivityKm ?? 10;
+  let distanceFactor = Math.exp(-distanceKm / sensitivityKm);
+  if (inView && (context?.proximityAnchor ?? 'viewport') !== 'user') {
+    distanceFactor = Math.max(distanceFactor, context?.inViewportProximityFloor ?? 0.9);
+  }
+
+  let effectiveDistanceWeight = W_DISTANCE;
+  if (context?.queryDensity === 'dense' && (parsed.brand || parsed.isNameSearch)) {
+    effectiveDistanceWeight *= 1.2;
+  } else if (context?.queryDensity === 'sparse' && textScore >= 0.75) {
+    effectiveDistanceWeight *= 0.55;
+  } else if (textScore >= 0.85) {
+    effectiveDistanceWeight *= 0.8;
+  }
   score += distanceFactor * effectiveDistanceWeight;
 
   // --- Category/cuisine match (0–15) ---
@@ -97,33 +120,38 @@ function computeScore(
   score += popularityScore(poi) * W_POPULARITY;
 
   // --- Viewport bonus (0–10) ---
-  if (viewport) {
-    const inView =
-      poi.lat >= viewport.south &&
-      poi.lat <= viewport.north &&
-      poi.lng >= viewport.west &&
-      poi.lng <= viewport.east;
-    if (inView) score += W_VIEWPORT;
-  }
+  if (inView) score += W_VIEWPORT;
 
   return score;
 }
 
-function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
-  const query = parsed.coreQuery.toLowerCase();
-  const name = poi.name.toLowerCase();
-  const brandTag = (poi.tags['brand'] ?? poi.tags['brand:wikidata'] ?? '').toLowerCase();
+export function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
+  const query = normalizeSearchText(parsed.coreQuery).toLowerCase();
+  const name = normalizeSearchText(poi.name).toLowerCase();
+  const brandTag = normalizeSearchText(
+    poi.tags['brand'] ?? poi.tags['brand:wikidata'] ?? '',
+  ).toLowerCase();
 
   // Exact name match
   if (name === query) return 1.0;
 
-  // Brand match
+  // Brand match from the manual alias list (highest confidence)
   if (parsed.brand) {
-    const brandLower = parsed.brand.toLowerCase();
+    const brandLower = normalizeSearchText(parsed.brand).toLowerCase();
     if (name.includes(brandLower) || brandTag.includes(brandLower)) return 0.95;
-    // Check brand_name tag from Overture places
-    const poiBrand = (poi.tags['polaris:brand'] ?? '').toLowerCase();
+    const poiBrand = normalizeSearchText(poi.tags['polaris:brand'] ?? '').toLowerCase();
     if (poiBrand && poiBrand.includes(brandLower)) return 0.95;
+  }
+
+  // Brand match from the Overture brand_name tag — works for ANY brand in the
+  // database without needing a manual alias. Slightly lower score (0.90 vs
+  // 0.95) to prefer confirmed aliases when available.
+  const poiBrandTag = normalizeSearchText(poi.tags['polaris:brand'] ?? '').toLowerCase();
+  if (
+    poiBrandTag &&
+    (poiBrandTag === query || poiBrandTag.includes(query) || query.includes(poiBrandTag))
+  ) {
+    return 0.9;
   }
 
   // Name starts with query
@@ -230,8 +258,8 @@ export function deduplicateResults(results: ScoredResult[]): ScoredResult[] {
     const isDup = kept.some((existing) => {
       const dist = haversineKm(existing.poi.lat, existing.poi.lng, r.poi.lat, r.poi.lng);
       if (dist > 0.05) return false; // >50m apart — not a duplicate
-      const nameA = existing.poi.name.toLowerCase().replace(/['']/g, '');
-      const nameB = r.poi.name.toLowerCase().replace(/['']/g, '');
+      const nameA = normalizeSearchText(existing.poi.name).toLowerCase().replace(/'/g, '');
+      const nameB = normalizeSearchText(r.poi.name).toLowerCase().replace(/'/g, '');
       return nameA === nameB || levenshtein(nameA, nameB) <= 2;
     });
     if (!isDup) kept.push(r);
@@ -244,7 +272,28 @@ export function deduplicateResults(results: ScoredResult[]): ScoredResult[] {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+function getEffectiveDistanceKm(
+  poi: OsmPoi,
+  refLat: number,
+  refLng: number,
+  context?: RankingContext,
+): number {
+  const viewport = context?.viewport;
+  const anchor = context?.proximityAnchor ?? 'viewport';
+  const viewportCenterLat = viewport ? (viewport.south + viewport.north) / 2 : refLat;
+  const viewportCenterLng = viewport ? (viewport.west + viewport.east) / 2 : refLng;
+  const viewportDistanceKm = haversineKm(viewportCenterLat, viewportCenterLng, poi.lat, poi.lng);
+  const userDistanceKm = context?.userLocation
+    ? haversineKm(context.userLocation.lat, context.userLocation.lng, poi.lat, poi.lng)
+    : Infinity;
+
+  if (anchor === 'user')
+    return Number.isFinite(userDistanceKm) ? userDistanceKm : viewportDistanceKm;
+  if (anchor === 'mixed') return Math.min(viewportDistanceKm, userDistanceKm);
+  return viewportDistanceKm;
+}
+
+export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;

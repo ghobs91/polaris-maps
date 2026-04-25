@@ -24,11 +24,17 @@ import {
   parseSearchQuery,
   fuzzyMatchBrand,
   isAddressQuery,
+  normalizeSearchText,
   type ParsedSearchQuery,
 } from './queryParser';
 import { fetchOverturePlaces } from '../poi/overtureFetcher';
 import { fetchOsmPoisByName } from '../poi/osmFetcher';
-import { scoreAndRank, deduplicateResults, type ScoredResult } from './searchRanker';
+import {
+  scoreAndRank,
+  deduplicateResults,
+  textMatchScore,
+  type ScoredResult,
+} from './searchRanker';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +78,9 @@ export interface SearchOptions {
   limit?: number;
   /** Actual visible viewport bounds for in-viewport boosting. */
   viewportBounds?: { south: number; north: number; west: number; east: number };
+  /** User's actual GPS location — when provided, Overture is also queried
+   *  around this point so nearby places surface even if the map is panned away. */
+  userLocation?: { lat: number; lng: number };
 }
 
 /**
@@ -114,12 +123,25 @@ export async function unifiedSearch(
   // Detect address queries early — these need fundamentally different handling
   const addressQuery = isAddressQuery(query);
 
-  // 2. Compute search bounding box (wider for category searches)
-  const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, zoom)) * 2));
-  const south = lat - delta;
-  const north = lat + delta;
-  const west = lng - delta;
-  const east = lng + delta;
+  const queryContext = deriveQueryContext(parsed, options);
+  const south = lat - queryContext.viewportRadiusDeg;
+  const north = lat + queryContext.viewportRadiusDeg;
+  const west = lng - queryContext.viewportRadiusDeg;
+  const east = lng + queryContext.viewportRadiusDeg;
+
+  const userSouth = options.userLocation
+    ? options.userLocation.lat - queryContext.userRadiusDeg
+    : south;
+  const userNorth = options.userLocation
+    ? options.userLocation.lat + queryContext.userRadiusDeg
+    : north;
+  const userWest = options.userLocation
+    ? options.userLocation.lng - queryContext.userRadiusDeg
+    : west;
+  const userEast = options.userLocation
+    ? options.userLocation.lng + queryContext.userRadiusDeg
+    : east;
+  const hasUserLocation = !!options.userLocation;
 
   // 3. Run all search sources in parallel
   // For address queries, skip name-based POI sources that would match
@@ -132,6 +154,7 @@ export async function unifiedSearch(
     photonResults,
     geocodingResults,
     overtureResults,
+    overtureUserResults,
     nameResults,
   ] = await Promise.allSettled([
     // Source 1: Local FTS5 search (instant, offline)
@@ -164,7 +187,15 @@ export async function unifiedSearch(
 
     // Source 5: Online Overture fetch — populates local DB and returns fresh places
     // Skip for address queries — same name-matching pollution as Source 1
-    addressQuery ? Promise.resolve([]) : fetchOverturePlaces(south, west, north, east, 500),
+    addressQuery
+      ? Promise.resolve([])
+      : fetchOverturePlaces(south, west, north, east, queryContext.viewportFetchLimit),
+
+    // Source 5b: User-location-centered Overture fetch (~10 km radius)
+    // Ensures nearby places surface even when the map has been panned away.
+    !hasUserLocation || addressQuery
+      ? Promise.resolve([])
+      : fetchOverturePlaces(userSouth, userWest, userNorth, userEast, queryContext.userFetchLimit),
 
     // Source 6: Overpass name search — finds POIs with the search term in their name
     // Skip for address queries — catches "Knights of Columbus" for "columbus pkwy"
@@ -219,9 +250,11 @@ export async function unifiedSearch(
         continue;
       }
 
-      // Exclude roads/streets for category searches — their fuzzy name match
-      // pollutes results (e.g. "Delisle Avenue" for "deli" search)
-      if (parsed.categories && isStreetResult(pr)) continue;
+      // Exclude roads/streets — their fuzzy name match pollutes results
+      // for any non-address query (e.g. "Marshall Avenue" for "marshalls",
+      // "Delisle Avenue" for "deli"). Address queries go through the
+      // dedicated address pipeline above.
+      if (isStreetResult(pr)) continue;
       allPois.push(pr.poi);
     }
   }
@@ -239,6 +272,18 @@ export async function unifiedSearch(
     }
   }
 
+  // Collect user-location-centered Overture results — nearby places that may
+  // not fall inside the viewport bbox but are still relevant to the user.
+  if (overtureUserResults.status === 'fulfilled') {
+    for (const place of overtureUserResults.value) {
+      const poi = placeToOsmPoi(place);
+      if (place.brandName) poi.tags['polaris:brand'] = place.brandName;
+      if (place.avgRating) poi.tags['polaris:avg_rating'] = String(place.avgRating);
+      if (place.reviewCount) poi.tags['polaris:review_count'] = String(place.reviewCount);
+      allPois.push(poi);
+    }
+  }
+
   // Collect Overpass name-search results — catches POIs with the search term
   // in their name regardless of how they're tagged in OSM.
   if (nameResults.status === 'fulfilled') {
@@ -247,10 +292,23 @@ export async function unifiedSearch(
     }
   }
 
-  // 4. Score and rank all POI results (with viewport boost)
+  const density = inferQueryDensity(allPois, parsed, lat, lng, options.userLocation);
+  const proximityAnchor = resolveProximityAnchor(parsed, options, density);
+
+  // 4. Score and rank all POI results (with dynamic proximity + viewport boost)
   const vpRect = options.viewportBounds ?? { south, north, west, east };
-  let scored = scoreAndRank(allPois, parsed, lat, lng, vpRect);
+  let scored = scoreAndRank(allPois, parsed, lat, lng, {
+    viewport: vpRect,
+    userLocation: options.userLocation,
+    proximityAnchor,
+    locationSensitivityKm: locationSensitivityKmFor(parsed, density, proximityAnchor),
+    queryDensity: density,
+    inViewportProximityFloor: parsed.isNameSearch && density !== 'sparse' ? 0.92 : 0.82,
+  });
   scored = deduplicateResults(scored);
+  if (options.userLocation && !addressQuery && proximityAnchor !== 'viewport') {
+    scored = promoteNearbyUserMatches(scored, parsed, options.userLocation);
+  }
 
   // 5. Build geocoding (address) results — from Nominatim + Photon house/street
   const addressResults: UnifiedSearchResult[] = [...photonAddressResults];
@@ -367,6 +425,153 @@ function isStreetResult(pr: { poi: OsmPoi; isPoi: boolean }): boolean {
   const photonType = pr.poi.tags['type'] ?? '';
   if (STREET_TYPES.has(photonType)) return true;
   return false;
+}
+
+function promoteNearbyUserMatches(
+  results: ScoredResult[],
+  parsed: ParsedSearchQuery,
+  userLocation: { lat: number; lng: number },
+): ScoredResult[] {
+  const normalizedQuery = normalizeSearchText(parsed.brand ?? parsed.coreQuery).toLowerCase();
+  if (!normalizedQuery) return results;
+
+  return [...results]
+    .map((result) => {
+      const name = normalizeSearchText(result.poi.name).toLowerCase();
+      const brand = normalizeSearchText(
+        result.poi.tags['polaris:brand'] ?? result.poi.tags['brand'] ?? '',
+      ).toLowerCase();
+      const isStrongMatch =
+        name === normalizedQuery ||
+        brand === normalizedQuery ||
+        name.startsWith(normalizedQuery) ||
+        name.includes(normalizedQuery) ||
+        brand.includes(normalizedQuery);
+      if (!isStrongMatch) return result;
+
+      const userDistanceKm = haversineKm(
+        userLocation.lat,
+        userLocation.lng,
+        result.poi.lat,
+        result.poi.lng,
+      );
+      if (userDistanceKm > 25) return result;
+
+      const boost = Math.max(0, 18 - userDistanceKm * 1.2);
+      return { ...result, score: result.score + boost };
+    })
+    .sort((a, b) => b.score - a.score || a.distanceKm - b.distanceKm);
+}
+
+function deriveQueryContext(
+  parsed: ParsedSearchQuery,
+  options: SearchOptions,
+): {
+  viewportRadiusDeg: number;
+  userRadiusDeg: number;
+  viewportFetchLimit: number;
+  userFetchLimit: number;
+} {
+  const zoomRadiusDeg = Math.max(0.035, Math.min(1.4, (360 / Math.pow(2, options.zoom)) * 1.5));
+
+  if (parsed.categories || parsed.cuisineHint) {
+    return {
+      viewportRadiusDeg: Math.max(zoomRadiusDeg, 0.09),
+      userRadiusDeg: parsed.wantsNearMe ? 0.1 : 0.08,
+      viewportFetchLimit: 420,
+      userFetchLimit: 180,
+    };
+  }
+
+  if (parsed.brand || parsed.isNameSearch) {
+    return {
+      viewportRadiusDeg: Math.min(Math.max(zoomRadiusDeg, 0.06), 0.22),
+      userRadiusDeg: parsed.wantsNearMe ? 0.09 : 0.06,
+      viewportFetchLimit: 260,
+      userFetchLimit: 120,
+    };
+  }
+
+  return {
+    viewportRadiusDeg: zoomRadiusDeg,
+    userRadiusDeg: 0.09,
+    viewportFetchLimit: 320,
+    userFetchLimit: 140,
+  };
+}
+
+function inferQueryDensity(
+  pois: OsmPoi[],
+  parsed: ParsedSearchQuery,
+  lat: number,
+  lng: number,
+  userLocation?: { lat: number; lng: number },
+): 'dense' | 'normal' | 'sparse' {
+  const anchor = userLocation ?? { lat, lng };
+  let strongMatchesWithin5Km = 0;
+  let strongMatchesWithin15Km = 0;
+
+  for (const poi of pois) {
+    const match = textMatchScore(poi, parsed);
+    if (match < 0.72) continue;
+    const dist = haversineKm(anchor.lat, anchor.lng, poi.lat, poi.lng);
+    if (dist <= 5) strongMatchesWithin5Km++;
+    if (dist <= 15) strongMatchesWithin15Km++;
+  }
+
+  if (strongMatchesWithin5Km >= 4 || strongMatchesWithin15Km >= 8) return 'dense';
+  if (strongMatchesWithin15Km <= 1) return 'sparse';
+  return 'normal';
+}
+
+function resolveProximityAnchor(
+  parsed: ParsedSearchQuery,
+  options: SearchOptions,
+  density: 'dense' | 'normal' | 'sparse',
+): 'viewport' | 'user' | 'mixed' {
+  if (!options.userLocation) return 'viewport';
+  if (parsed.wantsNearMe) return 'user';
+  if (parsed.categories || parsed.cuisineHint) return 'viewport';
+  if (parsed.brand || parsed.isNameSearch) {
+    return density === 'dense' ? 'mixed' : 'viewport';
+  }
+  return 'mixed';
+}
+
+function locationSensitivityKmFor(
+  parsed: ParsedSearchQuery,
+  density: 'dense' | 'normal' | 'sparse',
+  anchor: 'viewport' | 'user' | 'mixed',
+): number {
+  if (anchor === 'user') {
+    if (density === 'dense') return 4;
+    if (density === 'sparse') return 14;
+    return 7;
+  }
+
+  if (parsed.brand || parsed.isNameSearch) {
+    if (density === 'dense') return 3.5;
+    if (density === 'sparse') return 18;
+    return 7;
+  }
+
+  if (parsed.categories || parsed.cuisineHint) {
+    if (density === 'dense') return 5;
+    if (density === 'sparse') return 16;
+    return 9;
+  }
+
+  return density === 'sparse' ? 15 : 8;
+}
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // Re-export for convenience

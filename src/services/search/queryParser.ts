@@ -68,6 +68,12 @@ const BRAND_ALIASES: Record<string, string> = {
   'best buy': 'Best Buy',
   walgreens: 'Walgreens',
   cvs: 'CVS',
+  kohls: "Kohl's",
+  "kohl's": "Kohl's",
+  'kohl\u2019s': "Kohl's",
+  marshalls: 'Marshalls',
+  "marshall's": 'Marshalls',
+  'marshall\u2019s': 'Marshalls',
 
   // Gas
   shell: 'Shell',
@@ -137,12 +143,22 @@ export interface ParsedSearchQuery {
   isNameSearch: boolean;
 }
 
+export function normalizeSearchText(text: string): string {
+  return text
+    .normalize('NFKD')
+    .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+    .replace(/[\u2010-\u2015]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Parse a user search query into structured intent.
  */
 export function parseSearchQuery(query: string): ParsedSearchQuery {
   const originalQuery = query.trim();
-  const normalized = originalQuery.toLowerCase();
+  const canonicalQuery = normalizeSearchText(originalQuery);
+  const normalized = canonicalQuery.toLowerCase();
 
   // 1. Extract modifiers
   const wantsNearMe = NEAR_ME_PATTERNS.test(normalized);
@@ -160,13 +176,13 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
   }
 
   // 3. Resolve categories from the original query
-  const categories = resolveSearchCategories(originalQuery);
+  const categories = resolveSearchCategories(canonicalQuery);
 
   // 4. Extract cuisine hint
-  const cuisineHint = extractCuisineHint(originalQuery);
+  const cuisineHint = extractCuisineHint(canonicalQuery);
 
   // 5. Build core query by stripping modifiers
-  let coreQuery = originalQuery.replace(STRIP_WORDS, '').replace(/\s+/g, ' ').trim();
+  let coreQuery = canonicalQuery.replace(STRIP_WORDS, '').replace(/\s+/g, ' ').trim();
   if (!coreQuery) coreQuery = originalQuery.trim();
 
   // 6. Determine if this is a name-based search
