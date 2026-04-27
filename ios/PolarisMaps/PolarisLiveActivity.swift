@@ -95,39 +95,3 @@ class PolarisLiveActivity: NSObject {
         }
     }
 }
-
-@available(iOS 16.1, *)
-extension PolarisLiveActivity {
-    /// Ensures that @objc method signatures are bridged with the correct arg counts.
-    @objc func startActivity_etaSeconds_remainingDistanceMeters_maneuverType_maneuverInstruction_streetName_destinationName_transportMode(
-        _ etaSeconds: Double,
-        _ remainingDistanceMeters: Double,
-        _ maneuverType: String,
-        _ maneuverInstruction: String,
-        _ streetName: String?,
-        _ destinationName: String,
-        _ transportMode: String
-    ) {
-        startActivity(etaSeconds,
-                      remainingDistanceMeters: remainingDistanceMeters,
-                      maneuverType: maneuverType,
-                      maneuverInstruction: maneuverInstruction,
-                      streetName: streetName,
-                      destinationName: destinationName,
-                      transportMode: transportMode)
-    }
-
-    @objc func updateActivity_etaSeconds_remainingDistanceMeters_maneuverType_maneuverInstruction_streetName(
-        _ etaSeconds: Double,
-        _ remainingDistanceMeters: Double,
-        _ maneuverType: String,
-        _ maneuverInstruction: String,
-        _ streetName: String?
-    ) {
-        updateActivity(etaSeconds,
-                       remainingDistanceMeters: remainingDistanceMeters,
-                       maneuverType: maneuverType,
-                       maneuverInstruction: maneuverInstruction,
-                       streetName: streetName)
-    }
-}

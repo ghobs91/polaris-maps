@@ -5,11 +5,9 @@ import ActivityKit
 struct NavigationLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: NavigationAttributes.self) { context in
-            // Lock Screen / banner UI
             LockScreenView(context: context)
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded leading: direction + remainder in current step
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 4) {
                         Image(systemName: maneuverIcon(for: context.state.maneuverType))
@@ -29,7 +27,6 @@ struct NavigationLiveActivity: Widget {
                     }
                     .padding(.leading, 4)
                 }
-                // Expanded trailing: ETA + distance
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(formatDuration(context.state.etaSeconds))
@@ -41,13 +38,11 @@ struct NavigationLiveActivity: Widget {
                     }
                     .padding(.trailing, 4)
                 }
-                // Expanded center: arrival time
                 DynamicIslandExpandedRegion(.center) {
                     Text(arrivalTime(etaSeconds: context.state.etaSeconds))
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                // Expanded bottom: destination + transport mode
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack(spacing: 4) {
                         Image(systemName: transportModeIcon(for: context.attributes.transportMode))
@@ -71,7 +66,6 @@ struct NavigationLiveActivity: Widget {
     }
 }
 
-/// Lock Screen full view
 struct LockScreenView: View {
     let context: ActivityViewContext<NavigationAttributes>
 
@@ -112,8 +106,6 @@ struct LockScreenView: View {
         .padding()
     }
 }
-
-// MARK: - Helpers
 
 func maneuverIcon(for type: String) -> String {
     switch type {
