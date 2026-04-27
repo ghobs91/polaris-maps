@@ -109,6 +109,7 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       lastUpdated: existing?.lastUpdated ?? null,
       driveKey: existing?.driveKey ?? null,
       geocodingUrl: entry.geocodingUrl ?? null,
+      tileVersion: existing?.tileVersion ?? null,
     };
 
     await upsertRegion(region);

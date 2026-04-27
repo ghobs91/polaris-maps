@@ -243,6 +243,9 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
   // Add geocoding_url to regions for per-region geocoding bundle URL
   await database.execAsync(`ALTER TABLE regions ADD COLUMN geocoding_url TEXT;`).catch(() => {});
 
+  // Add tile_version to regions for version-aware P2P downloads
+  await database.execAsync(`ALTER TABLE regions ADD COLUMN tile_version TEXT;`).catch(() => {});
+
   // ATProto review columns
   for (const ddl of [
     `ALTER TABLE reviews ADD COLUMN source TEXT NOT NULL DEFAULT 'anonymous'`,

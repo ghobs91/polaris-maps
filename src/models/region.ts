@@ -16,6 +16,8 @@ export interface Region {
   lastUpdated: number | null;
   driveKey: string | null;
   geocodingUrl: string | null;
+  /** OpenFreeMap tile build version (date-stamp from tile URL, e.g. "20260422_001001_pt"). */
+  tileVersion: string | null;
 }
 
 export type RegionDownloadStatus = 'none' | 'downloading' | 'complete' | 'failed';

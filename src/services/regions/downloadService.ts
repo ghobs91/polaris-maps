@@ -2,32 +2,91 @@ import * as FileSystem from 'expo-file-system';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
+import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
+/** Cached latest tile version (date-stamp from tile URL). */
+let cachedTileVersion: string | null = null;
+/** Timestamp of the last TileJSON fetch (to allow re-fetch after TTL). */
+let tileVersionFetchedAt: number = 0;
+/** How long to cache the tile version before re-fetching (1 hour). */
+const TILE_VERSION_TTL_MS = 3_600_000;
+
+interface TileJsonResult {
+  urlTemplate: string;
+  /** Date-stamp from the tile URL path, e.g. "20260422_001001_pt". */
+  tileVersion: string;
+}
 
 /**
- * Resolve the OpenFreeMap vector tile URL template from TileJSON.
- * Returns a URL like `https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf`.
+ * Fetch OpenFreeMap TileJSON and extract both the tile URL template and the
+ * tile build version (date-stamp embedded in the tile URL path).
+ *
+ * The tile URL looks like:
+ *   https://tiles.openfreemap.org/planet/20260422_001001_pt/{z}/{x}/{y}.pbf
+ * We extract "20260422_001001_pt" as the version identifier.
  */
-async function getTileUrlTemplate(): Promise<string | null> {
-  if (cachedTileUrlTemplate) return cachedTileUrlTemplate;
+async function fetchTileJson(): Promise<TileJsonResult | null> {
+  // Return cached result if still fresh
+  if (
+    cachedTileUrlTemplate &&
+    cachedTileVersion &&
+    Date.now() - tileVersionFetchedAt < TILE_VERSION_TTL_MS
+  ) {
+    return { urlTemplate: cachedTileUrlTemplate, tileVersion: cachedTileVersion };
+  }
+
   try {
     const res = await fetch(OPENFREEMAP_TILEJSON_URL, {
       headers: { Accept: 'application/json' },
     });
     if (!res.ok) return null;
     const json = (await res.json()) as { tiles?: string[] };
-    if (json.tiles && json.tiles.length > 0) {
-      cachedTileUrlTemplate = json.tiles[0];
-      return cachedTileUrlTemplate;
+    if (!json.tiles || json.tiles.length === 0) return null;
+
+    cachedTileUrlTemplate = json.tiles[0];
+    cachedTileVersion = extractTileVersion(json.tiles[0]);
+    tileVersionFetchedAt = Date.now();
+
+    return { urlTemplate: cachedTileUrlTemplate, tileVersion: cachedTileVersion! };
+  } catch {
+    // Return stale cache if available as fallback
+    if (cachedTileUrlTemplate && cachedTileVersion) {
+      return { urlTemplate: cachedTileUrlTemplate, tileVersion: cachedTileVersion };
     }
     return null;
-  } catch {
-    return null;
   }
+}
+
+/**
+ * Extract the tile build version stamp from a tile URL.
+ *
+ * URL format: https://tiles.openfreemap.org/planet/YYYYMMDD_HHMMSS_pt/{z}/{x}/{y}.pbf
+ * Extracts: "YYYYMMDD_HHMMSS_pt"
+ */
+function extractTileVersion(tileUrl: string): string {
+  // Match the date-stamp pattern in the URL path
+  const match = tileUrl.match(/\/planet\/(\d{8}_\d{6}_pt)\//);
+  return match?.[1] ?? '';
+}
+
+/**
+ * Resolve just the OpenFreeMap tile URL template (backward-compatible wrapper).
+ */
+async function getTileUrlTemplate(): Promise<string | null> {
+  const result = await fetchTileJson();
+  return result?.urlTemplate ?? null;
+}
+
+/**
+ * Get the latest tile version from OpenFreeMap (date-stamp of the current build).
+ */
+export async function fetchLatestTileVersion(): Promise<string | null> {
+  const result = await fetchTileJson();
+  return result?.tileVersion ?? null;
 }
 
 export interface DownloadProgress {
@@ -67,15 +126,28 @@ export async function downloadRegion(
     region.id,
   ]);
 
+  // Fetch latest tile version from OpenFreeMap to decide P2P vs HTTP
+  const latestVersion = await fetchLatestTileVersion();
+
   try {
-    // Try P2P download first if a drive key is known
-    const peerSuccess = region.driveKey
-      ? await tryPeerDownload(region, destDir, onProgress)
-      : false;
+    let usedP2P = false;
+
+    // Only try P2P if:
+    // 1. A drive key is known (peers have seeded this region)
+    // 2. We either verified the version matches latest, OR we can't reach
+    //    OpenFreeMap at all (offline fallback — best effort from peers)
+    if (region.driveKey) {
+      const versionOk =
+        !latestVersion || // offline — trust P2P as best effort
+        region.tileVersion === latestVersion; // version matches latest
+      if (versionOk) {
+        usedP2P = await tryPeerDownload(region, destDir, onProgress);
+      }
+    }
 
     checkAborted(signal);
 
-    if (!peerSuccess) {
+    if (!usedP2P) {
       await downloadViaHttp(region, destDir, onProgress, signal);
     }
 
@@ -94,10 +166,19 @@ export async function downloadRegion(
     const dirInfo = await FileSystem.getInfoAsync(destDir);
     const totalSize = (dirInfo as { size?: number }).size ?? 0;
 
-    // Mark as downloaded
+    // Mark as downloaded, storing the tile version from the source used.
+    // For P2P: keep the existing stored version (already verified or offline best effort).
+    // For HTTP: always store the latest version from OpenFreeMap.
+    const downloadedVersion = usedP2P ? (region.tileVersion ?? latestVersion) : latestVersion;
     await db.runAsync(
-      'UPDATE regions SET download_status = ?, downloaded_at = ?, last_updated = ? WHERE id = ?',
-      ['complete', Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000), region.id],
+      'UPDATE regions SET download_status = ?, downloaded_at = ?, last_updated = ?, tile_version = ? WHERE id = ?',
+      [
+        'complete',
+        Math.floor(Date.now() / 1000),
+        Math.floor(Date.now() / 1000),
+        downloadedVersion ?? null,
+        region.id,
+      ],
     );
 
     await updatePeerMetrics({ cacheSizeBytes: totalSize });
@@ -309,6 +390,7 @@ async function autoSeedRegion(
 ): Promise<void> {
   const { key } = await seedRegion(regionId, filesDir);
   await db.runAsync('UPDATE regions SET drive_key = ? WHERE id = ?', [key, regionId]);
+  joinRegionFeed(regionId, key).catch(() => {});
 }
 
 export function cancelDownload(_regionId: string): void {
@@ -316,8 +398,19 @@ export function cancelDownload(_regionId: string): void {
 }
 
 export async function deleteRegionData(regionId: string): Promise<void> {
-  // Stop seeding this region via Hyperdrive
+  const db = await getDatabase();
+
+  // Read drive_key before nullifying so we can leave the feed
+  const row = await db.getFirstAsync<{ drive_key: string | null }>(
+    'SELECT drive_key FROM regions WHERE id = ?',
+    [regionId],
+  );
+
+  // Stop seeding via Hyperdrive and leave the feed
   unseedRegion(regionId).catch(() => {});
+  if (row?.drive_key) {
+    leaveRegionFeed(row.drive_key).catch(() => {});
+  }
 
   const destDir = `${FileSystem.documentDirectory}regions/${regionId}/`;
   const info = await FileSystem.getInfoAsync(destDir);
@@ -325,9 +418,8 @@ export async function deleteRegionData(regionId: string): Promise<void> {
     await FileSystem.deleteAsync(destDir, { idempotent: true });
   }
 
-  const db = await getDatabase();
   await db.runAsync(
-    'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, last_updated = ? WHERE id = ?',
+    'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, tile_version = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
 }

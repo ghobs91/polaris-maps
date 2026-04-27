@@ -69,6 +69,7 @@ function makeRegion(overrides: Partial<Region> = {}): Region {
     lastUpdated: null,
     driveKey: null,
     geocodingUrl: null,
+    tileVersion: null,
     ...overrides,
   };
 }
