@@ -27,7 +27,7 @@ function contrastRatio(l1: number, l2: number): number {
 
 describe('darkMapStyle', () => {
   const style = JSON.parse(DARK_MAP_STYLE_JSON);
-  const bgColor = '#1C1C2E';
+  const bgColor = '#2B2B2F';
   const bgLum = hexToLuminance(bgColor);
 
   it('should parse as valid JSON with version 8', () => {
