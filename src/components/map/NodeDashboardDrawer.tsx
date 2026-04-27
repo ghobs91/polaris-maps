@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { usePeerStore } from '../../stores/peerStore';
 import { joinNetwork, getLocalNode } from '../../services/sync/peerService';
-import { getActiveFeeds } from '../../services/sync/feedSyncService';
+import { startPeerMonitor, stopPeerMonitor } from '../../services/sync/peerMonitor';
 import { NodeDashboard } from '../dashboard';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -40,24 +40,13 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
   const translateY = useRef(new Animated.Value(DRAWER_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  const {
-    localNode,
-    activePeers,
-    syncingFeeds,
-    isOnline,
-    setLocalNode,
-    setSyncingFeeds,
-    setActivePeers,
-  } = usePeerStore();
+  const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode } = usePeerStore();
   const [refreshing, setRefreshing] = useState(false);
 
   const loadNodeData = useCallback(async () => {
     try {
       const node = await getLocalNode();
       setLocalNode(node);
-      const feeds = getActiveFeeds();
-      setSyncingFeeds(feeds.length);
-      setActivePeers(feeds.reduce((sum, f) => sum + f.peers, 0));
     } catch {
       try {
         const node = await joinNetwork();
@@ -66,7 +55,7 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
         // Silently fail — will retry on pull-to-refresh
       }
     }
-  }, [setLocalNode, setSyncingFeeds]);
+  }, [setLocalNode]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -128,6 +117,7 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
       translateY.setValue(DRAWER_HEIGHT);
       backdropOpacity.setValue(0);
       loadNodeData();
+      startPeerMonitor();
       Animated.parallel([
         Animated.spring(translateY, {
           toValue: 0,
@@ -141,6 +131,8 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
           useNativeDriver: true,
         }),
       ]).start();
+    } else {
+      stopPeerMonitor();
     }
   }, [visible, translateY, backdropOpacity, loadNodeData]);
 

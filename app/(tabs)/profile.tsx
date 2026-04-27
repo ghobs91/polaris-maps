@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePeerStore } from '../../src/stores/peerStore';
 import { joinNetwork, getLocalNode } from '../../src/services/sync/peerService';
-import { getActiveFeeds } from '../../src/services/sync/feedSyncService';
+import { startPeerMonitor, stopPeerMonitor } from '../../src/services/sync/peerMonitor';
 import { NodeDashboard } from '../../src/components/dashboard';
 import { Button, ErrorBoundary } from '../../src/components/common';
 import { spacing, typography } from '../../src/constants/theme';
@@ -15,26 +15,14 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
-  const {
-    localNode,
-    activePeers,
-    syncingFeeds,
-    isOnline,
-    setLocalNode,
-    setSyncingFeeds,
-    setActivePeers,
-  } = usePeerStore();
+  const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode } = usePeerStore();
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadNodeData = useCallback(async () => {
     try {
       const node = await getLocalNode();
       setLocalNode(node);
-      const feeds = getActiveFeeds();
-      setSyncingFeeds(feeds.length);
-      setActivePeers(feeds.reduce((sum, f) => sum + f.peers, 0));
     } catch {
-      // Node not joined yet — auto-join
       try {
         const node = await joinNetwork();
         setLocalNode(node);
@@ -42,10 +30,14 @@ export default function ProfileScreen() {
         // Silently fail — will retry on refresh
       }
     }
-  }, [setLocalNode, setSyncingFeeds]);
+  }, [setLocalNode]);
 
   useEffect(() => {
     loadNodeData();
+    startPeerMonitor();
+    return () => {
+      stopPeerMonitor();
+    };
   }, [loadNodeData]);
 
   const onRefresh = useCallback(async () => {
