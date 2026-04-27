@@ -51,7 +51,9 @@ export function LocationActionPanel() {
   const { bottom: safeBottom } = useSafeAreaInsets();
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
-  const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
+  const [usedOnlineRouting, setUsedOnlineRouting] = useState<'no-region' | 'unavailable' | null>(
+    null,
+  );
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
   const [showParkAndRide, setShowParkAndRide] = useState(false);
   const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
@@ -61,7 +63,7 @@ export function LocationActionPanel() {
     setSelectedLocation(null);
     clearRoutePreview();
     setRouteError(null);
-    setUsedOnlineRouting(false);
+    setUsedOnlineRouting(null);
   }, [setSelectedLocation, clearRoutePreview]);
 
   /** Compute route and show it on the map (directions preview) */
@@ -71,7 +73,7 @@ export function LocationActionPanel() {
       if (!selectedLocation) return;
       setIsRouting(true);
       setRouteError(null);
-      setUsedOnlineRouting(false);
+      setUsedOnlineRouting(null);
       setParkAndRideResult(null);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -144,7 +146,7 @@ export function LocationActionPanel() {
           setRouteError('No route found between these points');
           return;
         }
-        if (!isRoutingInitialized()) setUsedOnlineRouting(true);
+        if (!isRoutingInitialized()) setUsedOnlineRouting(region ? 'unavailable' : 'no-region');
 
         // Store as preview (not active navigation)
         setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
@@ -364,7 +366,7 @@ export function LocationActionPanel() {
         </View>
       )}
 
-      {usedOnlineRouting && (
+      {usedOnlineRouting !== null && (
         <TouchableOpacity
           style={styles.regionHint}
           onPress={() => router.push('/regions')}
@@ -372,7 +374,9 @@ export function LocationActionPanel() {
         >
           <Ionicons name="cloud-download-outline" size={14} color={colors.warning} />
           <Text style={styles.regionHintText}>
-            Using online routing — download a region for offline navigation
+            {usedOnlineRouting === 'no-region'
+              ? 'Using online routing — download a region for offline navigation'
+              : 'Using online routing — offline routing data unavailable'}
           </Text>
         </TouchableOpacity>
       )}
