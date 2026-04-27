@@ -21,6 +21,7 @@ import {
 import { reroute } from '@/services/routing/routingService';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
+import { useLiveActivity } from '@/hooks/useLiveActivity';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function NavigationScreen() {
@@ -68,6 +69,10 @@ export default function NavigationScreen() {
 
   // Start/stop periodic traffic refresh based on navigation state
   useNavigationTrafficRefresh();
+
+  // Manage iOS Live Activity (Dynamic Island) while navigating
+  useLiveActivity();
+
   const [navPosition, setNavPosition] = useState<[number, number] | null>(null);
   const [navBearing, setNavBearing] = useState(0);
   // Live remaining distance to the end of the current maneuver step.
