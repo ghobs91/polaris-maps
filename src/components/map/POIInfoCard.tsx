@@ -874,6 +874,34 @@ export function POIInfoCard() {
               <Text style={[styles.updatePlaceBtnText, { color: primary }]}>Update Place Info</Text>
             </TouchableOpacity>
           )}
+
+          {/* ── Add to OpenStreetMap (Overture POI) ───────────────── */}
+          {selectedPoi &&
+            selectedPoi.id <= 0 &&
+            selectedPoi.tags['polaris:source'] === 'overture' && (
+              <TouchableOpacity
+                style={[styles.osmAddBtn, { borderColor }]}
+                activeOpacity={0.7}
+                onPress={() => {
+                  const initialTags: Record<string, string> = {};
+                  for (const [k, v] of Object.entries(selectedPoi.tags)) {
+                    if (!k.startsWith('polaris:')) initialTags[k] = v;
+                  }
+                  router.push({
+                    pathname: '/poi/osm-edit',
+                    params: {
+                      name: selectedPoi.name || '',
+                      lat: String(selectedPoi.lat),
+                      lng: String(selectedPoi.lng),
+                      initialTags: JSON.stringify(initialTags),
+                    },
+                  });
+                }}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                <Text style={styles.osmAddBtnText}>Add to OpenStreetMap</Text>
+              </TouchableOpacity>
+            )}
         </ScrollView>
       )}
     </Animated.View>
@@ -1026,6 +1054,22 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   updatePlaceBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  osmAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    paddingVertical: 14,
+    borderRadius: borderRadius.lg,
+    backgroundColor: '#7EBC6F',
+  },
+  osmAddBtnText: {
+    color: '#fff',
     fontSize: 15,
     fontWeight: '600',
   },

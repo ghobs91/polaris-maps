@@ -14,7 +14,12 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmAuthStore } from '@/stores/osmAuthStore';
-import { fetchOsmNode, submitOsmNodeEdit, type OsmNodeData } from '@/services/osm/osmEditService';
+import {
+  fetchOsmNode,
+  submitOsmNodeEdit,
+  submitOsmNodeCreate,
+  type OsmNodeData,
+} from '@/services/osm/osmEditService';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 /**
@@ -36,10 +41,24 @@ const EDITABLE_FIELDS = [
 
 export default function OsmEditScreen() {
   const router = useRouter();
-  const { nodeId, name: poiName } = useLocalSearchParams<{
-    nodeId: string;
+  const {
+    nodeId,
+    name: poiName,
+    lat: paramLat,
+    lng: paramLng,
+    initialTags: paramInitialTags,
+  } = useLocalSearchParams<{
+    nodeId?: string;
     name?: string;
+    lat?: string;
+    lng?: string;
+    initialTags?: string;
   }>();
+
+  // Determine mode: editing an existing node, or creating a new one
+  const isCreateMode = !nodeId && paramLat !== undefined && paramLng !== undefined;
+  const createLat = paramLat ? parseFloat(paramLat) : 0;
+  const createLng = paramLng ? parseFloat(paramLng) : 0;
 
   // Auth
   const accessToken = useOsmAuthStore((s) => s.accessToken);
@@ -64,7 +83,45 @@ export default function OsmEditScreen() {
 
   // Load node data once auth is hydrated
   useEffect(() => {
-    if (!hydrated || !nodeId) return;
+    if (!hydrated) return;
+
+    // Create mode: populate directly from initialTags param
+    if (isCreateMode) {
+      const tags: Record<string, string> = {};
+      try {
+        if (paramInitialTags) {
+          const parsed = JSON.parse(paramInitialTags);
+          if (typeof parsed === 'object' && parsed !== null) {
+            Object.assign(tags, parsed);
+          }
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+
+      const initial: Record<string, string> = {};
+      for (const f of EDITABLE_FIELDS) {
+        initial[f.key] = tags[f.key] ?? '';
+      }
+      setEditedTags(initial);
+
+      // Create a synthetic node for the form (no real OSM ID yet)
+      setNode({
+        id: 0,
+        version: 0,
+        lat: createLat,
+        lon: createLng,
+        tags,
+      });
+      setLoading(false);
+      return;
+    }
+
+    // Edit mode: fetch existing OSM node
+    if (!nodeId) {
+      setLoading(false);
+      return;
+    }
     const id = parseInt(nodeId, 10);
     if (isNaN(id) || id <= 0) {
       setLoading(false);
@@ -73,7 +130,6 @@ export default function OsmEditScreen() {
     fetchOsmNode(id)
       .then((data) => {
         setNode(data);
-        // Pre-populate edited fields with current values
         const initial: Record<string, string> = {};
         for (const f of EDITABLE_FIELDS) {
           initial[f.key] = data.tags[f.key] ?? '';
@@ -84,22 +140,24 @@ export default function OsmEditScreen() {
         Alert.alert('Error', `Could not load place data: ${(e as Error).message}`);
       })
       .finally(() => setLoading(false));
-  }, [hydrated, nodeId]);
+  }, [hydrated, isCreateMode, nodeId, paramInitialTags, createLat, createLng]);
 
   const setTag = useCallback((key: string, value: string) => {
     setEditedTags((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  // Detect which tags actually changed
+  // Detect which tags actually changed (create mode: all non-empty values are "changed")
   const changedTags = useMemo(() => {
     if (!node) return {};
     const changed: Record<string, string> = {};
     for (const [k, v] of Object.entries(editedTags)) {
       const original = node.tags[k] ?? '';
-      if (v !== original) changed[k] = v;
+      if (isCreateMode ? v.trim() !== '' : v !== original) {
+        changed[k] = v;
+      }
     }
     return changed;
-  }, [node, editedTags]);
+  }, [node, editedTags, isCreateMode]);
 
   const hasChanges = Object.keys(changedTags).length > 0;
 
@@ -123,16 +181,36 @@ export default function OsmEditScreen() {
       return;
     }
 
-    const comment = changeComment.trim() || `Updated ${poiName ?? 'place'} via Polaris Maps`;
+    const comment =
+      changeComment.trim() ||
+      (isCreateMode
+        ? `Added ${poiName ?? 'place'} via Polaris Maps (source: Overture Maps)`
+        : `Updated ${poiName ?? 'place'} via Polaris Maps`);
 
     setSubmitting(true);
     try {
-      const result = await submitOsmNodeEdit(accessToken, node.id, changedTags, comment);
-      Alert.alert(
-        'Edit Submitted',
-        `Your changes have been submitted to OpenStreetMap.\n\nChangeset #${result.changesetId}`,
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
+      if (isCreateMode) {
+        const result = await submitOsmNodeCreate(
+          accessToken,
+          node.lat,
+          node.lon,
+          changedTags,
+          comment,
+        );
+        Alert.alert(
+          'Place Added to OSM',
+          `Your new place has been submitted to OpenStreetMap.\n\n` +
+            `Node #${result.nodeId}\nChangeset #${result.changesetId}`,
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      } else {
+        const result = await submitOsmNodeEdit(accessToken, node.id, changedTags, comment);
+        Alert.alert(
+          'Edit Submitted',
+          `Your changes have been submitted to OpenStreetMap.\n\nChangeset #${result.changesetId}`,
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      }
     } catch (e) {
       Alert.alert('Submission Failed', (e as Error).message);
     } finally {
@@ -145,6 +223,7 @@ export default function OsmEditScreen() {
     changedTags,
     changeComment,
     poiName,
+    isCreateMode,
     ensureValid,
     handleLogin,
     router,
@@ -159,12 +238,16 @@ export default function OsmEditScreen() {
     );
   }
 
-  // ── Invalid node
+  // ── Invalid node (edit mode only)
   if (!node) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>Could not load this place from OpenStreetMap.</Text>
-        <Text style={styles.errorSub}>Only OSM nodes with a positive ID can be edited.</Text>
+        <Text style={styles.errorText}>Could not load this place.</Text>
+        <Text style={styles.errorSub}>
+          {isCreateMode
+            ? 'Missing coordinates. Please try again from the place details screen.'
+            : 'Only OSM nodes with a positive ID can be edited.'}
+        </Text>
       </View>
     );
   }
@@ -179,8 +262,9 @@ export default function OsmEditScreen() {
           </View>
           <Text style={styles.authTitle}>Sign in to OpenStreetMap</Text>
           <Text style={styles.authDesc}>
-            To update place information, you need to sign in with your OpenStreetMap account. Your
-            changes will be submitted directly to OpenStreetMap for the community.
+            {isCreateMode
+              ? 'To add this place to OpenStreetMap, you need to sign in with your OpenStreetMap account. Your addition will be submitted directly to OpenStreetMap for the community.'
+              : 'To update place information, you need to sign in with your OpenStreetMap account. Your changes will be submitted directly to OpenStreetMap for the community.'}
           </Text>
         </View>
 
@@ -215,7 +299,7 @@ export default function OsmEditScreen() {
     );
   }
 
-  // ── Main edit form
+  // ── Main edit / create form
   return (
     <ScrollView
       style={styles.container}
@@ -232,13 +316,18 @@ export default function OsmEditScreen() {
           </View>
         )}
         <Text style={styles.userName}>
-          Editing as <Text style={styles.userNameBold}>{user?.displayName ?? 'OSM User'}</Text>
+          {isCreateMode ? 'Adding as ' : 'Editing as '}
+          <Text style={styles.userNameBold}>{user?.displayName ?? 'OSM User'}</Text>
         </Text>
       </View>
 
-      <Text style={styles.heading}>Update Place Info</Text>
+      <Text style={styles.heading}>
+        {isCreateMode ? 'Add Place to OpenStreetMap' : 'Update Place Info'}
+      </Text>
       <Text style={styles.subheading}>
-        Edit the fields below. Changes are submitted directly to OpenStreetMap.
+        {isCreateMode
+          ? 'This data comes from Overture Maps. Review and adjust before submitting to OpenStreetMap.'
+          : 'Edit the fields below. Changes are submitted directly to OpenStreetMap.'}
       </Text>
 
       {/* Editable fields */}
@@ -248,7 +337,10 @@ export default function OsmEditScreen() {
           <TextInput
             style={[
               styles.input,
-              editedTags[field.key] !== (node.tags[field.key] ?? '') && styles.inputChanged,
+              isCreateMode && editedTags[field.key] !== '' && styles.inputFilled,
+              !isCreateMode &&
+                editedTags[field.key] !== (node.tags[field.key] ?? '') &&
+                styles.inputChanged,
             ]}
             value={editedTags[field.key] ?? ''}
             onChangeText={(text) => setTag(field.key, text)}
@@ -259,10 +351,13 @@ export default function OsmEditScreen() {
             autoCapitalize="none"
             autoCorrect={false}
           />
-          {editedTags[field.key] !== (node.tags[field.key] ?? '') && (
+          {!isCreateMode && editedTags[field.key] !== (node.tags[field.key] ?? '') && (
             <Text style={styles.changedLabel}>
               {node.tags[field.key] ? `Was: ${node.tags[field.key]}` : 'New value'}
             </Text>
+          )}
+          {isCreateMode && editedTags[field.key] !== '' && (
+            <Text style={styles.filledLabel}>Will be added to OSM</Text>
           )}
         </View>
       ))}
@@ -274,7 +369,11 @@ export default function OsmEditScreen() {
           style={[styles.input, styles.commentInput]}
           value={changeComment}
           onChangeText={setChangeComment}
-          placeholder={`Updated ${poiName ?? 'place'} via Polaris Maps`}
+          placeholder={
+            isCreateMode
+              ? `Added ${poiName ?? 'place'} via Polaris Maps (source: Overture Maps)`
+              : `Updated ${poiName ?? 'place'} via Polaris Maps`
+          }
           placeholderTextColor={colors.textSecondary}
           multiline
           numberOfLines={2}
@@ -295,22 +394,28 @@ export default function OsmEditScreen() {
           <>
             <Ionicons name="cloud-upload-outline" size={20} color="#fff" />
             <Text style={styles.submitButtonText}>
-              Submit {Object.keys(changedTags).length}{' '}
-              {Object.keys(changedTags).length === 1 ? 'change' : 'changes'} to OSM
+              {isCreateMode
+                ? 'Add Place to OpenStreetMap'
+                : `Submit ${Object.keys(changedTags).length} ${Object.keys(changedTags).length === 1 ? 'change' : 'changes'} to OSM`}
             </Text>
           </>
         )}
       </TouchableOpacity>
 
       {!hasChanges && (
-        <Text style={styles.noChangesHint}>Modify at least one field above to submit changes.</Text>
+        <Text style={styles.noChangesHint}>
+          {isCreateMode
+            ? 'Fill in at least one field above to add this place to OSM.'
+            : 'Modify at least one field above to submit changes.'}
+        </Text>
       )}
 
       <View style={styles.footer}>
         <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
         <Text style={styles.footerText}>
-          Changes go live on OpenStreetMap and are reviewed by the community. Please only submit
-          accurate information.
+          {isCreateMode
+            ? 'New places go live on OpenStreetMap and are reviewed by the community. Please only submit accurate information from the Overture data source.'
+            : 'Changes go live on OpenStreetMap and are reviewed by the community. Please only submit accurate information.'}
         </Text>
       </View>
     </ScrollView>
@@ -466,11 +571,20 @@ const styles = StyleSheet.create({
     borderColor: '#7EBC6F',
     borderWidth: 2,
   },
+  inputFilled: {
+    borderColor: '#7EBC6F',
+    borderWidth: 1,
+  },
   commentInput: {
     minHeight: 60,
     textAlignVertical: 'top',
   },
   changedLabel: {
+    ...typography.caption,
+    color: '#7EBC6F',
+    marginTop: 4,
+  },
+  filledLabel: {
     ...typography.caption,
     color: '#7EBC6F',
     marginTop: 4,

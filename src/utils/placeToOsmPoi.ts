@@ -103,6 +103,31 @@ export function placeToOsmPoi(place: Place): OsmPoi {
 }
 
 /**
+ * Convert a Place (Overture/community) to a flat OSM tag map suitable for
+ * pre-filling the osm-edit creation form.
+ *
+ * Includes only tags that are meaningful in OSM-land: name, category-mapped
+ * amenity/shop/tourism/leisure, phone, website, opening_hours, address parts.
+ */
+export function placeToOsmTags(place: Place): Record<string, string> {
+  const mapping = CATEGORY_TO_OSM[place.category] ?? CATEGORY_TO_OSM.other;
+  const tags: Record<string, string> = {
+    name: place.name,
+    [mapping.type]: mapping.subtype,
+  };
+
+  if (place.phone) tags['phone'] = place.phone;
+  if (place.website) tags['website'] = place.website;
+  if (place.hours) tags['opening_hours'] = place.hours;
+  if (place.addressStreet) tags['addr:street'] = place.addressStreet;
+  if (place.addressCity) tags['addr:city'] = place.addressCity;
+  if (place.addressState) tags['addr:state'] = place.addressState;
+  if (place.addressPostcode) tags['addr:postcode'] = place.addressPostcode;
+
+  return tags;
+}
+
+/**
  * Convert a SavedPlace (from the user's saved lists) to the OsmPoi format
  * used by POILayer and POIInfoCard, so tapping a saved place shows the
  * full place card rather than just a pin.

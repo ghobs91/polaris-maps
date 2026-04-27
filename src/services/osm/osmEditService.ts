@@ -210,6 +210,89 @@ export async function submitOsmNodeEdit(
 }
 
 // ---------------------------------------------------------------------------
+// Element creation
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a new OSM node within an existing changeset.
+ * Returns the new node ID assigned by OSM.
+ */
+export async function createOsmNode(
+  accessToken: string,
+  changesetId: number,
+  lat: number,
+  lon: number,
+  tags: Record<string, string>,
+): Promise<number> {
+  const tagXml = Object.entries(tags)
+    .map(([k, v]) => `    <tag k="${escapeXml(k)}" v="${escapeXml(v)}"/>`)
+    .join('\n');
+
+  const xml = [
+    '<osm>',
+    `  <node changeset="${changesetId}" lat="${lat}" lon="${lon}" visible="true">`,
+    tagXml,
+    '  </node>',
+    '</osm>',
+  ].join('\n');
+
+  const resp = await fetch(`${OSM_API}/api/0.6/node/create`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/xml',
+    },
+    body: xml,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Failed to create node (${resp.status}): ${text}`);
+  }
+
+  const id = parseInt(await resp.text(), 10);
+  if (isNaN(id)) throw new Error('Invalid node ID in OSM response');
+  return id;
+}
+
+// ---------------------------------------------------------------------------
+// High-level: create a new OSM node
+// ---------------------------------------------------------------------------
+
+export interface CreateResult {
+  changesetId: number;
+  nodeId: number;
+}
+
+/**
+ * Submit a new OSM node.
+ *
+ * 1. Create changeset → create node → close changeset
+ */
+export async function submitOsmNodeCreate(
+  accessToken: string,
+  lat: number,
+  lng: number,
+  tags: Record<string, string>,
+  comment: string,
+): Promise<CreateResult> {
+  const changesetId = await createChangeset(accessToken, comment);
+
+  try {
+    const nodeId = await createOsmNode(accessToken, changesetId, lat, lng, tags);
+    await closeChangeset(accessToken, changesetId);
+    return { changesetId, nodeId };
+  } catch (e) {
+    try {
+      await closeChangeset(accessToken, changesetId);
+    } catch {
+      /* ignore close errors */
+    }
+    throw e;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

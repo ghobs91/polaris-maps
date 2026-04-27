@@ -10,6 +10,7 @@ import {
   FlatList,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { usePOIStore } from '../../src/stores/poiStore';
 import { useMapStore } from '../../src/stores/mapStore';
 import { getPlaceById } from '../../src/services/poi/poiService';
@@ -22,6 +23,7 @@ import { RatingWidget } from '../../src/components/poi/RatingWidget';
 import { Button, LoadingSpinner, ErrorBoundary, Modal } from '../../src/components/common';
 import { SaveToListSheet } from '../../src/components/places';
 import { colors, spacing, typography, borderRadius } from '../../src/constants/theme';
+import { placeToOsmTags } from '../../src/utils/placeToOsmPoi';
 import type { StreetImagery } from '../../src/models/imagery';
 
 const SAFE_URL_SCHEMES = ['https:', 'http:'];
@@ -224,6 +226,27 @@ export default function POIDetailScreen() {
           />
           <Button title="Verify I'm Here" onPress={handleAttest} variant="outline" />
           <Button title="Save to List" onPress={() => setShowSaveSheet(true)} variant="outline" />
+
+          {selectedPlace.source === 'overture' && (
+            <Pressable
+              style={({ pressed }) => [styles.osmAddButton, pressed && styles.osmAddButtonPressed]}
+              onPress={() => {
+                const tags = placeToOsmTags(selectedPlace);
+                router.push({
+                  pathname: '/poi/osm-edit',
+                  params: {
+                    name: selectedPlace.name,
+                    lat: String(selectedPlace.lat),
+                    lng: String(selectedPlace.lng),
+                    initialTags: JSON.stringify(tags),
+                  },
+                });
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={20} color="#fff" />
+              <Text style={styles.osmAddButtonText}>Add to OpenStreetMap</Text>
+            </Pressable>
+          )}
         </View>
 
         <Modal visible={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Save to List">
@@ -391,4 +414,22 @@ const styles = StyleSheet.create({
   },
   photoThumbIcon: { fontSize: 24 },
   photoThumbBearing: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
+  osmAddButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#7EBC6F',
+    paddingVertical: 14,
+    borderRadius: borderRadius.lg,
+    marginTop: spacing.sm,
+  },
+  osmAddButtonPressed: {
+    opacity: 0.7,
+  },
+  osmAddButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
