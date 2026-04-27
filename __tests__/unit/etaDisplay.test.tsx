@@ -1,35 +1,3 @@
-/**
- * Unit tests for EtaDisplay safeAreaBottom padding logic.
- *
- * We extract the paddingBottom computation and formatDuration from the module
- * without rendering the React component (the unit test runner doesn't have the
- * jest-expo preset required for React Native rendering).
- */
-
-describe('EtaDisplay — paddingBottom with safeAreaBottom', () => {
-  const BASE_PADDING_BOTTOM = 16;
-
-  function computePaddingBottom(safeAreaBottom = 0): number {
-    return BASE_PADDING_BOTTOM + safeAreaBottom;
-  }
-
-  it('defaults to 16 when safeAreaBottom is 0', () => {
-    expect(computePaddingBottom(0)).toBe(16);
-  });
-
-  it('adds the iPhone home indicator inset (34)', () => {
-    expect(computePaddingBottom(34)).toBe(50);
-  });
-
-  it('adds a large safe area (44)', () => {
-    expect(computePaddingBottom(44)).toBe(60);
-  });
-
-  it('stays at base when safeAreaBottom is omitted', () => {
-    expect(computePaddingBottom()).toBe(16);
-  });
-});
-
 describe('EtaDisplay — formatDuration', () => {
   // Mirror the private formatDuration function from EtaDisplay.tsx
   function formatDuration(seconds: number): string {

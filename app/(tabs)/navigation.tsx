@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
+import type { MapViewHandle } from '@/components/map/MapView';
 import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { spacing, typography } from '@/constants/theme';
@@ -81,6 +82,9 @@ export default function NavigationScreen() {
 
   // Camera follow state — breaks when user pans/zooms, restored by re-center button
   const [followCamera, setFollowCamera] = useState(true);
+  const mapRef = useRef<MapViewHandle>(null);
+  const navPositionRef = useRef<[number, number] | null>(null);
+  navPositionRef.current = navPosition;
 
   const handleFollowCameraChange = useCallback((following: boolean) => {
     setFollowCamera(following);
@@ -88,6 +92,10 @@ export default function NavigationScreen() {
 
   const handleRecenter = useCallback(() => {
     setFollowCamera(true);
+    const pos = navPositionRef.current;
+    if (pos && mapRef.current) {
+      mapRef.current.flyTo(pos[1], pos[0], 17);
+    }
   }, []);
 
   // Initialize navPosition from the route start so the chevron appears immediately
@@ -383,6 +391,7 @@ export default function NavigationScreen() {
     <View style={styles.container}>
       {/* Full-screen map — tilted + heading-up when navigating */}
       <MapView
+        ref={mapRef}
         routeGeometry={activeRoute.geometry}
         navigationMode={isNavigating}
         navPosition={navPosition}
@@ -390,14 +399,6 @@ export default function NavigationScreen() {
         followCamera={followCamera}
         onFollowCameraChange={handleFollowCameraChange}
       />
-
-      {/* Re-center button — shown when user has panned/zoomed away */}
-      {!followCamera && (
-        <TouchableOpacity style={styles.recenterBtn} onPress={handleRecenter} activeOpacity={0.85}>
-          <Ionicons name="navigate" size={16} color="#fff" />
-          <Text style={styles.recenterText}>Re-center</Text>
-        </TouchableOpacity>
-      )}
 
       {/* Turn banner overlaid at top */}
       <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
@@ -408,8 +409,8 @@ export default function NavigationScreen() {
         />
       </View>
 
-      {/* ETA / Exit bar — flush to screen bottom, padded for safe area */}
-      <View style={[styles.etaContainer, { bottom: 0 }]}>
+      {/* Floating bottom bar pinned above the safe area. */}
+      <View style={[styles.etaContainer, { bottom: insets.bottom + spacing.md }]}>
         {/* Multi-stop: show next stop name */}
         {waypoints.length > 0 && currentLegIndex < waypoints.length && (
           <View style={styles.nextStopBanner}>
@@ -426,9 +427,20 @@ export default function NavigationScreen() {
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           onExit={stopNavigation}
-          safeAreaBottom={insets.bottom}
         />
       </View>
+
+      {/* Re-center button — shown when user has panned/zoomed away */}
+      {!followCamera && (
+        <TouchableOpacity
+          style={[styles.recenterBtn, { bottom: insets.bottom + spacing.md + 100 }]}
+          onPress={handleRecenter}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="navigate" size={16} color="#fff" />
+          <Text style={styles.recenterText}>Re-center</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -443,16 +455,16 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     },
     etaContainer: {
       position: 'absolute',
-      left: 0,
-      right: 0,
+      left: spacing.md,
+      right: spacing.md,
     },
     empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
     emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
     emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
     recenterBtn: {
       position: 'absolute',
-      left: spacing.md,
-      bottom: 120,
+      alignSelf: 'center',
+      zIndex: 10,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
@@ -476,7 +488,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       alignItems: 'center',
       gap: 6,
       backgroundColor: 'rgba(28,28,30,0.88)',
-      marginHorizontal: spacing.md,
       marginBottom: 6,
       paddingVertical: 8,
       paddingHorizontal: 14,

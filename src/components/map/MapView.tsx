@@ -673,7 +673,8 @@ const styles = StyleSheet.create({
 function NavPuck({ isDark: dark }: { isDark: boolean }) {
   return (
     <View style={[puckStyles.oval, dark ? puckStyles.ovalDark : puckStyles.ovalLight]}>
-      {/* Up-pointing solid arrow via CSS border trick */}
+      {/* Layer a slightly larger white triangle behind the blue arrow for contrast. */}
+      <View style={puckStyles.arrowBorder} />
       <View style={puckStyles.arrow} />
     </View>
   );
@@ -681,6 +682,7 @@ function NavPuck({ isDark: dark }: { isDark: boolean }) {
 
 const ARROW_HALF = 11; // half of arrow base width
 const ARROW_H = 18; // arrow height
+const ARROW_BORDER = 2;
 
 const puckStyles = StyleSheet.create({
   oval: {
@@ -702,7 +704,20 @@ const puckStyles = StyleSheet.create({
     backgroundColor: '#2C2C2E',
   },
   // ▲ pointing UP — the CSS-border triangle trick
+  arrowBorder: {
+    position: 'absolute',
+    width: 0,
+    height: 0,
+    borderLeftWidth: ARROW_HALF + ARROW_BORDER,
+    borderRightWidth: ARROW_HALF + ARROW_BORDER,
+    borderBottomWidth: ARROW_H + ARROW_BORDER,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#FFFFFF',
+    marginBottom: Math.round(ARROW_H / 5),
+  },
   arrow: {
+    position: 'absolute',
     width: 0,
     height: 0,
     borderLeftWidth: ARROW_HALF,
