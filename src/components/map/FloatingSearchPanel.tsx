@@ -216,6 +216,8 @@ interface FloatingSearchPanelProps {
   onProfilePress?: () => void;
   /** Called when the user taps the locate/find-me button */
   onLocatePress?: () => void;
+  /** When true, renders as an embedded panel (no absolute positioning, no map controls, no profile/bookmark buttons) */
+  embedded?: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -332,7 +334,7 @@ function CtrlBtn({
   );
 }
 
-function MapControlsColumn({
+export function MapControlsColumn({
   onLocatePress,
   isDark,
 }: {
@@ -573,6 +575,7 @@ export function FloatingSearchPanel({
   bottomInsetExtra = 0,
   onProfilePress,
   onLocatePress,
+  embedded = false,
 }: FloatingSearchPanelProps) {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
@@ -601,7 +604,9 @@ export function FloatingSearchPanel({
   const [selectedResult, setSelectedResult] = useState<GeocodingResult | null>(null);
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
-  const [usedOnlineRouting, setUsedOnlineRouting] = useState(false);
+  const [usedOnlineRouting, setUsedOnlineRouting] = useState<'no-region' | 'unavailable' | null>(
+    null,
+  );
   const [isTransitRouting, setIsTransitRouting] = useState(false);
   const [recentsExpanded, setRecentsExpanded] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
@@ -943,7 +948,7 @@ export function FloatingSearchPanel({
     clearRoutePreview();
     useTransitStore.getState().clearTransitPlan();
     setRouteError(null);
-    setUsedOnlineRouting(false);
+    setUsedOnlineRouting(null);
   }, [setSelectedLocation, clearRoutePreview]);
 
   // ── Selecting a result ──────────────────────
@@ -1057,7 +1062,7 @@ export function FloatingSearchPanel({
       navigateToResult(result);
       setSelectedResult(result);
       setRouteError(null);
-      setUsedOnlineRouting(false);
+      setUsedOnlineRouting(null);
       clearRoutePreview();
       setMode('location');
     },
@@ -1077,7 +1082,7 @@ export function FloatingSearchPanel({
       setMode('location');
       setIsRouting(true);
       setRouteError(null);
-      setUsedOnlineRouting(false);
+      setUsedOnlineRouting(null);
       setParkAndRideResult(null);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -1146,7 +1151,7 @@ export function FloatingSearchPanel({
           setRouteError('No route found between these points');
           return;
         }
-        if (!isRoutingInitialized()) setUsedOnlineRouting(true);
+        if (!isRoutingInitialized()) setUsedOnlineRouting(region ? 'unavailable' : 'no-region');
 
         setRoutePreview(routes[0], routes.slice(1), dest, costing, currentWaypoints);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
@@ -1580,7 +1585,7 @@ export function FloatingSearchPanel({
       navigateToResult({ entry: homeEntry.entry, rank: 0 });
       setSelectedResult({ entry: homeEntry.entry, rank: 0 });
       setRouteError(null);
-      setUsedOnlineRouting(false);
+      setUsedOnlineRouting(null);
       clearRoutePreview();
       setMode('location');
     } else {
@@ -1596,7 +1601,7 @@ export function FloatingSearchPanel({
       navigateToResult({ entry: workEntry.entry, rank: 0 });
       setSelectedResult({ entry: workEntry.entry, rank: 0 });
       setRouteError(null);
-      setUsedOnlineRouting(false);
+      setUsedOnlineRouting(null);
       clearRoutePreview();
       setMode('location');
     } else {
@@ -1648,6 +1653,11 @@ export function FloatingSearchPanel({
 
   const panelBottom =
     keyboardHeight > 0 ? keyboardHeight + 12 : insets.bottom + 12 + bottomInsetExtra;
+
+  const rootStyle = embedded
+    ? [styles.rootEmbedded, st.embeddedRoot]
+    : [styles.root, { bottom: panelBottom }];
+
   // Panel always uses dark glass (like Apple Maps) — use light text always
   const textColor = '#F2F2F7';
   const subColor = '#8E8E93';
@@ -1737,12 +1747,10 @@ export function FloatingSearchPanel({
     const entry = selectedResult.entry;
     const subtitle = [entry.city, entry.state, entry.country].filter(Boolean).join(', ');
     return (
-      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
-        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
-        <GlassPanel isDark={isDark} style={st.panel}>
-          <View style={styles.handle} />
-
-          {/* Header row */}
+      <View style={rootStyle} pointerEvents="box-none">
+        {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
+        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+          {/* Location header */}
           <View style={st.locHeader}>
             <View style={st.locTitleBlock}>
               <Text style={[st.locTitle, { color: textColor }]} numberOfLines={2}>
@@ -1899,10 +1907,10 @@ export function FloatingSearchPanel({
       ? parkAndRideResult.totalDurationSeconds
       : (routePreviewTrafficEta ?? routePreview.summary.durationSeconds);
     return (
-      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
-        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
-        <GlassPanel isDark={isDark} style={st.panel}>
-          <View style={styles.handle} />
+      <View style={rootStyle} pointerEvents="box-none">
+        {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
+        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+          {!embedded && <View style={styles.handle} />}
 
           {/* Header */}
           <View style={st.locHeader}>
@@ -1961,7 +1969,7 @@ export function FloatingSearchPanel({
             </View>
           )}
 
-          {usedOnlineRouting && (
+          {usedOnlineRouting !== null && (
             <TouchableOpacity
               style={st.regionHint}
               onPress={() => router.push('/regions')}
@@ -1969,7 +1977,9 @@ export function FloatingSearchPanel({
             >
               <Ionicons name="cloud-download-outline" size={13} color={colors.warning} />
               <Text style={[st.regionHintText, { color: colors.warning }]}>
-                Using online routing — download a region for offline use
+                {usedOnlineRouting === 'no-region'
+                  ? 'Using online routing — download a region for offline use'
+                  : 'Using online routing — offline routing data unavailable'}
               </Text>
             </TouchableOpacity>
           )}
@@ -2132,10 +2142,10 @@ export function FloatingSearchPanel({
   // ── Transit preview view ────────────────────
   if (mode === 'transit-preview') {
     return (
-      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
-        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
-        <GlassPanel isDark={isDark} style={st.panel}>
-          <View style={styles.handle} />
+      <View style={rootStyle} pointerEvents="box-none">
+        {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
+        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+          {!embedded && <View style={styles.handle} />}
           <TransitDirectionsPanel
             onClose={() => {
               useTransitStore.getState().clearTransitPlan();
@@ -2148,7 +2158,7 @@ export function FloatingSearchPanel({
   }
 
   // ── Minimized pill (Apple Maps style) ──────────
-  if (minimized) {
+  if (minimized && !embedded) {
     return (
       <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
         <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
@@ -2194,7 +2204,7 @@ export function FloatingSearchPanel({
 
   return (
     <>
-      {showSearchThisArea && (
+      {!embedded && showSearchThisArea && (
         <View pointerEvents="box-none" style={[styles.searchThisAreaWrap, { top: insets.top + 8 }]}>
           <TouchableOpacity
             style={styles.searchThisAreaBtn}
@@ -2206,17 +2216,19 @@ export function FloatingSearchPanel({
           </TouchableOpacity>
         </View>
       )}
-      <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
-        <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
-        <GlassPanel isDark={isDark} style={st.panel}>
+      <View style={rootStyle} pointerEvents="box-none">
+        {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
+        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
           {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
-          <View
-            {...handlePanResponder.panHandlers}
-            style={styles.handleZone}
-            hitSlop={{ top: 8, bottom: 8 }}
-          >
-            <View style={styles.handle} />
-          </View>
+          {!embedded && (
+            <View
+              {...handlePanResponder.panHandlers}
+              style={styles.handleZone}
+              hitSlop={{ top: 8, bottom: 8 }}
+            >
+              <View style={styles.handle} />
+            </View>
+          )}
 
           {/* ── Search row ── */}
           <View style={styles.searchRow}>
@@ -2238,7 +2250,7 @@ export function FloatingSearchPanel({
               <TouchableOpacity onPress={dismissSearch} hitSlop={10} style={styles.cancelBtn}>
                 <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
               </TouchableOpacity>
-            ) : (
+            ) : !embedded ? (
               <View style={styles.headerButtons}>
                 <TouchableOpacity
                   onPress={() => router.push('/(tabs)/places')}
@@ -2259,7 +2271,7 @@ export function FloatingSearchPanel({
                   </View>
                 </TouchableOpacity>
               </View>
-            )}
+            ) : null}
           </View>
 
           {/* ── Body ── */}
@@ -2340,7 +2352,7 @@ export function FloatingSearchPanel({
                         navigateToResult({ entry: fav.entry, rank: 0 });
                         setSelectedResult({ entry: fav.entry, rank: 0 });
                         setRouteError(null);
-                        setUsedOnlineRouting(false);
+                        setUsedOnlineRouting(null);
                         clearRoutePreview();
                         setMode('location');
                       }}
@@ -2374,6 +2386,26 @@ export function FloatingSearchPanel({
                     isDark={isDark}
                   />
                 </ScrollView>
+
+                {/* ── Saved Places link (embedded/sidebar mode only) ── */}
+                {embedded && (
+                  <TouchableOpacity
+                    style={st.recentRow}
+                    onPress={() => router.push('/(tabs)/places')}
+                    activeOpacity={0.65}
+                  >
+                    <View style={st.recentIcon}>
+                      <Ionicons name="bookmark" size={18} color={colors.primary} />
+                    </View>
+                    <View style={st.resultText}>
+                      <Text style={[st.resultName, { color: textColor }]}>My Places</Text>
+                      <Text style={[st.resultSub, { color: subColor }]}>
+                        Saved places and guides
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={subColor} />
+                  </TouchableOpacity>
+                )}
 
                 {/* Recents — collapsed to 1 item by default */}
                 {history.length > 0 && (
@@ -2451,6 +2483,12 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
   StyleSheet.create({
     panel: {
       ...shadow.lg,
+    },
+    embeddedRoot: {
+      flex: 1,
+    },
+    embeddedPanel: {
+      flex: 1,
     },
     divider: {
       height: StyleSheet.hairlineWidth,
@@ -2685,6 +2723,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 12,
+  },
+  rootEmbedded: {
+    alignSelf: 'stretch',
   },
   searchThisAreaWrap: {
     position: 'absolute',
