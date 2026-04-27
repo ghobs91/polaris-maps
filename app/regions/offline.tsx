@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
 import { getDownloadedRegions } from '../../src/services/regions/regionRepository';
 import { deleteRegionData } from '../../src/services/regions/downloadService';
+import { checkForRegionUpdates } from '../../src/services/regions/updateService';
 import { RegionCard } from '../../src/components/regions';
 import { ErrorBoundary, LoadingSpinner } from '../../src/components/common';
 import { colors, spacing, typography } from '../../src/constants/theme';
@@ -9,14 +10,19 @@ import type { Region } from '../../src/models/region';
 
 export default function OfflineRegionsScreen() {
   const [regions, setRegions] = useState<Region[]>([]);
+  const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadRegions = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getDownloadedRegions();
+      const [data, stale] = await Promise.all([
+        getDownloadedRegions(),
+        checkForRegionUpdates().catch(() => [] as Region[]),
+      ]);
       setRegions(data);
+      setStaleRegionIds(new Set(stale.map((r) => r.id)));
     } finally {
       setLoading(false);
     }
@@ -84,6 +90,7 @@ export default function OfflineRegionsScreen() {
             <RegionCard
               region={item}
               onDelete={deletingId === item.id ? undefined : handleDelete}
+              updateAvailable={staleRegionIds.has(item.id)}
             />
           )}
           contentContainerStyle={styles.list}

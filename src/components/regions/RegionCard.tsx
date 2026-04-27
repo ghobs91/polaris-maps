@@ -9,9 +9,18 @@ interface RegionCardProps {
   onDownload?: (region: Region) => void;
   onCancel?: (region: Region) => void;
   onDelete?: (region: Region) => void;
+  /** Whether a newer tile version is available from OpenFreeMap. */
+  updateAvailable?: boolean;
 }
 
-export function RegionCard({ region, onPress, onDownload, onCancel, onDelete }: RegionCardProps) {
+export function RegionCard({
+  region,
+  onPress,
+  onDownload,
+  onCancel,
+  onDelete,
+  updateAvailable,
+}: RegionCardProps) {
   const sizeMb = region.tilesSizeBytes
     ? Math.round(
         ((region.tilesSizeBytes ?? 0) +
@@ -31,7 +40,14 @@ export function RegionCard({ region, onPress, onDownload, onCancel, onDelete }: 
       >
         <View style={styles.header}>
           <Text style={styles.name}>{region.name}</Text>
-          <StatusBadge status={region.downloadStatus} />
+          <View style={styles.badges}>
+            {updateAvailable && region.downloadStatus === 'complete' && (
+              <View style={[styles.badge, styles.updateBadge]}>
+                <Text style={[styles.badgeText, styles.updateText]}>Update</Text>
+              </View>
+            )}
+            <StatusBadge status={region.downloadStatus} />
+          </View>
         </View>
 
         {sizeMb != null && <Text style={styles.size}>{sizeMb} MB</Text>}
@@ -66,13 +82,24 @@ export function RegionCard({ region, onPress, onDownload, onCancel, onDelete }: 
           </TouchableOpacity>
         )}
         {region.downloadStatus === 'complete' && (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.dangerBtn]}
-            onPress={() => onDelete?.(region)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.actionText, styles.dangerText]}>Delete</Text>
-          </TouchableOpacity>
+          <>
+            {updateAvailable && (
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.updateBtn]}
+                onPress={() => onDownload?.(region)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.actionText, styles.updateActionText]}>Update</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.dangerBtn]}
+              onPress={() => onDelete?.(region)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.actionText, styles.dangerText]}>Delete</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
     </View>
@@ -126,9 +153,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   name: { ...typography.subtitle, color: colors.text, flex: 1 },
+  badges: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
   size: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.sm },
   badge: { borderRadius: borderRadius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   badgeText: { ...typography.caption, fontWeight: '600' },
+  updateBadge: { backgroundColor: colors.warning + '20' },
+  updateText: { color: colors.warning },
   actions: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm },
   actionBtn: {
     borderWidth: 1,
@@ -140,6 +170,8 @@ const styles = StyleSheet.create({
   actionText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
   retryBtn: { borderColor: colors.warning },
   retryText: { color: colors.warning },
+  updateBtn: { borderColor: colors.warning },
+  updateActionText: { color: colors.warning },
   dangerBtn: { borderColor: colors.error },
   dangerText: { color: colors.error },
   cancelBtn: { borderColor: colors.textSecondary },
