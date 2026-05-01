@@ -1,17 +1,59 @@
 diff --git a/ios/MLRN/CameraUpdateItem.m b/ios/MLRN/CameraUpdateItem.m
-index 7511c45dd0fb2e9a01312badab075d9890087963..5fe44de6205f4a38095fa10525f0794cf9913980 100644
+index 7511c45dd0fb2e9a01312badab075d9890087963..3f7e2c8a5f4e9a01312badab075d9890087963c 100644
 --- a/ios/MLRN/CameraUpdateItem.m
 +++ b/ios/MLRN/CameraUpdateItem.m
-@@ -80,20 +80,37 @@ - (MLRNCameraWithPadding *)_makeCamera:(MLRNMapView *)mapView {
+@@ -37,9 +37,20 @@ - (void)_flyToCamera:(MLRNMapView *)mapView
+     withCompletionHandler:(void (^)(void))completionHandler {
+   MLRNCameraWithPadding *nextCamera = [self _makeCamera:mapView];
++  BOOL hasRequestedPadding = _cameraStop.padding.top > 0 || _cameraStop.padding.left > 0 ||
++      _cameraStop.padding.bottom > 0 || _cameraStop.padding.right > 0;
  
-   bool hasSetAltitude = false;
++  // Cold-start camera setup can abort inside MapLibre when routed through the
++  // edgePadding variant despite there being no actual requested padding.
++  if (!hasRequestedPadding) {
++    [mapView flyToCamera:nextCamera.camera
++             withDuration:_cameraStop.duration
++        completionHandler:completionHandler];
++    return;
++  }
++
+   if ([mapView respondsToSelector:@selector
+                (_flyToCamera:edgePadding:withDuration:peakAltitude:completionHandler:)]) {
+     [mapView _flyToCamera:nextCamera.camera
+               edgePadding:nextCamera.boundsPadding
+              withDuration:_cameraStop.duration
+@@ -56,9 +67,21 @@ - (void)_moveCamera:(MLRNMapView *)mapView
+                       ease:(BOOL)ease
+      withCompletionHandler:(void (^)(void))completionHandler {
+    MLRNCameraWithPadding *nextCamera = [self _makeCamera:mapView];
++  BOOL hasRequestedPadding = _cameraStop.padding.top > 0 || _cameraStop.padding.left > 0 ||
++      _cameraStop.padding.bottom > 0 || _cameraStop.padding.right > 0;
+    NSString *easeFunctionName =
+        ease ? kCAMediaTimingFunctionEaseInEaseOut : kCAMediaTimingFunctionLinear;
+ 
++  // Cold-start camera setup can abort inside MapLibre when routed through the
++  // edgePadding variant despite there being no actual requested padding.
++  if (!animated && !hasRequestedPadding) {
++    [mapView setCamera:nextCamera.camera animated:NO];
++    if (completionHandler != nil) {
++      completionHandler();
++    }
++    return;
++  }
++
+    [mapView setCamera:nextCamera.camera
+                    withDuration:animated ? _cameraStop.duration : 0
+         animationTimingFunction:[CAMediaTimingFunction functionWithName:easeFunctionName]
+@@ -80,20 +103,37 @@ - (MLRNCameraWithPadding *)_makeCamera:(MLRNMapView *)mapView {
+ 
+    bool hasSetAltitude = false;
  
 +  // Guard: camera:fittingCoordinateBounds:edgePadding: crashes (SIGABRT) when
 +  // the map view has a zero-size frame (not yet laid out). Fall back to setting
 +  // centerCoordinate directly when the view hasn't been sized.
 +  BOOL mapHasLayout = mapView.frame.size.width > 0 && mapView.frame.size.height > 0;
 +
-   if ([self _isCoordValid:_cameraStop.coordinate]) {
+    if ([self _isCoordValid:_cameraStop.coordinate]) {
 -    MLNCoordinateBounds boundsFromCoord = {.sw = _cameraStop.coordinate,
 -                                           .ne = _cameraStop.coordinate};
 -    MLNMapCamera *boundsCamera = [mapView camera:nextCamera
@@ -32,7 +74,7 @@ index 7511c45dd0fb2e9a01312badab075d9890087963..5fe44de6205f4a38095fa10525f0794c
 +    } else {
 +      nextCamera.centerCoordinate = _cameraStop.coordinate;
 +    }
-   } else if ([self _areBoundsValid:_cameraStop.bounds]) {
+    } else if ([self _areBoundsValid:_cameraStop.bounds]) {
 -    MLNMapCamera *boundsCamera = [mapView camera:nextCamera
 -                         fittingCoordinateBounds:_cameraStop.bounds
 -                                     edgePadding:padding];
@@ -49,9 +91,9 @@ index 7511c45dd0fb2e9a01312badab075d9890087963..5fe44de6205f4a38095fa10525f0794c
 +        hasSetAltitude = true;
 +      }
 +    }
-   }
+    }
  
-   if (_cameraStop.pitch != nil) {
+    if (_cameraStop.pitch != nil) {
 diff --git a/ios/MLRN/MLRNMapView.m b/ios/MLRN/MLRNMapView.m
 index 0c4e8b6c57e33a6c3f6a4c6af6d8fd91a69dcf94..2e12a5742f90e8ee1f49f7f1ea2f9dd2829e3e31 100644
 --- a/ios/MLRN/MLRNMapView.m
@@ -59,59 +101,33 @@ index 0c4e8b6c57e33a6c3f6a4c6af6d8fd91a69dcf94..2e12a5742f90e8ee1f49f7f1ea2f9dd2
 @@ -470,13 +470,11 @@ - (MLRNSource *)getTouchableSourceWithHighestZIndex:(NSArray<MLRNSource *> *)to
  }
  
- - (NSURL *)_getStyleURLFromKey:(NSString *)mapStyle {
+  - (NSURL *)_getStyleURLFromKey:(NSString *)mapStyle {
 -  NSURL *url = [NSURL URLWithString:mapStyle];
 -  if (url) {
 -    return url;
 -  } else if (RCTJSONParse(mapStyle, nil)) {
 +  if (RCTJSONParse(mapStyle, nil)) {
-       return [MLRNUtils styleURLFromStyleJSON:mapStyle];
-    }
+        return [MLRNUtils styleURLFromStyleJSON:mapStyle];
+     }
 -  return url;
 +
 +  return [NSURL URLWithString:mapStyle];
- }
+  }
  
- - (void)_removeAllSourcesFromMap {
-diff --git a/ios/MLRN/CameraUpdateItem.m b/ios/MLRN/CameraUpdateItem.m
-index 5fe44de6205f4a38095fa10525f0794cf9913980..9f918582f06b979b4d3da345e1e38f18aeacaa22 100644
---- a/ios/MLRN/CameraUpdateItem.m
-+++ b/ios/MLRN/CameraUpdateItem.m
-@@ -56,9 +56,21 @@ - (void)_moveCamera:(MLRNMapView *)mapView
-                      ease:(BOOL)ease
-     withCompletionHandler:(void (^)(void))completionHandler {
-   MLRNCameraWithPadding *nextCamera = [self _makeCamera:mapView];
-+  BOOL hasRequestedPadding = _cameraStop.padding.top > 0 || _cameraStop.padding.left > 0 ||
-+      _cameraStop.padding.bottom > 0 || _cameraStop.padding.right > 0;
-   NSString *easeFunctionName =
-       ease ? kCAMediaTimingFunctionEaseInEaseOut : kCAMediaTimingFunctionLinear;
-+
-+  // Cold-start camera setup can abort inside MapLibre when routed through the
-+  // edgePadding variant despite there being no actual requested padding.
-+  if (!animated && !hasRequestedPadding) {
-+    [mapView setCamera:nextCamera.camera animated:NO];
-+    if (completionHandler != nil) {
-+      completionHandler();
-+    }
-+    return;
-+  }
- 
-   [mapView setCamera:nextCamera.camera
-                  withDuration:animated ? _cameraStop.duration : 0
-       animationTimingFunction:[CAMediaTimingFunction functionWithName:easeFunctionName]
+  - (void)_removeAllSourcesFromMap {
 diff --git a/package.json b/package.json
 index 48af535f1e9b1620a4a0290ad58e1df179f7b07c..b8c89ecb0fc2b357aa19b6be6b6e1fb04931fbe2 100644
 --- a/package.json
 +++ b/package.json
 @@ -70,6 +70,11 @@
-         "types": "./lib/typescript/commonjs/src/plugin/withMapLibre.d.ts",
-         "default": "./lib/commonjs/plugin/withMapLibre.js"
-       }
+          "types": "./lib/typescript/commonjs/src/plugin/withMapLibre.d.ts",
+          "default": "./lib/commonjs/plugin/withMapLibre.js"
+        }
 +    },
 +    "./app.plugin": {
 +      "require": {
 +        "default": "./app.plugin.js"
 +      }
-     }
-   },
-   "files": [
+      }
+    },
+    "files": [
