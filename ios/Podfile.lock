@@ -61,6 +61,10 @@ PODS:
     - Yoga
   - ExpoSecureStore (14.0.0):
     - ExpoModulesCore
+  - ExpoSpeech (13.0.1):
+    - ExpoModulesCore
+  - ExpoSpeechRecognition (3.1.3):
+    - ExpoModulesCore
   - ExpoSplashScreen (0.29.0):
     - ExpoModulesCore
   - ExpoSQLite (15.1.4):
@@ -1983,6 +1987,8 @@ DEPENDENCIES:
   - "ExpoLocation (from `../node_modules/.pnpm/expo-location@18.0.0_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+cor_e4f812eaecaaa8a10b5f5786ab8cf546/node_modules/expo-location/ios`)"
   - "ExpoModulesCore (from `../node_modules/.pnpm/expo-modules-core@2.0.0/node_modules/expo-modules-core`)"
   - "ExpoSecureStore (from `../node_modules/.pnpm/expo-secure-store@14.0.0_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel_5e6aa6e6ab5c06588dc17e3c51bbd906/node_modules/expo-secure-store/ios`)"
+  - "ExpoSpeech (from `../node_modules/.pnpm/expo-speech@13.0.1_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core@_9e72168d6f4c95986b10ca323d99973b/node_modules/expo-speech/ios`)"
+  - "ExpoSpeechRecognition (from `../node_modules/.pnpm/expo-speech-recognition@3.1.3_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@_77fae1e55c73b8cb6916b9fba927fb06/node_modules/expo-speech-recognition/ios`)"
   - "ExpoSplashScreen (from `../node_modules/.pnpm/expo-splash-screen@0.29.0_expo-modules-autolinking@2.0.8_expo@52.0.0_@babel+core@7.29.0_cd0807ba91a71fd31c052cd7a0e8569e/node_modules/expo-splash-screen/ios`)"
   - "ExpoSQLite (from `../node_modules/.pnpm/expo-sqlite@15.1.4_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core@_69e0732760d4a8dbf2f16562b2c1b8b8/node_modules/expo-sqlite/ios`)"
   - "ExpoSystemUI (from `../node_modules/.pnpm/expo-system-ui@4.0.0_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+cor_70cfbd182de424556f9badcff436b05a/node_modules/expo-system-ui/ios`)"
@@ -2108,6 +2114,10 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-modules-core@2.0.0/node_modules/expo-modules-core"
   ExpoSecureStore:
     :path: "../node_modules/.pnpm/expo-secure-store@14.0.0_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel_5e6aa6e6ab5c06588dc17e3c51bbd906/node_modules/expo-secure-store/ios"
+  ExpoSpeech:
+    :path: "../node_modules/.pnpm/expo-speech@13.0.1_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@babel+core@_9e72168d6f4c95986b10ca323d99973b/node_modules/expo-speech/ios"
+  ExpoSpeechRecognition:
+    :path: "../node_modules/.pnpm/expo-speech-recognition@3.1.3_expo@52.0.0_@babel+core@7.29.0_@babel+preset-env@7.29.0_@_77fae1e55c73b8cb6916b9fba927fb06/node_modules/expo-speech-recognition/ios"
   ExpoSplashScreen:
     :path: "../node_modules/.pnpm/expo-splash-screen@0.29.0_expo-modules-autolinking@2.0.8_expo@52.0.0_@babel+core@7.29.0_cd0807ba91a71fd31c052cd7a0e8569e/node_modules/expo-splash-screen/ios"
   ExpoSQLite:
@@ -2280,6 +2290,8 @@ SPEC CHECKSUMS:
   ExpoLocation: 3aa81e9f7efc0fda4900a9e216db812dcc7cc11f
   ExpoModulesCore: d5d5fd01ac8e4197b6890fdbfe2e3794a3409ece
   ExpoSecureStore: 06c3192d58ed167f619af3d53797c055f5ada785
+  ExpoSpeech: acaa550b65ffecb079ab7599cdcce7f2503d424f
+  ExpoSpeechRecognition: fd574043a94289bc4d3505b7135bdf0acb385c8f
   ExpoSplashScreen: 126e28d50322976ecfb6c374fe230de5f67550fc
   ExpoSQLite: a55722487de46cdb8d87992e63a19c069818083c
   ExpoSystemUI: a46ae8f7f47091c7498038f5e567d92118e77c32

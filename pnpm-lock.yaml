@@ -100,6 +100,12 @@ importers:
       expo-secure-store:
         specifier: 14.0.0
         version: 14.0.0(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))
+      expo-speech:
+        specifier: ~13.0.1
+        version: 13.0.1(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))
+      expo-speech-recognition:
+        specifier: ^3.1.3
+        version: 3.1.3(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
       expo-splash-screen:
         specifier: 0.29.0
         version: 0.29.0(expo-modules-autolinking@2.0.8)(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))
@@ -3441,6 +3447,18 @@ packages:
 
   expo-secure-store@14.0.0:
     resolution: {integrity: sha512-VyhtRFXP+7hQmHhKlHIOWid1Q/IRpM7Uif32tZHLZHvQ6FNz2cUkr26XWGvCa7btYbrR6OL++FBFZYjbIcRZTw==}
+    peerDependencies:
+      expo: '*'
+
+  expo-speech-recognition@3.1.3:
+    resolution: {integrity: sha512-vluXqggfY2AJcazYITvnV6YSE2rVe5SId5TpdjMC/m6JPUgHCOODrcHJtAQF6OUYl4f2T7oZSceGw6fJCC86Xw==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
+
+  expo-speech@13.0.1:
+    resolution: {integrity: sha512-J7tvFzORsFpIKihMnayeY5lCPc15giDrlN+ws2uUNo0MvLv1HCYEu/5p3+aMmZXXsY5I1QlconD4CwRWw3JFig==}
     peerDependencies:
       expo: '*'
 
@@ -11064,6 +11082,16 @@ snapshots:
       - supports-color
 
   expo-secure-store@14.0.0(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)):
+    dependencies:
+      expo: 52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
+
+  expo-speech-recognition@3.1.3(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1))(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1):
+    dependencies:
+      expo: 52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
+      react: 18.3.1
+      react-native: 0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)
+
+  expo-speech@13.0.1(expo@52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)):
     dependencies:
       expo: 52.0.0(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@expo/metro-runtime@4.0.1(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1)))(encoding@0.1.13)(react-native@0.76.9(@babel/core@7.29.0)(@babel/preset-env@7.29.0(@babel/core@7.29.0))(@react-native-community/cli@20.1.3(typescript@5.6.3))(@types/react@18.3.28)(encoding@0.1.13)(react@18.3.1))(react@18.3.1)
 

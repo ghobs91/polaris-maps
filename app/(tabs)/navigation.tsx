@@ -23,6 +23,7 @@ import { reroute } from '@/services/routing/routingService';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
+import { speakInstruction, stopNavigationSpeech } from '@/services/tts';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function NavigationScreen() {
@@ -60,6 +61,7 @@ export default function NavigationScreen() {
   const wasNavigating = useRef(false);
   useEffect(() => {
     if (wasNavigating.current && !isNavigating) {
+      stopNavigationSpeech();
       router.replace('/(tabs)');
     }
     wasNavigating.current = isNavigating;
@@ -73,6 +75,41 @@ export default function NavigationScreen() {
 
   // Manage iOS Live Activity (Dynamic Island) while navigating
   useLiveActivity();
+
+  // Voice guidance: speak turn-by-turn instructions as maneuvers advance.
+  // Skips the initial mount so we don't greet the user on navigation start;
+  // speaks on every subsequent step change (including after reroutes).
+  const prevStepIndexRef = useRef<number | null>(null);
+  const hasSpokenInitialRef = useRef(false);
+  useEffect(() => {
+    if (!isNavigating || !currentManeuver) return;
+
+    // On the very first render after navigation starts, record the index
+    // without speaking (the user just saw the route and doesn't need an
+    // immediate prompt). All subsequent step changes are spoken.
+    if (!hasSpokenInitialRef.current) {
+      prevStepIndexRef.current = currentStepIndex;
+      hasSpokenInitialRef.current = true;
+      return;
+    }
+
+    // Only speak when the step index actually changes.
+    if (currentStepIndex !== prevStepIndexRef.current) {
+      prevStepIndexRef.current = currentStepIndex;
+      const text = currentManeuver.verbalPreTransition || currentManeuver.instruction;
+      if (text.trim()) {
+        speakInstruction(text);
+      }
+    }
+  }, [isNavigating, currentStepIndex, currentManeuver]);
+
+  // Reset speech flag when navigation restarts.
+  useEffect(() => {
+    if (!isNavigating) {
+      hasSpokenInitialRef.current = false;
+      prevStepIndexRef.current = null;
+    }
+  }, [isNavigating]);
 
   const [navPosition, setNavPosition] = useState<[number, number] | null>(null);
   const [navBearing, setNavBearing] = useState(0);

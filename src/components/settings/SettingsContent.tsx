@@ -52,9 +52,11 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
     resourceLimits,
     permissions,
     themeMode,
+    voiceGuidanceEnabled,
     setResourceLimits,
     setPermissions,
     setThemeMode,
+    setVoiceGuidanceEnabled,
   } = useSettingsStore();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -172,6 +174,19 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
               {pct}%
             </Text>
           ))}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Navigation</Text>
+
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>Voice Guidance</Text>
+          <Switch
+            value={voiceGuidanceEnabled}
+            onValueChange={setVoiceGuidanceEnabled}
+            trackColor={{ false: colors.border, true: colors.primary }}
+          />
         </View>
       </View>
 
