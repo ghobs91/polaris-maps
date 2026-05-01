@@ -7,6 +7,8 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
 import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
+import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
+import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -19,7 +21,7 @@ import {
   isOffRoute,
   OFF_ROUTE_THRESHOLD_METERS,
 } from '@/utils/routeSnap';
-import { reroute } from '@/services/routing/routingService';
+import { reroute, computeRoute } from '@/services/routing/routingService';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
@@ -43,6 +45,9 @@ export default function NavigationScreen() {
     waypoints,
     currentLegIndex,
     advanceLeg,
+    costing,
+    destination,
+    addWaypointAndReplaceRoute,
   } = useNavigationStore();
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
@@ -119,6 +124,7 @@ export default function NavigationScreen() {
 
   // Camera follow state — breaks when user pans/zooms, restored by re-center button
   const [followCamera, setFollowCamera] = useState(true);
+  const [showAddDestination, setShowAddDestination] = useState(false);
   const mapRef = useRef<MapViewHandle>(null);
   const navPositionRef = useRef<[number, number] | null>(null);
   navPositionRef.current = navPosition;
@@ -134,6 +140,55 @@ export default function NavigationScreen() {
       mapRef.current.flyTo(pos[1], pos[0], 17);
     }
   }, []);
+
+  const handleOpenAddDestination = useCallback(() => {
+    setShowAddDestination(true);
+  }, []);
+
+  const handleCloseAddDestination = useCallback(() => {
+    setShowAddDestination(false);
+  }, []);
+
+  const handleSelectDestination = useCallback(
+    async (result: UnifiedSearchResult) => {
+      const pos = navPositionRef.current;
+      if (!pos || !destination) {
+        setShowAddDestination(false);
+        return;
+      }
+
+      // Build new waypoint list from current position
+      // pending waypoints = waypoints from currentLegIndex onwards
+      const pendingWaypoints = waypoints.slice(currentLegIndex);
+
+      // Insert new destination after the current target (index 1), or append if empty
+      const newWaypoint = { lat: result.lat, lng: result.lng, name: result.name };
+      if (pendingWaypoints.length > 0) {
+        pendingWaypoints.splice(1, 0, newWaypoint);
+      } else {
+        pendingWaypoints.push(newWaypoint);
+      }
+
+      // Compute new route: currentPos -> pendingWaypoints -> original destination
+      const routeWaypoints = [
+        { lat: pos[1], lng: pos[0] },
+        ...pendingWaypoints,
+        { lat: destination.lat, lng: destination.lng },
+      ];
+
+      try {
+        const routes = await computeRoute(routeWaypoints, costing);
+        if (routes.length > 0) {
+          addWaypointAndReplaceRoute(routes[0], pendingWaypoints);
+        }
+      } catch {
+        // Silently fail — user can try again
+      }
+
+      setShowAddDestination(false);
+    },
+    [waypoints, currentLegIndex, destination, costing, addWaypointAndReplaceRoute],
+  );
 
   // Initialize navPosition from the route start so the chevron appears immediately
   useEffect(() => {
@@ -464,6 +519,7 @@ export default function NavigationScreen() {
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           onExit={stopNavigation}
+          onAddDestination={handleOpenAddDestination}
         />
       </View>
 
@@ -478,6 +534,16 @@ export default function NavigationScreen() {
           <Text style={styles.recenterText}>Re-center</Text>
         </TouchableOpacity>
       )}
+
+      {/* Add destination search panel */}
+      <AddDestinationPanel
+        visible={showAddDestination}
+        onClose={handleCloseAddDestination}
+        onSelect={handleSelectDestination}
+        searchCenter={
+          navPosition ? { lat: navPosition[1], lng: navPosition[0] } : { lat: 0, lng: 0 }
+        }
+      />
     </View>
   );
 }

@@ -10,6 +10,7 @@ interface EtaDisplayProps {
   onExit?: () => void;
   onPreview?: () => void;
   isPreviewMode?: boolean;
+  onAddDestination?: () => void;
 }
 
 export function EtaDisplay({
@@ -18,6 +19,7 @@ export function EtaDisplay({
   onExit,
   onPreview,
   isPreviewMode,
+  onAddDestination,
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
@@ -61,6 +63,20 @@ export function EtaDisplay({
               size={18}
               color={isPreviewMode ? '#fff' : 'rgba(255,255,255,0.75)'}
             />
+          </TouchableOpacity>
+        )}
+        {onAddDestination && (
+          <TouchableOpacity
+            style={styles.addDestBtn}
+            onPress={onAddDestination}
+            activeOpacity={0.85}
+          >
+            <View style={styles.addDestIconContainer}>
+              <Ionicons name="location-outline" size={18} color="#fff" />
+              <View style={styles.addDestPlusBadge}>
+                <Ionicons name="add" size={10} color="#fff" />
+              </View>
+            </View>
           </TouchableOpacity>
         )}
         {onExit && (
@@ -125,6 +141,32 @@ const styles = StyleSheet.create({
   },
   previewBtnActive: {
     backgroundColor: 'rgba(74,222,128,0.25)',
+  },
+  addDestBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addDestIconContainer: {
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 22,
+    height: 22,
+  },
+  addDestPlusBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -4,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#409CFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   exitBtn: {
     backgroundColor: '#EF4444',

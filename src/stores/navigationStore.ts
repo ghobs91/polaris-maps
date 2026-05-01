@@ -59,6 +59,7 @@ interface NavigationState {
   updateEta: (etaSeconds: number, remainingMeters: number) => void;
   updateTrafficEta: (trafficEta: number, freeFlowEta: number, matchRatio: number) => void;
   replaceRoute: (route: ValhallaRoute) => void;
+  addWaypointAndReplaceRoute: (route: ValhallaRoute, waypoints: Waypoint[]) => void;
 }
 
 export const useNavigationStore = create<NavigationState>()((set, get) => ({
@@ -219,6 +220,21 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       remainingDistanceMeters: route.summary.distanceMeters,
       isRerouting: false,
       hasDeviated: false,
+    });
+  },
+
+  addWaypointAndReplaceRoute: (route, waypoints) => {
+    const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
+    set({
+      activeRoute: route,
+      currentStepIndex: 0,
+      currentManeuver: firstManeuver,
+      currentLegIndex: 0,
+      etaSeconds: route.summary.durationSeconds,
+      remainingDistanceMeters: route.summary.distanceMeters,
+      isRerouting: false,
+      hasDeviated: false,
+      waypoints,
     });
   },
 }));
