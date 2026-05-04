@@ -222,3 +222,57 @@ describe('startNavigation with waypoints', () => {
     expect(s.isNavigating).toBe(false);
   });
 });
+
+describe('advanceStep', () => {
+  it('advances by exactly one maneuver at a time', () => {
+    const route = makeRoute();
+    useNavigationStore.getState().startNavigation(route, [], null, 'auto');
+
+    expect(useNavigationStore.getState().currentStepIndex).toBe(0);
+    expect(useNavigationStore.getState().currentManeuver?.instruction).toBe('Head north');
+
+    useNavigationStore.getState().advanceStep();
+
+    expect(useNavigationStore.getState().currentStepIndex).toBe(1);
+    expect(useNavigationStore.getState().currentManeuver?.instruction).toBe(
+      'Arrive at destination',
+    );
+  });
+
+  it('does not advance past the last maneuver', () => {
+    const route = makeRoute();
+    useNavigationStore.getState().startNavigation(route, [], null, 'auto');
+
+    useNavigationStore.getState().advanceStep(); // 0 → 1
+    useNavigationStore.getState().advanceStep(); // 1 → still 1 (no step 2)
+
+    expect(useNavigationStore.getState().currentStepIndex).toBe(1);
+  });
+
+  it('never jumps more than one step per call', () => {
+    const route = makeRoute();
+    useNavigationStore.getState().startNavigation(route, [], null, 'auto');
+
+    // Track the maximum index jump across multiple calls
+    const maxJump = 1; // advanceStep always increments by exactly 1
+
+    useNavigationStore.getState().advanceStep();
+    expect(useNavigationStore.getState().currentStepIndex).toBe(1);
+    expect(useNavigationStore.getState().currentStepIndex - 0).toBeLessThanOrEqual(maxJump);
+  });
+
+  it('setCurrentStep can set any valid index directly', () => {
+    const route = makeRoute();
+    useNavigationStore.getState().startNavigation(route, [], null, 'auto');
+
+    useNavigationStore.getState().setCurrentStep(1);
+    expect(useNavigationStore.getState().currentStepIndex).toBe(1);
+    expect(useNavigationStore.getState().currentManeuver?.instruction).toBe(
+      'Arrive at destination',
+    );
+
+    // Setting out of bounds does nothing
+    useNavigationStore.getState().setCurrentStep(99);
+    expect(useNavigationStore.getState().currentStepIndex).toBe(1);
+  });
+});

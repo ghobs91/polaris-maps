@@ -218,6 +218,11 @@ export default function NavigationScreen() {
   // Low-pass filtered bearing so turns animate smoothly rather than snapping.
   const smoothBearingRef = useRef(0);
   const interpolationRafRef = useRef<number | null>(null);
+  // GPS-confirmed segment index, updated on every GPS callback.
+  // Used for step advancement instead of the DR-extrapolated curSegIdx, which
+  // can drift ahead of the true position and trigger premature step advances
+  // when consecutive maneuvers have close beginShapeIndex values.
+  const gpsSegmentIndexRef = useRef(0);
 
   // Live GPS tracking: watch position and snap to route during active navigation
   useEffect(() => {
@@ -301,14 +306,16 @@ export default function NavigationScreen() {
           setNavPosition(curPos);
         }
 
-        // Advance maneuver step as soon as DR crosses the next step's shape boundary.
-        // This fires at 60fps so the banner updates instantly, not waiting for the
-        // next GPS tick (which can lag up to 1s behind the smooth extrapolation).
+        // Advance maneuver step when the GPS-confirmed position crosses
+        // the next step's shape boundary. Using the GPS-verified segment
+        // index prevents the DR extrapolation from advancing steps too early
+        // when it drifts ahead of the real position (which would cause the
+        // banner to show an instruction one step ahead of where it should be).
         const store = useNavigationStore.getState();
         const nextStepIdx = store.currentStepIndex + 1;
         if (
           nextStepIdx < allManeuvers.length &&
-          curSegIdx >= allManeuvers[nextStepIdx].beginShapeIndex
+          gpsSegmentIndexRef.current >= allManeuvers[nextStepIdx].beginShapeIndex
         ) {
           store.advanceStep();
         }
@@ -341,6 +348,7 @@ export default function NavigationScreen() {
             segmentIndex,
             distanceMeters: distFromRoute,
           } = snapToRoute(gpsPos, coords);
+          gpsSegmentIndexRef.current = segmentIndex;
           const now = performance.now();
 
           // --- Off-route detection & rerouting ---
@@ -375,7 +383,10 @@ export default function NavigationScreen() {
                 const navStore = useNavigationStore.getState();
                 if (navStore.isNavigating) {
                   navStore.replaceRoute(newRoute);
-                  // Reset DR anchor to start of the new route
+                  // Reset DR anchor and GPS segment index to start of the new route.
+                  // The next GPS callback will correct the segment index to the
+                  // actual position; using 0 here prevents stale indices from the
+                  // previous route causing premature step advances.
                   const newCoords = decodePolyline(newRoute.geometry);
                   if (newCoords.length >= 2) {
                     drAnchorRef.current = {
@@ -384,6 +395,7 @@ export default function NavigationScreen() {
                       speedMps: (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0,
                       time: performance.now(),
                     };
+                    gpsSegmentIndexRef.current = 0;
                   }
                 }
                 offRouteCountRef.current = 0;
@@ -462,6 +474,7 @@ export default function NavigationScreen() {
         interpolationRafRef.current = null;
       }
       drAnchorRef.current = null;
+      gpsSegmentIndexRef.current = 0;
       offRouteCountRef.current = 0;
       reroutingRef.current = false;
     };
