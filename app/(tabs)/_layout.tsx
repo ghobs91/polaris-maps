@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
 import { getDownloadedRegions } from '@/services/regions/regionRepository';
 import { RegionGate } from '@/components/regions';
+import { useMapStore } from '@/stores/mapStore';
 
 type GateState = 'needed' | 'clear';
 
@@ -22,6 +23,13 @@ export default function TabLayout() {
           new Promise<[]>((resolve) => setTimeout(() => resolve([]), 2000)),
         ]);
         if (downloaded.length > 0) {
+          if (!cancelled) setGate('clear');
+          return;
+        }
+
+        // Suppress the gate if the user navigated here from a place list tap.
+        if (useMapStore.getState().suppressRegionGate) {
+          useMapStore.getState().setSuppressRegionGate(false);
           if (!cancelled) setGate('clear');
           return;
         }

@@ -142,6 +142,10 @@ export default function PlaceListDetailScreen() {
     async (place: SavedPlace) => {
       const hasCoords = place.lat !== 0 || place.lng !== 0;
 
+      // Suppress the RegionGate when navigating from a place — we want to
+      // go straight to the map, not be blocked by a download prompt.
+      useMapStore.getState().setSuppressRegionGate(true);
+
       if (hasCoords) {
         locateTo(place.lat, place.lng, 15);
         setSelectedLocation({ lat: place.lat, lng: place.lng, name: place.name });

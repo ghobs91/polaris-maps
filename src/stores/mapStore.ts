@@ -41,6 +41,9 @@ interface MapState {
   // Set when user taps a stop search marker on the map
   pendingStopSelection: { lat: number; lng: number; name: string } | null;
 
+  // Set when user taps a place from a list — tells the tab layout to skip the RegionGate
+  suppressRegionGate: boolean;
+
   setViewport: (viewport: Partial<MapState['viewport']>) => void;
   /** Update viewport and force the camera to fly, even if lat/lng/zoom are unchanged. */
   locateTo: (lat: number, lng: number, zoom: number) => void;
@@ -56,6 +59,7 @@ interface MapState {
   setPendingSearchQuery: (query: string | null) => void;
   setStopSearchMarkers: (markers: MapState['stopSearchMarkers']) => void;
   setPendingStopSelection: (selection: MapState['pendingStopSelection']) => void;
+  setSuppressRegionGate: (suppress: boolean) => void;
 }
 
 export const useMapStore = create<MapState>()((set) => ({
@@ -77,6 +81,7 @@ export const useMapStore = create<MapState>()((set) => ({
   locateTrigger: 0,
   stopSearchMarkers: [],
   pendingStopSelection: null,
+  suppressRegionGate: false,
 
   setViewport: (viewport) => set((state) => ({ viewport: { ...state.viewport, ...viewport } })),
   locateTo: (lat, lng, zoom) =>
@@ -96,4 +101,5 @@ export const useMapStore = create<MapState>()((set) => ({
   setPendingSearchQuery: (pendingSearchQuery) => set({ pendingSearchQuery }),
   setStopSearchMarkers: (stopSearchMarkers) => set({ stopSearchMarkers }),
   setPendingStopSelection: (pendingStopSelection) => set({ pendingStopSelection }),
+  setSuppressRegionGate: (suppressRegionGate) => set({ suppressRegionGate }),
 }));

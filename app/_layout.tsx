@@ -38,6 +38,7 @@ function RootLayoutInner() {
         <Stack.Screen name="imagery/viewer" options={{ title: 'Street View' }} />
         <Stack.Screen name="imagery/capture" options={{ title: 'Capture' }} />
         <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
+        <Stack.Screen name="places/list" options={{ headerShown: false }} />
       </Stack>
     </>
   );
