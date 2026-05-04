@@ -17,7 +17,7 @@ import {
   geoNodeToRegion,
   findDeepestNodeContainingPoint,
 } from '../../constants/geofabrikCatalog';
-import { upsertRegion } from '../../services/regions/regionRepository';
+import { upsertRegion, getDownloadedRegions } from '../../services/regions/regionRepository';
 import { downloadRegion, type DownloadProgress } from '../../services/regions/downloadService';
 import {
   seedRegion,
@@ -54,6 +54,31 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
         : null,
     [userLat, userLng],
   );
+
+  // Build a map from region ID (path with / replaced by -) back to the original path
+  const idToPathMap = useMemo(() => {
+    const map = new Map<string, string>();
+    function walk(nodes: GeoNode[]) {
+      for (const node of nodes) {
+        map.set(node.path.replace(/\//g, '-'), node.path);
+        if (node.children) walk(node.children);
+      }
+    }
+    walk(GEOFABRIK_TREE);
+    return map;
+  }, []);
+
+  // Load already-downloaded regions from DB so the gate reflects persisted state
+  useEffect(() => {
+    getDownloadedRegions().then((regions) => {
+      const paths = new Set<string>();
+      for (const region of regions) {
+        const path = idToPathMap.get(region.id);
+        if (path) paths.add(path);
+      }
+      if (paths.size > 0) setCompletedPaths(paths);
+    });
+  }, [idToPathMap]);
 
   const handleDownload = useCallback(
     async (node: GeoNode) => {

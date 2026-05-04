@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,11 @@ import {
   ScrollView,
   Switch,
   useColorScheme,
+  TextInput,
+  UIManager,
+  findNodeHandle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, darkColors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { GeoNode } from '../../constants/geofabrikCatalog';
 
@@ -38,6 +42,34 @@ export interface GeofabrikTreePickerProps {
 }
 
 // ---------------------------------------------------------------------------
+// Search helpers
+// ---------------------------------------------------------------------------
+
+interface SearchResult {
+  node: GeoNode;
+  breadcrumb: string;
+}
+
+function flattenNodes(nodes: GeoNode[], parentBreadcrumb = ''): SearchResult[] {
+  const seen = new Set<string>();
+  const results: SearchResult[] = [];
+  function walk(nodes: GeoNode[], parentBreadcrumb: string) {
+    for (const node of nodes) {
+      const breadcrumb = parentBreadcrumb ? `${parentBreadcrumb} > ${node.name}` : node.name;
+      if (!seen.has(node.path)) {
+        seen.add(node.path);
+        results.push({ node, breadcrumb });
+      }
+      if (node.children) {
+        walk(node.children, breadcrumb);
+      }
+    }
+  }
+  walk(nodes, parentBreadcrumb);
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -53,22 +85,193 @@ export function GeofabrikTreePicker({
   seedPeerCounts,
   onToggleSeed,
 }: GeofabrikTreePickerProps) {
+  const isDark = useColorScheme() === 'dark';
+  const c = isDark ? darkColors : colors;
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const scrollViewRef = useRef<ScrollView>(null);
+  const contentRef = useRef<View>(null);
+  const suggestedRef = useRef<View>(null);
+
+  const allSearchable = useMemo(() => flattenNodes(nodes), [nodes]);
+
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return [];
+    return allSearchable.filter(
+      (r) =>
+        r.node.name.toLowerCase().includes(query) || r.breadcrumb.toLowerCase().includes(query),
+    );
+  }, [searchQuery, allSearchable]);
+
+  // Auto-scroll to the suggested region once it is expanded and laid out
+  useEffect(() => {
+    if (!suggestedPath || searchQuery) return;
+    const timer = setTimeout(() => {
+      const contentHandle = findNodeHandle(contentRef.current);
+      const suggestedHandle = findNodeHandle(suggestedRef.current);
+      if (contentHandle && suggestedHandle) {
+        UIManager.measureLayout(
+          suggestedHandle,
+          contentHandle,
+          () => {},
+          (_x, y, _width, _height) => {
+            scrollViewRef.current?.scrollTo({ y: Math.max(0, y - 120), animated: true });
+          },
+        );
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [suggestedPath, searchQuery]);
+
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-      {nodes.map((continent) => (
-        <ContinentRow
-          key={continent.path}
-          node={continent}
-          downloadingPath={downloadingPath}
-          completedPaths={completedPaths}
-          suggestedPath={suggestedPath ?? null}
-          onDownload={onDownload}
-          seedingPaths={seedingPaths}
-          seedPeerCounts={seedPeerCounts}
+    <View style={styles.container}>
+      <View style={[styles.searchContainer, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <Ionicons name="search" size={18} color={c.textSecondary} style={styles.searchIcon} />
+        <TextInput
+          style={[styles.searchInput, { color: c.text }]}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search regions..."
+          placeholderTextColor={c.textSecondary}
+          autoCorrect={false}
+          clearButtonMode="while-editing"
+          returnKeyType="search"
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7}>
+            <Ionicons name="close-circle" size={18} color={c.textSecondary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {searchQuery.trim() ? (
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+          {searchResults.map(({ node, breadcrumb }) => (
+            <SearchResultRow
+              key={node.path}
+              node={node}
+              breadcrumb={breadcrumb}
+              isSuggested={node.path === suggestedPath}
+              isDownloading={downloadingPath === node.path}
+              isCompleted={completedPaths.has(node.path)}
+              isDisabled={downloadingPath != null}
+              onDownload={onDownload}
+              isSeeding={seedingPaths?.has(node.path) ?? false}
+              peerCount={seedPeerCounts?.get(node.path) ?? 0}
+              onToggleSeed={onToggleSeed}
+            />
+          ))}
+          {searchResults.length === 0 && (
+            <Text style={[styles.emptySearch, { color: c.textSecondary }]}>No regions found</Text>
+          )}
+        </ScrollView>
+      ) : (
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View ref={contentRef} collapsable={false}>
+            {nodes.map((continent) => (
+              <ContinentRow
+                key={continent.path}
+                node={continent}
+                downloadingPath={downloadingPath}
+                completedPaths={completedPaths}
+                suggestedPath={suggestedPath ?? null}
+                onDownload={onDownload}
+                seedingPaths={seedingPaths}
+                seedPeerCounts={seedPeerCounts}
+                onToggleSeed={onToggleSeed}
+                suggestedRef={suggestedRef}
+              />
+            ))}
+          </View>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search result row
+// ---------------------------------------------------------------------------
+
+interface SearchResultRowProps {
+  node: GeoNode;
+  breadcrumb: string;
+  isSuggested: boolean;
+  isDownloading: boolean;
+  isCompleted: boolean;
+  isDisabled: boolean;
+  onDownload: (node: GeoNode) => void;
+  isSeeding: boolean;
+  peerCount: number;
+  onToggleSeed?: (node: GeoNode, seed: boolean) => void;
+}
+
+function SearchResultRow({
+  node,
+  breadcrumb,
+  isSuggested,
+  isDownloading,
+  isCompleted,
+  isDisabled,
+  onDownload,
+  isSeeding,
+  peerCount,
+  onToggleSeed,
+}: SearchResultRowProps) {
+  const c = useColorScheme() === 'dark' ? darkColors : colors;
+
+  return (
+    <View
+      style={[
+        styles.searchResultRow,
+        { backgroundColor: c.surface },
+        isSuggested && [styles.rowSuggested, { borderColor: c.primary }],
+      ]}
+    >
+      <View style={styles.searchResultText}>
+        <Text
+          style={[
+            styles.searchResultName,
+            { color: c.text },
+            isSuggested && [styles.nameSuggested, { color: c.primary }],
+          ]}
+          numberOfLines={1}
+        >
+          {node.name}
+          {isSuggested ? '  ★' : ''}
+        </Text>
+        <Text style={[styles.searchResultBreadcrumb, { color: c.textSecondary }]} numberOfLines={1}>
+          {breadcrumb}
+        </Text>
+      </View>
+
+      {isCompleted ? (
+        <SeedToggle
+          node={node}
+          isSeeding={isSeeding}
+          peerCount={peerCount}
           onToggleSeed={onToggleSeed}
         />
-      ))}
-    </ScrollView>
+      ) : (
+        <TouchableOpacity
+          style={[
+            styles.downloadBtn,
+            { backgroundColor: c.primary },
+            isDisabled && styles.downloadBtnDisabled,
+          ]}
+          onPress={() => onDownload(node)}
+          disabled={isDisabled}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.downloadBtnText}>{isDownloading ? '…' : 'Download'}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
   );
 }
 
@@ -85,6 +288,7 @@ interface ContinentRowProps {
   seedingPaths?: Set<string>;
   seedPeerCounts?: Map<string, number>;
   onToggleSeed?: (node: GeoNode, seed: boolean) => void;
+  suggestedRef: React.RefObject<View>;
 }
 
 function ContinentRow({
@@ -96,12 +300,20 @@ function ContinentRow({
   seedingPaths,
   seedPeerCounts,
   onToggleSeed,
+  suggestedRef,
 }: ContinentRowProps) {
   const c = useColorScheme() === 'dark' ? darkColors : colors;
 
   // Auto-expand the continent that contains the suggested path
   const containsSuggested = suggestedPath != null && suggestedPath.startsWith(node.path + '/');
-  const [expanded, setExpanded] = useState(containsSuggested);
+  const isSuggested = node.path === suggestedPath;
+  const [expanded, setExpanded] = useState(containsSuggested || isSuggested);
+
+  useEffect(() => {
+    if (containsSuggested || isSuggested) {
+      setExpanded(true);
+    }
+  }, [containsSuggested, isSuggested]);
 
   const toggle = useCallback(() => setExpanded((v) => !v), []);
 
@@ -138,6 +350,7 @@ function ContinentRow({
           isSeeding={seedingPaths?.has(node.path) ?? false}
           peerCount={seedPeerCounts?.get(node.path) ?? 0}
           onToggleSeed={onToggleSeed}
+          suggestedRef={suggestedRef}
         />
       )}
 
@@ -154,6 +367,7 @@ function ContinentRow({
               seedingPaths={seedingPaths}
               seedPeerCounts={seedPeerCounts}
               onToggleSeed={onToggleSeed}
+              suggestedRef={suggestedRef}
             />
           ))}
         </View>
@@ -175,6 +389,7 @@ interface CountryRowProps {
   seedingPaths?: Set<string>;
   seedPeerCounts?: Map<string, number>;
   onToggleSeed?: (node: GeoNode, seed: boolean) => void;
+  suggestedRef: React.RefObject<View>;
 }
 
 function CountryRow({
@@ -186,16 +401,23 @@ function CountryRow({
   seedingPaths,
   seedPeerCounts,
   onToggleSeed,
+  suggestedRef,
 }: CountryRowProps) {
   const c = useColorScheme() === 'dark' ? darkColors : colors;
 
   const containsSuggested = suggestedPath != null && suggestedPath.startsWith(node.path + '/');
-  const [expanded, setExpanded] = useState(containsSuggested);
+  const isSuggested = node.path === suggestedPath;
+  const [expanded, setExpanded] = useState(containsSuggested || isSuggested);
+
+  useEffect(() => {
+    if (containsSuggested || isSuggested) {
+      setExpanded(true);
+    }
+  }, [containsSuggested, isSuggested]);
 
   const toggle = useCallback(() => setExpanded((v) => !v), []);
 
   const hasChildren = (node.children?.length ?? 0) > 0;
-  const isSuggested = node.path === suggestedPath;
 
   if (!hasChildren) {
     return (
@@ -210,6 +432,7 @@ function CountryRow({
         isSeeding={seedingPaths?.has(node.path) ?? false}
         peerCount={seedPeerCounts?.get(node.path) ?? 0}
         onToggleSeed={onToggleSeed}
+        suggestedRef={suggestedRef}
       />
     );
   }
@@ -287,6 +510,7 @@ function CountryRow({
               isSeeding={seedingPaths?.has(sub.path) ?? false}
               peerCount={seedPeerCounts?.get(sub.path) ?? 0}
               onToggleSeed={onToggleSeed}
+              suggestedRef={suggestedRef}
             />
           ))}
         </View>
@@ -342,6 +566,7 @@ interface LeafRowProps {
   isSeeding: boolean;
   peerCount: number;
   onToggleSeed?: (node: GeoNode, seed: boolean) => void;
+  suggestedRef: React.RefObject<View>;
 }
 
 function LeafRow({
@@ -355,6 +580,7 @@ function LeafRow({
   isSeeding,
   peerCount,
   onToggleSeed,
+  suggestedRef,
 }: LeafRowProps) {
   const c = useColorScheme() === 'dark' ? darkColors : colors;
 
@@ -363,6 +589,7 @@ function LeafRow({
 
   return (
     <View
+      ref={isSuggested ? suggestedRef : null}
       style={[
         styles.leafRow,
         { backgroundColor: indentBg },
@@ -412,11 +639,59 @@ function LeafRow({
 // ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingBottom: spacing.md,
+  },
+
+  // Search
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  searchIcon: {
+    marginLeft: spacing.xs,
+  },
+  searchInput: {
+    ...typography.body,
+    flex: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+  },
+  searchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: 2,
+  },
+  searchResultText: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  searchResultName: {
+    ...typography.body,
+    fontSize: 14,
+  },
+  searchResultBreadcrumb: {
+    ...typography.caption,
+    marginTop: 2,
+  },
+  emptySearch: {
+    ...typography.body,
+    textAlign: 'center',
+    marginTop: spacing.lg,
   },
 
   // Continent block

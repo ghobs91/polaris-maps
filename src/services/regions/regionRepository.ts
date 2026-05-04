@@ -19,6 +19,7 @@ export async function getRegionContainingPoint(lat: number, lng: number): Promis
     `SELECT * FROM regions
      WHERE bounds_min_lat <= ? AND bounds_max_lat >= ?
        AND bounds_min_lng <= ? AND bounds_max_lng >= ?
+       AND download_status = 'complete'
      LIMIT 1`,
     [lat, lat, lng, lng],
   );
