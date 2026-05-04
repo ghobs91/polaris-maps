@@ -43,11 +43,7 @@ import {
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useTransitStore } from '../../stores/transitStore';
-import {
-  computeRoute,
-  initRouting,
-  isRoutingInitialized,
-} from '../../services/routing/routingService';
+import { computeRoute, initRouting } from '../../services/routing/routingService';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
@@ -62,6 +58,11 @@ import { getDatabase } from '../../services/database/init';
 import { formatDistance } from '../../utils/units';
 import { shouldOfferParkAndRide, planParkAndRide } from '../../services/routing/parkAndRideService';
 import { decodePolyline } from '../../utils/polyline';
+import { useTrafficStore } from '../../stores/trafficStore';
+import {
+  averageRouteTrafficColor,
+  ETA_COLOR_GREEN,
+} from '../../services/traffic/routeTrafficService';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 import { destinationToGeocodingResult, isSameDestination } from './floatingSearchPanelHelpers';
@@ -592,6 +593,13 @@ export function FloatingSearchPanel({
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
   const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
+  const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
+
+  const routePreviewEtaColor = useMemo(() => {
+    if (!routePreview || normalizedSegments.length === 0) return ETA_COLOR_GREEN;
+    const coords = decodePolyline(routePreview.geometry);
+    return averageRouteTrafficColor(coords, normalizedSegments);
+  }, [routePreview, normalizedSegments]);
   const routePreviewWaypoints = useNavigationStore((s) => s.routePreviewWaypoints);
   const setRoutePreviewWaypoints = useNavigationStore((s) => s.setRoutePreviewWaypoints);
   const transitDirectionsActive = useTransitStore((s) => s.directionsActive);
@@ -604,9 +612,6 @@ export function FloatingSearchPanel({
   const [selectedResult, setSelectedResult] = useState<GeocodingResult | null>(null);
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
-  const [usedOnlineRouting, setUsedOnlineRouting] = useState<'no-region' | 'unavailable' | null>(
-    null,
-  );
   const [isTransitRouting, setIsTransitRouting] = useState(false);
   const [recentsExpanded, setRecentsExpanded] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
@@ -948,7 +953,6 @@ export function FloatingSearchPanel({
     clearRoutePreview();
     useTransitStore.getState().clearTransitPlan();
     setRouteError(null);
-    setUsedOnlineRouting(null);
   }, [setSelectedLocation, clearRoutePreview]);
 
   // ── Selecting a result ──────────────────────
@@ -1062,7 +1066,6 @@ export function FloatingSearchPanel({
       navigateToResult(result);
       setSelectedResult(result);
       setRouteError(null);
-      setUsedOnlineRouting(null);
       clearRoutePreview();
       setMode('location');
     },
@@ -1082,7 +1085,6 @@ export function FloatingSearchPanel({
       setMode('location');
       setIsRouting(true);
       setRouteError(null);
-      setUsedOnlineRouting(null);
       setParkAndRideResult(null);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -1151,7 +1153,6 @@ export function FloatingSearchPanel({
           setRouteError('No route found between these points');
           return;
         }
-        if (!isRoutingInitialized()) setUsedOnlineRouting(region ? 'unavailable' : 'no-region');
 
         setRoutePreview(routes[0], routes.slice(1), dest, costing, currentWaypoints);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
@@ -1585,13 +1586,10 @@ export function FloatingSearchPanel({
       navigateToResult({ entry: homeEntry.entry, rank: 0 });
       setSelectedResult({ entry: homeEntry.entry, rank: 0 });
       setRouteError(null);
-      setUsedOnlineRouting(null);
       clearRoutePreview();
       setMode('location');
     } else {
       setQuery('');
-      setResults([]);
-      setMode('setting-home');
       setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [homeEntry, navigateToResult, clearRoutePreview]);
@@ -1601,13 +1599,10 @@ export function FloatingSearchPanel({
       navigateToResult({ entry: workEntry.entry, rank: 0 });
       setSelectedResult({ entry: workEntry.entry, rank: 0 });
       setRouteError(null);
-      setUsedOnlineRouting(null);
       clearRoutePreview();
       setMode('location');
     } else {
       setQuery('');
-      setResults([]);
-      setMode('setting-work');
       setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [workEntry, navigateToResult, clearRoutePreview]);
@@ -1906,6 +1901,7 @@ export function FloatingSearchPanel({
     const displayEtaSeconds = parkAndRideResult
       ? parkAndRideResult.totalDurationSeconds
       : (routePreviewTrafficEta ?? routePreview.summary.durationSeconds);
+
     return (
       <View style={rootStyle} pointerEvents="box-none">
         {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
@@ -1919,8 +1915,8 @@ export function FloatingSearchPanel({
                 {entry.text}
               </Text>
               <View style={st.routeSummaryRow}>
-                <Ionicons name="time-outline" size={13} color={subColor} />
-                <Text style={[st.routeSummaryText, { color: subColor }]}>
+                <Ionicons name="time-outline" size={13} color={routePreviewEtaColor} />
+                <Text style={[st.routeSummaryText, { color: routePreviewEtaColor }]}>
                   {formatDuration(displayEtaSeconds)}
                 </Text>
                 <Text style={[st.routeSummaryDot, { color: subColor }]}>·</Text>
@@ -1967,21 +1963,6 @@ export function FloatingSearchPanel({
                 </Text>
               </View>
             </View>
-          )}
-
-          {usedOnlineRouting !== null && (
-            <TouchableOpacity
-              style={st.regionHint}
-              onPress={() => router.push('/regions')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="cloud-download-outline" size={13} color={colors.warning} />
-              <Text style={[st.regionHintText, { color: colors.warning }]}>
-                {usedOnlineRouting === 'no-region'
-                  ? 'Using online routing — download a region for offline use'
-                  : 'Using online routing — offline routing data unavailable'}
-              </Text>
-            </TouchableOpacity>
           )}
 
           {/* Waypoints / stops */}
@@ -2352,7 +2333,6 @@ export function FloatingSearchPanel({
                         navigateToResult({ entry: fav.entry, rank: 0 });
                         setSelectedResult({ entry: fav.entry, rank: 0 });
                         setRouteError(null);
-                        setUsedOnlineRouting(null);
                         clearRoutePreview();
                         setMode('location');
                       }}
@@ -2650,17 +2630,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     routeSummaryDot: {
       ...typography.caption,
-    },
-    regionHint: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: spacing.xs,
-      marginHorizontal: spacing.md,
-      marginBottom: spacing.xs,
-    },
-    regionHintText: {
-      ...typography.caption,
-      flex: 1,
     },
     stepsList: {
       maxHeight: 200,

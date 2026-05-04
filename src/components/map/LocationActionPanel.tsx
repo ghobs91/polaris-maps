@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,12 +16,9 @@ import { useRouter } from 'expo-router';
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useTransitStore } from '../../stores/transitStore';
+import { useTrafficStore } from '../../stores/trafficStore';
 import * as FileSystem from 'expo-file-system';
-import {
-  computeRoute,
-  initRouting,
-  isRoutingInitialized,
-} from '../../services/routing/routingService';
+import { computeRoute, initRouting } from '../../services/routing/routingService';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
@@ -32,6 +29,11 @@ import { extractTar } from '../../utils/archiveExtract';
 import { getDatabase } from '../../services/database/init';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
+import { decodePolyline } from '../../utils/polyline';
+import {
+  averageRouteTrafficColor,
+  ETA_COLOR_GREEN,
+} from '../../services/traffic/routeTrafficService';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import {
   shouldOfferParkAndRide,
@@ -45,15 +47,19 @@ export function LocationActionPanel() {
   const setFitBounds = useMapStore((s) => s.setFitBounds);
   const routePreview = useNavigationStore((s) => s.routePreview);
   const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
+  const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
+
+  const etaDisplayColor = useMemo(() => {
+    if (!routePreview || normalizedSegments.length === 0) return ETA_COLOR_GREEN;
+    const coords = decodePolyline(routePreview.geometry);
+    return averageRouteTrafficColor(coords, normalizedSegments);
+  }, [routePreview, normalizedSegments]);
   const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
   const { bottom: safeBottom } = useSafeAreaInsets();
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
-  const [usedOnlineRouting, setUsedOnlineRouting] = useState<'no-region' | 'unavailable' | null>(
-    null,
-  );
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
   const [showParkAndRide, setShowParkAndRide] = useState(false);
   const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
@@ -63,7 +69,6 @@ export function LocationActionPanel() {
     setSelectedLocation(null);
     clearRoutePreview();
     setRouteError(null);
-    setUsedOnlineRouting(null);
   }, [setSelectedLocation, clearRoutePreview]);
 
   /** Compute route and show it on the map (directions preview) */
@@ -73,7 +78,6 @@ export function LocationActionPanel() {
       if (!selectedLocation) return;
       setIsRouting(true);
       setRouteError(null);
-      setUsedOnlineRouting(null);
       setParkAndRideResult(null);
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -146,7 +150,6 @@ export function LocationActionPanel() {
           setRouteError('No route found between these points');
           return;
         }
-        if (!isRoutingInitialized()) setUsedOnlineRouting(region ? 'unavailable' : 'no-region');
 
         // Store as preview (not active navigation)
         setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
@@ -321,8 +324,8 @@ export function LocationActionPanel() {
       {/* Route summary */}
       <View style={styles.routeSummary}>
         <View style={styles.summaryItem}>
-          <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-          <Text style={styles.summaryText}>
+          <Ionicons name="time-outline" size={14} color={etaDisplayColor} />
+          <Text style={[styles.summaryText, { color: etaDisplayColor }]}>
             {formatDuration(
               parkAndRideResult
                 ? parkAndRideResult.totalDurationSeconds
@@ -364,21 +367,6 @@ export function LocationActionPanel() {
             </Text>
           </View>
         </View>
-      )}
-
-      {usedOnlineRouting !== null && (
-        <TouchableOpacity
-          style={styles.regionHint}
-          onPress={() => router.push('/regions')}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="cloud-download-outline" size={14} color={colors.warning} />
-          <Text style={styles.regionHintText}>
-            {usedOnlineRouting === 'no-region'
-              ? 'Using online routing — download a region for offline navigation'
-              : 'Using online routing — offline routing data unavailable'}
-          </Text>
-        </TouchableOpacity>
       )}
 
       {/* Direction steps */}
@@ -527,18 +515,6 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.error,
     marginTop: spacing.xs,
-  },
-  regionHint: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  regionHintText: {
-    ...typography.caption,
-    color: colors.warning,
-    flex: 1,
   },
   actions: {
     flexDirection: 'row',

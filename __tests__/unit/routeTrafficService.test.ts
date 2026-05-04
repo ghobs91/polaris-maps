@@ -1,6 +1,10 @@
 import {
   congestionColor,
   buildRouteTrafficGeoJSON,
+  averageRouteTrafficColor,
+  ETA_COLOR_GREEN,
+  ETA_COLOR_ORANGE,
+  ETA_COLOR_RED,
   DEFAULT_ROUTE_COLOR,
 } from '../../src/services/traffic/routeTrafficService';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
@@ -276,3 +280,176 @@ describe('buildRouteTrafficGeoJSON', () => {
     expect(colors).toContain('#FF6D00'); // orange
   });
 });
+
+// ---------------------------------------------------------------------------
+// averageRouteTrafficColor
+// ---------------------------------------------------------------------------
+describe('averageRouteTrafficColor', () => {
+  it('returns green when no traffic segments provided', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.07, 42.37],
+    ];
+    expect(averageRouteTrafficColor(route, [])).toBe(ETA_COLOR_GREEN);
+  });
+
+  it('returns green when fewer than 2 route coords', () => {
+    expect(
+      averageRouteTrafficColor(
+        [[0, 0]],
+        [makeTestSeg({ coordinates: [[0, 0]], congestionRatio: 0.5 })],
+      ),
+    ).toBe(ETA_COLOR_GREEN);
+  });
+
+  it('returns green when all segments are free-flow', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.065, 42.365],
+      [-71.07, 42.37],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-71.065, 42.365]],
+      congestionRatio: 0.9,
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_GREEN);
+  });
+
+  it('returns red when all segments are stopped', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+      [-71.062, 42.362],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-71.0605, 42.3605]], // midpoint of pair [0,1] — close enough
+      congestionRatio: 0.1,
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_RED);
+  });
+
+  it('returns orange for moderate congestion (ratio 0.25–0.74)', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+      [-71.062, 42.362],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-71.0605, 42.3605]], // midpoint of pair [0,1]
+      congestionRatio: 0.4,
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_ORANGE);
+  });
+
+  it('falls back to green when traffic is too far from route', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-72.0, 43.0]], // far away
+      congestionRatio: 0.1,
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_GREEN);
+  });
+
+  it('unmatched sections are excluded — isolated red data on mostly no-data route shows red', () => {
+    // Long route with a single red segment near the middle.
+    // Most pairs have no traffic data and are excluded from the average.
+    const route: [number, number][] = [];
+    for (let i = 0; i < 200; i++) {
+      route.push([-71.06 + i * 0.005, 42.36 + i * 0.002]);
+    }
+
+    const mid = Math.floor(route.length / 2);
+    const segCoord: [number, number] = [
+      (route[mid][0] + route[mid + 1][0]) / 2,
+      (route[mid][1] + route[mid + 1][1]) / 2,
+    ];
+    const seg = makeTestSeg({
+      coordinates: [segCoord],
+      congestionRatio: 0.1,
+    });
+
+    // Only the matched pairs are included → average stays red.
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_RED);
+  });
+
+  it('distance-weights among matched sections: mostly green traffic + small red traffic = green', () => {
+    // Route with 6 pairs (7 points), spaced 0.02° apart so each traffic
+    // segment only matches its nearest midpoint.
+    const route: [number, number][] = [
+      [-71.0, 42.0],
+      [-71.02, 42.02],
+      [-71.04, 42.04],
+      [-71.06, 42.06],
+      [-71.08, 42.08],
+      [-71.1, 42.1],
+      [-71.12, 42.12],
+    ];
+
+    const segments = [
+      makeTestSeg({ coordinates: [[-71.01, 42.01]], congestionRatio: 0.9 }),
+      makeTestSeg({ coordinates: [[-71.03, 42.03]], congestionRatio: 0.9 }),
+      makeTestSeg({ coordinates: [[-71.05, 42.05]], congestionRatio: 0.9 }),
+      makeTestSeg({ coordinates: [[-71.07, 42.07]], congestionRatio: 0.9 }),
+      makeTestSeg({ coordinates: [[-71.09, 42.09]], congestionRatio: 0.9 }),
+      makeTestSeg({ coordinates: [[-71.11, 42.11]], congestionRatio: 0.1 }),
+    ];
+
+    // 5 green pairs + 1 red pair, equal distance → avg = 4.6/6 ≈ 0.77 → green
+    expect(averageRouteTrafficColor(route, segments)).toBe(ETA_COLOR_GREEN);
+  });
+
+  it('entirely congested route with ratio just below 0.75 returns orange', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+      [-71.062, 42.362],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-71.061, 42.361]],
+      congestionRatio: 0.74, // just under free-flow threshold
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_ORANGE);
+  });
+
+  it('boundary: ratio exactly 0.75 returns green', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-71.0605, 42.3605]],
+      congestionRatio: 0.75,
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_GREEN);
+  });
+
+  it('boundary: ratio exactly 0.25 returns orange', () => {
+    const route: [number, number][] = [
+      [-71.06, 42.36],
+      [-71.061, 42.361],
+    ];
+    const seg = makeTestSeg({
+      coordinates: [[-71.0605, 42.3605]],
+      congestionRatio: 0.25,
+    });
+    expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_ORANGE);
+  });
+});
+
+function makeTestSeg(
+  overrides: Partial<NormalizedTrafficSegment> &
+    Pick<NormalizedTrafficSegment, 'coordinates' | 'congestionRatio'>,
+): NormalizedTrafficSegment {
+  return {
+    id: 'seg-1',
+    currentSpeedMph: 40,
+    freeFlowSpeedMph: 60,
+    confidence: 0.9,
+    source: 'tomtom',
+    timestamp: Date.now(),
+    ...overrides,
+  };
+}

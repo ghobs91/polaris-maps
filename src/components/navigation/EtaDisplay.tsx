@@ -1,8 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatDistance } from '../../utils/units';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useTrafficStore } from '../../stores/trafficStore';
+import { decodePolyline } from '../../utils/polyline';
+import {
+  averageRouteTrafficColor,
+  ETA_COLOR_GREEN,
+} from '../../services/traffic/routeTrafficService';
 
 interface EtaDisplayProps {
   etaSeconds: number | null;
@@ -23,6 +29,14 @@ export function EtaDisplay({
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
+  const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
+
+  // Compute overall traffic color from segments along the route
+  const etaColor = useMemo(() => {
+    if (!activeRoute || normalizedSegments.length === 0) return ETA_COLOR_GREEN;
+    const coords = decodePolyline(activeRoute.geometry);
+    return averageRouteTrafficColor(coords, normalizedSegments);
+  }, [activeRoute, normalizedSegments]);
 
   // trafficEtaSeconds from TomTom is always the full-route value. Scale it
   // by the remaining-distance fraction so it stays in sync with the chevron.
@@ -45,7 +59,7 @@ export function EtaDisplay({
   return (
     <View style={styles.container}>
       <View style={styles.info}>
-        <Text style={styles.eta}>{formatDuration(displayEta)}</Text>
+        <Text style={[styles.eta, { color: etaColor }]}>{formatDuration(displayEta)}</Text>
         <Text style={styles.sub}>
           {remainingDistanceMeters != null ? `${formatDistance(remainingDistanceMeters)} · ` : ''}
           {arrivalStr}

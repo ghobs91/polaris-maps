@@ -1,7 +1,13 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
+import { haversineMeters } from '../../utils/routeSnap';
 
 /** Default route color when no traffic data is available. */
 export const DEFAULT_ROUTE_COLOR = '#4A90D9';
+
+/** Display colors for the ETA number based on overall route traffic. */
+export const ETA_COLOR_GREEN = '#4ADE80';
+export const ETA_COLOR_ORANGE = '#FF9500';
+export const ETA_COLOR_RED = '#FF3B30';
 
 /**
  * Proximity threshold in degrees (~300 m at mid-latitudes).
@@ -130,4 +136,71 @@ export function buildRouteTrafficGeoJSON(
   flushRun();
 
   return { type: 'FeatureCollection', features };
+}
+
+/**
+ * Compute a distance-weighted average congestion ratio across route sections
+ * that have matching traffic data, then map it to a single display color.
+ *
+ * Sections without nearby traffic data are **excluded** from the average so
+ * they don't dilute the real congestion. If no segments match at all, the
+ * function falls back to green (no data).
+ *
+ * Returns one of:
+ * - {@link ETA_COLOR_GREEN} (overall free flow)
+ * - {@link ETA_COLOR_ORANGE} (overall moderate congestion)
+ * - {@link ETA_COLOR_RED} (overall heavy / stopped traffic)
+ */
+export function averageRouteTrafficColor(
+  routeCoords: [number, number][],
+  segments: NormalizedTrafficSegment[],
+): string {
+  if (routeCoords.length < 2) return ETA_COLOR_GREEN;
+
+  const thresholdSq = MATCH_THRESHOLD_DEG * MATCH_THRESHOLD_DEG;
+  let totalWeightedRatio = 0;
+  let totalWeight = 0;
+
+  for (let i = 0; i < routeCoords.length - 1; i++) {
+    const a = routeCoords[i];
+    const b = routeCoords[i + 1];
+    const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+
+    let bestDistSq = Infinity;
+    let bestRatio = -1;
+
+    for (const seg of segments) {
+      for (const pt of seg.coordinates) {
+        const d = distSq(mid, pt);
+        if (d < bestDistSq) {
+          bestDistSq = d;
+          bestRatio = seg.congestionRatio;
+        }
+      }
+      for (let j = 0; j < seg.coordinates.length - 1; j++) {
+        const d = pointToSegDistSq(mid, seg.coordinates[j], seg.coordinates[j + 1]);
+        if (d < bestDistSq) {
+          bestDistSq = d;
+          bestRatio = seg.congestionRatio;
+        }
+      }
+    }
+
+    // Only include sections that actually matched traffic data in the average.
+    // Sections without data are skipped so they don't dilute the real congestion.
+    if (bestDistSq <= thresholdSq && bestRatio >= 0) {
+      const dist = haversineMeters(a, b);
+      totalWeightedRatio += bestRatio * dist;
+      totalWeight += dist;
+    }
+  }
+
+  // No traffic data matched at all — fall back to green (no data).
+  if (totalWeight === 0) return ETA_COLOR_GREEN;
+
+  const avgRatio = totalWeightedRatio / totalWeight;
+
+  if (avgRatio >= 0.75) return ETA_COLOR_GREEN;
+  if (avgRatio >= 0.25) return ETA_COLOR_ORANGE;
+  return ETA_COLOR_RED;
 }
