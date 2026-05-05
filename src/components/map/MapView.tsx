@@ -23,7 +23,7 @@ import { TrafficRouteLayer } from './TrafficRouteLayer';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
-import { resolveMapStyle } from './mapStyleResolver';
+import { resolveMapStyle, setLayerVisibilityInStyle } from './mapStyleResolver';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 // Suppress noisy MapLibre Native font-loading timeouts (e.g. missing glyph
@@ -528,16 +528,19 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     [onMapLongPress],
   );
 
-  // Resolve the map style based on user preference and dark mode
-  const resolvedMapStyle = useMemo(
-    () =>
-      resolveMapStyle({
-        mapStylePref,
-        isDark,
-        styleLoadFailed,
-      }),
-    [mapStylePref, isDark, styleLoadFailed],
-  );
+  // Resolve the map style based on user preference and dark mode.
+  // Hide house numbers when in navigation mode.
+  const resolvedMapStyle = useMemo(() => {
+    let style = resolveMapStyle({
+      mapStylePref,
+      isDark,
+      styleLoadFailed,
+    });
+    if (navigationMode) {
+      style = setLayerVisibilityInStyle(style, 'housenumber', 'none');
+    }
+    return style;
+  }, [mapStylePref, isDark, styleLoadFailed, navigationMode]);
 
   const handleMapLoadFail = useCallback(() => {
     if (!styleLoadFailed) {
