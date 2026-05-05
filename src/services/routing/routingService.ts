@@ -9,8 +9,15 @@ import type {
 
 let initialized = false;
 
-/** Public Valhalla API hosted by OpenStreetMap — uses live OSM data, no setup required. */
-const OSM_VALHALLA_ENDPOINT = 'https://valhalla1.openstreetmap.de/route';
+/** Public Valhalla API endpoints hosted by FOSSGIS/OpenStreetMap.
+ *  valhalla1 and valhalla2 resolve to different IPs for hardware redundancy. */
+const VALHALLA_ENDPOINTS = [
+  'https://valhalla1.openstreetmap.de/route',
+  'https://valhalla2.openstreetmap.de/route',
+];
+
+/** Per-endpoint timeout — if one endpoint is slow, we race the next. */
+const ENDPOINT_TIMEOUT_MS = 8_000;
 
 /** Map Valhalla HTTP maneuver type codes to our ManeuverType strings. */
 function valhallaTypeCode(code: number): ManeuverType {
@@ -67,6 +74,72 @@ function valhallaTypeCode(code: number): ManeuverType {
   }
 }
 
+/** Wrap a routing error with a human-friendly message. */
+function friendlyRoutingError(err: unknown): Error {
+  if (err instanceof Error && err.name === 'AbortError') {
+    return new Error(
+      'Routing request timed out. The routing service may be temporarily unavailable. Please try again later.',
+    );
+  }
+  if (err instanceof TypeError && err.message.includes('Network request failed')) {
+    return new Error(
+      'Unable to reach the routing service. Please check your internet connection and try again.',
+    );
+  }
+  if (err instanceof Error) return err;
+  return new Error(String(err));
+}
+
+/** Fetch from a single Valhalla endpoint with its own abort timeout.
+ *  Throws on timeout, network error, or non-2xx response. */
+async function fetchSingleEndpoint(
+  endpoint: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ENDPOINT_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const raw = await res.text().catch(() => '');
+      const safe = raw.slice(0, 200).replace(/key=[^&]*/g, 'key=REDACTED');
+      throw new Error(`Online routing error ${res.status}: ${safe}`);
+    }
+    return res;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/** Race the routing request across all known Valhalla endpoints.
+ *  First successful response wins; all others are cancelled via AbortController.
+ *  If all endpoints fail, throws a combined error message. */
+async function tryEndpoints(body: Record<string, unknown>): Promise<Response> {
+  const errors: string[] = [];
+
+  try {
+    return await Promise.any(
+      VALHALLA_ENDPOINTS.map(async (endpoint) => {
+        try {
+          return await fetchSingleEndpoint(endpoint, body);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`${endpoint}: ${msg}`);
+          throw err;
+        }
+      }),
+    );
+  } catch {
+    throw new Error(`All routing endpoints are currently unreachable.\n${errors.join('\n')}`);
+  }
+}
+
 /** Compute routing via the public OSM Valhalla HTTP API. */
 async function computeRouteOnline(
   waypoints: Array<{ lat: number; lng: number }>,
@@ -92,20 +165,11 @@ async function computeRouteOnline(
     directions_options: { units: 'kilometers' },
   };
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15_000);
-
-  const res = await fetch(OSM_VALHALLA_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  }).finally(() => clearTimeout(timeoutId));
-
-  if (!res.ok) {
-    const raw = await res.text().catch(() => '');
-    const safe = raw.slice(0, 200).replace(/key=[^&]*/g, 'key=REDACTED');
-    throw new Error(`Online routing error ${res.status}: ${safe}`);
+  let res: Response;
+  try {
+    res = await tryEndpoints(body);
+  } catch (err: unknown) {
+    throw friendlyRoutingError(err);
   }
 
   const json = (await res.json()) as Record<string, unknown>;
@@ -204,12 +268,12 @@ export async function updateTrafficSpeeds(speeds: Record<string, number>): Promi
   return Valhalla.updateTrafficSpeeds(speeds);
 }
 
-export function hasCoverage(bounds: {
+export async function hasCoverage(bounds: {
   minLat: number;
   maxLat: number;
   minLng: number;
   maxLng: number;
-}): boolean {
+}): Promise<boolean> {
   if (!initialized) return false;
   return Valhalla.hasCoverage(bounds);
 }

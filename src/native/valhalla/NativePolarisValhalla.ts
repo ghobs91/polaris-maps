@@ -1,5 +1,5 @@
 import type { TurboModule } from 'react-native';
-import { TurboModuleRegistry } from 'react-native';
+import { TurboModuleRegistry, NativeModules } from 'react-native';
 
 export interface ValhallaConfig {
   graphTilePath: string;
@@ -77,9 +77,24 @@ export interface Spec extends TurboModule {
     costing: string,
   ): Promise<NativeValhallaRoute>;
   updateTrafficSpeeds(speeds: Record<string, number>): Promise<void>;
-  hasCoverage(bounds: Bounds): boolean;
+  hasCoverage(bounds: Bounds): Promise<boolean>;
   getLoadedRegions(): Promise<LoadedRegionInfo[]>;
   dispose(): Promise<void>;
 }
 
-export default TurboModuleRegistry.get<Spec>('PolarisValhalla');
+/**
+ * The native module for on-device Valhalla routing.
+ *
+ * Tries TurboModuleRegistry first (New Architecture), then falls back
+ * to NativeModules (Old Architecture interop). Both resolution paths
+ * map to the same native implementation provided by valhalla-mobile.
+ *
+ * When neither is available (e.g., valhalla-mobile not linked), returns
+ * null and the JS layer falls back to the online OSM Valhalla HTTP API
+ * at valhalla1.openstreetmap.de.
+ */
+const NativeValhalla =
+  TurboModuleRegistry.get<Spec>('PolarisValhalla') ??
+  (NativeModules.PolarisValhalla as Spec | null);
+
+export default NativeValhalla;

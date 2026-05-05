@@ -4,6 +4,7 @@ import MapLibreGL from '@maplibre/maplibre-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useShallow } from 'zustand/react/shallow';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
   filterPoiLabelsForDisplay,
   filterPoisForDisplay,
@@ -25,13 +26,18 @@ interface PoiBadgeProps {
 }
 
 const PoiBadge = memo(function PoiBadge({ poi, showLabel, onPress }: PoiBadgeProps) {
+  const { isDark } = useTheme();
   const { icon, color } = getPoiCategory(poi.type, poi.subtype);
 
   return (
     <TouchableOpacity onPress={() => onPress(poi)} activeOpacity={0.75} style={styles.hitArea}>
       <View style={styles.marker}>
         {showLabel ? (
-          <Text style={[styles.label, { color }]} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={[styles.label, { color }, isDark ? styles.labelDark : styles.labelLight]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {poi.name}
           </Text>
         ) : null}
@@ -129,8 +135,15 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     textAlign: 'center',
     maxWidth: 104,
+  },
+  labelDark: {
     textShadowColor: 'rgba(0,0,0,0.85)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 3,
+  },
+  labelLight: {
+    textShadowColor: 'rgba(255,255,255,1)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 6,
   },
 });

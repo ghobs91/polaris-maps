@@ -79,12 +79,12 @@ export async function updateTrafficSpeeds(speeds: Record<string, number>): Promi
   return NativePolarisValhalla!.updateTrafficSpeeds(speeds);
 }
 
-export function hasCoverage(bounds: {
+export async function hasCoverage(bounds: {
   minLat: number;
   maxLat: number;
   minLng: number;
   maxLng: number;
-}): boolean {
+}): Promise<boolean> {
   if (!isAvailable) return false;
   return NativePolarisValhalla!.hasCoverage(bounds);
 }
