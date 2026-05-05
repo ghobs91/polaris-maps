@@ -1,5 +1,5 @@
-import { OPENFREEMAP_STYLE_URL } from '../../constants/config';
 import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
+import { LIGHT_MAP_STYLE_JSON } from '../../constants/lightMapStyle';
 import { SATELLITE_STYLE_JSON } from '../../constants/satelliteStyle';
 
 type MapStylePreference = 'default' | 'satellite' | 'terrain';
@@ -76,5 +76,19 @@ export function resolveMapStyle({
     ? SATELLITE_STYLE_JSON
     : isDark
       ? DARK_MAP_STYLE_JSON
-      : OPENFREEMAP_STYLE_URL;
+      : LIGHT_MAP_STYLE_JSON;
+}
+
+/** Set the visibility of a layer in a serialised style JSON. */
+export function setLayerVisibilityInStyle(
+  styleJson: string,
+  layerId: string,
+  visibility: 'visible' | 'none',
+): string {
+  const style = JSON.parse(styleJson);
+  const layer = style.layers?.find((l: { id: string }) => l.id === layerId);
+  if (layer) {
+    layer.layout = { ...layer.layout, visibility };
+  }
+  return JSON.stringify(style);
 }
