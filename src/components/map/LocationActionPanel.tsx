@@ -19,6 +19,7 @@ import { useTransitStore } from '../../stores/transitStore';
 import { useTrafficStore } from '../../stores/trafficStore';
 import * as FileSystem from 'expo-file-system';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
+import type { ValhallaRoute } from '../../models/route';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import {
@@ -26,7 +27,6 @@ import {
   getDownloadedRegions,
 } from '../../services/regions/regionRepository';
 import { extractTar } from '../../utils/archiveExtract';
-import { getDatabase } from '../../services/database/init';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import { decodePolyline } from '../../utils/polyline';
@@ -106,6 +106,8 @@ export function LocationActionPanel() {
           if (downloaded.length > 0) region = downloaded[0];
         }
 
+        let offlineInitialized = false;
+
         if (region) {
           const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
           const graphTilePath = `${regionDir}routing/`;
@@ -120,32 +122,56 @@ export function LocationActionPanel() {
               } catch {
                 // Extraction failed — fall through to online routing
               }
-            } else {
-              const db = await getDatabase();
-              await db.runAsync(
-                'UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?',
-                ['none', Math.floor(Date.now() / 1000), region.id],
-              );
-              await FileSystem.deleteAsync(regionDir, { idempotent: true });
-              region = null;
             }
+            // No routing tiles available for this region — keep region data intact, fall through to online
           }
-          if (region) {
+          if (graphDirInfo.exists || (await FileSystem.getInfoAsync(graphTilePath)).exists) {
             try {
               await initRouting(graphTilePath);
+              offlineInitialized = true;
             } catch {
               // initRouting failed — fall through to online routing
             }
           }
         }
 
-        const routes = await computeRoute(
-          [
-            { lat: pos.coords.latitude, lng: pos.coords.longitude },
-            { lat: selectedLocation.lat, lng: selectedLocation.lng },
-          ],
-          costing,
-        );
+        let routes: ValhallaRoute[] = [];
+        try {
+          routes = await computeRoute(
+            [
+              { lat: pos.coords.latitude, lng: pos.coords.longitude },
+              { lat: selectedLocation.lat, lng: selectedLocation.lng },
+            ],
+            costing,
+          );
+        } catch (routeErr: unknown) {
+          // If online routing failed and offline tiles exist but weren't initialized,
+          // try harder to find and init any available offline tiles
+          if (!offlineInitialized) {
+            const downloaded = await getDownloadedRegions();
+            for (const r of downloaded) {
+              const rDir = `${FileSystem.documentDirectory}regions/${r.id}/`;
+              const rGraphPath = `${rDir}routing/`;
+              const rGraphInfo = await FileSystem.getInfoAsync(rGraphPath);
+              if (!rGraphInfo.exists) continue;
+              try {
+                await initRouting(rGraphPath);
+                routes = await computeRoute(
+                  [
+                    { lat: pos.coords.latitude, lng: pos.coords.longitude },
+                    { lat: selectedLocation.lat, lng: selectedLocation.lng },
+                  ],
+                  costing,
+                );
+                break;
+              } catch {
+                // keep trying other regions
+              }
+            }
+          }
+          if (!routes.length) throw routeErr;
+        }
+
         if (!routes.length) {
           setRouteError('No route found between these points');
           return;
