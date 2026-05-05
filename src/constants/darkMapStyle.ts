@@ -186,6 +186,19 @@ const style = {
         'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.58, 17, 0.78],
       },
     },
+    {
+      id: 'building-3d',
+      type: 'fill-extrusion',
+      source: 'openmaptiles',
+      'source-layer': 'building',
+      minzoom: 14,
+      paint: {
+        'fill-extrusion-color': '#5B5861',
+        'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
+        'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
+        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.5, 17, 0.8],
+      },
+    },
 
     // ───────────────────── Aeroway ─────────────────────
     {
