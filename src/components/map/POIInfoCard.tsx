@@ -26,8 +26,8 @@ import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
 
 const SCREEN_H = Dimensions.get('window').height;
-// Two snap points: peek (40%) and expanded (85%)
-const PEEK_H = SCREEN_H * 0.42;
+// Two snap points: peek (55%) and expanded (85%)
+const PEEK_H = SCREEN_H * 0.55;
 const FULL_H = SCREEN_H * 0.85;
 
 // ---------------------------------------------------------------------------
