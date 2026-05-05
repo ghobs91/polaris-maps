@@ -9,7 +9,7 @@ export const colors = {
   surfaceDark: '#1F2937',
   text: '#000000',
   textDark: '#F9FAFB',
-  textSecondary: '#8E8E93',
+  textSecondary: '#5A5A5F',
   border: '#C6C6C8',
   borderDark: '#374151',
   error: '#FF3B30',
