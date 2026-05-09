@@ -149,12 +149,90 @@ function addSpmPackage() {
   console.log('[withValhalla] Added valhalla-mobile SPM to pbxproj');
 }
 
+/**
+ * Patches the Podfile post_install hook to fix a fmt 11.x consteval
+ * compilation issue with the iOS 26 SDK / Xcode 26. This was previously
+ * in the withLiveActivities plugin.
+ */
+function patchPodfile() {
+  const podfilePath = path.join(IOS_DIR, 'Podfile');
+  if (!fs.existsSync(podfilePath)) return;
+
+  let content = fs.readFileSync(podfilePath, 'utf8');
+  if (content.includes('FMT_CONSTEVAL_PATCHED')) {
+    console.log('[withValhalla] fmt patch already applied');
+    return;
+  }
+
+  const fmtFix = `    # Fix fmt 11.x consteval issue with iOS 26 SDK / Xcode 26.
+    # Patches fmt/base.h after pod install downloads fresh sources.
+    fmt_base_h = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base_h)
+      content = File.read(fmt_base_h)
+      unless content.include?('FMT_CONSTEVAL_PATCHED')
+        lines = content.lines
+        new_lines = []
+        i = 0
+        while i < lines.length
+          line = lines[i]
+          if line.include?('Detect consteval, C++20 constexpr extensions')
+            new_lines << "// FMT_CONSTEVAL_PATCHED: Force consteval off for iOS 26 SDK / Xcode 26 compatibility.\\n"
+            new_lines << "#define FMT_USE_CONSTEVAL 0\\n"
+            new_lines << "#define FMT_CONSTEVAL\\n"
+            new_lines << "#define FMT_CONSTEXPR20\\n"
+            found_first_endif = false
+            i += 1
+            while i < lines.length
+              if lines[i].strip == '#if FMT_USE_CONSTEVAL' && found_first_endif
+                i += 1
+                while i < lines.length
+                  break if lines[i].strip == '#endif'
+                  i += 1
+                end
+                break
+              end
+              if lines[i].strip == '#endif' && !found_first_endif
+                found_first_endif = true
+              end
+              i += 1
+            end
+          else
+            new_lines << line
+          end
+          i += 1
+        end
+        FileUtils.chmod(0644, fmt_base_h)
+        File.write(fmt_base_h, new_lines.join)
+      end
+    end
+`;
+
+  // Insert inside the post_install block after the resource-bundle-fix code
+  const oldBlock = `          config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+        end
+      end
+    end
+  end`;
+  const newBlock = `          config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+        end
+      end
+    end
+
+${fmtFix}
+  end`;
+
+  content = content.replace(oldBlock, newBlock);
+  fs.writeFileSync(podfilePath, content);
+  console.log('[withValhalla] Applied fmt consteval patch to Podfile');
+}
+
 function withValhalla(config) {
   config = withDangerousMod(config, [
     'ios',
     (cfg) => {
       copyFiles();
       addSpmPackage();
+      patchPodfile();
       return cfg;
     },
   ]);

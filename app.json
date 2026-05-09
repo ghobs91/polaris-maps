@@ -33,7 +33,7 @@
       ]
     },
     "plugins": [
-      "./plugins/withLiveActivities",
+      // "./plugins/withLiveActivities",
       "./plugins/withValhalla",
       "@maplibre/maplibre-react-native",
       "expo-router",
