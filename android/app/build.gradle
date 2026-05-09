@@ -173,9 +173,4 @@ dependencies {
     } else {
         implementation jscFlavor
     }
-
-    // valhalla-mobile: on-device Valhalla routing engine
-    implementation("io.github.rallista:valhalla-mobile:0.5.1")
-    implementation("io.github.rallista:valhalla-models:0.2.0")
-    implementation("io.github.rallista:valhalla-models-config:0.2.0")
 }

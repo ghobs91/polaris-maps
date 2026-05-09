@@ -2,6 +2,7 @@ import WidgetKit
 import SwiftUI
 import ActivityKit
 
+@available(iOS 16.1, *)
 struct NavigationLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: NavigationAttributes.self) { context in
@@ -66,6 +67,7 @@ struct NavigationLiveActivity: Widget {
     }
 }
 
+@available(iOS 16.1, *)
 struct LockScreenView: View {
     let context: ActivityViewContext<NavigationAttributes>
 
