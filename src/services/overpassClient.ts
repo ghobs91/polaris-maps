@@ -27,8 +27,9 @@ export interface OverpassRequestOptions {
 /**
  * Send an Overpass QL query with parallel hedging.
  *
- * Fires requests to all instances and returns the first successful response.
- * Throws an AggregateError if all instances fail.
+ * Fires requests to all instances via POST (avoids URL length limits) and
+ * returns the first successful response.  Throws an AggregateError if all
+ * instances fail.
  */
 export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
   // Enforce minimum inter-request gap to respect public API usage policies
@@ -39,8 +40,6 @@ export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Prom
   }
   _lastOverpassRequestAt = Date.now();
 
-  const encoded = encodeURIComponent(opts.query);
-
   const attempts = OVERPASS_INSTANCES.map(async (base) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
@@ -50,7 +49,10 @@ export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Prom
     opts.signal?.addEventListener('abort', onExternalAbort);
 
     try {
-      const res = await fetch(`${base}?data=${encoded}`, {
+      const res = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(opts.query)}`,
         signal: ctrl.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
