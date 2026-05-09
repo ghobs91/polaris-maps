@@ -46,6 +46,7 @@ import {
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { searchOtpStops } from '../../services/transit/otpEndpointRegistry';
 import type { OtpItinerary, OtpLeg } from '../../models/transit';
+import TransitTimeSelector from './TransitTimeSelector';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const CARD_H = Math.min(SCREEN_H * 0.55, 480);
@@ -258,10 +259,13 @@ export function TransitStopCard() {
       // Try OTP first (registry auto-selects endpoint by coordinates);
       // fall back to local cached-line planner only if OTP fails.
       try {
+        const timeState = useTransitStore.getState();
         const itineraries = await planTransitTrip({
           from: { lat: origin.lat, lng: origin.lon },
           to: { lat: destLat, lng: destLng },
-          modes: useTransitStore.getState().enabledModes,
+          modes: timeState.enabledModes,
+          departureTime: timeState.departureTime?.toISOString(),
+          isDepartAt: timeState.isDepartAt,
         });
         setDirItineraries(itineraries);
         if (itineraries.length === 0) setDirError('No transit routes found');
@@ -589,6 +593,9 @@ export function TransitStopCard() {
                 <Ionicons name="swap-vertical" size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
+
+            {/* Time selector */}
+            <TransitTimeSelector />
 
             <ScrollView
               style={styles.departuresList}

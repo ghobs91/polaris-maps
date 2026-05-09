@@ -356,7 +356,7 @@ async function planViaOtp1Rest(
   endpoint: OtpEndpoint,
   options: PlanTransitOptions,
 ): Promise<OtpItinerary[]> {
-  const { from, to, departureTime, numItineraries = 5 } = options;
+  const { from, to, departureTime, numItineraries = 5, isDepartAt } = options;
 
   const dt = departureTime ? new Date(departureTime) : new Date();
   const timeStr = dt.toLocaleTimeString('en-US', {
@@ -377,6 +377,11 @@ async function planViaOtp1Rest(
     numItineraries: String(numItineraries),
     showIntermediateStops: 'true',
   });
+
+  // OTP1 supports arriveBy as a boolean query param
+  if (isDepartAt === false) {
+    params.set('arriveBy', 'true');
+  }
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20_000);
@@ -561,6 +566,8 @@ export interface PlanTransitOptions {
   to: { lat: number; lng: number };
   /** ISO 8601 date-time string. Defaults to now. */
   departureTime?: string;
+  /** When true, depart at `departureTime`; when false, arrive by `departureTime`. Defaults to true. */
+  isDepartAt?: boolean;
   /** Transit modes to include. Defaults to all. */
   modes?: TransitMode[];
   /** Number of itineraries to request. Defaults to 5. */
@@ -586,8 +593,13 @@ export async function planTransitTrip(options: PlanTransitOptions): Promise<OtpI
       if (registryEndpoint.apiStyle === 'transmodel-v3') {
         return await planViaTransmodelV3(registryEndpoint, options);
       }
-      // gtfs-graphql-v2 — use existing GraphQL client with registry URL
-      return await planViaGtfsGraphql(registryEndpoint, options);
+      if (registryEndpoint.apiStyle === 'transitous-v1') {
+        // Transitous routing is handled separately via the MOTIS API.
+        // Skip here so the caller falls through to user-configured OTP.
+      } else {
+        // gtfs-graphql-v2 and unknown styles — use existing GraphQL client
+        return await planViaGtfsGraphql(registryEndpoint, options);
+      }
     } catch {
       // Registry endpoint failed; try user-configured fallback
     }

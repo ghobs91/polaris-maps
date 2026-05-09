@@ -6,6 +6,12 @@ import {
   getCachedLines,
   hasCachedLines,
 } from '../services/transit/transitLineFetcher';
+import { getRegionContainingPoint } from '../services/regions/regionRepository';
+import {
+  getOfflineDotGtfsLines,
+  hasOfflineDotGtfsData,
+} from '../services/transit/dotGtfsOffline';
+import { isOnline } from '../services/regions/connectivityService';
 import { TRANSIT_FETCH_DEBOUNCE_MS } from '../constants/config';
 
 const MIN_ZOOM = 8;
@@ -37,10 +43,18 @@ export function useTransitStops() {
       useTransitStore.getState().setRouteLines(getCachedLines());
     }
 
+    // Always try to load offline DOT GTFS data — even if other lines
+    // are already cached (e.g. Amtrak). Merges with existing lines.
+    loadOfflineDotGtfsIfAvailable();
+
     // Attempt to fetch for current viewport immediately
     const { viewportBounds, currentZoom } = useOsmPoiStore.getState();
     if (viewportBounds && (currentZoom ?? 0) >= MIN_ZOOM) {
       hasFetchedRef.current = true;
+      // If offline and we already loaded DOT lines, skip the network fetch
+      if (!isOnline() && useTransitStore.getState().routeLines.length > 0) {
+        return;
+      }
       fetchAndMergeLines(viewportBounds);
     }
 
@@ -57,6 +71,9 @@ export function useTransitStops() {
       // First valid viewport after toggle-on: fetch immediately (no debounce)
       if (!hasFetchedRef.current) {
         hasFetchedRef.current = true;
+        if (!isOnline() && useTransitStore.getState().routeLines.length > 0) {
+          return;
+        }
         fetchAndMergeLines(state.viewportBounds);
         return;
       }
@@ -64,7 +81,12 @@ export function useTransitStops() {
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         const { viewportBounds: bounds } = useOsmPoiStore.getState();
-        if (bounds) fetchAndMergeLines(bounds);
+        if (bounds) {
+          if (!isOnline() && useTransitStore.getState().routeLines.length > 0) {
+            return;
+          }
+          fetchAndMergeLines(bounds);
+        }
       }, TRANSIT_FETCH_DEBOUNCE_MS);
     });
 
@@ -95,9 +117,47 @@ async function fetchAndMergeLines(bounds: {
       (partial) => useTransitStore.getState().setRouteLines(partial),
     );
     useTransitStore.getState().setRouteLines(lines);
-  } catch {
-    // Silently ignore — Overpass may be unavailable
+  } catch (err) {
+    // Log for debugging — Overpass may be unavailable or timed out
+    console.error('[transit] fetchTransitLines failed:', err);
   } finally {
     useTransitStore.getState().setIsLoadingLines(false);
+  }
+}
+
+/**
+ * Load offline DOT GTFS transit lines if the user is in a downloaded
+ * region with pre-cached GTFS data. Merges with existing cached lines
+ * so Amtrak + local transit both appear.
+ */
+async function loadOfflineDotGtfsIfAvailable(): Promise<void> {
+  const state = useOsmPoiStore.getState();
+  if (!state.viewportBounds) return;
+
+  const { minLat, minLng, maxLat, maxLng } = state.viewportBounds;
+  const centreLat = (minLat + maxLat) / 2;
+  const centreLng = (minLng + maxLng) / 2;
+
+  const region = await getRegionContainingPoint(centreLat, centreLng);
+  if (!region) return;
+
+  if (!hasOfflineDotGtfsData(region.id)) return;
+
+  try {
+    const offlineLines = await getOfflineDotGtfsLines(region.id);
+    if (offlineLines.length === 0) return;
+
+    // Merge with existing lines — don't replace cached Amtrak/OTP lines
+    const existing = useTransitStore.getState().routeLines;
+    const existingIds = new Set(existing.map((l) => l.id));
+    const merged = [...existing];
+    for (const line of offlineLines) {
+      if (!existingIds.has(line.id)) {
+        merged.push(line);
+      }
+    }
+    useTransitStore.getState().setRouteLines(merged);
+  } catch {
+    // Silently ignore — offline transit is best-effort
   }
 }

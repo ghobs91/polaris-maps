@@ -227,4 +227,26 @@ describe('transitStore', () => {
       expect(useTransitStore.getState().transitLayerVisible).toBe(true);
     });
   });
+
+  describe('gtfsLoadingAgency', () => {
+    it('starts as null', () => {
+      expect(useTransitStore.getState().gtfsLoadingAgency).toBeNull();
+    });
+
+    it('can be set to an agency name', () => {
+      useTransitStore.getState().setGtfsLoadingAgency('King County Metro');
+      expect(useTransitStore.getState().gtfsLoadingAgency).toBe('King County Metro');
+    });
+
+    it('can be set back to null', () => {
+      useTransitStore.getState().setGtfsLoadingAgency('Sound Transit');
+      useTransitStore.getState().setGtfsLoadingAgency(null);
+      expect(useTransitStore.getState().gtfsLoadingAgency).toBeNull();
+    });
+
+    it('handles multi-agency labels', () => {
+      useTransitStore.getState().setGtfsLoadingAgency('RTD Denver + 2 others');
+      expect(useTransitStore.getState().gtfsLoadingAgency).toBe('RTD Denver + 2 others');
+    });
+  });
 });

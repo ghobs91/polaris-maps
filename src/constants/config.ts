@@ -72,6 +72,10 @@ export const mobilityDbRefreshToken: string =
 /** OpenTripPlanner GTFS GraphQL API base URL — set EXPO_PUBLIC_OTP_BASE_URL in .env */
 export const OTP_BASE_URL: string = process.env.EXPO_PUBLIC_OTP_BASE_URL ?? '';
 
+/** Transitous MOTIS 2 API base URL — set EXPO_PUBLIC_TRANSITOUS_BASE_URL in .env */
+export const TRANSITOUS_BASE_URL: string =
+  process.env.EXPO_PUBLIC_TRANSITOUS_BASE_URL ?? 'https://api.transitous.org/api';
+
 /** OTP GraphQL endpoint path. */
 export const OTP_GRAPHQL_PATH = '/otp/gtfs/v1';
 

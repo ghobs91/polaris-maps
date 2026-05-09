@@ -13,6 +13,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, borderRadius } from '../../constants/theme';
 import type { OtpItinerary, OtpLeg, TransitMode } from '../../models/transit';
+import TransitTimeSelector from './TransitTimeSelector';
 
 // ── Mode icons ──────────────────────────────────────────────────────
 
@@ -364,6 +365,8 @@ export function TransitDirectionsPanel({ onClose }: TransitDirectionsPanelProps)
       </View>
 
       <ModeFilterBar isDark={isDark} />
+
+      <TransitTimeSelector />
 
       {isLoading && (
         <View style={styles.center}>

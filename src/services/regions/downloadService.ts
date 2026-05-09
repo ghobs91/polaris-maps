@@ -5,6 +5,8 @@ import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveB
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
+import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
+import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -161,6 +163,11 @@ export async function downloadRegion(
 
     // Download and import geocoding bundle if the region has a geocoding URL.
     await downloadAndImportGeocodingBundle(region, destDir, onProgress, signal).catch(() => {});
+
+    checkAborted(signal);
+
+    // DOT GTFS pre-caching — download transit feed data for offline transit lines.
+    await cacheDotGtfsForRegion(region.id, region.bounds).catch(() => {});
 
     // Calculate total size
     const dirInfo = await FileSystem.getInfoAsync(destDir);
@@ -411,6 +418,9 @@ export async function deleteRegionData(regionId: string): Promise<void> {
   if (row?.drive_key) {
     leaveRegionFeed(row.drive_key).catch(() => {});
   }
+
+  // Remove cached DOT GTFS data for this region
+  removeOfflineDotGtfsData(regionId);
 
   const destDir = `${FileSystem.documentDirectory}regions/${regionId}/`;
   const info = await FileSystem.getInfoAsync(destDir);

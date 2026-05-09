@@ -38,11 +38,19 @@ interface TransitState {
   transitOrigin: { lat: number; lng: number; name?: string } | null;
   transitDestination: { lat: number; lng: number; name?: string } | null;
 
+  // DOT GTFS loading indicator (agency name or null)
+  gtfsLoadingAgency: string | null;
+
   // Directions panel active (hides FloatingSearchPanel)
   directionsActive: boolean;
 
+  // Departure time selection for trip planning
+  departureTime: Date | null;
+  isDepartAt: boolean;
+
   // Actions
   setTransitLayerVisible: (visible: boolean) => void;
+  setGtfsLoadingAgency: (agency: string | null) => void;
   setRouteLines: (lines: TransitRouteLine[]) => void;
   setIsLoadingLines: (loading: boolean) => void;
   setStops: (stops: OtpStop[]) => void;
@@ -57,6 +65,8 @@ interface TransitState {
   setTransitOrigin: (origin: TransitState['transitOrigin']) => void;
   setTransitDestination: (destination: TransitState['transitDestination']) => void;
   setDirectionsActive: (active: boolean) => void;
+  setDepartureTime: (time: Date | null) => void;
+  setIsDepartAt: (isDepart: boolean) => void;
   clearTransitPlan: () => void;
 }
 
@@ -75,11 +85,15 @@ export const useTransitStore = create<TransitState>()((set, get) => ({
   transitOrigin: null,
   transitDestination: null,
   directionsActive: false,
+  departureTime: null,
+  isDepartAt: true,
+  gtfsLoadingAgency: null,
 
   setTransitLayerVisible: (visible) => {
     set({ transitLayerVisible: visible });
     storage.set(TRANSIT_LAYER_KEY, visible);
   },
+  setGtfsLoadingAgency: (agency) => set({ gtfsLoadingAgency: agency }),
   setRouteLines: (lines) => set({ routeLines: lines }),
   setIsLoadingLines: (loading) => set({ isLoadingLines: loading }),
   setStops: (stops) => set({ stops }),
@@ -105,6 +119,8 @@ export const useTransitStore = create<TransitState>()((set, get) => ({
   setTransitOrigin: (origin) => set({ transitOrigin: origin }),
   setTransitDestination: (destination) => set({ transitDestination: destination }),
   setDirectionsActive: (active) => set({ directionsActive: active }),
+  setDepartureTime: (time) => set({ departureTime: time }),
+  setIsDepartAt: (isDepart) => set({ isDepartAt: isDepart }),
   clearTransitPlan: () =>
     set({
       itineraries: [],
@@ -112,5 +128,7 @@ export const useTransitStore = create<TransitState>()((set, get) => ({
       tripPlanError: null,
       transitOrigin: null,
       transitDestination: null,
+      departureTime: null,
+      isDepartAt: true,
     }),
 }));

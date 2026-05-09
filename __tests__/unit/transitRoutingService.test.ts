@@ -319,9 +319,11 @@ describe('findEndpointForCoords (registry)', () => {
     expect(ep!.apiStyle).toBe('transmodel-v3');
   });
 
-  it('returns null for coordinates outside all bboxes', () => {
+  it('returns Transitous as global fallback for uncovered cities', () => {
     const ep = findEndpointForCoords(-33.87, 151.21); // Sydney
-    expect(ep).toBeNull();
+    expect(ep).not.toBeNull();
+    expect(ep!.label).toContain('Transitous');
+    expect(ep!.apiStyle).toBe('transitous-v1');
   });
 
   it('has at least one endpoint in the registry', () => {

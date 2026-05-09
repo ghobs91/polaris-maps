@@ -12,7 +12,25 @@ import type { TransitMode } from '../../models/transit';
 
 // ── Types ───────────────────────────────────────────────────────────
 
-export type OtpApiStyle = 'rest-v1' | 'gtfs-graphql-v2' | 'transmodel-v3' | 'mbta-v3';
+export type OtpApiStyle =
+  | 'rest-v1'
+  | 'gtfs-graphql-v2'
+  | 'transmodel-v3'
+  | 'mbta-v3'
+  | 'wmata-gtfs-v1'
+  | 'bart-gtfs-v1'
+  | 'tfl-v1'
+  | 'cta-gtfs-v1'
+  | 'septa-gtfs-v1'
+  | 'lametro-gtfs-v1'
+  | 'marta-gtfs-v1'
+  | 'miami-gtfs-v1'
+  | 'baltimore-gtfs-v1'
+  | 'idfm-gtfs-v1'
+  | 'vbb-gtfs-v1'
+  | 'madrid-gtfs-v1'
+  | 'transitous-v1'
+  | 'dot-gtfs';
 
 export interface OtpEndpoint {
   /** Human-readable label (for logging / debug UI). */
@@ -36,28 +54,29 @@ export interface OtpEndpoint {
 // ── Registry ────────────────────────────────────────────────────────
 
 export const OTP_ENDPOINTS: OtpEndpoint[] = [
-  // ─── United States ──────────────────────────────────────────────
-  // Coverage map for major US transit systems (by ridership):
-  //   NYC Subway (NYCTA)        → MTA OTP endpoint below
-  //   PATH (PANYNJ)             → MTA OTP endpoint below (PATH prefix)
-  //   Staten Island Railway     → MTA OTP endpoint below (SIF prefix)
-  //   MBTA ("the T", Boston)    → Dedicated MBTA V3 API below
-  //   Washington Metro (WMATA)  → Overpass fallback (lines + stops)
-  //   Chicago "L" (CTA)         → Overpass fallback (lines + stops)
-  //   SEPTA Metro (Philadelphia)→ Overpass fallback (lines + stops)
-  //   BART (SF Bay Area)        → Overpass fallback (lines + stops)
-  //   MARTA rail (Atlanta)      → Overpass fallback (lines + stops)
-  //   Metro Rail (LACMTA, LA)   → Overpass fallback (lines + stops)
-  //   Metrorail (Miami-Dade)    → Overpass fallback (lines + stops)
-  //   PATCO Speedline           → Overpass fallback (lines + stops)
-  //   Baltimore Metro SubwayLink→ Overpass fallback (lines + stops)
+  // ─── United States — OTP / Agency API ─────────────────────────────
+  // NYC Subway, PATH, SIR, LIRR, Metro-North → MTA OTP
+  // MBTA ("the T", Boston)                   → MBTA V3 API
+  // Washington Metro (WMATA)                 → GTFS Static (official feed)
+  // Chicago "L" (CTA)                        → GTFS Static (feed URL)
+  // SEPTA Metro (Philadelphia)               → GTFS Static (feed URL)
+  // BART (SF Bay Area)                       → GTFS Static (official feed)
+  // MARTA rail (Atlanta)                     → GTFS Static (feed URL)
+  // Metro Rail (LACMTA, LA)                  → GTFS Static (feed URL)
+  // Metrorail (Miami-Dade)                   → GTFS Static (feed URL)
+  // Baltimore Metro + PATCO                  → GTFS Static (feed URL)
 
   {
     label: 'MTA New York City & Long Island',
-    // Covers NYC Subway, PATH, Staten Island Railway, LIRR, Metro-North, NJ Transit rail
     bbox: [40.4, -74.3, 41.4, -72.0],
     url: 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/plan',
     apiStyle: 'rest-v1',
+  },
+  {
+    label: 'WMATA Washington DC Metro',
+    bbox: [38.75, -77.5, 39.2, -76.8],
+    url: 'https://api.wmata.com/gtfs/rail-gtfs.zip',
+    apiStyle: 'wmata-gtfs-v1',
   },
   {
     label: 'TriMet Portland, OR',
@@ -65,22 +84,115 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
     url: 'https://maps.trimet.org/otp_mod/plan',
     apiStyle: 'rest-v1',
   },
-
   {
     label: 'MBTA Boston & Massachusetts',
-    // Covers greater Boston + commuter rail extent (Red, Orange, Blue, Green lines + commuter rail)
     bbox: [41.0, -72.0, 43.0, -70.0],
     url: 'https://api-v3.mbta.com',
     apiStyle: 'mbta-v3',
   },
+  {
+    label: 'CTA Chicago L',
+    bbox: [41.6, -88.0, 42.1, -87.5],
+    url: 'https://www.transitchicago.com/downloads/sch_data/google_transit.zip',
+    apiStyle: 'cta-gtfs-v1',
+  },
+  {
+    label: 'SEPTA Metro Philadelphia',
+    bbox: [39.8, -75.4, 40.2, -74.9],
+    url: 'https://www3.septa.org/developer/gtfs_public.zip',
+    apiStyle: 'septa-gtfs-v1',
+  },
+  {
+    label: 'BART San Francisco Bay Area',
+    bbox: [37.4, -122.6, 38.1, -121.7],
+    url: 'https://www.bart.gov/dev/schedules/google_transit.zip',
+    apiStyle: 'bart-gtfs-v1',
+  },
+  {
+    label: 'LA Metro Rail',
+    bbox: [33.7, -118.5, 34.2, -117.9],
+    url: 'https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip',
+    apiStyle: 'lametro-gtfs-v1',
+  },
+  {
+    label: 'MARTA Rail Atlanta',
+    bbox: [33.6, -84.6, 33.9, -84.2],
+    url: 'https://www.itsmarta.com/google_transit_feed/google_transit.zip',
+    apiStyle: 'marta-gtfs-v1',
+  },
+  {
+    label: 'Miami-Dade Metrorail',
+    bbox: [25.6, -80.5, 25.9, -80.1],
+    url: 'https://www.miamidade.gov/transit/googletransit/current/google_transit.zip',
+    apiStyle: 'miami-gtfs-v1',
+  },
+  {
+    label: 'Baltimore Metro & PATCO',
+    bbox: [39.15, -76.8, 39.45, -76.4],
+    url: 'https://mdotmta-gtfs.s3.amazonaws.com/mdotmta_gtfs_rail.zip',
+    apiStyle: 'baltimore-gtfs-v1',
+  },
 
-  // ─── Europe ─────────────────────────────────────────────────────
+  // ─── Europe ──────────────────────────────────────────────────────
+  // London → TfL Unified API
+  // Paris  → GTFS Static (IDFM feed)
+  // Berlin → GTFS Static (VBB feed)
+  // Madrid → GTFS Static (CRTM feed)
+
+  {
+    label: 'TfL London',
+    bbox: [51.2, -0.6, 51.75, 0.3],
+    url: 'https://api.tfl.gov.uk',
+    apiStyle: 'tfl-v1',
+  },
+  {
+    label: 'IDFM Paris Metro',
+    bbox: [48.7, 2.0, 49.0, 2.6],
+    url: 'https://data.iledefrance-mobilites.fr/explore/dataset/offre-horaires-tc-gtfs-idf/files/6d4d44e4d99d5b03280ac5bcd08e757a/download',
+    apiStyle: 'idfm-gtfs-v1',
+  },
+  {
+    label: 'VBB Berlin',
+    bbox: [52.3, 13.0, 52.7, 13.8],
+    url: 'https://www.vbb.de/vbbgtfs',
+    apiStyle: 'vbb-gtfs-v1',
+  },
+  {
+    label: 'CRTM Madrid Metro',
+    bbox: [40.25, -3.9, 40.6, -3.4],
+    url: 'https://crtm.maps.arcgis.com/sharing/rest/content/items/...',
+    apiStyle: 'madrid-gtfs-v1',
+  },
+
   {
     label: 'Entur Norway (nationwide)',
     bbox: [57.5, 4.0, 71.5, 31.5],
     url: 'https://api.entur.io/journey-planner/v3/graphql',
     apiStyle: 'transmodel-v3',
     headers: { 'ET-Client-Name': 'polaris-maps' },
+  },
+
+  // ─── DOT GTFS Registry (US catch-all) ──────────────────────────────
+  // Placed after city-specific endpoints so dedicated infra wins.
+  // Queries the DOT GTFS Feeds List spatial index and downloads matching
+  // GTFS feeds for transit lines in uncovered US regions.
+  {
+    label: 'DOT GTFS Registry (US)',
+    bbox: [24, -125, 50, -66],
+    url: '',
+    apiStyle: 'dot-gtfs',
+  },
+
+  // ─── Global ───────────────────────────────────────────────────────
+  // Placed last: findEndpointForCoords returns city-specific endpoints
+  // first, falling back to Transitous for worldwide coverage.
+  // Line rendering handled by MapLibre vector tiles; routing/departures
+  // via MOTIS 2 REST API.
+  {
+    label: 'Transitous (global)',
+    bbox: [-90, -180, 90, 180],
+    url: 'https://api.transitous.org/api',
+    apiStyle: 'transitous-v1',
   },
 ];
 

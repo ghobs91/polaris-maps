@@ -603,6 +603,20 @@ export function FloatingSearchPanel({
   const routePreviewWaypoints = useNavigationStore((s) => s.routePreviewWaypoints);
   const setRoutePreviewWaypoints = useNavigationStore((s) => s.setRoutePreviewWaypoints);
   const transitDirectionsActive = useTransitStore((s) => s.directionsActive);
+  const gtfsLoadingAgency = useTransitStore((s) => s.gtfsLoadingAgency);
+
+  // Auto-dismiss loading banner after 15 seconds
+  const loadingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (gtfsLoadingAgency) {
+      loadingTimer.current = setTimeout(() => {
+        useTransitStore.getState().setGtfsLoadingAgency(null);
+      }, 15_000);
+    }
+    return () => {
+      if (loadingTimer.current) clearTimeout(loadingTimer.current);
+    };
+  }, [gtfsLoadingAgency]);
 
   const [mode, setMode] = useState<PanelMode>('idle');
   const [query, setQuery] = useState('');
@@ -1222,10 +1236,13 @@ export function FloatingSearchPanel({
       };
 
       const enabledModes = useTransitStore.getState().enabledModes;
+      const timeState = useTransitStore.getState();
       const itineraries = await planTransitTrip({
         from: origin,
         to: dest,
-        modes: enabledModes,
+        modes: timeState.enabledModes,
+        departureTime: timeState.departureTime?.toISOString(),
+        isDepartAt: timeState.isDepartAt,
       });
 
       if (itineraries.length === 0) {
@@ -2220,6 +2237,14 @@ export function FloatingSearchPanel({
       )}
       <View style={rootStyle} pointerEvents="box-none">
         {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
+        {gtfsLoadingAgency && (
+          <View style={styles.gtfsLoadingBanner} pointerEvents="none">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.gtfsLoadingText}>
+              Loading transit data from {gtfsLoadingAgency}…
+            </Text>
+          </View>
+        )}
         <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
           {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
           {!embedded && (
@@ -2979,5 +3004,22 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     paddingVertical: 6,
     paddingHorizontal: 4,
+  },
+  gtfsLoadingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 6,
+    alignSelf: 'stretch',
+  },
+  gtfsLoadingText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });

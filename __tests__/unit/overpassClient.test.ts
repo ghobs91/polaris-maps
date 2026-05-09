@@ -70,7 +70,7 @@ describe('overpassFetch', () => {
     ).rejects.toThrow();
   });
 
-  it('sends the query as GET with URL-encoded data parameter', async () => {
+  it('sends the query as POST with URL-encoded body', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ elements: [] }),
@@ -78,12 +78,13 @@ describe('overpassFetch', () => {
 
     await overpassFetch({ query: '[out:json];node(1);out;', timeoutMs: 5000 });
 
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('data=%5Bout%3Ajson%5D%3Bnode(1)%3Bout%3B');
+    const [url, init] = mockFetch.mock.calls[0] as [string, { method: string; body: string }];
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toContain('data=%5Bout%3Ajson%5D%3Bnode(1)%3Bout%3B');
     expect(url).toContain('overpass');
   });
 
-  it('calls all three known Overpass instances', async () => {
+  it('calls all three known Overpass instances via POST', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => sampleResponse,
@@ -92,8 +93,10 @@ describe('overpassFetch', () => {
     await overpassFetch({ query: 'test', timeoutMs: 5000 });
 
     const urls = mockFetch.mock.calls.map((c: any[]) => c[0]);
-    expect(urls).toContain('https://overpass-api.de/api/interpreter?data=test');
-    expect(urls).toContain('https://overpass.private.coffee/api/interpreter?data=test');
-    expect(urls).toContain('https://overpass.openstreetmap.fr/api/interpreter?data=test');
+    const methods = mockFetch.mock.calls.map((c: any[]) => c[1]?.method);
+    expect(urls).toContain('https://overpass-api.de/api/interpreter');
+    expect(urls).toContain('https://overpass.private.coffee/api/interpreter');
+    expect(urls).toContain('https://overpass.openstreetmap.fr/api/interpreter');
+    expect(methods.every((m) => m === 'POST')).toBe(true);
   });
 });

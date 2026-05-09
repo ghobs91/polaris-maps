@@ -15,9 +15,21 @@ import { findEndpointForCoords, type OtpEndpoint } from './otpEndpointRegistry';
 import { decodePolyline } from '../../utils/polyline';
 import { fetchMbtaLines } from './mbtaFetcher';
 import { fetchAmtrakRoutes } from './amtrakFetcher';
+import { fetchTflLines } from './tflFetcher';
+import { fetchWmataLines } from './wmataFetcher';
+import { fetchGtfsStaticLines, type GtfsFetcherConfig } from './gtfsStaticFetcher';
+import { fetchDotGtfsLines } from './dotGtfsFetcher';
 import { overpassFetch } from '../overpassClient';
 
-const OVERPASS_TIMEOUT_MS = 25_000;
+const OVERPASS_TIMEOUT_MS = 75_000;
+
+/**
+ * Yield the JS thread so React Native can process UI events.
+ * Prevents the map from freezing during heavy transit-data processing.
+ */
+function yieldToUI(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
 
 // ── Spatial tile cache ──────────────────────────────────────────────
 
@@ -309,6 +321,31 @@ function deduplicateLines(lines: TransitRouteLine[]): TransitRouteLine[] {
 
 // ── Fetch a single tile from Overpass ────────────────────────────────
 
+/** Retry a tile fetch up to 3 times with exponential backoff. */
+async function fetchTileWithRetry(
+  minLat: number,
+  minLng: number,
+  maxLat: number,
+  maxLng: number,
+): Promise<TransitRouteLine[]> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await fetchTile(minLat, minLng, maxLat, maxLng);
+    } catch (err) {
+      lastErr = err;
+      console.warn(
+        `[transit] Overpass tile (${minLat.toFixed(3)},${minLng.toFixed(3)}) attempt ${attempt} failed:`,
+        err,
+      );
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 1_000 * attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchTile(
   minLat: number,
   minLng: number,
@@ -316,7 +353,7 @@ async function fetchTile(
   maxLng: number,
 ): Promise<TransitRouteLine[]> {
   const bbox = `${minLat},${minLng},${maxLat},${maxLng}`;
-  const query = `[out:json][timeout:25];
+  const query = `[out:json][timeout:60];
 (
   relation["route"~"^(subway|light_rail|train|tram|monorail)$"](${bbox});
 )->.routes;
@@ -346,9 +383,14 @@ out body;`;
   }
 
   const lines: TransitRouteLine[] = [];
-  for (const rel of relations) {
-    const line = relationToLine(rel, stopNodes);
+  for (let i = 0; i < relations.length; i++) {
+    const line = relationToLine(relations[i], stopNodes);
     if (line) lines.push(line);
+    // Yield every 4 relations so the UI thread stays responsive
+    // during heavy Douglas-Peucker simplification of large geometries
+    if ((i + 1) % 4 === 0 && i < relations.length - 1) {
+      await yieldToUI();
+    }
   }
   return deduplicateLines(lines);
 }
@@ -586,6 +628,52 @@ async function fetchOtpLines(ep: OtpEndpoint): Promise<TransitRouteLine[]> {
  * Returns the lines if a registry endpoint covers the area, or null
  * to signal that Overpass should be used instead.
  */
+
+// ── Per-city GTFS fetcher configs ────────────────────────────────────
+
+const GTFS_CONFIGS: Record<string, GtfsFetcherConfig> = {
+  'cta-gtfs-v1': {
+    label: 'CTA Chicago L',
+    routeTypeFilter: [1],
+  },
+  'septa-gtfs-v1': {
+    label: 'SEPTA Metro Philadelphia',
+    routeTypeFilter: [0, 1],
+  },
+  'lametro-gtfs-v1': {
+    label: 'LA Metro Rail',
+    routeTypeFilter: [0, 1],
+  },
+  'marta-gtfs-v1': {
+    label: 'MARTA Rail Atlanta',
+    routeTypeFilter: [1],
+  },
+  'miami-gtfs-v1': {
+    label: 'Miami-Dade Metrorail',
+    routeTypeFilter: [1],
+  },
+  'baltimore-gtfs-v1': {
+    label: 'Baltimore Metro & PATCO',
+    routeTypeFilter: [0, 1],
+  },
+  'idfm-gtfs-v1': {
+    label: 'IDFM Paris Metro',
+    routeTypeFilter: [1],
+  },
+  'vbb-gtfs-v1': {
+    label: 'VBB Berlin',
+    routeTypeFilter: [1, 2],
+  },
+  'madrid-gtfs-v1': {
+    label: 'CRTM Madrid Metro',
+    routeTypeFilter: [1],
+  },
+  'bart-gtfs-v1': {
+    label: 'BART San Francisco Bay Area',
+    routeTypeFilter: [1],
+  },
+};
+
 async function tryFetchViaOtp(
   minLat: number,
   minLng: number,
@@ -595,17 +683,77 @@ async function tryFetchViaOtp(
   const centreLat = (minLat + maxLat) / 2;
   const centreLng = (minLng + maxLng) / 2;
   const ep = findEndpointForCoords(centreLat, centreLng);
-  if (!ep) return null;
+  if (!ep) {
+    console.warn(`[transit] No endpoint found for (${centreLat.toFixed(2)}, ${centreLng.toFixed(2)})`);
+    return null;
+  }
+  console.warn(`[transit] Endpoint matched: ${ep.label} (${ep.apiStyle})`);
 
-  // MBTA V3 API: dedicated fetcher for the Boston area
+  // Dedicated REST fetchers
+  if (ep.apiStyle === 'wmata-gtfs-v1') {
+    const lines = await fetchWmataLines();
+    if (lines.length === 0) {
+      // WMATA REST API failed — fall through to DOT GTFS Registry
+      console.warn(`[transit] WMATA REST API failed, trying DOT fallback`);
+      const radiusDeg = Math.max(maxLat - minLat, maxLng - minLng) / 2 + 0.3;
+      const dotLines = await fetchDotGtfsLines(centreLat, centreLng, radiusDeg);
+      if (dotLines.length > 0) return dotLines;
+      return null;
+    }
+    return lines;
+  }
+
   if (ep.apiStyle === 'mbta-v3') {
     const lines = await fetchMbtaLines();
     if (lines.length === 0) return null;
     return lines;
   }
 
+  if (ep.apiStyle === 'tfl-v1') {
+    const lines = await fetchTflLines();
+    if (lines.length === 0) return null;
+    return lines;
+  }
+
+  // GTFS Static fetchers — config-driven, uses the endpoint's url as feed URL
+  // Agencies that gate their GTFS behind an API key need URL interpolation.
+  const gtfsConfig = GTFS_CONFIGS[ep.apiStyle];
+  if (gtfsConfig) {
+    const lines = await fetchGtfsStaticLines({
+      ...gtfsConfig,
+      feedUrl: ep.url,
+    });
+    if (lines.length === 0) {
+      // City-specific GTFS failed — fall through to DOT GTFS Registry
+      // for this area (covers offline + stale URL scenarios).
+      console.warn(`[transit] City-specific GTFS ${ep.apiStyle} failed for ${ep.label}, trying DOT fallback`);
+      const radiusDeg = Math.max(maxLat - minLat, maxLng - minLng) / 2 + 0.3;
+      const dotLines = await fetchDotGtfsLines(centreLat, centreLng, radiusDeg);
+      if (dotLines.length > 0) return dotLines;
+      return null;
+    }
+    return lines;
+  }
+
+  // Transitous — routing/departures via MOTIS API; no JS-side line fetching
+  if (ep.apiStyle === 'transitous-v1') {
+    return null;
+  }
+
+  // DOT GTFS Registry — spatial lookup + GTFS download for uncovered US areas
+  if (ep.apiStyle === 'dot-gtfs') {
+    console.log(`[transit] DOT GTFS endpoint matched for (${centreLat.toFixed(2)}, ${centreLng.toFixed(2)}), label: ${ep.label}`);
+    const radiusDeg = Math.max(maxLat - minLat, maxLng - minLng) / 2 + 0.3;
+    const lines = await fetchDotGtfsLines(centreLat, centreLng, radiusDeg);
+    if (lines.length === 0) return null;
+    return lines;
+  }
+
   // OTP1 REST (MTA NYC, TriMet, etc.)
-  if (ep.apiStyle !== 'rest-v1') return null;
+  if (ep.apiStyle !== 'rest-v1') {
+    console.warn(`[transit] Unknown apiStyle "${ep.apiStyle}" for ${ep.label}, falling through to Overpass`);
+    return null;
+  }
 
   const lines = await fetchOtpLines(ep);
   if (lines.length === 0) return null;
@@ -694,19 +842,32 @@ export async function fetchTransitLines(
     const hasOtp = otpLines && otpLines.length > 0;
     const hasAmtrak = amtrakLines.length > 0;
 
-    if (hasOtp || hasAmtrak) {
-      if (hasOtp) {
-        const OTP_CACHE_KEY = '__otp__';
-        tileData.set(OTP_CACHE_KEY, otpLines!);
-      }
+    console.warn(
+      `[transit] fetchTransitLines result: otp=${hasOtp ? otpLines!.length : 0}, ` +
+      `amtrak=${amtrakLines.length}, fallingThrough=${!hasOtp}`,
+    );
+
+    // OTP covers the transit network for the entire region — no need to
+    // fall back to Overpass.  Mark all viewport tiles as fetched so
+    // Overpass won't fire later.
+    if (hasOtp) {
+      const OTP_CACHE_KEY = '__otp__';
+      tileData.set(OTP_CACHE_KEY, otpLines!);
       if (hasAmtrak) {
         tileData.set(AMTRAK_CACHE_KEY, amtrakLines);
       }
-      // Mark all viewport tiles as fetched so Overpass won't fire later
       for (const tile of tilesForBounds(minLat, minLng, maxLat, maxLng)) {
         fetchedTiles.add(tile.key);
       }
       return getAllCachedLines();
+    }
+
+    // Amtrak supplement without OTP coverage (e.g. Chicago, DC, SF, LA):
+    // cache the Amtrak lines so they're included in the final result, but
+    // DO NOT block the Overpass fallback — the local transit systems in
+    // these cities need Overpass to show their lines.
+    if (hasAmtrak) {
+      tileData.set(AMTRAK_CACHE_KEY, amtrakLines);
     }
   } catch {
     // OTP+BTS both failed — fall through to Overpass
@@ -750,7 +911,7 @@ export async function fetchTransitLines(
 
             let promise = inflight.get(tile.key);
             if (!promise) {
-              promise = fetchTile(tile.minLat, tile.minLng, tile.maxLat, tile.maxLng);
+              promise = fetchTileWithRetry(tile.minLat, tile.minLng, tile.maxLat, tile.maxLng);
               inflight.set(tile.key, promise);
             }
 
@@ -770,6 +931,8 @@ export async function fetchTransitLines(
         if (onProgress) {
           onProgress(getAllCachedLines());
         }
+        // Yield to UI thread so map remains responsive during heavy processing
+        await yieldToUI();
       }
     } else {
       // ── Mega-tile path: many tiles → merge into coarser requests ──
@@ -811,7 +974,7 @@ export async function fetchTransitLines(
             if (mega.tileKeys.every((k) => fetchedTiles.has(k))) return;
 
             try {
-              const lines = await fetchTile(mega.minLat, mega.minLng, mega.maxLat, mega.maxLng);
+              const lines = await fetchTileWithRetry(mega.minLat, mega.minLng, mega.maxLat, mega.maxLng);
               // Store under a mega key and mark all fine-grained tiles as fetched
               const megaKey = `mega:${mega.minLat.toFixed(2)},${mega.minLng.toFixed(2)}`;
               tileData.set(megaKey, lines);
@@ -830,6 +993,8 @@ export async function fetchTransitLines(
         if (onProgress) {
           onProgress(getAllCachedLines());
         }
+        // Yield to UI thread so map remains responsive during heavy processing
+        await yieldToUI();
       }
     }
   }
@@ -858,6 +1023,15 @@ export function getCachedLines(): TransitRouteLine[] {
 /** Check if we have any cached transit data. */
 export function hasCachedLines(): boolean {
   return tileData.size > 0;
+}
+
+/** Exposed for testing. Reset all tile/OTP/Amtrak caches. */
+export function __clearTransitLineCache(): void {
+  tileData.clear();
+  fetchedTiles.clear();
+  inflight.clear();
+  otpLineCache.clear();
+  otpLineFetchInFlight.clear();
 }
 
 // ── Background metro-area pre-warm ──────────────────────────────────
@@ -902,7 +1076,7 @@ export async function prewarmTransitCache(lat: number, lng: number): Promise<voi
     const maxLng = lng + PAD_LNG;
 
     const bbox = `${minLat.toFixed(4)},${minLng.toFixed(4)},${maxLat.toFixed(4)},${maxLng.toFixed(4)}`;
-    const query = `[out:json][timeout:30];
+    const query = `[out:json][timeout:60];
 (
   relation["route"~"^(subway|light_rail|train|tram|monorail)$"](${bbox});
 )->.routes;
@@ -920,7 +1094,7 @@ out body;`;
     try {
       const data = await overpassFetch<{ elements: (OverpassRelation | StopNode)[] }>({
         query,
-        timeoutMs: 35_000,
+        timeoutMs: 75_000,
         signal: controller.signal,
       });
 

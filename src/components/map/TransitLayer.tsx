@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { useTransitStore } from '../../stores/transitStore';
+
 import type { TransitRouteLine, OtpItinerary, SelectedTransitStop } from '../../models/transit';
 
 // ── Default route colours per mode (when OSM has no colour tag) ─────

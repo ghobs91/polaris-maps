@@ -244,7 +244,14 @@ export function LocationActionPanel() {
       };
 
       const enabledModes = useTransitStore.getState().enabledModes;
-      const itineraries = await planTransitTrip({ from: origin, to: dest, modes: enabledModes });
+      const timeState = useTransitStore.getState();
+      const itineraries = await planTransitTrip({
+        from: origin,
+        to: dest,
+        modes: enabledModes,
+        departureTime: timeState.departureTime?.toISOString(),
+        isDepartAt: timeState.isDepartAt,
+      });
 
       if (itineraries.length === 0) {
         setRouteError('No transit routes found');

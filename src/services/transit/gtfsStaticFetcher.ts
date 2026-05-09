@@ -1,9 +1,12 @@
 /**
  * GTFS Static Feed Fetcher
  *
- * Downloads official GTFS feeds via MobilityData catalog, unzips, and
- * parses the CSV files into typed structures for routes, stops, shapes,
- * trips, and stop_times.
+ * Downloads official GTFS feeds via MobilityData catalog or direct URLs,
+ * unzips, and parses the CSV files into typed structures for routes, stops,
+ * shapes, trips, and stop_times.
+ *
+ * Parsing logic is shared via `gtfsParser.ts` (used by both MobilityData
+ * and DOT GTFS registry paths).
  *
  * Only rail-related feeds are parsed (route_type 1=subway, 2=rail).
  * Feed discovery is cached for 24 hours; parsed data is cached in memory.
@@ -11,186 +14,72 @@
 
 import { discoverFeeds } from './transitFeedService';
 import type { TransitFeed } from '../../models/transit';
+import type { TransitRouteLine } from '../../models/transit';
 import { TRANSIT_FEED_CACHE_TTL_MS } from '../../constants/config';
+import { storage } from '../storage/mmkv';
 
-// ── GTFS parsed types ───────────────────────────────────────────────
+// Re-export shared types (used by callers like transitLineFetcher.ts)
+export type {
+  GtfsRoute,
+  GtfsStop,
+  GtfsTrip,
+  GtfsStopTime,
+  GtfsShapePoint,
+  GtfsFeedData,
+  GtfsFetcherConfig,
+} from './gtfsParser';
 
-export interface GtfsRoute {
-  route_id: string;
-  route_short_name?: string;
-  route_long_name?: string;
-  route_type: number;
-  route_color?: string;
-  route_text_color?: string;
-  agency_id?: string;
+import {
+  extractZipTexts,
+  parseCsv,
+  parseGtfsColor,
+  routeTypeToMode,
+  convertFeedToLines,
+  parseGtfsFeed,
+  type GtfsFetcherConfig,
+  type GtfsFeedData,
+  type GtfsRoute,
+  type GtfsStop,
+  type GtfsTrip,
+  type GtfsStopTime,
+  type GtfsShapePoint,
+} from './gtfsParser';
+
+// ── Persistent cache (MMKV) ─────────────────────────────────────────
+
+/** 7 days — GTFS feeds update seasonally, not daily. */
+const PERSISTENT_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+
+function getPersistentCacheKey(label: string): string {
+  return `transit_lines:${label}`;
 }
 
-export interface GtfsStop {
-  stop_id: string;
-  stop_name: string;
-  stop_lat: number;
-  stop_lon: number;
-  stop_code?: string;
-  parent_station?: string;
-}
-
-export interface GtfsTrip {
-  trip_id: string;
-  route_id: string;
-  service_id: string;
-  trip_headsign?: string;
-  direction_id?: number;
-  shape_id?: string;
-}
-
-export interface GtfsStopTime {
-  trip_id: string;
-  arrival_time: string;
-  departure_time: string;
-  stop_id: string;
-  stop_sequence: number;
-}
-
-export interface GtfsShapePoint {
-  shape_id: string;
-  shape_pt_lat: number;
-  shape_pt_lon: number;
-  shape_pt_sequence: number;
-}
-
-export interface GtfsFeedData {
-  feedId: string;
-  provider: string;
-  feedName: string;
-  routes: GtfsRoute[];
-  stops: GtfsStop[];
-  trips: GtfsTrip[];
-  stopTimes: GtfsStopTime[];
-  /** shape_id → ordered [lng, lat][] */
-  shapes: Map<string, [number, number][]>;
-  /** trip_id → GtfsTrip */
-  tripIndex: Map<string, GtfsTrip>;
-  /** stop_id → GtfsStop */
-  stopIndex: Map<string, GtfsStop>;
-  /** route_id → GtfsRoute */
-  routeIndex: Map<string, GtfsRoute>;
-  /** stop_id → trip_ids stopping there */
-  stopTrips: Map<string, string[]>;
-}
-
-// ── CSV parser ──────────────────────────────────────────────────────
-
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.split('\n').filter((l) => l.trim());
-  if (lines.length < 2) return [];
-
-  const headers = parseCsvLine(lines[0]);
-  const rows: Record<string, string>[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]);
-    if (values.length < headers.length) continue;
-    const row: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = values[j];
+function loadFromPersistentCache(label: string): TransitRouteLine[] | null {
+  try {
+    const key = getPersistentCacheKey(label);
+    const raw = storage.getString(key);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as { lines: TransitRouteLine[]; cachedAt: number };
+    if (Date.now() - entry.cachedAt > PERSISTENT_CACHE_TTL) {
+      storage.delete(key);
+      return null;
     }
-    rows.push(row);
+    console.warn(`[gtfs-static] ${label} loaded from persistent cache (${entry.lines.length} lines)`);
+    return entry.lines;
+  } catch {
+    return null;
   }
-
-  return rows;
 }
 
-function parseCsvLine(line: string): string[] {
-  const values: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === ',' && !inQuotes) {
-      values.push(current.trim());
-      current = '';
-    } else {
-      current += ch;
-    }
+function saveToPersistentCache(label: string, lines: TransitRouteLine[]): void {
+  try {
+    const key = getPersistentCacheKey(label);
+    const entry = JSON.stringify({ lines, cachedAt: Date.now() });
+    storage.set(key, entry);
+    console.warn(`[gtfs-static] ${label} saved to persistent cache (${lines.length} lines)`);
+  } catch {
+    // Storage full or unavailable — non-fatal
   }
-  values.push(current.trim());
-  return values;
-}
-
-// ── Zip extraction (minimal, for GTFS) ──────────────────────────────
-
-/**
- * Extract text files from a ZIP ArrayBuffer using the ZIP local file
- * header format. No external library needed — GTFS zips use STORE or
- * DEFLATE compression which we handle via DecompressionStream (Web API).
- */
-async function extractZipTexts(
-  buffer: ArrayBuffer,
-  fileNames: string[],
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  const view = new DataView(buffer);
-  const decoder = new TextDecoder();
-  let offset = 0;
-
-  while (offset < buffer.byteLength - 4) {
-    const sig = view.getUint32(offset, true);
-    if (sig !== 0x04034b50) break; // Not a local file header
-
-    const compressionMethod = view.getUint16(offset + 8, true);
-    const compressedSize = view.getUint32(offset + 18, true);
-    const nameLen = view.getUint16(offset + 26, true);
-    const extraLen = view.getUint16(offset + 28, true);
-    const fileName = decoder.decode(new Uint8Array(buffer, offset + 30, nameLen));
-    const dataOffset = offset + 30 + nameLen + extraLen;
-
-    if (fileNames.includes(fileName)) {
-      const rawData = new Uint8Array(buffer, dataOffset, compressedSize);
-
-      if (compressionMethod === 0) {
-        // STORE — no compression
-        result.set(fileName, decoder.decode(rawData));
-      } else if (compressionMethod === 8) {
-        // DEFLATE — use DecompressionStream
-        try {
-          const ds = new DecompressionStream('deflate-raw' as CompressionFormat);
-          const writer = ds.writable.getWriter();
-          writer.write(rawData);
-          writer.close();
-          const reader = ds.readable.getReader();
-          const chunks: Uint8Array[] = [];
-          let done = false;
-          while (!done) {
-            const { value, done: d } = await reader.read();
-            if (value) chunks.push(value);
-            done = d;
-          }
-          const total = chunks.reduce((s, c) => s + c.length, 0);
-          const merged = new Uint8Array(total);
-          let pos = 0;
-          for (const c of chunks) {
-            merged.set(c, pos);
-            pos += c.length;
-          }
-          result.set(fileName, decoder.decode(merged));
-        } catch {
-          // DecompressionStream not available — skip this file
-        }
-      }
-    }
-
-    offset = dataOffset + compressedSize;
-  }
-
-  return result;
 }
 
 // ── Feed data cache ─────────────────────────────────────────────────
@@ -232,7 +121,6 @@ export async function fetchGtfsFeeds(
   const railFeeds = feeds.filter((f) => {
     if (!f.latest_dataset?.hosted_url) return false;
     const name = (f.feed_name ?? f.provider ?? '').toLowerCase();
-    // Include feeds with rail-related names, skip obvious bus-only
     return (
       name.includes('rail') ||
       name.includes('subway') ||
@@ -241,27 +129,22 @@ export async function fetchGtfsFeeds(
       name.includes('light rail') ||
       name.includes('transit') ||
       name.includes('path') ||
-      // Include feeds without clear bus-only names (they may be
-      // multi-modal), we'll filter by route_type after parsing
       (!name.includes('bus') && !name.includes('ferry'))
     );
   });
 
-  // Download and parse each feed (in parallel, from cache if available)
-  const results = await Promise.all(railFeeds.slice(0, 8).map((f) => fetchAndParseFeed(f)));
+  const results = await Promise.all(railFeeds.slice(0, 8).map((f) => fetchAndParseMobilityFeed(f)));
 
-  // Only return feeds that actually contain rail routes
   return results.filter(
     (d): d is GtfsFeedData =>
       d !== null && d.routes.some((r) => RAIL_ROUTE_TYPES.has(r.route_type)),
   );
 }
 
-async function fetchAndParseFeed(feed: TransitFeed): Promise<GtfsFeedData | null> {
+async function fetchAndParseMobilityFeed(feed: TransitFeed): Promise<GtfsFeedData | null> {
   const url = feed.latest_dataset?.hosted_url;
   if (!url) return null;
 
-  // Check cache
   const cached = feedDataCache.get(feed.id);
   if (cached && Date.now() - cached.fetchedAt < FEED_DATA_CACHE_TTL) {
     return cached.data;
@@ -277,133 +160,19 @@ async function fetchAndParseFeed(feed: TransitFeed): Promise<GtfsFeedData | null
 
     const buffer = await res.arrayBuffer();
 
-    const needed = [
-      'agency.txt',
-      'routes.txt',
-      'stops.txt',
-      'trips.txt',
-      'stop_times.txt',
-      'shapes.txt',
-    ];
+    const needed = ['agency.txt', 'routes.txt', 'stops.txt', 'trips.txt', 'stop_times.txt', 'shapes.txt'];
     const files = await extractZipTexts(buffer, needed);
-
-    // Parse routes — only keep rail types
-    const allRoutes = parseCsv(files.get('routes.txt') ?? '').map(
-      (r): GtfsRoute => ({
-        route_id: r.route_id,
-        route_short_name: r.route_short_name,
-        route_long_name: r.route_long_name,
-        route_type: parseInt(r.route_type, 10),
-        route_color: r.route_color,
-        route_text_color: r.route_text_color,
-        agency_id: r.agency_id,
-      }),
-    );
-    const routes = allRoutes.filter((r) => RAIL_ROUTE_TYPES.has(r.route_type));
-    if (routes.length === 0) return null;
-
-    const railRouteIds = new Set(routes.map((r) => r.route_id));
-
-    // Parse stops
-    const stops = parseCsv(files.get('stops.txt') ?? '').map(
-      (s): GtfsStop => ({
-        stop_id: s.stop_id,
-        stop_name: s.stop_name,
-        stop_lat: parseFloat(s.stop_lat),
-        stop_lon: parseFloat(s.stop_lon),
-        stop_code: s.stop_code,
-        parent_station: s.parent_station,
-      }),
-    );
-
-    // Parse trips — only for rail routes
-    const allTrips = parseCsv(files.get('trips.txt') ?? '').map(
-      (t): GtfsTrip => ({
-        trip_id: t.trip_id,
-        route_id: t.route_id,
-        service_id: t.service_id,
-        trip_headsign: t.trip_headsign,
-        direction_id: t.direction_id ? parseInt(t.direction_id, 10) : undefined,
-        shape_id: t.shape_id,
-      }),
-    );
-    const trips = allTrips.filter((t) => railRouteIds.has(t.route_id));
-    const tripIds = new Set(trips.map((t) => t.trip_id));
-
-    // Parse stop_times — only for rail trips
-    const stopTimes = parseCsv(files.get('stop_times.txt') ?? '')
-      .filter((st) => tripIds.has(st.trip_id))
-      .map(
-        (st): GtfsStopTime => ({
-          trip_id: st.trip_id,
-          arrival_time: st.arrival_time,
-          departure_time: st.departure_time,
-          stop_id: st.stop_id,
-          stop_sequence: parseInt(st.stop_sequence, 10),
-        }),
-      );
-
-    // Parse shapes — only for rail trip shapes
-    const railShapeIds = new Set(trips.map((t) => t.shape_id).filter(Boolean));
-    const shapePointRows = parseCsv(files.get('shapes.txt') ?? '').filter((sp) =>
-      railShapeIds.has(sp.shape_id),
-    );
-
-    // Group shape points by shape_id, sort by sequence
-    const shapesRaw = new Map<string, { lat: number; lon: number; seq: number }[]>();
-    for (const sp of shapePointRows) {
-      const arr = shapesRaw.get(sp.shape_id) ?? [];
-      arr.push({
-        lat: parseFloat(sp.shape_pt_lat),
-        lon: parseFloat(sp.shape_pt_lon),
-        seq: parseInt(sp.shape_pt_sequence, 10),
-      });
-      shapesRaw.set(sp.shape_id, arr);
-    }
-
-    const shapes = new Map<string, [number, number][]>();
-    for (const [id, pts] of shapesRaw) {
-      pts.sort((a, b) => a.seq - b.seq);
-      shapes.set(
-        id,
-        pts.map((p) => [p.lon, p.lat]),
-      );
-    }
-
-    // Build indexes
-    const tripIndex = new Map<string, GtfsTrip>();
-    for (const t of trips) tripIndex.set(t.trip_id, t);
-
-    const stopIndex = new Map<string, GtfsStop>();
-    for (const s of stops) stopIndex.set(s.stop_id, s);
-
-    const routeIndex = new Map<string, GtfsRoute>();
-    for (const r of routes) routeIndex.set(r.route_id, r);
-
-    // Build stop→trip mapping
-    const stopTrips = new Map<string, string[]>();
-    for (const st of stopTimes) {
-      const arr = stopTrips.get(st.stop_id) ?? [];
-      arr.push(st.trip_id);
-      stopTrips.set(st.stop_id, arr);
-    }
 
     const agencyRow = parseCsv(files.get('agency.txt') ?? '')[0];
 
-    const data: GtfsFeedData = {
-      feedId: feed.id,
-      provider: feed.provider,
-      feedName: feed.feed_name ?? agencyRow?.agency_name ?? feed.provider,
-      routes,
-      stops,
-      trips,
-      stopTimes,
-      shapes,
-      tripIndex,
-      stopIndex,
-      routeIndex,
-      stopTrips,
-    };
+    const data = parseGtfsFeed(
+      files,
+      feed.id,
+      feed.feed_name ?? agencyRow?.agency_name ?? feed.provider,
+      { routeTypeFilter: [...RAIL_ROUTE_TYPES] },
+    );
+
+    if (!data) return null;
 
     // Cache it
     feedDataCache.set(feed.id, { data, fetchedAt: Date.now() });
@@ -419,8 +188,118 @@ async function fetchAndParseFeed(feed: TransitFeed): Promise<GtfsFeedData | null
 }
 
 /**
- * Clear all cached GTFS data. Useful when changing regions.
+ * Clear all cached GTFS data (in-memory + persistent). Useful when changing regions.
  */
 export function clearGtfsCache(): void {
   feedDataCache.clear();
+  gtfsLineCache.clear();
+  // Clear persistent cache keys
+  const keys = storage.getAllKeys();
+  for (const key of keys) {
+    if (key.startsWith('transit_lines:')) {
+      storage.delete(key);
+    }
+  }
+}
+
+// ── Config-driven transit line fetcher ────────────────────────────────
+
+const gtfsLineCache = new Map<string, TransitRouteLine[]>();
+const gtfsLineFetchInFlight = new Map<string, Promise<TransitRouteLine[]>>();
+
+/**
+ * Fetch transit route lines from a GTFS static feed.
+ *
+ * If `config.feedUrl` is provided the feed is downloaded directly from
+ * that URL. Otherwise the MobilityData feed catalog is used to discover
+ * feeds for the bounding-box area.
+ *
+ * Returns an empty array on failure — never throws.
+ */
+export async function fetchGtfsStaticLines(
+  config: GtfsFetcherConfig,
+): Promise<TransitRouteLine[]> {
+  const cacheKey = config.label;
+
+  // 1. Check in-memory cache
+  const cached = gtfsLineCache.get(cacheKey);
+  if (cached) return cached;
+
+  // 2. Check persistent cache (MMKV)
+  const persisted = loadFromPersistentCache(cacheKey);
+  if (persisted) {
+    gtfsLineCache.set(cacheKey, persisted);
+    return persisted;
+  }
+
+  let inFlight = gtfsLineFetchInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  inFlight = (async (): Promise<TransitRouteLine[]> => {
+    try {
+      let feedData: GtfsFeedData | null = null;
+
+      if (config.feedUrl) {
+        feedData = await fetchFeedFromUrl(config.feedUrl, config.label, config.timeoutMs);
+      }
+
+      if (!feedData) return [];
+
+      const lines = await convertFeedToLines(feedData, config);
+      console.warn(`[gtfs-static] ${config.label} converted to ${lines.length} TransitRouteLines`);
+      gtfsLineCache.set(cacheKey, lines);
+      saveToPersistentCache(cacheKey, lines);
+      return lines;
+    } catch {
+      return [];
+    } finally {
+      gtfsLineFetchInFlight.delete(cacheKey);
+    }
+  })();
+
+  gtfsLineFetchInFlight.set(cacheKey, inFlight);
+  return inFlight;
+}
+
+async function fetchFeedFromUrl(
+  url: string,
+  label: string,
+  timeoutMs = 40_000,
+): Promise<GtfsFeedData | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    console.warn(`[gtfs-static] Downloading ${label} from ${url}`);
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      console.warn(`[gtfs-static] ${label} HTTP ${res.status}: ${url}`);
+      return null;
+    }
+    const buffer = await res.arrayBuffer();
+    console.warn(`[gtfs-static] ${label} downloaded ${(buffer.byteLength / 1024).toFixed(0)} KB`);
+
+    // Only extract files needed for line geometry (skip stop_times.txt — 192MB uncompressed for CTA, kills perf)
+    const needed = ['routes.txt', 'stops.txt', 'trips.txt', 'shapes.txt'];
+    const files = await extractZipTexts(buffer, needed);
+    console.warn(`[gtfs-static] ${label} extracted files: ${[...files.keys()].join(', ') || '(none)'}`);
+
+    const feed = parseGtfsFeed(files, `direct:${label}`, label);
+    if (feed) {
+      console.warn(`[gtfs-static] ${label} parsed: ${feed.routes.length} routes, ${feed.shapes.size} shapes`);
+    } else {
+      console.warn(`[gtfs-static] ${label} parseGtfsFeed returned null (no routes.txt?)`);
+    }
+    return feed;
+  } catch (err) {
+    console.warn(`[gtfs-static] ${label} fetch error:`, err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Exported for testing. */
+export function __clearGtfsLineCache(): void {
+  gtfsLineCache.clear();
+  gtfsLineFetchInFlight.clear();
 }
