@@ -43,6 +43,7 @@ let indexPromise: Promise<DotGtfsIndexData | null> | null = null;
 let loadedIndex: DotGtfsIndexData | null = null;
 
 // Try to load the JSON at module level (Metro bundler handles static requires)
+/* eslint-disable @typescript-eslint/no-require-imports */
 try {
   loadedIndex = require('./dot-gtfs-index.json') as DotGtfsIndexData;
   if (!loadedIndex?.buckets || !loadedIndex?.entries) {
@@ -51,6 +52,7 @@ try {
 } catch {
   // JSON file not bundled — will be loaded lazily with a warning
 }
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 async function loadIndex(): Promise<DotGtfsIndexData | null> {
   if (loadedIndex) return loadedIndex;
@@ -158,10 +160,7 @@ export async function lookupDotGtfsFeeds(
   // Sort by UZA population (largest first), then by distance
   results.sort((a, b) => {
     if (b.uzaPop !== a.uzaPop) return b.uzaPop - a.uzaPop;
-    return (
-      haversineDeg(lat, lng, a.lat, a.lng) -
-      haversineDeg(lat, lng, b.lat, b.lng)
-    );
+    return haversineDeg(lat, lng, a.lat, a.lng) - haversineDeg(lat, lng, b.lat, b.lng);
   });
 
   return results.slice(0, maxFeeds);
@@ -170,9 +169,7 @@ export async function lookupDotGtfsFeeds(
 /**
  * Get a specific DOT GTFS feed entry by its NTD ID.
  */
-export async function getDotGtfsFeedByNtdId(
-  ntdId: string,
-): Promise<DotGtfsFeedEntry | undefined> {
+export async function getDotGtfsFeedByNtdId(ntdId: string): Promise<DotGtfsFeedEntry | undefined> {
   const index = await loadIndex();
   if (!index) return undefined;
   return index.entries.find((e) => e.ntdId === ntdId);

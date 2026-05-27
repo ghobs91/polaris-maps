@@ -11,12 +11,12 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		13B07FC11A68108700A75B9A /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB71A68108700A75B9A /* main.m */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		5E07623FA21C161E6DDBB9F9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C3DE97B436D3D3B30A7761AF /* PrivacyInfo.xcprivacy */; };
+		3F5AFB4873C74F8F8F5AEB64 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2D9EF040C4414289F6A7F8 /* noop-file.swift */; };
+		5F339A4E4BB947EE2FBA5C1F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EFDDD1B74C50645EE56DD271 /* PrivacyInfo.xcprivacy */; };
 		96905EF65AED1B983A6B3ABC /* libPods-PolarisMaps.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58EEBF8E8E6FB1BC6CAF49B5 /* libPods-PolarisMaps.a */; };
-		ABE22A6275D142F49AB4E787 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = C375C874764D49A19B139A4C /* noop-file.swift */; };
 		B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		C8A1BB522FAEB62700A26C1E /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = A9E0C3FED91D411A3343293F /* MapLibre */; };
+		C8EB47C62FC576A100472296 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 23CBD40D27B8AA5887BDCFAC /* MapLibre */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,12 +29,12 @@
 		58EEBF8E8E6FB1BC6CAF49B5 /* libPods-PolarisMaps.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PolarisMaps.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C2E3173556A471DD304B334 /* Pods-PolarisMaps.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.debug.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.debug.xcconfig"; sourceTree = "<group>"; };
 		7A4D352CD337FB3A3BF06240 /* Pods-PolarisMaps.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.release.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig"; sourceTree = "<group>"; };
-		A63EE81E01124DD4A49A37BC /* PolarisMaps-Bridging-Header.h */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "PolarisMaps-Bridging-Header.h"; path = "PolarisMaps/PolarisMaps-Bridging-Header.h"; sourceTree = "<group>"; };
+		7B2D9EF040C4414289F6A7F8 /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "PolarisMaps/noop-file.swift"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = PolarisMaps/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		C375C874764D49A19B139A4C /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "PolarisMaps/noop-file.swift"; sourceTree = "<group>"; };
-		C3DE97B436D3D3B30A7761AF /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		DA120E38F05D4C059254A960 /* PolarisMaps-Bridging-Header.h */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "PolarisMaps-Bridging-Header.h"; path = "PolarisMaps/PolarisMaps-Bridging-Header.h"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		EFDDD1B74C50645EE56DD271 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PolarisMaps/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -43,7 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C8A1BB522FAEB62700A26C1E /* MapLibre in Frameworks */,
+				C8EB47C62FC576A100472296 /* MapLibre in Frameworks */,
 				96905EF65AED1B983A6B3ABC /* libPods-PolarisMaps.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -61,9 +61,9 @@
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				13B07FB71A68108700A75B9A /* main.m */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				C375C874764D49A19B139A4C /* noop-file.swift */,
-				A63EE81E01124DD4A49A37BC /* PolarisMaps-Bridging-Header.h */,
-				C3DE97B436D3D3B30A7761AF /* PrivacyInfo.xcprivacy */,
+				7B2D9EF040C4414289F6A7F8 /* noop-file.swift */,
+				DA120E38F05D4C059254A960 /* PolarisMaps-Bridging-Header.h */,
+				EFDDD1B74C50645EE56DD271 /* PrivacyInfo.xcprivacy */,
 			);
 			name = PolarisMaps;
 			sourceTree = "<group>";
@@ -149,14 +149,14 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "PolarisMaps" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				4A56164641E0316F29024A9F /* [Expo] Configure project */,
+				5B5668B844BBB2F9468BE6A5 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				F69E4A20982C4C2DB13F0D37 /* Remove signature files (Xcode workaround) */,
-				65AC6FFE321EF979FC4124A9 /* [CP] Embed Pods Frameworks */,
+				E00846ACA97443E6A79B2576 /* Remove signature files (Xcode workaround) */,
+				7A9C4554B904C094850B90CF /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -164,7 +164,7 @@
 			);
 			name = PolarisMaps;
 			packageProductDependencies = (
-				A9E0C3FED91D411A3343293F /* MapLibre */,
+				23CBD40D27B8AA5887BDCFAC /* MapLibre */,
 			);
 			productName = PolarisMaps;
 			productReference = 13B07F961A680F5B00A75B9A /* PolarisMaps.app */;
@@ -193,7 +193,7 @@
 			);
 			mainGroup = 83CBB9F61A601CBA00E9B192;
 			packageReferences = (
-				C67C629614F450AF6F7020E6 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
+				FFEC82100568E872A2B18D9B /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
 			);
 			productRefGroup = 83CBBA001A601CBA00E9B192 /* Products */;
 			projectDirPath = "";
@@ -212,7 +212,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				5E07623FA21C161E6DDBB9F9 /* PrivacyInfo.xcprivacy in Resources */,
+				5F339A4E4BB947EE2FBA5C1F /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -256,7 +256,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		4A56164641E0316F29024A9F /* [Expo] Configure project */ = {
+		5B5668B844BBB2F9468BE6A5 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -275,7 +275,7 @@
 			shellPath = /bin/sh;
 			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-PolarisMaps/expo-configure-project.sh\"\n";
 		};
-		65AC6FFE321EF979FC4124A9 /* [CP] Embed Pods Frameworks */ = {
+		7A9C4554B904C094850B90CF /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -333,7 +333,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		F69E4A20982C4C2DB13F0D37 /* Remove signature files (Xcode workaround) */ = {
+		E00846ACA97443E6A79B2576 /* Remove signature files (Xcode workaround) */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -357,7 +357,7 @@
 				13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */,
 				13B07FC11A68108700A75B9A /* main.m in Sources */,
 				B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */,
-				ABE22A6275D142F49AB4E787 /* noop-file.swift in Sources */,
+				3F5AFB4873C74F8F8F5AEB64 /* noop-file.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -379,7 +379,6 @@
 					"FB_SONARKIT_ENABLED=1",
 				);
 				INFOPLIST_FILE = PolarisMaps/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -413,7 +412,6 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				INFOPLIST_FILE = PolarisMaps/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -578,7 +576,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		C67C629614F450AF6F7020E6 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */ = {
+		FFEC82100568E872A2B18D9B /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/maplibre/maplibre-gl-native-distribution";
 			requirement = {
@@ -589,9 +587,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A9E0C3FED91D411A3343293F /* MapLibre */ = {
+		23CBD40D27B8AA5887BDCFAC /* MapLibre */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = C67C629614F450AF6F7020E6 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
+			package = FFEC82100568E872A2B18D9B /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
 			productName = MapLibre;
 		};
 /* End XCSwiftPackageProductDependency section */
