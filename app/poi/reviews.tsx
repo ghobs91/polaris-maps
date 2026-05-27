@@ -3,13 +3,13 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TextInput,
   Alert,
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getReviewsForPlace, createOrUpdateReview } from '../../src/services/poi/reviewService';
@@ -85,6 +85,11 @@ export default function ReviewsScreen() {
     }
   }, [id, rating, body, loadReviews]);
 
+  const renderReviewItem = useCallback(
+    ({ item }: { item: Review }) => <ReviewCard review={item} />,
+    [],
+  );
+
   return (
     <ErrorBoundary>
       <KeyboardAvoidingView
@@ -139,10 +144,10 @@ export default function ReviewsScreen() {
             <LoadingSpinner size="large" />
           </View>
         ) : (
-          <FlatList
+          <FlashList
             data={reviews}
             keyExtractor={(item) => `${item.poiUuid}-${item.authorPubkey}`}
-            renderItem={({ item }) => <ReviewCard review={item} />}
+            renderItem={renderReviewItem}
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={
               <View style={styles.center}>

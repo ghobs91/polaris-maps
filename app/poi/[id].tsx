@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState } from 'react';
+import React, { useEffect, useCallback, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,15 @@ import {
   Linking,
   Pressable,
   Alert,
-  FlatList,
+  ActivityIndicator,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { usePOIStore } from '../../src/stores/poiStore';
 import { useMapStore } from '../../src/stores/mapStore';
+import { useOsmAuthStore } from '../../src/stores/osmAuthStore';
+import { useSettingsStore } from '../../src/stores/settingsStore';
 import { getPlaceById } from '../../src/services/poi/poiService';
 import { getReviewsForPlace } from '../../src/services/poi/reviewService';
 import { getPendingEdits } from '../../src/services/poi/editService';
@@ -24,6 +27,8 @@ import { Button, LoadingSpinner, ErrorBoundary, Modal } from '../../src/componen
 import { SaveToListSheet } from '../../src/components/places';
 import { colors, spacing, typography, borderRadius } from '../../src/constants/theme';
 import { placeToOsmTags } from '../../src/utils/placeToOsmPoi';
+import { checkPoiExistsInOsm } from '../../src/services/poi/osmFetcher';
+import { submitOsmNodeCreate } from '../../src/services/osm/osmEditService';
 import type { StreetImagery } from '../../src/models/imagery';
 
 const SAFE_URL_SCHEMES = ['https:', 'http:'];
@@ -42,10 +47,21 @@ function safePhone(raw: string): void {
   if (cleaned.length > 0) Linking.openURL(`tel:${cleaned}`);
 }
 
+/** Session-scoped dedup set to prevent re-submitting the same POI within one session. */
+const seededKeys = new Set<string>();
+
+function dedupKey(lat: number, lng: number, name: string): string {
+  const r = (n: number) => Math.round(n * 10_000) / 10_000;
+  return `${r(lat)},${r(lng)},${name.trim().toLowerCase()}`;
+}
+
 export default function POIDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
+  const accessToken = useOsmAuthStore((s) => s.accessToken);
+  const contributionsEnabled = useSettingsStore((s) => s.permissions.poiContributionsEnabled);
+  const autoSeedFired = useRef(false);
   const {
     selectedPlace,
     selectedPlaceReviews,
@@ -58,6 +74,7 @@ export default function POIDetailScreen() {
   } = usePOIStore();
   const [nearbyImages, setNearbyImages] = useState<StreetImagery[]>([]);
   const [showSaveSheet, setShowSaveSheet] = useState(false);
+  const [seedStatus, setSeedStatus] = useState<'idle' | 'submitting' | 'success'>('idle');
 
   const loadPlace = useCallback(async () => {
     if (!id) return;
@@ -84,6 +101,70 @@ export default function POIDetailScreen() {
     loadPlace();
     return () => setSelectedPlace(null);
   }, [loadPlace, setSelectedPlace]);
+
+  // Selective auto-seed: when an Overture-sourced POI is opened, check if it
+  // already exists in OSM.  If not, submit it automatically.
+  useEffect(() => {
+    if (
+      !selectedPlace ||
+      selectedPlace.source !== 'overture' ||
+      !accessToken ||
+      !contributionsEnabled
+    ) {
+      return;
+    }
+
+    // Prevent double-fire from React Strict Mode double-mount
+    if (autoSeedFired.current) return;
+    autoSeedFired.current = true;
+
+    const key = dedupKey(selectedPlace.lat, selectedPlace.lng, selectedPlace.name);
+
+    // Session-scoped dedup — already submitted this POI this session
+    if (seededKeys.has(key)) return;
+
+    const trySeed = async () => {
+      setSeedStatus('submitting');
+
+      try {
+        const exists = await checkPoiExistsInOsm(
+          selectedPlace.lat,
+          selectedPlace.lng,
+          selectedPlace.name,
+        );
+        if (exists) {
+          setSeedStatus('idle');
+          return;
+        }
+      } catch {
+        // Overpass check failed — proceed with submission (fail-open).
+        // Better to risk a rare duplicate than to block a legitimate submission.
+      }
+
+      const tags = placeToOsmTags(selectedPlace);
+
+      try {
+        await submitOsmNodeCreate(
+          accessToken,
+          selectedPlace.lat,
+          selectedPlace.lng,
+          tags,
+          'Added Overture Maps POI via Polaris Maps',
+        );
+        seededKeys.add(key);
+        setSeedStatus('success');
+        setTimeout(() => setSeedStatus('idle'), 4000);
+      } catch (e) {
+        setSeedStatus('idle');
+        Alert.alert(
+          'Submission Failed',
+          `Could not add this place to OpenStreetMap: ${(e as Error).message}`,
+        );
+      }
+    };
+
+    trySeed();
+  }, [selectedPlace, accessToken, contributionsEnabled]);
 
   const handleAttest = useCallback(async () => {
     if (!selectedPlace) return;
@@ -112,6 +193,29 @@ export default function POIDetailScreen() {
       </View>
     );
   }
+
+  const renderPhotoItem = useCallback(
+    ({ item }: { item: StreetImagery }) => (
+      <Pressable
+        onPress={() =>
+          router.push({
+            pathname: '/imagery/viewer',
+            params: {
+              lat: String(selectedPlace.lat),
+              lng: String(selectedPlace.lng),
+              id: item.id,
+            },
+          })
+        }
+      >
+        <View style={styles.photoThumb}>
+          <Text style={styles.photoThumbIcon}>📷</Text>
+          <Text style={styles.photoThumbBearing}>{item.bearing}°</Text>
+        </View>
+      </Pressable>
+    ),
+    [router, selectedPlace, styles],
+  );
 
   const categoryLabel = selectedPlace.category.replace(/_/g, ' ');
 
@@ -208,6 +312,24 @@ export default function POIDetailScreen() {
           </View>
         )}
 
+        {seedStatus !== 'idle' && (
+          <View style={[styles.seedBanner, seedStatus === 'success' && styles.seedBannerSuccess]}>
+            {seedStatus === 'submitting' ? (
+              <>
+                <ActivityIndicator size="small" color="#7EBC6F" />
+                <Text style={styles.seedBannerText}>Adding to OpenStreetMap...</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                <Text style={[styles.seedBannerText, styles.seedBannerTextSuccess]}>
+                  Added to OpenStreetMap
+                </Text>
+              </>
+            )}
+          </View>
+        )}
+
         <View style={styles.actions}>
           <Button title="Directions" onPress={handleDirectionsPress} variant="primary" />
           <Button
@@ -300,31 +422,13 @@ export default function POIDetailScreen() {
                 <Text style={styles.link}>See all</Text>
               </Pressable>
             </View>
-            <FlatList
+            <FlashList
               data={nearbyImages.slice(0, 10)}
               horizontal
               showsHorizontalScrollIndicator={false}
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.photoStrip}
-              renderItem={({ item }) => (
-                <Pressable
-                  onPress={() =>
-                    router.push({
-                      pathname: '/imagery/viewer',
-                      params: {
-                        lat: String(selectedPlace.lat),
-                        lng: String(selectedPlace.lng),
-                        id: item.id,
-                      },
-                    })
-                  }
-                >
-                  <View style={styles.photoThumb}>
-                    <Text style={styles.photoThumbIcon}>📷</Text>
-                    <Text style={styles.photoThumbBearing}>{item.bearing}°</Text>
-                  </View>
-                </Pressable>
-              )}
+              renderItem={renderPhotoItem}
             />
           </View>
         )}
@@ -431,5 +535,28 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  seedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#f0f8ed',
+    paddingVertical: 12,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#7EBC6F',
+  },
+  seedBannerSuccess: {
+    backgroundColor: '#7EBC6F',
+  },
+  seedBannerText: {
+    ...typography.bodySmall,
+    color: '#2d6a4f',
+    fontWeight: '600',
+  },
+  seedBannerTextSuccess: {
+    color: '#fff',
   },
 });

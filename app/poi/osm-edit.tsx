@@ -9,7 +9,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
-  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -183,9 +182,7 @@ export default function OsmEditScreen() {
 
     const comment =
       changeComment.trim() ||
-      (isCreateMode
-        ? `Added ${poiName ?? 'place'} via Polaris Maps (source: Overture Maps)`
-        : `Updated ${poiName ?? 'place'} via Polaris Maps`);
+      (isCreateMode ? `Added ${poiName ?? 'place'}` : `Updated ${poiName ?? 'place'}`);
 
     setSubmitting(true);
     try {
@@ -252,50 +249,23 @@ export default function OsmEditScreen() {
     );
   }
 
-  // ── Not logged in
+  // ── Not logged in — redirect to Settings
   if (!accessToken) {
+    Alert.alert(
+      'Sign In Required',
+      'You need to sign in to OpenStreetMap before you can add or edit places. You can sign in from the Settings screen.',
+      [
+        {
+          text: 'Go to Settings',
+          onPress: () => router.replace('/settings'),
+        },
+        { text: 'Cancel', onPress: () => router.back() },
+      ],
+    );
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.authContent}>
-        <View style={styles.authHeader}>
-          <View style={styles.osmLogo}>
-            <Ionicons name="map" size={40} color="#7EBC6F" />
-          </View>
-          <Text style={styles.authTitle}>Sign in to OpenStreetMap</Text>
-          <Text style={styles.authDesc}>
-            {isCreateMode
-              ? 'To add this place to OpenStreetMap, you need to sign in with your OpenStreetMap account. Your addition will be submitted directly to OpenStreetMap for the community.'
-              : 'To update place information, you need to sign in with your OpenStreetMap account. Your changes will be submitted directly to OpenStreetMap for the community.'}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.loginButton}
-          onPress={handleLogin}
-          disabled={isLoggingIn}
-          activeOpacity={0.8}
-        >
-          {isLoggingIn ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Ionicons name="log-in-outline" size={20} color="#fff" />
-              <Text style={styles.loginButtonText}>Sign in with OpenStreetMap</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        <Text style={styles.authFooter}>
-          Don't have an account?{' '}
-          <Text
-            style={styles.linkText}
-            onPress={() => {
-              Linking.openURL('https://www.openstreetmap.org/user/new');
-            }}
-          >
-            Create one at openstreetmap.org
-          </Text>
-        </Text>
-      </ScrollView>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
     );
   }
 
@@ -309,7 +279,7 @@ export default function OsmEditScreen() {
       {/* User banner */}
       <View style={styles.userBanner}>
         {user?.avatarUrl ? (
-          <Image source={{ uri: user.avatarUrl }} style={styles.avatar} />
+          <Image source={{ uri: user.avatarUrl }} style={styles.avatar} resizeMode="cover" />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Ionicons name="person" size={16} color="#fff" />

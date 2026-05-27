@@ -148,6 +148,7 @@ export interface OsmUser {
   id: number;
   displayName: string;
   avatarUrl?: string;
+  changesetCount: number;
 }
 
 /** Fetch the authenticated user's profile. */
@@ -159,12 +160,18 @@ export async function fetchOsmUserDetails(accessToken: string): Promise<OsmUser>
     throw new Error(`Failed to fetch OSM user details (${resp.status})`);
   }
   const json = (await resp.json()) as {
-    user: { id: number; display_name: string; img?: { href: string } };
+    user: {
+      id: number;
+      display_name: string;
+      img?: { href: string };
+      changesets?: { count: number };
+    };
   };
   return {
     id: json.user.id,
     displayName: json.user.display_name,
     avatarUrl: json.user.img?.href,
+    changesetCount: json.user.changesets?.count ?? 0,
   };
 }
 
@@ -172,17 +179,36 @@ export async function fetchOsmUserDetails(accessToken: string): Promise<OsmUser>
 // Token validation
 // ---------------------------------------------------------------------------
 
-/** Quick check that the stored token still has write_api permission. */
-export async function validateToken(accessToken: string): Promise<boolean> {
+/** Result of a token validation attempt. */
+export type TokenValidity = { valid: true } | { valid: false; reason: 'expired' | 'network_error' };
+
+/**
+ * Check whether the stored access token still has write_api permission.
+ *
+ * Distinguishes between genuine auth failures (401) and transient errors
+ * (network, rate-limit, server downtime) so callers can decide whether to
+ * keep or discard the token.
+ */
+export async function validateToken(accessToken: string): Promise<TokenValidity> {
   try {
     const resp = await fetch(`${OSM_API}/api/0.6/permissions.json`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!resp.ok) return false;
+    if (resp.status === 401 || resp.status === 403) {
+      return { valid: false, reason: 'expired' };
+    }
+    if (!resp.ok) {
+      // 5xx, 429, or unknown — don't throw away the token
+      return { valid: false, reason: 'network_error' };
+    }
     const json = (await resp.json()) as { permissions: string[] };
-    return json.permissions.includes('allow_write_api');
+    if (json.permissions.includes('allow_write_api')) {
+      return { valid: true };
+    }
+    return { valid: false, reason: 'expired' };
   } catch {
-    return false;
+    // Network error (DNS, timeout, offline) — token may still be valid
+    return { valid: false, reason: 'network_error' };
   }
 }
 

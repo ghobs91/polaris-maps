@@ -104,21 +104,35 @@ export function placeToOsmPoi(place: Place): OsmPoi {
 
 /**
  * Convert a Place (Overture/community) to a flat OSM tag map suitable for
- * pre-filling the osm-edit creation form.
+ * submitting to OpenStreetMap.
  *
- * Includes only tags that are meaningful in OSM-land: name, category-mapped
- * amenity/shop/tourism/leisure, phone, website, opening_hours, address parts.
+ * Only tags that are meaningful in OSM-land are included: name, a
+ * category-mapped primary tag (amenity/shop/tourism/leisure), phone, website,
+ * opening_hours, and address parts.
+ *
+ * When the category falls through to the 'other' fallback, NO primary tag
+ * is emitted — "amenity=place" is not a valid OSM tag and submitting it
+ * would be harmful.  A POI with only name + metadata is better than one
+ * with a fabricated primary tag.
+ *
+ * Internal Polaris keys (polaris:*) are never included in the output.
  */
 export function placeToOsmTags(place: Place): Record<string, string> {
-  const mapping = CATEGORY_TO_OSM[place.category] ?? CATEGORY_TO_OSM.other;
+  const mapping = CATEGORY_TO_OSM[place.category];
   const tags: Record<string, string> = {
     name: place.name,
-    [mapping.type]: mapping.subtype,
   };
+
+  // Only include a primary OSM tag when we have a non-'other' mapping.
+  // The 'other' fallback produces "amenity=place" which is not valid OSM.
+  if (mapping && mapping !== CATEGORY_TO_OSM.other) {
+    tags[mapping.type] = mapping.subtype;
+  }
 
   if (place.phone) tags['phone'] = place.phone;
   if (place.website) tags['website'] = place.website;
   if (place.hours) tags['opening_hours'] = place.hours;
+  if (place.brandWikidata) tags['brand:wikidata'] = place.brandWikidata;
   if (place.addressStreet) tags['addr:street'] = place.addressStreet;
   if (place.addressCity) tags['addr:city'] = place.addressCity;
   if (place.addressState) tags['addr:state'] = place.addressState;

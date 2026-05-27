@@ -274,6 +274,84 @@ out body center;`;
   return pois;
 }
 
+// ---------------------------------------------------------------------------
+// Pre-submission existence check (Overture → OSM auto-seed guard)
+// ---------------------------------------------------------------------------
+
+/** Radius in meters for proximity check when determining if a POI exists in OSM. */
+const POI_EXISTS_RADIUS_M = 50;
+
+/** In-memory cache for existence checks — avoids repeated Overpass queries. */
+const existsCache = new Map<string, boolean>();
+const EXISTS_CACHE_MAX = 200;
+
+function existsCacheKey(lat: number, lng: number, name: string): string {
+  const r = (n: number) => Math.round(n * 10_000) / 10_000; // ~11m precision
+  const norm = name.trim().toLowerCase();
+  return `${r(lat)},${r(lng)},${norm}`;
+}
+
+/**
+ * Check if a POI with the given name already exists near the given coordinates
+ * in OpenStreetMap.
+ *
+ * Queries Overpass for nodes and ways with an exact case-insensitive name
+ * match within POI_EXISTS_RADIUS_M meters.
+ *
+ * Results are cached in memory to avoid repeated Overpass queries for the
+ * same POI during a session.
+ *
+ * @returns true if at least one matching POI exists, false otherwise.
+ * @throws on Overpass API errors (caller should handle gracefully — it is
+ *   safer to proceed with submission than to block on a transient API error).
+ */
+export async function checkPoiExistsInOsm(
+  lat: number,
+  lng: number,
+  name: string,
+): Promise<boolean> {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+
+  // Check in-memory cache
+  const cacheKey = existsCacheKey(lat, lng, trimmed);
+  const cached = existsCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  // Escape regex special characters for the Overpass regex query.
+  // We use ^...$ to ensure exact name matching, not substring matching.
+  // Also escapes " to avoid breaking the Overpass QL string delimiters.
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+
+  const query = `[out:json][timeout:10];
+(
+  node["name"~"^${escaped}$",i](around:${POI_EXISTS_RADIUS_M},${lat},${lng});
+  way["name"~"^${escaped}$",i](around:${POI_EXISTS_RADIUS_M},${lat},${lng});
+);
+out ids;`;
+
+  const data = await overpassFetch<{ elements: any[] }>({
+    query,
+    timeoutMs: 10_000,
+  });
+
+  const exists = (data.elements?.length ?? 0) > 0;
+
+  // Cache the result (evict oldest when full)
+  if (existsCache.size >= EXISTS_CACHE_MAX) {
+    const oldestKey = existsCache.keys().next().value;
+    if (oldestKey !== undefined) existsCache.delete(oldestKey);
+  }
+  existsCache.set(cacheKey, exists);
+
+  return exists;
+}
+
+/** Clear the existence check cache (exposed for testing). */
+export function clearExistenceCache(): void {
+  existsCache.clear();
+}
+
 /**
  * Fetch general POIs from Nominatim for a bounding box.
  * Used as a fallback when Overpass API is unavailable/rate-limited.

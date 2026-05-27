@@ -84,11 +84,14 @@ export const useOsmAuthStore = create<OsmAuthState>((set, get) => ({
   ensureValid: async () => {
     const { accessToken } = get();
     if (!accessToken) return false;
-    const valid = await validateToken(accessToken);
-    if (!valid) {
+    const result = await validateToken(accessToken);
+    if (result.valid) return true;
+    // Only logout on a definitive expiry; keep the token on network errors.
+    // A temporary API outage or spotty connectivity should not destroy the
+    // user's session.
+    if (result.reason === 'expired') {
       await get().logout();
-      return false;
     }
-    return true;
+    return false;
   },
 }));

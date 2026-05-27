@@ -1,4 +1,9 @@
-import { fetchOsmPois, clearOsmCache } from '../../src/services/poi/osmFetcher';
+import {
+  fetchOsmPois,
+  clearOsmCache,
+  checkPoiExistsInOsm,
+  clearExistenceCache,
+} from '../../src/services/poi/osmFetcher';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,5 +277,207 @@ describe('fetchOsmPois', () => {
       type: 'healthcare',
       subtype: 'dentist',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkPoiExistsInOsm — pre-submission existence guard
+// ---------------------------------------------------------------------------
+
+describe('checkPoiExistsInOsm', () => {
+  beforeEach(() => {
+    clearExistenceCache();
+    mockFetch.mockReset();
+  });
+
+  it('returns true when a matching OSM node exists nearby', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        elements: [{ type: 'node', id: 12345 }],
+      }),
+    });
+
+    const result = await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    expect(result).toBe(true);
+    // Should have called fetch with the right query
+    expect(mockFetch).toHaveBeenCalled();
+  });
+
+  it('returns true when a matching OSM way exists nearby', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        elements: [{ type: 'way', id: 67890 }],
+      }),
+    });
+
+    const result = await checkPoiExistsInOsm(40.748, -73.985, 'Central Park');
+    expect(result).toBe(true);
+  });
+
+  it('returns false when no matching POIs exist', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        elements: [],
+      }),
+    });
+
+    const result = await checkPoiExistsInOsm(40.748, -73.985, 'Unknown Cafe');
+    expect(result).toBe(false);
+  });
+
+  it('returns false for empty name (short-circuit)', async () => {
+    const result = await checkPoiExistsInOsm(40.748, -73.985, '');
+    expect(result).toBe(false);
+    // Should not have made any network call
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns false for whitespace-only name', async () => {
+    const result = await checkPoiExistsInOsm(40.748, -73.985, '   ');
+    expect(result).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns cached result on second call with same params', async () => {
+    let callCount = 0;
+    mockFetch.mockImplementation(() => {
+      callCount++;
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ elements: [{ type: 'node', id: 1 }] }),
+      });
+    });
+
+    // First call — should hit network
+    const r1 = await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    expect(r1).toBe(true);
+
+    // Second call with exact same params — should use cache
+    mockFetch.mockClear();
+    const r2 = await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    expect(r2).toBe(true);
+    // No additional fetch calls because the result was cached
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('caches false results too', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [] }),
+    });
+
+    // First call — empty result
+    await checkPoiExistsInOsm(40.748, -73.985, 'No Such Place');
+    mockFetch.mockClear();
+
+    // Second call — should use cache, returning false without network
+    const r2 = await checkPoiExistsInOsm(40.748, -73.985, 'No Such Place');
+    expect(r2).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('escapes regex special characters in the name', async () => {
+    // Name contains regex special chars: ., (, ), +
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [] }),
+    });
+
+    await checkPoiExistsInOsm(40.748, -73.985, 'Dr. Smith (Downtown)');
+    expect(mockFetch).toHaveBeenCalled();
+
+    // Extract the query from the fetch body (it's URL-encoded: data=<encoded>)
+    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
+    const encoded = body.replace(/^data=/, '');
+    const decoded = decodeURIComponent(encoded);
+
+    // The query should have escaped the special chars with backslashes
+    expect(decoded).toContain('Dr\\. Smith \\(Downtown\\)');
+  });
+
+  it('escapes double-quote characters to avoid breaking Overpass QL', async () => {
+    // Double quotes inside the name would prematurely terminate the Overpass
+    // regex string if not escaped.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [] }),
+    });
+
+    await checkPoiExistsInOsm(40.748, -73.985, 'Joe\'s "Best" Cafe');
+    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
+    const encoded = body.replace(/^data=/, '');
+    const decoded = decodeURIComponent(encoded);
+
+    // The double quotes should be backslash-escaped in the Overpass regex
+    expect(decoded).toContain('\\"Best\\"');
+  });
+
+  it('is case-insensitive in matching', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [] }),
+    });
+
+    await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
+    const encoded = body.replace(/^data=/, '');
+    const decoded = decodeURIComponent(encoded);
+    // The Overpass query should include the case-insensitive flag ",i"
+    expect(decoded).toContain('"^Starbucks$",i');
+  });
+
+  it('trims whitespace from the name', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [] }),
+    });
+
+    await checkPoiExistsInOsm(40.748, -73.985, '  Starbucks  ');
+    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
+    const encoded = body.replace(/^data=/, '');
+    const decoded = decodeURIComponent(encoded);
+    // The query should use the trimmed name, not the raw input
+    expect(decoded).toContain('"^Starbucks$",i');
+    expect(decoded).not.toContain('  Starbucks');
+  });
+
+  it('throws on Overpass errors', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 503 });
+
+    await expect(checkPoiExistsInOsm(40.748, -73.985, 'Starbucks')).rejects.toThrow();
+  });
+
+  it('clearExistenceCache forces a fresh network call', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [{ type: 'node', id: 1 }] }),
+    });
+
+    await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    clearExistenceCache();
+    mockFetch.mockClear();
+
+    await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    // overpassClient fires to 3 Overpass instances in parallel
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('cache keys round coordinates to ~11m precision', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ elements: [{ type: 'node', id: 1 }] }),
+    });
+
+    // First call at precise coordinates
+    await checkPoiExistsInOsm(40.748123, -73.985456, 'Starbucks');
+    mockFetch.mockClear();
+
+    // Second call at nearby coordinates (within ~11m rounding)
+    await checkPoiExistsInOsm(40.748129, -73.98546, 'starbucks');
+    // Should hit cache (coordinates round to same key, name is lowercased)
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

@@ -7,10 +7,12 @@ import {
   Switch,
   TouchableOpacity,
   TextInput,
+  Linking,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
+import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { syncResourceLimits } from '../../services/sync/peerService';
 import { Button } from '../common';
 import { spacing, typography, borderRadius } from '../../constants/theme';
@@ -48,16 +50,14 @@ interface SettingsContentProps {
 }
 
 export function SettingsContent({ showHeading = true }: SettingsContentProps) {
-  const {
-    resourceLimits,
-    permissions,
-    themeMode,
-    voiceGuidanceEnabled,
-    setResourceLimits,
-    setPermissions,
-    setThemeMode,
-    setVoiceGuidanceEnabled,
-  } = useSettingsStore();
+  const resourceLimits = useSettingsStore((s) => s.resourceLimits);
+  const permissions = useSettingsStore((s) => s.permissions);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const voiceGuidanceEnabled = useSettingsStore((s) => s.voiceGuidanceEnabled);
+  const setResourceLimits = useSettingsStore((s) => s.setResourceLimits);
+  const setPermissions = useSettingsStore((s) => s.setPermissions);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  const setVoiceGuidanceEnabled = useSettingsStore((s) => s.setVoiceGuidanceEnabled);
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const bskySession = useAtprotoAuthStore((s) => s.session);
@@ -65,6 +65,11 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const bskyIsLoading = useAtprotoAuthStore((s) => s.isLoading);
   const bskyLogin = useAtprotoAuthStore((s) => s.login);
   const bskyLogout = useAtprotoAuthStore((s) => s.logout);
+  const osmUser = useOsmAuthStore((s) => s.user);
+  const osmAccessToken = useOsmAuthStore((s) => s.accessToken);
+  const osmIsLoggingIn = useOsmAuthStore((s) => s.isLoggingIn);
+  const osmLogin = useOsmAuthStore((s) => s.login);
+  const osmLogout = useOsmAuthStore((s) => s.logout);
   const [bskyHandle, setBskyHandle] = useState('');
   const [bskyPassword, setBskyPassword] = useState('');
 
@@ -188,6 +193,64 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             trackColor={{ false: colors.border, true: colors.primary }}
           />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>OpenStreetMap Account</Text>
+
+        {osmAccessToken && osmUser ? (
+          <View style={styles.bskySection}>
+            <View style={styles.bskyLoggedInRow}>
+              <MaterialCommunityIcons name="map" size={20} color="#7EBC6F" />
+              <View style={styles.flexOne}>
+                <Text style={[styles.toggleLabel, styles.toggleLabelStrong]}>
+                  {osmUser.displayName}
+                </Text>
+                <Text style={styles.bskyCaption}>Signed in to OpenStreetMap</Text>
+              </View>
+            </View>
+            <Text style={styles.bskyBody}>
+              You can add and update places on OpenStreetMap. Your contributions are public.
+            </Text>
+            <View style={styles.osmStatsRow}>
+              <MaterialCommunityIcons name="star-outline" size={16} color={colors.textSecondary} />
+              <Text style={styles.bskyBody}>
+                {osmUser.changesetCount} changesets on OpenStreetMap
+              </Text>
+            </View>
+            <Button
+              title="View Latest Contributions"
+              variant="ghost"
+              onPress={() => {
+                Linking.openURL(
+                  `https://www.openstreetmap.org/user/${encodeURIComponent(osmUser.displayName)}/history`,
+                );
+              }}
+            />
+            <Button
+              title="Sign Out"
+              variant="ghost"
+              onPress={() => {
+                osmLogout();
+              }}
+            />
+          </View>
+        ) : (
+          <View style={styles.bskySection}>
+            <Text style={[styles.toggleLabel, styles.toggleLabelSemiBold]}>
+              Sign in to OpenStreetMap
+            </Text>
+            <Text style={styles.bskyBody}>
+              Connect your OpenStreetMap account to add places to OSM directly from the map.
+            </Text>
+            <Button
+              title={osmIsLoggingIn ? 'Signing in…' : 'Sign in with OpenStreetMap'}
+              variant="primary"
+              onPress={() => osmLogin().catch(() => {})}
+              disabled={osmIsLoggingIn}
+            />
+          </View>
+        )}
       </View>
 
       <View style={styles.section}>
@@ -374,5 +437,10 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     bskyError: {
       ...typography.caption,
       color: colors.error,
+    },
+    osmStatsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
     },
   });
