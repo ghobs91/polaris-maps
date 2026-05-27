@@ -110,7 +110,10 @@ const POI_OSM_KEYS = new Set([
   'office',
   'aeroway',
   'railway',
-  'highway',
+  // NOTE: 'highway' intentionally excluded — Photon returns road/street
+  // results with osm_key=highway.  Classifying them as POIs would cause
+  // streets to pollute address-search results (isStreetResult short-circuits
+  // on isPoi=true and lets highway results through all filters).
 ]);
 
 export interface PhotonResult {

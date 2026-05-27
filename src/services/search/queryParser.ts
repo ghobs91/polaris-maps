@@ -212,12 +212,25 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
  * Regex that matches common street-type abbreviations and full words as
  * whole tokens — handles commas, end-of-string, and other punctuation
  * after the token (e.g. "pkwy," or "ave.").
+ *
+ * Covers the most common USPS street suffix abbreviations and their
+ * full-word equivalents.
  */
 const ADDRESS_TOKEN_RE =
-  /\b(st|ave|blvd|rd|dr|ln|ct|pl|pkwy|street|avenue|boulevard|road|drive|lane|court|place|highway|hwy|parkway)\b/i;
+  /\b(st|ave|blvd|rd|dr|ln|ct|pl|pkwy|way|cir|ter|trl|aly|cv|loop|pass|sq|walk|path|pky|street|avenue|boulevard|road|drive|lane|court|place|highway|hwy|parkway|circle|terrace|trail|alley|cove|square)\b/i;
 
 /** Starts with a house number (digits, optionally followed by a letter like "314A"). */
-const LEADING_NUMBER_RE = /^\s*\d+[a-z]?\s/i;
+const LEADING_NUMBER_RE = /^\s*\d+[a-z]?[\s,]/i;
+
+/**
+ * Leading house number + word ending with an embedded street suffix.
+ * Catches queries like "1000 Broadway" or "1 Gateway" where "way" is
+ * not a standalone token but appears at the end of a street-name word.
+ * Only triggered when the query starts with a house number, to avoid
+ * false positives on generic words like "doorway" or "hallway".
+ */
+const LEADING_NUMBER_WITH_SUFFIX_RE =
+  /^\d+[a-z]?\s.*\b\w+(?:way|circle|terrace|trail|alley|cove|square|path|walk|loop|pass)\b/i;
 
 /**
  * Returns true if the query looks like a street address.
@@ -228,6 +241,8 @@ export function isAddressQuery(query: string): boolean {
   if (ADDRESS_TOKEN_RE.test(query)) return true;
   // "314 columbus pkwy" — leading house number + comma (city/state pattern)
   if (LEADING_NUMBER_RE.test(query) && query.includes(',')) return true;
+  // "1000 Broadway" — leading house number + word ending with street suffix
+  if (LEADING_NUMBER_WITH_SUFFIX_RE.test(query)) return true;
   return false;
 }
 

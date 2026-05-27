@@ -234,8 +234,13 @@ export async function unifiedSearch(
     for (const pr of photonResults.value) {
       if (!pr.poi.name) continue;
 
-      // For address queries, promote house/street results to the address pipeline
-      if (addressQuery && !pr.isPoi) {
+      // For address queries, Photon is restricted to house+street layers.
+      // Route ALL results (houses, streets, addresses) to the address
+      // pipeline regardless of isPoi classification — the layer restriction
+      // guarantees that only address-related features are returned, and
+      // classifying them as POIs would pollute the POI scoring with street
+      // names that happen to share keywords with the query.
+      if (addressQuery) {
         photonAddressResults.push({
           name: pr.displayText || pr.poi.name,
           subtitle: [pr.address.city, pr.address.state, pr.address.country]
@@ -254,7 +259,35 @@ export async function unifiedSearch(
       // for any non-address query (e.g. "Marshall Avenue" for "marshalls",
       // "Delisle Avenue" for "deli"). Address queries go through the
       // dedicated address pipeline above.
-      if (isStreetResult(pr)) continue;
+      //
+      // Exception: when Photon returns a non-POI result whose name closely
+      // matches the query (e.g. "1000 Broadway"), promote it as an address
+      // result instead of discarding it. This handles addresses that the
+      // isAddressQuery heuristic missed (e.g. where the street suffix is
+      // embedded in the street name rather than a standalone token).
+      if (isStreetResult(pr)) {
+        const qLower = normalizeSearchText(query).toLowerCase();
+        const nameLower = normalizeSearchText(pr.poi.name).toLowerCase();
+        const housenumber = pr.address.housenumber ?? '';
+        const queryContainsHousenumber =
+          !!housenumber && qLower.includes(housenumber.toLowerCase());
+        const nameStronglyMatches =
+          qLower.includes(nameLower) || nameLower.includes(qLower) || queryContainsHousenumber;
+        if (nameStronglyMatches && !parsed.categories) {
+          photonAddressResults.push({
+            name: pr.displayText || pr.poi.name,
+            subtitle: [pr.address.city, pr.address.state, pr.address.country]
+              .filter(Boolean)
+              .join(', '),
+            lat: pr.poi.lat,
+            lng: pr.poi.lng,
+            type: 'address',
+            score: 75,
+            distanceKm: 0,
+          });
+        }
+        continue;
+      }
       allPois.push(pr.poi);
     }
   }
@@ -326,7 +359,7 @@ export async function unifiedSearch(
           lat: gr.entry.lat,
           lng: gr.entry.lng,
           type: 'address',
-          score: addressQuery ? 95 : 0,
+          score: addressQuery ? 95 : 50,
           distanceKm: 0,
         });
       }
