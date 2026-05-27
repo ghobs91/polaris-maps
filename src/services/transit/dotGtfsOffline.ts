@@ -14,7 +14,6 @@ import {
   extractZipTexts,
   parseGtfsFeed,
   convertFeedToLines,
-  ALL_ROUTE_TYPES,
   type GtfsFeedData,
 } from './gtfsParser';
 import type { TransitRouteLine } from '../../models/transit';
@@ -48,14 +47,10 @@ const offlineFeedCache = new Map<string, OfflineCacheEntry>();
  * @param regionId  ID of the downloaded region (e.g. "us-ny-new-york")
  * @param bbox  Bounding box of the downloaded region
  */
-export async function cacheDotGtfsForRegion(
-  regionId: string,
-  bbox: BoundingBox,
-): Promise<void> {
+export async function cacheDotGtfsForRegion(regionId: string, bbox: BoundingBox): Promise<void> {
   const centerLat = (bbox.minLat + bbox.maxLat) / 2;
   const centerLng = (bbox.minLng + bbox.maxLng) / 2;
-  const radiusDeg =
-    Math.max(bbox.maxLat - bbox.minLat, bbox.maxLng - bbox.minLng) / 2 + 0.3;
+  const radiusDeg = Math.max(bbox.maxLat - bbox.minLat, bbox.maxLng - bbox.minLng) / 2 + 0.3;
 
   const feeds = await lookupDotGtfsFeeds(centerLat, centerLng, radiusDeg, 6);
   if (feeds.length === 0) return;
@@ -79,18 +74,14 @@ export async function cacheDotGtfsForRegion(
  * @param regionId  Region ID to retrieve lines for
  * @returns  TransitRouteLine[] for the cached region (empty if none cached)
  */
-export async function getOfflineDotGtfsLines(
-  regionId: string,
-): Promise<TransitRouteLine[]> {
-  const regionFeeds = [...offlineFeedCache.values()].filter(
-    (entry) => entry.regionId === regionId,
-  );
+export async function getOfflineDotGtfsLines(regionId: string): Promise<TransitRouteLine[]> {
+  const regionFeeds = [...offlineFeedCache.values()].filter((entry) => entry.regionId === regionId);
 
   if (regionFeeds.length === 0) return [];
 
   const config = {
     label: 'Offline DOT GTFS',
-    routeTypeFilter: ALL_ROUTE_TYPES,
+    routeTypeFilter: [0, 1, 2], // Rail only: tram/light_rail, subway, rail (exclude bus, ferry, etc.)
   };
 
   const allLines: TransitRouteLine[] = [];
@@ -124,10 +115,7 @@ export function removeOfflineDotGtfsData(regionId: string): void {
 
 // ── Internal ─────────────────────────────────────────────────────────
 
-async function downloadAndCacheOffline(
-  feed: DotGtfsFeedEntry,
-  regionId: string,
-): Promise<void> {
+async function downloadAndCacheOffline(feed: DotGtfsFeedEntry, regionId: string): Promise<void> {
   const url = feed.weblink;
   if (!url) return;
 

@@ -672,6 +672,68 @@ const GTFS_CONFIGS: Record<string, GtfsFetcherConfig> = {
     label: 'BART San Francisco Bay Area',
     routeTypeFilter: [1],
   },
+
+  // ── European country-level GTFS feeds ───────────────────────────
+  'ch-gtfs-v1': {
+    label: 'Switzerland GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 90_000,
+  },
+  'de-gtfs-v1': {
+    label: 'Deutschland GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 90_000,
+  },
+  'dk-gtfs-v1': {
+    label: 'Denmark GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 60_000,
+  },
+  'ee-gtfs-v1': {
+    label: 'Estonia GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 45_000,
+  },
+  'fi-gtfs-v1': {
+    label: 'Finland GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 60_000,
+  },
+  'ie-gtfs-v1': {
+    label: 'Ireland GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 60_000,
+  },
+  'lu-gtfs-v1': {
+    label: 'Luxembourg GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 45_000,
+  },
+  'nl-gtfs-v1': {
+    label: 'Netherlands GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 90_000,
+  },
+  'no-gtfs-v1': {
+    label: 'Norway GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 60_000,
+  },
+  'se-gtfs-v1': {
+    label: 'Sweden GTFS',
+    routeTypeFilter: [0, 1, 2, 3, 4, 5, 6],
+    filterByRouteType: false,
+    timeoutMs: 90_000,
+  },
 };
 
 async function tryFetchViaOtp(
@@ -684,7 +746,9 @@ async function tryFetchViaOtp(
   const centreLng = (minLng + maxLng) / 2;
   const ep = findEndpointForCoords(centreLat, centreLng);
   if (!ep) {
-    console.warn(`[transit] No endpoint found for (${centreLat.toFixed(2)}, ${centreLng.toFixed(2)})`);
+    console.warn(
+      `[transit] No endpoint found for (${centreLat.toFixed(2)}, ${centreLng.toFixed(2)})`,
+    );
     return null;
   }
   console.warn(`[transit] Endpoint matched: ${ep.label} (${ep.apiStyle})`);
@@ -726,7 +790,9 @@ async function tryFetchViaOtp(
     if (lines.length === 0) {
       // City-specific GTFS failed — fall through to DOT GTFS Registry
       // for this area (covers offline + stale URL scenarios).
-      console.warn(`[transit] City-specific GTFS ${ep.apiStyle} failed for ${ep.label}, trying DOT fallback`);
+      console.warn(
+        `[transit] City-specific GTFS ${ep.apiStyle} failed for ${ep.label}, trying DOT fallback`,
+      );
       const radiusDeg = Math.max(maxLat - minLat, maxLng - minLng) / 2 + 0.3;
       const dotLines = await fetchDotGtfsLines(centreLat, centreLng, radiusDeg);
       if (dotLines.length > 0) return dotLines;
@@ -742,7 +808,9 @@ async function tryFetchViaOtp(
 
   // DOT GTFS Registry — spatial lookup + GTFS download for uncovered US areas
   if (ep.apiStyle === 'dot-gtfs') {
-    console.log(`[transit] DOT GTFS endpoint matched for (${centreLat.toFixed(2)}, ${centreLng.toFixed(2)}), label: ${ep.label}`);
+    console.log(
+      `[transit] DOT GTFS endpoint matched for (${centreLat.toFixed(2)}, ${centreLng.toFixed(2)}), label: ${ep.label}`,
+    );
     const radiusDeg = Math.max(maxLat - minLat, maxLng - minLng) / 2 + 0.3;
     const lines = await fetchDotGtfsLines(centreLat, centreLng, radiusDeg);
     if (lines.length === 0) return null;
@@ -751,7 +819,9 @@ async function tryFetchViaOtp(
 
   // OTP1 REST (MTA NYC, TriMet, etc.)
   if (ep.apiStyle !== 'rest-v1') {
-    console.warn(`[transit] Unknown apiStyle "${ep.apiStyle}" for ${ep.label}, falling through to Overpass`);
+    console.warn(
+      `[transit] Unknown apiStyle "${ep.apiStyle}" for ${ep.label}, falling through to Overpass`,
+    );
     return null;
   }
 
@@ -844,7 +914,7 @@ export async function fetchTransitLines(
 
     console.warn(
       `[transit] fetchTransitLines result: otp=${hasOtp ? otpLines!.length : 0}, ` +
-      `amtrak=${amtrakLines.length}, fallingThrough=${!hasOtp}`,
+        `amtrak=${amtrakLines.length}, fallingThrough=${!hasOtp}`,
     );
 
     // OTP covers the transit network for the entire region — no need to
@@ -974,7 +1044,12 @@ export async function fetchTransitLines(
             if (mega.tileKeys.every((k) => fetchedTiles.has(k))) return;
 
             try {
-              const lines = await fetchTileWithRetry(mega.minLat, mega.minLng, mega.maxLat, mega.maxLng);
+              const lines = await fetchTileWithRetry(
+                mega.minLat,
+                mega.minLng,
+                mega.maxLat,
+                mega.maxLng,
+              );
               // Store under a mega key and mark all fine-grained tiles as fetched
               const megaKey = `mega:${mega.minLat.toFixed(2)},${mega.minLng.toFixed(2)}`;
               tileData.set(megaKey, lines);

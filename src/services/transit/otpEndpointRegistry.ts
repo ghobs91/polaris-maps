@@ -29,6 +29,16 @@ export type OtpApiStyle =
   | 'idfm-gtfs-v1'
   | 'vbb-gtfs-v1'
   | 'madrid-gtfs-v1'
+  | 'ch-gtfs-v1'
+  | 'de-gtfs-v1'
+  | 'dk-gtfs-v1'
+  | 'ee-gtfs-v1'
+  | 'fi-gtfs-v1'
+  | 'ie-gtfs-v1'
+  | 'lu-gtfs-v1'
+  | 'nl-gtfs-v1'
+  | 'no-gtfs-v1'
+  | 'se-gtfs-v1'
   | 'transitous-v1'
   | 'dot-gtfs';
 
@@ -162,6 +172,72 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
     bbox: [40.25, -3.9, 40.6, -3.4],
     url: 'https://crtm.maps.arcgis.com/sharing/rest/content/items/...',
     apiStyle: 'madrid-gtfs-v1',
+  },
+
+  // ─── Europe — Country-level GTFS feeds (data.public-transport.earth) ──
+  // Placed after city-specific endpoints so dedicated infra wins.
+  // Each feed is a consolidated GTFS ZIP containing all transit agencies
+  // for that country. All modes included (bus, rail, tram, metro, ferry).
+
+  {
+    label: 'Switzerland GTFS',
+    bbox: [45.8, 5.9, 47.8, 10.5],
+    url: 'https://data.public-transport.earth/gtfs/ch',
+    apiStyle: 'ch-gtfs-v1',
+  },
+  {
+    label: 'Deutschland GTFS',
+    bbox: [47.2, 5.8, 55.1, 15.1],
+    url: 'https://data.public-transport.earth/gtfs/de',
+    apiStyle: 'de-gtfs-v1',
+  },
+  {
+    label: 'Denmark GTFS',
+    bbox: [54.5, 7.5, 57.8, 15.5],
+    url: 'https://data.public-transport.earth/gtfs/dk',
+    apiStyle: 'dk-gtfs-v1',
+  },
+  {
+    label: 'Estonia GTFS',
+    bbox: [57.5, 21.5, 59.7, 28.2],
+    url: 'https://data.public-transport.earth/gtfs/ee',
+    apiStyle: 'ee-gtfs-v1',
+  },
+  {
+    label: 'Finland GTFS',
+    bbox: [59.5, 19.0, 70.1, 31.6],
+    url: 'https://data.public-transport.earth/gtfs/fi',
+    apiStyle: 'fi-gtfs-v1',
+  },
+  {
+    label: 'Ireland GTFS',
+    bbox: [51.4, -10.5, 55.4, -5.5],
+    url: 'https://data.public-transport.earth/gtfs/ie',
+    apiStyle: 'ie-gtfs-v1',
+  },
+  {
+    label: 'Luxembourg GTFS',
+    bbox: [49.4, 5.7, 50.2, 6.5],
+    url: 'https://data.public-transport.earth/gtfs/lu',
+    apiStyle: 'lu-gtfs-v1',
+  },
+  {
+    label: 'Netherlands GTFS',
+    bbox: [50.7, 3.3, 53.6, 7.3],
+    url: 'https://data.public-transport.earth/gtfs/nl',
+    apiStyle: 'nl-gtfs-v1',
+  },
+  {
+    label: 'Norway GTFS',
+    bbox: [57.5, 4.0, 71.2, 31.5],
+    url: 'https://data.public-transport.earth/gtfs/no',
+    apiStyle: 'no-gtfs-v1',
+  },
+  {
+    label: 'Sweden GTFS',
+    bbox: [55.3, 10.5, 69.1, 24.2],
+    url: 'https://data.public-transport.earth/gtfs/se',
+    apiStyle: 'se-gtfs-v1',
   },
 
   {

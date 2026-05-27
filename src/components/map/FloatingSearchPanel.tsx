@@ -604,6 +604,8 @@ export function FloatingSearchPanel({
   const setRoutePreviewWaypoints = useNavigationStore((s) => s.setRoutePreviewWaypoints);
   const transitDirectionsActive = useTransitStore((s) => s.directionsActive);
   const gtfsLoadingAgency = useTransitStore((s) => s.gtfsLoadingAgency);
+  const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
+  const isLoadingLines = useTransitStore((s) => s.isLoadingLines);
 
   // Auto-dismiss loading banner after 15 seconds
   const loadingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2243,6 +2245,12 @@ export function FloatingSearchPanel({
             <Text style={styles.gtfsLoadingText}>
               Loading transit data from {gtfsLoadingAgency}…
             </Text>
+          </View>
+        )}
+        {transitLayerVisible && isLoadingLines && !gtfsLoadingAgency && (
+          <View style={styles.gtfsLoadingBanner} pointerEvents="none">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.gtfsLoadingText}>Loading transit...</Text>
           </View>
         )}
         <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>

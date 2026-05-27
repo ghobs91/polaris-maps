@@ -16,7 +16,6 @@ import {
   extractZipTexts,
   parseGtfsFeed,
   convertFeedToLines,
-  ALL_ROUTE_TYPES,
   type GtfsFeedData,
 } from './gtfsParser';
 import type { TransitRouteLine } from '../../models/transit';
@@ -89,13 +88,15 @@ export async function fetchDotGtfsLines(
   lng: number,
   radiusDeg: number,
 ): Promise<TransitRouteLine[]> {
-  console.warn(`[dot-gtfs] fetchDotGtfsLines called at (${lat.toFixed(2)}, ${lng.toFixed(2)}) radius=${radiusDeg.toFixed(2)}°`);
+  console.warn(
+    `[dot-gtfs] fetchDotGtfsLines called at (${lat.toFixed(2)}, ${lng.toFixed(2)}) radius=${radiusDeg.toFixed(2)}°`,
+  );
   const feeds = await lookupDotGtfsFeeds(lat, lng, radiusDeg, 8);
   if (feeds.length === 0) return [];
 
   console.warn(
     `[dot-gtfs] Found ${feeds.length} feeds for (${lat.toFixed(2)}, ${lng.toFixed(2)}) ` +
-    `radius ${radiusDeg.toFixed(2)}°: ${feeds.map((f) => f.agencyName).join(', ')}`,
+      `radius ${radiusDeg.toFixed(2)}°: ${feeds.map((f) => f.agencyName).join(', ')}`,
   );
 
   // Notify loading state via transit store
@@ -118,24 +119,24 @@ export async function fetchDotGtfsLines(
     const BATCH_SIZE = 4;
     for (let i = 0; i < uncached.length; i += BATCH_SIZE) {
       const batch = uncached.slice(i, i + BATCH_SIZE);
-      await Promise.all(
-        batch.map((feed) => fetchAndCacheDotFeed(feed).catch(() => null)),
-      );
+      await Promise.all(batch.map((feed) => fetchAndCacheDotFeed(feed).catch(() => null)));
     }
 
     // Convert all cached feed data to TransitRouteLine[]
     const allLines: TransitRouteLine[] = [];
     const config = {
       label: 'DOT GTFS',
-      routeTypeFilter: ALL_ROUTE_TYPES,
-      filterByRouteType: false, // Include ALL routes regardless of type
+      routeTypeFilter: [0, 1, 2], // Rail only: tram/light_rail, subway, rail (exclude bus, ferry, etc.)
+      filterByRouteType: true,
     };
 
     for (const feed of feeds) {
       // Check persistent cache first
       const persisted = loadDotPersistentCache(feed.weblink);
       if (persisted) {
-        console.warn(`[dot-gtfs] ${feed.agencyName} loaded from persistent cache (${persisted.length} lines)`);
+        console.warn(
+          `[dot-gtfs] ${feed.agencyName} loaded from persistent cache (${persisted.length} lines)`,
+        );
         allLines.push(...persisted);
         continue;
       }
@@ -151,7 +152,7 @@ export async function fetchDotGtfsLines(
         if (lines.length === 0) {
           console.warn(
             `[dot-gtfs] Feed parsed but produced 0 lines: ${feed.agencyName} ` +
-            `(${cached.data.routes.length} routes, ${cached.data.shapes.size} shapes, ${cached.data.trips.length} trips)`,
+              `(${cached.data.routes.length} routes, ${cached.data.shapes.size} shapes, ${cached.data.trips.length} trips)`,
           );
         } else {
           // Save to persistent cache
@@ -223,9 +224,7 @@ async function fetchAndCacheDotFeed(feed: DotGtfsFeedEntry): Promise<void> {
     // Cache it (keyed by original URL, not API-key-augmented URL)
     feedCache.set(feed.weblink, { data, fetchedAt: Date.now() });
     if (feedCache.size > MAX_CACHE_ENTRIES) {
-      const oldest = [...feedCache.entries()].sort(
-        (a, b) => a[1].fetchedAt - b[1].fetchedAt,
-      );
+      const oldest = [...feedCache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
       feedCache.delete(oldest[0][0]);
     }
   } catch (err) {
