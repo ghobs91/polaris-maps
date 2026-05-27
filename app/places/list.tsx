@@ -2,7 +2,6 @@ import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TextInput,
   TouchableOpacity,
   Alert,
@@ -10,6 +9,7 @@ import {
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
@@ -224,13 +224,16 @@ export default function PlaceListDetailScreen() {
     );
   }
 
-  const renderItem = ({ item }: { item: SavedPlace }) => (
-    <SavedPlaceRow
-      place={item}
-      onPress={() => handlePlacePress(item)}
-      onLongPress={() => handleRemovePlace(item)}
-      onSaveToList={() => setPlaceForSheet(item)}
-    />
+  const renderItem = useCallback(
+    ({ item }: { item: SavedPlace }) => (
+      <SavedPlaceRow
+        place={item}
+        onPress={() => handlePlacePress(item)}
+        onLongPress={() => handleRemovePlace(item)}
+        onSaveToList={() => setPlaceForSheet(item)}
+      />
+    ),
+    [handlePlacePress, handleRemovePlace],
   );
 
   return (
@@ -268,7 +271,7 @@ export default function PlaceListDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        <FlatList
+        <FlashList
           data={sortedPlaces}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
@@ -318,7 +321,7 @@ export default function PlaceListDetailScreen() {
                 Multiple results for "{disambigPlace?.name}". Tap the correct one.
               </Text>
             </View>
-            <FlatList
+            <FlashList
               data={disambigResults}
               keyExtractor={(_, i) => String(i)}
               contentContainerStyle={styles.listContent}

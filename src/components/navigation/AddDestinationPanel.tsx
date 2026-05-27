@@ -11,6 +11,7 @@ import {
   Platform,
   Keyboard,
   ActivityIndicator,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
@@ -172,6 +173,31 @@ export function AddDestinationPanel({
     [onSelect, isListening],
   );
 
+  const renderItem = useCallback(
+    ({ item }: { item: UnifiedSearchResult }) => (
+      <Pressable
+        style={({ pressed }) => [styles.resultItem, pressed && styles.resultItemPressed]}
+        onPress={() => handleSelect(item)}
+      >
+        <View style={styles.resultIcon}>
+          <Ionicons name="location-outline" size={20} color="#409CFF" />
+        </View>
+        <View style={styles.resultTextContainer}>
+          <Text style={styles.resultName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <Text style={styles.resultSubtitle} numberOfLines={1}>
+            {item.subtitle}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+      </Pressable>
+    ),
+    [handleSelect, styles],
+  );
+
+  const renderSeparator = useCallback(() => <View style={styles.separator} />, []);
+
   const translateY = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [600, 0],
@@ -264,27 +290,8 @@ export function AddDestinationPanel({
               data={results}
               keyExtractor={(item, index) => `${item.lat}-${item.lng}-${index}`}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.resultItem}
-                  onPress={() => handleSelect(item)}
-                  activeOpacity={0.6}
-                >
-                  <View style={styles.resultIcon}>
-                    <Ionicons name="location-outline" size={20} color="#409CFF" />
-                  </View>
-                  <View style={styles.resultTextContainer}>
-                    <Text style={styles.resultName} numberOfLines={1}>
-                      {item.name}
-                    </Text>
-                    <Text style={styles.resultSubtitle} numberOfLines={1}>
-                      {item.subtitle}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-                </TouchableOpacity>
-              )}
-              ItemSeparatorComponent={() => <View style={styles.separator} />}
+              renderItem={renderItem}
+              ItemSeparatorComponent={renderSeparator}
               style={styles.resultsList}
             />
           )}
@@ -397,6 +404,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 4,
+  },
+  resultItemPressed: {
+    opacity: 0.7,
   },
   resultIcon: {
     width: 32,

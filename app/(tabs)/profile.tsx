@@ -15,7 +15,11 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = React.useMemo(() => createStyles(colors), [colors]);
-  const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode } = usePeerStore();
+  const localNode = usePeerStore((s) => s.localNode);
+  const activePeers = usePeerStore((s) => s.activePeers);
+  const syncingFeeds = usePeerStore((s) => s.syncingFeeds);
+  const isOnline = usePeerStore((s) => s.isOnline);
+  const setLocalNode = usePeerStore((s) => s.setLocalNode);
   const [refreshing, setRefreshing] = React.useState(false);
 
   const loadNodeData = useCallback(async () => {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { getDownloadedRegions } from '../../src/services/regions/regionRepository';
 import { deleteRegionData } from '../../src/services/regions/downloadService';
 import { checkForRegionUpdates } from '../../src/services/regions/updateService';
@@ -61,6 +62,17 @@ export default function OfflineRegionsScreen() {
     [loadRegions],
   );
 
+  const renderRegionItem = useCallback(
+    ({ item }: { item: Region }) => (
+      <RegionCard
+        region={item}
+        onDelete={deletingId === item.id ? undefined : handleDelete}
+        updateAvailable={staleRegionIds.has(item.id)}
+      />
+    ),
+    [deletingId, handleDelete, staleRegionIds],
+  );
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -83,16 +95,10 @@ export default function OfflineRegionsScreen() {
         <Text style={styles.heading}>Downloaded Regions</Text>
         <Text style={styles.storageInfo}>Total: {Math.round(totalSizeMb)} MB</Text>
 
-        <FlatList
+        <FlashList
           data={regions}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <RegionCard
-              region={item}
-              onDelete={deletingId === item.id ? undefined : handleDelete}
-              updateAvailable={staleRegionIds.has(item.id)}
-            />
-          )}
+          renderItem={renderRegionItem}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.center}>

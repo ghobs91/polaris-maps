@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
@@ -8,7 +8,7 @@ interface ReviewCardProps {
   review: Review;
 }
 
-export function ReviewCard({ review }: ReviewCardProps) {
+export const ReviewCard = memo(function ReviewCard({ review }: ReviewCardProps) {
   const date = new Date(review.createdAt * 1000);
   const dateStr = date.toLocaleDateString(undefined, {
     year: 'numeric',
@@ -39,7 +39,7 @@ export function ReviewCard({ review }: ReviewCardProps) {
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

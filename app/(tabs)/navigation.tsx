@@ -33,22 +33,20 @@ export default function NavigationScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const {
-    activeRoute,
-    currentManeuver,
-    currentStepIndex,
-    etaSeconds,
-    remainingDistanceMeters,
-    isNavigating,
-    stopNavigation,
-    updateEta,
-    waypoints,
-    currentLegIndex,
-    advanceLeg,
-    costing,
-    destination,
-    addWaypointAndReplaceRoute,
-  } = useNavigationStore();
+  const activeRoute = useNavigationStore((s) => s.activeRoute);
+  const currentManeuver = useNavigationStore((s) => s.currentManeuver);
+  const currentStepIndex = useNavigationStore((s) => s.currentStepIndex);
+  const etaSeconds = useNavigationStore((s) => s.etaSeconds);
+  const remainingDistanceMeters = useNavigationStore((s) => s.remainingDistanceMeters);
+  const isNavigating = useNavigationStore((s) => s.isNavigating);
+  const stopNavigation = useNavigationStore((s) => s.stopNavigation);
+  const updateEta = useNavigationStore((s) => s.updateEta);
+  const waypoints = useNavigationStore((s) => s.waypoints);
+  const currentLegIndex = useNavigationStore((s) => s.currentLegIndex);
+  const advanceLeg = useNavigationStore((s) => s.advanceLeg);
+  const costing = useNavigationStore((s) => s.costing);
+  const destination = useNavigationStore((s) => s.destination);
+  const addWaypointAndReplaceRoute = useNavigationStore((s) => s.addWaypointAndReplaceRoute);
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
   useEffect(() => {

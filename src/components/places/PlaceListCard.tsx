@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { memo, useMemo } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import type { PlaceList } from '../../models/placeList';
@@ -27,17 +27,20 @@ function getEmoji(list: PlaceList): string {
   return '📍';
 }
 
-export function PlaceListCard({ list, onPress, onLongPress }: PlaceListCardProps) {
+export const PlaceListCard = memo(function PlaceListCard({
+  list,
+  onPress,
+  onLongPress,
+}: PlaceListCardProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const emoji = getEmoji(list);
 
   return (
-    <TouchableOpacity
-      style={styles.container}
+    <Pressable
+      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
       onPress={onPress}
       onLongPress={onLongPress}
-      activeOpacity={0.7}
     >
       <View style={styles.iconContainer}>
         <Text style={styles.emoji}>{emoji}</Text>
@@ -51,9 +54,9 @@ export function PlaceListCard({ list, onPress, onLongPress }: PlaceListCardProps
           {list.places.length === 1 ? 'place' : 'places'}
         </Text>
       </View>
-    </TouchableOpacity>
+    </Pressable>
   );
-}
+});
 
 const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
   StyleSheet.create({
@@ -78,4 +81,5 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     info: { flex: 1 },
     name: { ...typography.subtitle, color: colors.text },
     meta: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+    pressed: { opacity: 0.7 },
   });

@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
+import React, { memo } from 'react';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 
@@ -13,7 +13,7 @@ interface RegionCardProps {
   updateAvailable?: boolean;
 }
 
-export function RegionCard({
+export const RegionCard = memo(function RegionCard({
   region,
   onPress,
   onDownload,
@@ -55,56 +55,67 @@ export function RegionCard({
 
       <View style={styles.actions}>
         {region.downloadStatus === 'none' && (
-          <TouchableOpacity
-            style={styles.actionBtn}
+          <Pressable
+            style={({ pressed }) => [styles.actionBtn, pressed && styles.actionPressed]}
             onPress={() => onDownload?.(region)}
-            activeOpacity={0.7}
           >
             <Text style={styles.actionText}>Download</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
         {region.downloadStatus === 'downloading' && (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.cancelBtn]}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              styles.cancelBtn,
+              pressed && styles.actionPressed,
+            ]}
             onPress={() => onCancel?.(region)}
-            activeOpacity={0.7}
           >
             <Text style={[styles.actionText, styles.cancelText]}>Cancel</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
         {region.downloadStatus === 'failed' && (
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.retryBtn]}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionBtn,
+              styles.retryBtn,
+              pressed && styles.actionPressed,
+            ]}
             onPress={() => onDownload?.(region)}
-            activeOpacity={0.7}
           >
             <Text style={[styles.actionText, styles.retryText]}>Retry</Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
         {region.downloadStatus === 'complete' && (
           <>
             {updateAvailable && (
-              <TouchableOpacity
-                style={[styles.actionBtn, styles.updateBtn]}
+              <Pressable
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  styles.updateBtn,
+                  pressed && styles.actionPressed,
+                ]}
                 onPress={() => onDownload?.(region)}
-                activeOpacity={0.7}
               >
                 <Text style={[styles.actionText, styles.updateActionText]}>Update</Text>
-              </TouchableOpacity>
+              </Pressable>
             )}
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.dangerBtn]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.dangerBtn,
+                pressed && styles.actionPressed,
+              ]}
               onPress={() => onDelete?.(region)}
-              activeOpacity={0.7}
             >
               <Text style={[styles.actionText, styles.dangerText]}>Delete</Text>
-            </TouchableOpacity>
+            </Pressable>
           </>
         )}
       </View>
     </View>
   );
-}
+});
 
 function StatusBadge({ status }: { status: Region['downloadStatus'] }) {
   const color =
@@ -167,6 +178,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
+  actionPressed: { opacity: 0.7 },
   actionText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
   retryBtn: { borderColor: colors.warning },
   retryText: { color: colors.warning },

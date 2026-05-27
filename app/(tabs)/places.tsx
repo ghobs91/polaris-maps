@@ -2,13 +2,13 @@ import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   TextInput,
   Alert,
   StyleSheet,
   ScrollView,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
@@ -32,7 +32,10 @@ export default function MyPlacesScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
   useICloudSync();
 
-  const { lists, createList, deleteList, clearAllLists } = usePlaceListStore();
+  const lists = usePlaceListStore((s) => s.lists);
+  const createList = usePlaceListStore((s) => s.createList);
+  const deleteList = usePlaceListStore((s) => s.deleteList);
+  const clearAllLists = usePlaceListStore((s) => s.clearAllLists);
   const [showNewList, setShowNewList] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmoji, setNewEmoji] = useState('');
@@ -249,7 +252,7 @@ export default function MyPlacesScreen() {
           <Text style={styles.newListText}>+ New list</Text>
         </TouchableOpacity>
 
-        <FlatList
+        <FlashList
           data={filteredSortedLists}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}

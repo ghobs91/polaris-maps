@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, FlatList, Dimensions } from 'react-native';
+import React, { useState, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { StreetImagery } from '../../models/imagery';
 
@@ -59,10 +59,11 @@ export function ImageryViewer({
         })}
         renderItem={({ item }) => {
           const uri = getImageUri?.(item);
+          const imageSource = uri ? { uri } : undefined;
           return (
             <View style={styles.imageContainer}>
-              {uri ? (
-                <Image source={{ uri }} style={styles.image} resizeMode="contain" />
+              {imageSource ? (
+                <Image source={imageSource} style={styles.image} resizeMode="contain" />
               ) : (
                 <View style={styles.placeholder}>
                   <Text style={styles.placeholderText}>Loading image…</Text>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { Place } from '../../models/poi';
@@ -8,7 +8,7 @@ interface POICardProps {
   onPress?: (place: Place) => void;
 }
 
-export function POICard({ place, onPress }: POICardProps) {
+export const POICard = memo(function POICard({ place, onPress }: POICardProps) {
   const categoryLabel = place.category.replace(/_/g, ' ');
 
   return (
@@ -53,7 +53,7 @@ export function POICard({ place, onPress }: POICardProps) {
       </View>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

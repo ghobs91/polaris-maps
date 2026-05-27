@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Pressable } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
@@ -12,13 +12,44 @@ interface SearchHistoryProps {
 }
 
 export function SearchHistory({ history, onSelect, onRemove, onClearAll }: SearchHistoryProps) {
+  const renderItem = useCallback(
+    ({ item }: { item: GeocodingResult }) => (
+      <Pressable
+        style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+        onPress={() => onSelect(item)}
+      >
+        <View style={styles.iconContainer}>
+          <Ionicons name="time-outline" size={20} color={colors.textSecondary} />
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={styles.text} numberOfLines={1}>
+            {item.entry.text}
+          </Text>
+          <Text style={styles.type}>{item.entry.type}</Text>
+        </View>
+        <Pressable
+          onPress={() => onRemove(item.entry.id)}
+          hitSlop={8}
+          style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+        >
+          <Ionicons name="close" size={18} color={colors.textSecondary} />
+        </Pressable>
+      </Pressable>
+    ),
+    [onSelect, onRemove, styles],
+  );
+
   if (history.length === 0) return null;
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Recent</Text>
-        <Pressable onPress={onClearAll} hitSlop={8}>
+        <Pressable
+          onPress={onClearAll}
+          hitSlop={8}
+          style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+        >
           <Text style={styles.clearAll}>Clear all</Text>
         </Pressable>
       </View>
@@ -28,22 +59,7 @@ export function SearchHistory({ history, onSelect, onRemove, onClearAll }: Searc
         style={styles.list}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={false}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.item} onPress={() => onSelect(item)} activeOpacity={0.6}>
-            <View style={styles.iconContainer}>
-              <Ionicons name="time-outline" size={20} color={colors.textSecondary} />
-            </View>
-            <View style={styles.textContainer}>
-              <Text style={styles.text} numberOfLines={1}>
-                {item.entry.text}
-              </Text>
-              <Text style={styles.type}>{item.entry.type}</Text>
-            </View>
-            <Pressable onPress={() => onRemove(item.entry.id)} hitSlop={8}>
-              <Ionicons name="close" size={18} color={colors.textSecondary} />
-            </Pressable>
-          </TouchableOpacity>
-        )}
+        renderItem={renderItem}
       />
     </View>
   );
@@ -84,6 +100,9 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  itemPressed: {
+    opacity: 0.7,
   },
   iconContainer: {
     width: 32,

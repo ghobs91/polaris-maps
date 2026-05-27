@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
@@ -10,6 +10,29 @@ interface SearchResultsProps {
 }
 
 export function SearchResults({ results, onSelect }: SearchResultsProps) {
+  const renderItem = useCallback(
+    ({ item }: { item: GeocodingResult }) => (
+      <Pressable
+        style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+        onPress={() => onSelect(item)}
+      >
+        <View style={styles.iconContainer}>
+          <Ionicons name="location-outline" size={20} color={colors.primary} />
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={styles.text} numberOfLines={1}>
+            {item.entry.text}
+          </Text>
+          <Text style={styles.type} numberOfLines={1}>
+            {item.entry.city ? item.entry.city : item.entry.type !== 'place' ? item.entry.type : ''}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+      </Pressable>
+    ),
+    [onSelect],
+  );
+
   if (results.length === 0) return null;
 
   return (
@@ -18,26 +41,7 @@ export function SearchResults({ results, onSelect }: SearchResultsProps) {
       keyExtractor={(item) => String(item.entry.id)}
       style={styles.list}
       keyboardShouldPersistTaps="handled"
-      renderItem={({ item }) => (
-        <TouchableOpacity style={styles.item} onPress={() => onSelect(item)} activeOpacity={0.6}>
-          <View style={styles.iconContainer}>
-            <Ionicons name="location-outline" size={20} color={colors.primary} />
-          </View>
-          <View style={styles.textContainer}>
-            <Text style={styles.text} numberOfLines={1}>
-              {item.entry.text}
-            </Text>
-            <Text style={styles.type} numberOfLines={1}>
-              {item.entry.city
-                ? item.entry.city
-                : item.entry.type !== 'place'
-                  ? item.entry.type
-                  : ''}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-      )}
+      renderItem={renderItem}
     />
   );
 }
@@ -57,6 +61,9 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  itemPressed: {
+    opacity: 0.7,
   },
   iconContainer: {
     width: 32,

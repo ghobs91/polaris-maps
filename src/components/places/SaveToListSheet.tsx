@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePlaceListStore } from '../../stores/placeListStore';
@@ -26,7 +27,10 @@ export function SaveToListSheet({
 }: SaveToListSheetProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { lists, createList, addPlace, removePlace } = usePlaceListStore();
+  const lists = usePlaceListStore((s) => s.lists);
+  const createList = usePlaceListStore((s) => s.createList);
+  const addPlace = usePlaceListStore((s) => s.addPlace);
+  const removePlace = usePlaceListStore((s) => s.removePlace);
   const [newListName, setNewListName] = useState('');
 
   const isInList = useCallback(
@@ -62,33 +66,44 @@ export function SaveToListSheet({
     setNewListName('');
   }, [newListName, createList, addPlace, poiUuid, placeName, lat, lng, address, category]);
 
+  const renderRow = useCallback(
+    ({ item }: { item: PlaceList }) => {
+      const saved = isInList(item);
+      return (
+        <Pressable
+          style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
+          onPress={() => handleToggle(item)}
+        >
+          <Text style={styles.checkmark}>{saved ? '✓' : ''}</Text>
+          <Text style={styles.listName}>{item.name}</Text>
+          <Text style={styles.count}>{item.places.length}</Text>
+        </Pressable>
+      );
+    },
+    [isInList, handleToggle],
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Save to list</Text>
-        <TouchableOpacity onPress={onDone}>
+        <Pressable style={({ pressed }) => [pressed && { opacity: 0.6 }]} onPress={onDone}>
           <Text style={styles.doneText}>Done</Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
-      <FlatList
+      <FlashList
         data={lists}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => {
-          const saved = isInList(item);
-          return (
-            <TouchableOpacity style={styles.row} onPress={() => handleToggle(item)}>
-              <Text style={styles.checkmark}>{saved ? '✓' : ''}</Text>
-              <Text style={styles.listName}>{item.name}</Text>
-              <Text style={styles.count}>{item.places.length}</Text>
-            </TouchableOpacity>
-          );
-        }}
+        renderItem={renderRow}
         ListFooterComponent={
-          <TouchableOpacity style={styles.newListRow} onPress={handleCreateAndAdd}>
+          <Pressable
+            style={({ pressed }) => [styles.newListRow, pressed && { opacity: 0.6 }]}
+            onPress={handleCreateAndAdd}
+          >
             <Text style={styles.plusIcon}>+</Text>
             <Text style={styles.newListText}>New list</Text>
-          </TouchableOpacity>
+          </Pressable>
         }
       />
     </View>

@@ -1,5 +1,6 @@
-import React from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { POICard } from './POICard';
 import { LoadingSpinner } from '../common';
 import { colors, spacing, typography } from '../../constants/theme';
@@ -29,11 +30,16 @@ export function POIList({ places, loading, emptyMessage, onPlacePress }: POIList
     );
   }
 
+  const renderItem = useCallback(
+    ({ item }: { item: Place }) => <POICard place={item} onPress={onPlacePress} />,
+    [onPlacePress],
+  );
+
   return (
-    <FlatList
+    <FlashList
       data={places}
       keyExtractor={(item) => item.uuid}
-      renderItem={({ item }) => <POICard place={item} onPress={onPlacePress} />}
+      renderItem={renderItem}
       contentContainerStyle={styles.list}
       showsVerticalScrollIndicator={false}
     />

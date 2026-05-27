@@ -1,5 +1,6 @@
-import React from 'react';
-import { View, Text, FlatList, StyleSheet } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import type { ValhallaManeuver } from '../../models/route';
@@ -10,13 +11,11 @@ interface ManeuverListProps {
 }
 
 export function ManeuverList({ maneuvers, currentIndex }: ManeuverListProps) {
-  return (
-    <FlatList
-      data={maneuvers}
-      keyExtractor={(_, i) => String(i)}
-      style={styles.list}
-      renderItem={({ item, index }) => (
-        <View style={[styles.item, index === currentIndex && styles.activeItem]}>
+  const renderItem = useCallback(
+    ({ item, index }: { item: ValhallaManeuver; index: number }) => {
+      const itemStyle = [styles.item, index === currentIndex && styles.activeItem];
+      return (
+        <View style={itemStyle}>
           <View style={styles.stepBadge}>
             <Text style={styles.stepNumber}>{index + 1}</Text>
           </View>
@@ -27,7 +26,17 @@ export function ManeuverList({ maneuvers, currentIndex }: ManeuverListProps) {
             <Text style={styles.distance}>{formatDistance(item.distanceMeters)}</Text>
           </View>
         </View>
-      )}
+      );
+    },
+    [currentIndex],
+  );
+
+  return (
+    <FlashList
+      data={maneuvers}
+      keyExtractor={(_, i) => String(i)}
+      style={styles.list}
+      renderItem={renderItem}
     />
   );
 }

@@ -40,7 +40,11 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
   const translateY = useRef(new Animated.Value(DRAWER_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  const { localNode, activePeers, syncingFeeds, isOnline, setLocalNode } = usePeerStore();
+  const localNode = usePeerStore((s) => s.localNode);
+  const activePeers = usePeerStore((s) => s.activePeers);
+  const syncingFeeds = usePeerStore((s) => s.syncingFeeds);
+  const isOnline = usePeerStore((s) => s.isOnline);
+  const setLocalNode = usePeerStore((s) => s.setLocalNode);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadNodeData = useCallback(async () => {

@@ -188,6 +188,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Track whether camera should follow nav position (breaks on user gesture)
   const followCameraRef = useRef(true);
   const suppressNextPressRef = useRef(false);
+
   // Sync external followCamera prop into ref
   useEffect(() => {
     followCameraRef.current = followCamera;

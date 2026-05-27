@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { memo, useMemo } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -12,18 +12,22 @@ interface SavedPlaceRowProps {
   onSaveToList?: () => void;
 }
 
-export function SavedPlaceRow({ place, onPress, onLongPress, onSaveToList }: SavedPlaceRowProps) {
+export const SavedPlaceRow = memo(function SavedPlaceRow({
+  place,
+  onPress,
+  onLongPress,
+  onSaveToList,
+}: SavedPlaceRowProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const subtitle = [place.address, place.category?.replace(/_/g, ' ')].filter(Boolean).join(' · ');
 
   return (
-    <TouchableOpacity
-      style={styles.container}
+    <Pressable
+      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
       onPress={onPress}
       onLongPress={onLongPress}
-      activeOpacity={0.7}
     >
       <View style={styles.marker}>
         <Text style={styles.markerIcon}>📌</Text>
@@ -44,13 +48,16 @@ export function SavedPlaceRow({ place, onPress, onLongPress, onSaveToList }: Sav
         ) : null}
       </View>
       {onSaveToList && (
-        <TouchableOpacity onPress={onSaveToList} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <Pressable
+          onPress={onSaveToList}
+          style={({ pressed }) => [{ padding: 4 }, pressed && { opacity: 0.6 }]}
+        >
           <Ionicons name="bookmark-outline" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </Pressable>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
-}
+});
 
 const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
   StyleSheet.create({
@@ -81,4 +88,5 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       fontStyle: 'italic',
       marginTop: 2,
     },
+    pressed: { opacity: 0.7 },
   });
