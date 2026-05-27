@@ -57,6 +57,10 @@
     <string>Polaris Maps needs your location to show your position on the map and provide navigation directions.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Polaris Maps needs access to your photo library to save and share maps, routes, and locations.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Polaris Maps uses speech recognition to enable voice commands for hands-free navigation.</string>
     <key>NSSupportsLiveActivities</key>
     <true/>
     <key>NSSupportsLiveActivitiesFrequentUpdates</key>
