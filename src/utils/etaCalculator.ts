@@ -1,5 +1,6 @@
 import type { ETARouteSegment, ETAResult, NormalizedTrafficSegment } from '../models/traffic';
 import { ROAD_CLASS_SPEEDS } from '../models/traffic';
+import type { ValhallaManeuver, ManeuverType, RoadClass } from '../models/route';
 import { decodePolyline } from './polyline';
 import { encode as geohashEncode, neighbors as geohashNeighbors } from './geohash';
 
@@ -7,6 +8,49 @@ const MATCH_THRESHOLD_METERS = 50;
 const EARTH_RADIUS_METERS = 6_371_000;
 const DEG_TO_RAD = Math.PI / 180;
 const DEFAULT_FREE_FLOW_MPH = ROAD_CLASS_SPEEDS.secondary; // 30
+
+/**
+ * Infer the most-likely road class from a Valhalla maneuver type.
+ * Uses heuristics: highway entrances/exits → motorway, roundabouts → secondary,
+ * ferries → service. All other maneuvers default to secondary (moderate road).
+ */
+function inferRoadClassFromManeuver(type: ManeuverType): RoadClass {
+  switch (type) {
+    case 'enter_highway':
+    case 'exit_highway':
+      return 'motorway';
+    case 'enter_roundabout':
+    case 'exit_roundabout':
+      return 'secondary';
+    case 'ferry':
+      return 'service';
+    default:
+      return 'secondary';
+  }
+}
+
+/**
+ * Build a lookup from polyline shape index → free-flow speed (mph) and road
+ * class using the route's maneuver list. Each maneuver's beginShapeIndex..
+ * endShapeIndex range is assigned a speed and road class based on inferred type.
+ *
+ * Returns a sparse array where index `i` holds { speed, roadClass }, or
+ * undefined when no maneuver covers that index.
+ */
+function buildManeuverSpeedMap(
+  maneuvers: ValhallaManeuver[],
+  coordCount: number,
+): ({ speed: number; roadClass: string } | undefined)[] {
+  const map: ({ speed: number; roadClass: string } | undefined)[] = new Array(coordCount);
+  for (const m of maneuvers) {
+    const roadClass = inferRoadClassFromManeuver(m.type);
+    const speed = ROAD_CLASS_SPEEDS[roadClass] ?? DEFAULT_FREE_FLOW_MPH;
+    for (let i = m.beginShapeIndex; i < m.endShapeIndex && i < coordCount; i++) {
+      map[i] = { speed, roadClass };
+    }
+  }
+  return map;
+}
 
 /** Haversine distance between two [lng, lat] points in meters. */
 function haversineMeters(a: [number, number], b: [number, number]): number {
@@ -78,13 +122,23 @@ function findNearestTrafficSegment(
  * Decode a Valhalla route geometry into ETARouteSegment[].
  * Each consecutive pair of decoded coordinates forms one segment.
  * Zero-distance segments are filtered out.
+ *
+ * When `maneuvers` are provided, each polyline index range covered by a
+ * maneuver is assigned a free-flow speed derived from the inferred road class
+ * (motorway=70, trunk=55, primary=45, secondary=30, etc.). Indices not covered
+ * by any maneuver fall back to `defaultSpeedMph`.
  */
 export function extractRouteSegments(
   geometry: string,
   defaultSpeedMph: number = DEFAULT_FREE_FLOW_MPH,
+  maneuvers?: ValhallaManeuver[],
 ): ETARouteSegment[] {
   const coords = decodePolyline(geometry);
   if (coords.length < 2) return [];
+
+  // Build maneuver speed map when maneuvers are available
+  const speedMap =
+    maneuvers && maneuvers.length > 0 ? buildManeuverSpeedMap(maneuvers, coords.length) : undefined;
 
   const segments: ETARouteSegment[] = [];
   for (let i = 0; i < coords.length - 1; i++) {
@@ -92,11 +146,13 @@ export function extractRouteSegments(
     const end = coords[i + 1];
     const dist = haversineMeters(start, end);
     if (dist > 0) {
+      const entry = speedMap?.[i];
       segments.push({
         startCoord: start,
         endCoord: end,
         distanceMeters: dist,
-        freeFlowSpeedMph: defaultSpeedMph,
+        freeFlowSpeedMph: entry?.speed ?? defaultSpeedMph,
+        roadClass: entry?.roadClass,
       });
     }
   }
@@ -117,8 +173,12 @@ export function formatETA(seconds: number): string {
  * Pure function: compute traffic-adjusted ETA for a route.
  *
  * For each route segment, find the nearest traffic segment within 50m
- * (using geohash6 spatial index). Use traffic speed if matched, otherwise
- * fall back to free-flow speed. Single O(n) pass over route segments.
+ * (using geohash6 spatial index). Use traffic current speed if matched,
+ * otherwise fall back to the segment's free-flow speed.
+ *
+ * When a traffic segment is matched, its freeFlowSpeedMph is also used for
+ * the free-flow baseline calculation (more accurate than road-class defaults).
+ * Single O(n) pass over route segments.
  */
 export function calculateTrafficETA(
   routeSegments: ETARouteSegment[],
@@ -143,15 +203,20 @@ export function calculateTrafficETA(
 
   for (const seg of routeSegments) {
     const mid = midpoint(seg.startCoord, seg.endCoord);
-    const freeFlowSeconds = seg.distanceMeters / (seg.freeFlowSpeedMph * 0.44704);
-    freeFlowTotalSeconds += freeFlowSeconds;
 
     const matched = findNearestTrafficSegment(mid, spatialIndex);
     if (matched && matched.currentSpeedMph > 0) {
+      // Live traffic speed available → use it for the traffic-adjusted time
       totalSeconds += seg.distanceMeters / (matched.currentSpeedMph * 0.44704);
+      // Use traffic source's free-flow speed for a more accurate baseline when available
+      const baselineSpeed =
+        matched.freeFlowSpeedMph > 0 ? matched.freeFlowSpeedMph : seg.freeFlowSpeedMph;
+      freeFlowTotalSeconds += seg.distanceMeters / (baselineSpeed * 0.44704);
       matchedCount++;
     } else {
+      const freeFlowSeconds = seg.distanceMeters / (seg.freeFlowSpeedMph * 0.44704);
       totalSeconds += freeFlowSeconds;
+      freeFlowTotalSeconds += freeFlowSeconds;
     }
   }
 

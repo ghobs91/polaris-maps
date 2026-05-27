@@ -4,6 +4,7 @@ import {
   formatETA,
 } from '../../src/utils/etaCalculator';
 import type { NormalizedTrafficSegment, ETARouteSegment } from '../../src/models/traffic';
+import type { ValhallaManeuver } from '../../src/models/route';
 
 // --- Helper to create route segments ---
 function makeRouteSegment(
@@ -38,6 +39,53 @@ function makeTrafficSegment(
     source: 'tomtom',
     timestamp: Math.floor(Date.now() / 1000),
   };
+}
+
+/** Build a minimal ValhallaManeuver for testing road-class speed assignment. */
+function makeManeuver(
+  type: ValhallaManeuver['type'],
+  beginShapeIndex: number,
+  endShapeIndex: number,
+): ValhallaManeuver {
+  return {
+    type,
+    instruction: '',
+    distanceMeters: 0,
+    durationSeconds: 0,
+    beginShapeIndex,
+    endShapeIndex,
+    verbalPreTransition: '',
+  };
+}
+
+/**
+ * Encode a simple array of [lng, lat] coords into a Valhalla precision-6
+ * polyline string. Minimal encoder for test use; does not handle edge cases.
+ */
+function encodePolyline(coords: [number, number][], precision = 6): string {
+  const factor = Math.pow(10, precision);
+  let prevLat = 0;
+  let prevLng = 0;
+  let result = '';
+
+  for (const [lng, lat] of coords) {
+    const dLat = Math.round(lat * factor) - prevLat;
+    const dLng = Math.round(lng * factor) - prevLng;
+    prevLat += dLat;
+    prevLng += dLng;
+
+    // Encode signed integer → unsigned zigzag encoding
+    for (const val of [dLat, dLng]) {
+      let v = val < 0 ? ~(val << 1) : val << 1;
+      while (v >= 0x20) {
+        result += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
+        v >>= 5;
+      }
+      result += String.fromCharCode(v + 63);
+    }
+  }
+
+  return result;
 }
 
 describe('formatETA', () => {
@@ -141,6 +189,23 @@ describe('calculateTrafficETA', () => {
     expect(result.totalSeconds).toBeCloseTo(3600, -1);
   });
 
+  it('uses traffic segment free-flow speed as baseline when matched', () => {
+    // Route segment has freeFlowSpeedMph=30 (secondary default)
+    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 30)];
+    // Traffic segment has freeFlowSpeedMph=70 (motorway), currentSpeed=35 (congested)
+    const trafficSegments: NormalizedTrafficSegment[] = [
+      makeTrafficSegment('t:1', [[4.845, 52.415]], 35, 70),
+    ];
+
+    const result = calculateTrafficETA(routeSegments, trafficSegments);
+
+    // Baseline should use traffic's freeFlowSpeedMph=70, not route's 30
+    // 1609m / (70 * 0.44704) ≈ 51.4s
+    expect(result.freeFlowTotalSeconds).toBeCloseTo(1609 / (70 * 0.44704), 0);
+    // Current: 1609m / (35 * 0.44704) ≈ 102.8s
+    expect(result.totalSeconds).toBeCloseTo(1609 / (35 * 0.44704), 0);
+  });
+
   it('handles very short segments (<10m)', () => {
     const routeSegments: ETARouteSegment[] = [
       makeRouteSegment(4.84, 52.41, 4.84001, 52.41001, 5, 60),
@@ -166,12 +231,97 @@ describe('calculateTrafficETA', () => {
 
 describe('extractRouteSegments', () => {
   it('decodes a simple encoded polyline into route segments', () => {
-    // A simple 2-point geometry (manually encoded is hard, but we test with a
-    // known Valhalla-style encoded string). For now, test structural properties.
     // We'll use a mock geometry that decodes to known points.
     const mockGeometry = 'ss~iqBknnwO??'; // 2 identical points → 1 segment
     const segments = extractRouteSegments(mockGeometry);
     // Should produce at least 0 segments (depends on decode result)
     expect(Array.isArray(segments)).toBe(true);
+  });
+
+  it('assigns motorway speed (70 mph) when highway maneuvers cover the segment', () => {
+    // 3 points forming a ~100m segment (0.001° apart at lat 52)
+    const coords: [number, number][] = [
+      [4.84, 52.41],
+      [4.841, 52.41],
+      [4.842, 52.41],
+    ];
+    const geometry = encodePolyline(coords);
+
+    const maneuvers: ValhallaManeuver[] = [
+      makeManeuver('enter_highway', 0, 2), // covers indices 0,1 → segment 0
+    ];
+
+    const segments = extractRouteSegments(geometry, 30, maneuvers);
+    expect(segments.length).toBeGreaterThanOrEqual(1);
+    // First segment (index 0) should get highway speed and road class
+    expect(segments[0].freeFlowSpeedMph).toBe(70);
+    expect(segments[0].roadClass).toBe('motorway');
+  });
+
+  it('assigns different speeds to segments covered by different maneuver types', () => {
+    // 4 points → 3 segments
+    const coords: [number, number][] = [
+      [4.84, 52.41],
+      [4.841, 52.41],
+      [4.842, 52.41],
+      [4.843, 52.41],
+    ];
+    const geometry = encodePolyline(coords);
+
+    const maneuvers: ValhallaManeuver[] = [
+      // beginShapeIndex..endShapeIndex cover polyline *coordinate* indices.
+      // 0..1 → index 0 only → segment 0 (coords[0]→coords[1])
+      makeManeuver('enter_highway', 0, 1),
+      // 1..2 → index 1 only → segment 1 (coords[1]→coords[2])
+      makeManeuver('enter_roundabout', 1, 2),
+      // index 2 → segment 2 uncovered → falls back to default speed (25)
+    ];
+
+    const segments = extractRouteSegments(geometry, 25, maneuvers);
+    expect(segments.length).toBe(3);
+    expect(segments[0].freeFlowSpeedMph).toBe(70); // motorway
+    expect(segments[0].roadClass).toBe('motorway');
+    expect(segments[1].freeFlowSpeedMph).toBe(30); // secondary from roundabout
+    expect(segments[1].roadClass).toBe('secondary');
+    expect(segments[2].freeFlowSpeedMph).toBe(25); // uncovered → default speed
+    expect(segments[2].roadClass).toBeUndefined();
+  });
+
+  it('assigns ferry maneuver speed (12 mph) to ferry segments', () => {
+    const coords: [number, number][] = [
+      [4.84, 52.41],
+      [4.841, 52.41],
+    ];
+    const geometry = encodePolyline(coords);
+
+    const maneuvers: ValhallaManeuver[] = [makeManeuver('ferry', 0, 1)];
+
+    const segments = extractRouteSegments(geometry, 30, maneuvers);
+    expect(segments.length).toBe(1);
+    expect(segments[0].freeFlowSpeedMph).toBe(12);
+  });
+
+  it('falls back to default speed when no maneuvers match', () => {
+    const coords: [number, number][] = [
+      [4.84, 52.41],
+      [4.841, 52.41],
+    ];
+    const geometry = encodePolyline(coords);
+
+    // Maneuver covers indices 5-10, which are beyond our polyline (1 segment = index 0)
+    const maneuvers: ValhallaManeuver[] = [makeManeuver('enter_highway', 5, 10)];
+
+    const segments = extractRouteSegments(geometry, 30, maneuvers);
+    expect(segments.length).toBe(1);
+    expect(segments[0].freeFlowSpeedMph).toBe(30); // falls back to default
+  });
+
+  it('returns empty array for geometry with fewer than 2 points', () => {
+    // Single-point polyline (only first coord)
+    const coords: [number, number][] = [[4.84, 52.41]];
+    const geometry = encodePolyline(coords);
+
+    const result = extractRouteSegments(geometry, 30, [makeManeuver('continue', 0, 1)]);
+    expect(result).toEqual([]);
   });
 });

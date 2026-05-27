@@ -64,6 +64,8 @@ export interface ETARouteSegment {
   endCoord: [number, number];
   distanceMeters: number;
   freeFlowSpeedMph: number;
+  /** Road class of this segment (inferred from route maneuvers when available). */
+  roadClass?: string;
 }
 
 export interface ETAResult {
