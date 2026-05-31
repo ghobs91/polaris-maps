@@ -124,11 +124,14 @@ describe('routeTypeToMode', () => {
 describe('parseGtfsFeed', () => {
   function makeFiles(overrides: Record<string, string> = {}) {
     const defaults: Record<string, string> = {
-      'routes.txt': 'route_id,route_short_name,route_long_name,route_type,route_color\n1,A,Alpha,1,FF0000\n2,B,Beta,3,00FF00',
+      'routes.txt':
+        'route_id,route_short_name,route_long_name,route_type,route_color\n1,A,Alpha,1,FF0000\n2,B,Beta,3,00FF00',
       'stops.txt': 'stop_id,stop_name,stop_lat,stop_lon,location_type\nS1,Main St,40.7,-74.0,1',
       'trips.txt': 'trip_id,route_id,service_id,shape_id\nT1,1,svc1,shape1\nT2,2,svc1,shape2',
-      'stop_times.txt': 'trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT1,08:00:00,08:00:30,S1,1\nT2,09:00:00,09:00:30,S1,1',
-      'shapes.txt': 'shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\nshape1,40.70,-74.00,1\nshape1,40.71,-74.01,2\nshape2,40.72,-74.02,1\nshape2,40.73,-74.03,2',
+      'stop_times.txt':
+        'trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT1,08:00:00,08:00:30,S1,1\nT2,09:00:00,09:00:30,S1,1',
+      'shapes.txt':
+        'shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\nshape1,40.70,-74.00,1\nshape1,40.71,-74.01,2\nshape2,40.72,-74.02,1\nshape2,40.73,-74.03,2',
       'agency.txt': 'agency_name\nTest Agency',
     };
     return new Map(Object.entries({ ...defaults, ...overrides }));
@@ -164,7 +167,7 @@ describe('parseGtfsFeed', () => {
     const feed = parseGtfsFeed(files, 'id', 'provider');
     const shape = feed!.shapes.get('shape1')!;
     expect(shape).toHaveLength(2);
-    expect(shape[0]).toEqual([-74.00, 40.70]);
+    expect(shape[0]).toEqual([-74.0, 40.7]);
     expect(shape[1]).toEqual([-74.01, 40.71]);
   });
 
@@ -178,21 +181,52 @@ describe('parseGtfsFeed', () => {
 // ── convertFeedToLines ───────────────────────────────────────────────
 
 describe('convertFeedToLines', () => {
-  function makeFeedData(overrides: Partial<import('../../src/services/transit/gtfsParser').GtfsFeedData> = {}) {
+  function makeFeedData(
+    overrides: Partial<import('../../src/services/transit/gtfsParser').GtfsFeedData> = {},
+  ) {
     const routes = overrides.routes ?? [
-      { route_id: 'R1', route_short_name: 'A', route_long_name: 'Alpha Line', route_type: 1, route_color: 'FF0000' },
+      {
+        route_id: 'R1',
+        route_short_name: 'A',
+        route_long_name: 'Alpha Line',
+        route_type: 1,
+        route_color: 'FF0000',
+      },
     ];
     const stops = overrides.stops ?? [
-      { stop_id: 'S1', stop_name: 'Station 1', stop_lat: 40.70, stop_lon: -74.00 },
+      { stop_id: 'S1', stop_name: 'Station 1', stop_lat: 40.7, stop_lon: -74.0 },
       { stop_id: 'S2', stop_name: 'Station 2', stop_lat: 40.71, stop_lon: -74.01 },
     ];
     const trips = overrides.trips ?? [
       { trip_id: 'T1', route_id: 'R1', service_id: 'svc', shape_id: 'shape1' },
     ];
-    const shapes = overrides.shapes ?? new Map([['shape1', [[-74.00, 40.70], [-74.01, 40.71], [-74.02, 40.72]] as [number, number][]]]);
+    const shapes =
+      overrides.shapes ??
+      new Map([
+        [
+          'shape1',
+          [
+            [-74.0, 40.7],
+            [-74.01, 40.71],
+            [-74.02, 40.72],
+          ] as [number, number][],
+        ],
+      ]);
     const stopTimes = overrides.stopTimes ?? [
-      { trip_id: 'T1', arrival_time: '08:00', departure_time: '08:01', stop_id: 'S1', stop_sequence: 1 },
-      { trip_id: 'T1', arrival_time: '08:10', departure_time: '08:11', stop_id: 'S2', stop_sequence: 2 },
+      {
+        trip_id: 'T1',
+        arrival_time: '08:00',
+        departure_time: '08:01',
+        stop_id: 'S1',
+        stop_sequence: 1,
+      },
+      {
+        trip_id: 'T1',
+        arrival_time: '08:10',
+        departure_time: '08:11',
+        stop_id: 'S2',
+        stop_sequence: 2,
+      },
     ];
 
     return {
@@ -207,7 +241,10 @@ describe('convertFeedToLines', () => {
       tripIndex: new Map(trips.map((t) => [t.trip_id, t])),
       stopIndex: new Map(stops.map((s) => [s.stop_id, s])),
       routeIndex: new Map(routes.map((r) => [r.route_id, r])),
-      stopTrips: new Map([['S1', ['T1']], ['S2', ['T1']]]),
+      stopTrips: new Map([
+        ['S1', ['T1']],
+        ['S2', ['T1']],
+      ]),
       ...overrides,
     };
   }
@@ -245,7 +282,7 @@ describe('convertFeedToLines', () => {
 
   it('skips routes with less than 2 geometry points', async () => {
     const feed = makeFeedData({
-      shapes: new Map([['shape1', [[-74.00, 40.70]] as [number, number][]]]),
+      shapes: new Map([['shape1', [[-74.0, 40.7]] as [number, number][]]]),
     });
     const lines = await convertFeedToLines(feed, config);
     expect(lines).toHaveLength(0);
@@ -293,11 +330,7 @@ describe('extractZipTexts', () => {
    *   - n bytes: extra field
    *   - n bytes: compressed data
    */
-  function buildZipEntry(
-    fileName: string,
-    content: string,
-    compress = true,
-  ): Uint8Array {
+  function buildZipEntry(fileName: string, content: string, compress = true): Uint8Array {
     const encoder = new TextEncoder();
     const contentBytes = encoder.encode(content);
     const nameBytes = encoder.encode(fileName);

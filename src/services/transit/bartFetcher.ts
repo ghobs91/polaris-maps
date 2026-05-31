@@ -125,17 +125,20 @@ export async function fetchBartLines(): Promise<TransitRouteLine[]> {
         const color = xmlTag(el, 'color');
         const hexcolor = xmlTag(el, 'hexcolor');
         if (name && number) {
-          routes.push({ name, abbr: abbr ?? '', number, color: color ?? '', hexcolor: hexcolor ?? '' });
+          routes.push({
+            name,
+            abbr: abbr ?? '',
+            number,
+            color: color ?? '',
+            hexcolor: hexcolor ?? '',
+          });
         }
       }
 
       // 2. Get detailed route info for each visible route (concurrent, limit 4)
       // Skip combined/unusual route numbers
       const mainRoutes = routes.filter(
-        (r) =>
-          r.name &&
-          !r.name.includes('Combined') &&
-          !r.name.includes('Special'),
+        (r) => r.name && !r.name.includes('Combined') && !r.name.includes('Special'),
       );
 
       const lines: TransitRouteLine[] = [];
@@ -148,9 +151,7 @@ export async function fetchBartLines(): Promise<TransitRouteLine[]> {
         const results = await Promise.all(
           batch.map(async (route): Promise<TransitRouteLine | null> => {
             try {
-              const infoXml = await bartXmlFetch(
-                `route.aspx?cmd=routeinfo&route=${route.number}`,
-              );
+              const infoXml = await bartXmlFetch(`route.aspx?cmd=routeinfo&route=${route.number}`);
               if (!infoXml) return null;
 
               // Parse stations

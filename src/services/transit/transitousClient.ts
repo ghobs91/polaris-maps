@@ -22,7 +22,11 @@ function getBaseUrl(): string {
   return url;
 }
 
-async function motisFetch<T>(path: string, params: Record<string, string>, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
+async function motisFetch<T>(
+  path: string,
+  params: Record<string, string>,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const url = new URL(path, getBaseUrl());
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== '') url.searchParams.set(k, v);

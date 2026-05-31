@@ -7,10 +7,7 @@ import {
   hasCachedLines,
 } from '../services/transit/transitLineFetcher';
 import { getRegionContainingPoint } from '../services/regions/regionRepository';
-import {
-  getOfflineDotGtfsLines,
-  hasOfflineDotGtfsData,
-} from '../services/transit/dotGtfsOffline';
+import { getOfflineDotGtfsLines, hasOfflineDotGtfsData } from '../services/transit/dotGtfsOffline';
 import { isOnline } from '../services/regions/connectivityService';
 import { TRANSIT_FETCH_DEBOUNCE_MS } from '../constants/config';
 

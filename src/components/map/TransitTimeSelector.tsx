@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useTransitStore } from '../../stores/transitStore';
 
@@ -79,12 +77,7 @@ export default function TransitTimeSelector() {
           ]}
           onPress={() => setIsDepartAt(true)}
         >
-          <Text
-            style={[
-              styles.toggleText,
-              { color: isDepartAt ? '#fff' : colors.textSecondary },
-            ]}
-          >
+          <Text style={[styles.toggleText, { color: isDepartAt ? '#fff' : colors.textSecondary }]}>
             Depart
           </Text>
         </TouchableOpacity>
@@ -97,12 +90,7 @@ export default function TransitTimeSelector() {
           ]}
           onPress={() => setIsDepartAt(false)}
         >
-          <Text
-            style={[
-              styles.toggleText,
-              { color: !isDepartAt ? '#fff' : colors.textSecondary },
-            ]}
-          >
+          <Text style={[styles.toggleText, { color: !isDepartAt ? '#fff' : colors.textSecondary }]}>
             Arrive
           </Text>
         </TouchableOpacity>
@@ -119,9 +107,7 @@ export default function TransitTimeSelector() {
         <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>
           {isDepartAt ? 'at' : 'by'}
         </Text>
-        <Text style={[styles.timeValue, { color: colors.primary }]}>
-          {timeLabel}
-        </Text>
+        <Text style={[styles.timeValue, { color: colors.primary }]}>{timeLabel}</Text>
       </TouchableOpacity>
 
       {/* Reset to now */}

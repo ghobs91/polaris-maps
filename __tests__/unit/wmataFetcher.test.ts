@@ -12,7 +12,12 @@ describe('wmataFetcher', () => {
 
   const makeLine = (code: string, name: string) => ({
     Lines: [
-      { LineCode: code, DisplayName: name, InternalDestination1: 'End 1', InternalDestination2: 'End 2' },
+      {
+        LineCode: code,
+        DisplayName: name,
+        InternalDestination1: 'End 1',
+        InternalDestination2: 'End 2',
+      },
     ],
   });
 

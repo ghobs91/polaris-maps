@@ -38,7 +38,11 @@ global.fetch = mockFetch as any;
 
 import { fetchDotGtfsLines, clearDotGtfsCache } from '../../src/services/transit/dotGtfsFetcher';
 import { lookupDotGtfsFeeds } from '../../src/services/transit/dotGtfsIndex';
-import { extractZipTexts, parseGtfsFeed, convertFeedToLines } from '../../src/services/transit/gtfsParser';
+import {
+  extractZipTexts,
+  parseGtfsFeed,
+  convertFeedToLines,
+} from '../../src/services/transit/gtfsParser';
 import type { DotGtfsFeedEntry } from '../../src/services/transit/dotGtfsIndex';
 
 function makeFeed(overrides: Partial<DotGtfsFeedEntry> = {}): DotGtfsFeedEntry {
@@ -69,8 +73,24 @@ function makeGtfsFeedData() {
     routes: [{ route_id: 'R1', route_short_name: '1', route_long_name: 'Line 1', route_type: 3 }],
     stops: [{ stop_id: 'S1', stop_name: 'Stop 1', stop_lat: 30.0, stop_lon: -97.0 }],
     trips: [{ trip_id: 'T1', route_id: 'R1', service_id: 'svc', shape_id: 'shape1' }],
-    stopTimes: [{ trip_id: 'T1', arrival_time: '08:00', departure_time: '08:01', stop_id: 'S1', stop_sequence: 1 }],
-    shapes: new Map([['shape1', [[-97.0, 30.0], [-97.01, 30.01]] as [number, number][]]]),
+    stopTimes: [
+      {
+        trip_id: 'T1',
+        arrival_time: '08:00',
+        departure_time: '08:01',
+        stop_id: 'S1',
+        stop_sequence: 1,
+      },
+    ],
+    shapes: new Map([
+      [
+        'shape1',
+        [
+          [-97.0, 30.0],
+          [-97.01, 30.01],
+        ] as [number, number][],
+      ],
+    ]),
     tripIndex: new Map(),
     stopIndex: new Map(),
     routeIndex: new Map(),
@@ -115,7 +135,12 @@ describe('dotGtfsFetcher', () => {
     it('sets loading state with count for multiple agencies', async () => {
       const feeds = [
         makeFeed(),
-        makeFeed({ agencyName: 'Other Agency', id: '00002:MB', ntdId: '00002', weblink: 'https://example.com/other.zip' }),
+        makeFeed({
+          agencyName: 'Other Agency',
+          id: '00002:MB',
+          ntdId: '00002',
+          weblink: 'https://example.com/other.zip',
+        }),
       ];
       (lookupDotGtfsFeeds as jest.Mock).mockResolvedValue(feeds);
       mockFetch.mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as any);
@@ -147,7 +172,10 @@ describe('dotGtfsFetcher', () => {
       const feed = makeFeed();
       (lookupDotGtfsFeeds as jest.Mock).mockResolvedValue([feed]);
 
-      mockFetch.mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) } as any);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      } as any);
 
       const filesMap = new Map([['routes.txt', 'mock']]);
       (extractZipTexts as jest.Mock).mockResolvedValueOnce(filesMap);
@@ -173,7 +201,10 @@ describe('dotGtfsFetcher', () => {
       (lookupDotGtfsFeeds as jest.Mock).mockResolvedValue([feed]);
 
       // First call: download and cache
-      mockFetch.mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) } as any);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      } as any);
       (extractZipTexts as jest.Mock).mockResolvedValueOnce(new Map([['routes.txt', 'mock']]));
       (parseGtfsFeed as jest.Mock).mockReturnValueOnce(makeGtfsFeedData());
       (convertFeedToLines as jest.Mock).mockResolvedValueOnce([]);
@@ -197,7 +228,10 @@ describe('dotGtfsFetcher', () => {
       (lookupDotGtfsFeeds as jest.Mock).mockResolvedValue([feed]);
 
       // First call: download and cache
-      mockFetch.mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) } as any);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      } as any);
       (extractZipTexts as jest.Mock).mockResolvedValueOnce(new Map([['routes.txt', 'mock']]));
       (parseGtfsFeed as jest.Mock).mockReturnValueOnce(makeGtfsFeedData());
       (convertFeedToLines as jest.Mock).mockResolvedValueOnce([]);
@@ -208,7 +242,10 @@ describe('dotGtfsFetcher', () => {
       clearDotGtfsCache();
 
       // Second call: should re-download because cache was cleared
-      mockFetch.mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) } as any);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      } as any);
       (extractZipTexts as jest.Mock).mockResolvedValueOnce(new Map([['routes.txt', 'mock']]));
       (parseGtfsFeed as jest.Mock).mockReturnValueOnce(makeGtfsFeedData());
       (convertFeedToLines as jest.Mock).mockResolvedValueOnce([]);

@@ -64,7 +64,9 @@ function loadFromPersistentCache(label: string): TransitRouteLine[] | null {
       storage.delete(key);
       return null;
     }
-    console.warn(`[gtfs-static] ${label} loaded from persistent cache (${entry.lines.length} lines)`);
+    console.warn(
+      `[gtfs-static] ${label} loaded from persistent cache (${entry.lines.length} lines)`,
+    );
     return entry.lines;
   } catch {
     return null;
@@ -160,7 +162,14 @@ async function fetchAndParseMobilityFeed(feed: TransitFeed): Promise<GtfsFeedDat
 
     const buffer = await res.arrayBuffer();
 
-    const needed = ['agency.txt', 'routes.txt', 'stops.txt', 'trips.txt', 'stop_times.txt', 'shapes.txt'];
+    const needed = [
+      'agency.txt',
+      'routes.txt',
+      'stops.txt',
+      'trips.txt',
+      'stop_times.txt',
+      'shapes.txt',
+    ];
     const files = await extractZipTexts(buffer, needed);
 
     const agencyRow = parseCsv(files.get('agency.txt') ?? '')[0];
@@ -216,9 +225,7 @@ const gtfsLineFetchInFlight = new Map<string, Promise<TransitRouteLine[]>>();
  *
  * Returns an empty array on failure — never throws.
  */
-export async function fetchGtfsStaticLines(
-  config: GtfsFetcherConfig,
-): Promise<TransitRouteLine[]> {
+export async function fetchGtfsStaticLines(config: GtfsFetcherConfig): Promise<TransitRouteLine[]> {
   const cacheKey = config.label;
 
   // 1. Check in-memory cache
@@ -281,11 +288,15 @@ async function fetchFeedFromUrl(
     // Only extract files needed for line geometry (skip stop_times.txt — 192MB uncompressed for CTA, kills perf)
     const needed = ['routes.txt', 'stops.txt', 'trips.txt', 'shapes.txt'];
     const files = await extractZipTexts(buffer, needed);
-    console.warn(`[gtfs-static] ${label} extracted files: ${[...files.keys()].join(', ') || '(none)'}`);
+    console.warn(
+      `[gtfs-static] ${label} extracted files: ${[...files.keys()].join(', ') || '(none)'}`,
+    );
 
     const feed = parseGtfsFeed(files, `direct:${label}`, label);
     if (feed) {
-      console.warn(`[gtfs-static] ${label} parsed: ${feed.routes.length} routes, ${feed.shapes.size} shapes`);
+      console.warn(
+        `[gtfs-static] ${label} parsed: ${feed.routes.length} routes, ${feed.shapes.size} shapes`,
+      );
     } else {
       console.warn(`[gtfs-static] ${label} parseGtfsFeed returned null (no routes.txt?)`);
     }

@@ -185,7 +185,9 @@ export async function extractZipTexts(
     const dataOffset = offset + 30 + nameLen + extraLen;
 
     // Match by basename (some agencies nest files in subdirs, e.g. google_transit/routes.txt)
-    const baseName = fileName.includes('/') ? fileName.slice(fileName.lastIndexOf('/') + 1) : fileName;
+    const baseName = fileName.includes('/')
+      ? fileName.slice(fileName.lastIndexOf('/') + 1)
+      : fileName;
     if (fileNames.includes(baseName)) {
       const rawData = new Uint8Array(buffer, dataOffset, compressedSize);
 
@@ -300,10 +302,9 @@ export function parseGtfsFeed(
   if (allRoutes.length === 0) return null;
 
   // Apply route filter
-  const filteredRoutes =
-    options?.routeTypeFilter
-      ? allRoutes.filter((r) => options.routeTypeFilter!.includes(r.route_type))
-      : allRoutes;
+  const filteredRoutes = options?.routeTypeFilter
+    ? allRoutes.filter((r) => options.routeTypeFilter!.includes(r.route_type))
+    : allRoutes;
 
   if (filteredRoutes.length === 0) return null;
 
@@ -435,7 +436,9 @@ export async function convertFeedToLines(
     ? feed.routes.filter((r) => new Set(config.routeTypeFilter).has(r.route_type))
     : feed.routes;
   if (filteredRoutes.length === 0) {
-    console.warn(`[gtfs] convertFeedToLines: no routes after filtering (${feed.feedName}, ${feed.routes.length} total routes)`);
+    console.warn(
+      `[gtfs] convertFeedToLines: no routes after filtering (${feed.feedName}, ${feed.routes.length} total routes)`,
+    );
     return [];
   }
 

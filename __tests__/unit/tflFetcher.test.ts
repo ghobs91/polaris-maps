@@ -31,11 +31,15 @@ describe('tflFetcher', () => {
 
   it('fetches lines for all rail modes and returns TransitRouteLine[]', async () => {
     const tubeLine = {
-      id: 'bakerloo', name: 'Bakerloo', modeName: 'tube',
+      id: 'bakerloo',
+      name: 'Bakerloo',
+      modeName: 'tube',
       lineStatuses: [{ statusSeverity: 10 }],
     };
     const dlrLine = {
-      id: 'dlr', name: 'DLR', modeName: 'dlr',
+      id: 'dlr',
+      name: 'DLR',
+      modeName: 'dlr',
       lineStatuses: [{ statusSeverity: 10 }],
     };
 
@@ -45,7 +49,8 @@ describe('tflFetcher', () => {
       // First 5 calls are mode endpoint calls (tube, dlr, overground, elizabeth-line, tram)
       if (callCount <= 5) {
         const idx = callCount;
-        if (idx === 1) return Promise.resolve({ ok: true, json: () => Promise.resolve([tubeLine]) });
+        if (idx === 1)
+          return Promise.resolve({ ok: true, json: () => Promise.resolve([tubeLine]) });
         if (idx === 2) return Promise.resolve({ ok: true, json: () => Promise.resolve([dlrLine]) });
         return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
       }
@@ -54,16 +59,18 @@ describe('tflFetcher', () => {
       if (callCount === 6) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ lineStrings: ['[[51.5,-0.1],[51.51,-0.09],[51.52,-0.08]]'] }),
+          json: () =>
+            Promise.resolve({ lineStrings: ['[[51.5,-0.1],[51.51,-0.09],[51.52,-0.08]]'] }),
         });
       }
       if (callCount === 7) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve([
-            { id: '1', commonName: 'Station A', lat: 51.5, lon: -0.1 },
-            { id: '2', commonName: 'Station B', lat: 51.52, lon: -0.08 },
-          ]),
+          json: () =>
+            Promise.resolve([
+              { id: '1', commonName: 'Station A', lat: 51.5, lon: -0.1 },
+              { id: '2', commonName: 'Station B', lat: 51.52, lon: -0.08 },
+            ]),
         });
       }
       if (callCount === 8) {
@@ -75,10 +82,11 @@ describe('tflFetcher', () => {
       if (callCount === 9) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve([
-            { id: '3', commonName: 'Station C', lat: 51.48, lon: -0.05 },
-            { id: '4', commonName: 'Station D', lat: 51.49, lon: -0.04 },
-          ]),
+          json: () =>
+            Promise.resolve([
+              { id: '3', commonName: 'Station C', lat: 51.48, lon: -0.05 },
+              { id: '4', commonName: 'Station D', lat: 51.49, lon: -0.04 },
+            ]),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });

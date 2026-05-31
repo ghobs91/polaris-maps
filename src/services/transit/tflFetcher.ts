@@ -160,9 +160,7 @@ async function doFetchTflLines(): Promise<TransitRouteLine[]> {
 
     for (const batch of batches) {
       const batchResults = await Promise.all(
-        batch.map((line) =>
-          fetchOneTflLine(line, controller.signal).catch(() => null),
-        ),
+        batch.map((line) => fetchOneTflLine(line, controller.signal).catch(() => null)),
       );
 
       for (const line of batchResults) {
