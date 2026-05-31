@@ -1,5 +1,12 @@
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
-import type { NativeMapKitPoi } from './NativePolarisMapKit';
+import type { NativeMapKitPoi, NativeMapKitRoute } from './NativePolarisMapKit';
+import type {
+  ValhallaRoute,
+  ValhallaLeg,
+  ValhallaManeuver,
+  CostingModel,
+  ManeuverType,
+} from '../../models/route';
 
 export type { NativeMapKitPoi };
 
@@ -82,4 +89,69 @@ export async function searchNearby(
 ): Promise<NativeMapKitPoi[]> {
   if (!isAvailable) return [];
   return NativeModule!.searchNearby(query, latitude, longitude, radiusMeters);
+}
+
+// ── Routing via MKDirections (third-tier fallback) ─────────────────────────
+
+/** Returns true if the MapKit native module is available (iOS only). */
+export function isMapKitAvailable(): boolean {
+  return isAvailable;
+}
+
+function mapNativeRoute(native: NativeMapKitRoute): ValhallaRoute {
+  return {
+    summary: {
+      distanceMeters: native.summary.distance_meters,
+      durationSeconds: native.summary.duration_seconds,
+      hasToll: native.summary.has_toll,
+      hasFerry: native.summary.has_ferry,
+    },
+    legs: native.legs.map(
+      (leg): ValhallaLeg => ({
+        distanceMeters: leg.distance_meters,
+        durationSeconds: leg.duration_seconds,
+        maneuvers: leg.maneuvers.map(
+          (m): ValhallaManeuver => ({
+            type: m.type as ManeuverType,
+            instruction: m.instruction,
+            distanceMeters: m.distance_meters,
+            durationSeconds: m.duration_seconds,
+            beginShapeIndex: m.begin_shape_index,
+            endShapeIndex: m.end_shape_index,
+            verbalPreTransition: m.verbal_pre_transition,
+          }),
+        ),
+      }),
+    ),
+    geometry: native.geometry,
+    boundingBox: native.bounding_box,
+  };
+}
+
+/**
+ * Compute a route using Apple's MapKit MKDirections API.
+ *
+ * This is a last-resort fallback — it requires network access to Apple's
+ * servers but does not depend on any third-party routing service.
+ */
+export async function computeRoute(
+  waypoints: Array<{ lat: number; lng: number }>,
+  costing: CostingModel,
+): Promise<ValhallaRoute[]> {
+  if (!isAvailable) throw new Error('MapKit routing is not available on this platform');
+  const results = await NativeModule!.computeRoute(waypoints, costing);
+  return results.map(mapNativeRoute);
+}
+
+/**
+ * Compute a reroute using Apple's MapKit MKDirections API.
+ */
+export async function reroute(
+  currentPosition: { lat: number; lng: number; bearing: number },
+  destination: { lat: number; lng: number },
+  costing: CostingModel,
+): Promise<ValhallaRoute> {
+  if (!isAvailable) throw new Error('MapKit routing is not available on this platform');
+  const result = await NativeModule!.reroute(currentPosition, destination, costing);
+  return mapNativeRoute(result);
 }

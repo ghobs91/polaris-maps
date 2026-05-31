@@ -1,5 +1,7 @@
 import * as Valhalla from '../../native/valhalla';
+import * as MapKitRouting from '../../native/mapkit';
 import { isOnline } from '../regions/connectivityService';
+import { Platform } from 'react-native';
 import type {
   ValhallaRoute,
   ValhallaManeuver,
@@ -241,11 +243,67 @@ export async function computeRoute(
   },
 ): Promise<ValhallaRoute[]> {
   if (initialized) {
-    return Valhalla.computeRoute(waypoints, costing, options);
+    try {
+      return await Valhalla.computeRoute(waypoints, costing, options);
+    } catch (nativeErr) {
+      // Native engine failed (e.g. route outside tile coverage).
+      // Fall back to online Valhalla if connected.
+      if (isOnline()) {
+        try {
+          return await computeRouteOnline(waypoints, costing, options);
+        } catch {
+          // Online also failed — try MapKit as last resort (iOS only)
+          if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+            try {
+              return await MapKitRouting.computeRoute(waypoints, costing);
+            } catch {
+              throw nativeErr;
+            }
+          }
+          throw nativeErr;
+        }
+      }
+      // Offline and native failed — try MapKit as last resort
+      if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+        try {
+          return await MapKitRouting.computeRoute(waypoints, costing);
+        } catch {
+          throw nativeErr;
+        }
+      }
+      throw nativeErr;
+    }
   }
   // Local tiles not loaded — fall back to online Valhalla if connected
-  if (!isOnline()) throw new Error('No offline routing data and no internet connection.');
-  return computeRouteOnline(waypoints, costing, options);
+  if (!isOnline()) {
+    // No internet and no offline tiles — try MapKit as last resort
+    if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+      return MapKitRouting.computeRoute(waypoints, costing);
+    }
+    throw new Error('No offline routing data and no internet connection.');
+  }
+  try {
+    return await computeRouteOnline(waypoints, costing, options);
+  } catch (onlineErr) {
+    // Online failed — try native engine as a last resort (it may still work
+    // if tiles were loaded in a previous session or by another code path).
+    if (initialized) {
+      try {
+        return await Valhalla.computeRoute(waypoints, costing, options);
+      } catch {
+        // Native also failed — try MapKit
+        if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+          return MapKitRouting.computeRoute(waypoints, costing);
+        }
+        throw onlineErr;
+      }
+    }
+    // Try MapKit as final fallback
+    if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+      return MapKitRouting.computeRoute(waypoints, costing);
+    }
+    throw onlineErr;
+  }
 }
 
 export async function reroute(
@@ -253,14 +311,72 @@ export async function reroute(
   destination: { lat: number; lng: number },
   costing: CostingModel,
 ): Promise<ValhallaRoute> {
-  if (initialized) return Valhalla.reroute(currentPosition, destination, costing);
-  if (!isOnline()) throw new Error('No offline routing data and no internet connection.');
-  const routes = await computeRouteOnline(
-    [{ lat: currentPosition.lat, lng: currentPosition.lng }, destination],
-    costing,
-  );
-  if (!routes.length) throw new Error('No route found');
-  return routes[0];
+  const waypoints = [{ lat: currentPosition.lat, lng: currentPosition.lng }, destination];
+
+  if (initialized) {
+    try {
+      return await Valhalla.reroute(currentPosition, destination, costing);
+    } catch (nativeErr) {
+      // Native reroute failed — try online as fallback
+      if (isOnline()) {
+        try {
+          const routes = await computeRouteOnline(waypoints, costing);
+          if (!routes.length) throw nativeErr;
+          return routes[0];
+        } catch {
+          // Online also failed — try MapKit as last resort
+          if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+            try {
+              return await MapKitRouting.reroute(currentPosition, destination, costing);
+            } catch {
+              throw nativeErr;
+            }
+          }
+          throw nativeErr;
+        }
+      }
+      // Offline and native failed — try MapKit as last resort
+      if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+        try {
+          return await MapKitRouting.reroute(currentPosition, destination, costing);
+        } catch {
+          throw nativeErr;
+        }
+      }
+      throw nativeErr;
+    }
+  }
+
+  if (!isOnline()) {
+    // No internet and no offline tiles — try MapKit as last resort
+    if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+      return MapKitRouting.reroute(currentPosition, destination, costing);
+    }
+    throw new Error('No offline routing data and no internet connection.');
+  }
+  try {
+    const routes = await computeRouteOnline(waypoints, costing);
+    if (!routes.length) throw new Error('No route found');
+    return routes[0];
+  } catch (onlineErr) {
+    // Online reroute failed — try native engine as a last resort
+    if (initialized) {
+      try {
+        return await Valhalla.reroute(currentPosition, destination, costing);
+      } catch {
+        // Native also failed — try MapKit
+        if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+          return MapKitRouting.reroute(currentPosition, destination, costing);
+        }
+        throw onlineErr;
+      }
+    }
+    // Try MapKit as final fallback
+    if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+      return MapKitRouting.reroute(currentPosition, destination, costing);
+    }
+    throw onlineErr;
+  }
 }
 
 export async function updateTrafficSpeeds(speeds: Record<string, number>): Promise<void> {

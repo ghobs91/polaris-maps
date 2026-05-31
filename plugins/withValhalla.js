@@ -20,6 +20,14 @@ const NATIVE_FILES = [
     src: path.join(NATIVE_SRC, 'PolarisMaps', 'PolarisValhalla.m'),
     dest: path.join(IOS_DIR, 'PolarisMaps', 'PolarisValhalla.m'),
   },
+  {
+    src: path.join(NATIVE_SRC, 'PolarisMaps', 'PolarisMapKit.swift'),
+    dest: path.join(IOS_DIR, 'PolarisMaps', 'PolarisMapKit.swift'),
+  },
+  {
+    src: path.join(NATIVE_SRC, 'PolarisMaps', 'PolarisMapKit.m'),
+    dest: path.join(IOS_DIR, 'PolarisMaps', 'PolarisMapKit.m'),
+  },
 ];
 
 function generateUuid() {
@@ -39,6 +47,69 @@ function copyFiles() {
     }
     fs.copyFileSync(src, dest);
     console.log(`[withValhalla] Copied ${src} → ${dest}`);
+  }
+}
+
+/**
+ * Registers native source files in the Xcode project so they get compiled.
+ * Adds PBXFileReference and PBXBuildFile entries, and adds files to the
+ * PolarisMaps group and Sources build phase.
+ */
+function registerNativeFiles() {
+  const pbxprojPath = path.join(IOS_DIR, 'PolarisMaps.xcodeproj', 'project.pbxproj');
+  if (!fs.existsSync(pbxprojPath)) {
+    console.warn('[withValhalla] project.pbxproj not found at', pbxprojPath);
+    return;
+  }
+
+  let content = fs.readFileSync(pbxprojPath, 'utf8');
+  let modified = false;
+
+  for (const { dest } of NATIVE_FILES) {
+    const fileName = path.basename(dest);
+    const relativePath = dest.replace(/^ios\//, '');
+
+    // Skip if already registered
+    if (content.includes(`/* ${fileName} */`)) {
+      continue;
+    }
+
+    const fileRefUuid = generateUuid();
+    const buildFileUuid = generateUuid();
+    const fileType = fileName.endsWith('.swift') ? 'sourcecode.swift' : 'sourcecode.c.objc';
+
+    // 1. Add PBXBuildFile entry
+    const buildFileEntry = `\t\t${buildFileUuid} /* ${fileName} in Sources */ = {isa = PBXBuildFile; fileRef = ${fileRefUuid} /* ${fileName} */; };`;
+    content = content.replace(
+      /(\/\* End PBXBuildFile section \*\/)/,
+      `${buildFileEntry}\n$1`
+    );
+
+    // 2. Add PBXFileReference entry
+    const fileRefEntry = `\t\t${fileRefUuid} /* ${fileName} */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = ${fileType}; name = "${fileName}"; path = "${relativePath}"; sourceTree = "<group>"; };`;
+    content = content.replace(
+      /(\/\* End PBXFileReference section \*\/)/,
+      `${fileRefEntry}\n$1`
+    );
+
+    // 3. Add to PolarisMaps group (after noop-file.swift)
+    content = content.replace(
+      /(7B2D9EF040C4414289F6A7F8 \/\* noop-file\.swift \*\/,)/,
+      `$1\n\t\t\t\t${fileRefUuid} /* ${fileName} */,`
+    );
+
+    // 4. Add to Sources build phase (after noop-file.swift)
+    content = content.replace(
+      /(3F5AFB4873C74F8F8F5AEB64 \/\* noop-file\.swift in Sources \*\/,)/,
+      `$1\n\t\t\t\t${buildFileUuid} /* ${fileName} in Sources */,`
+    );
+
+    modified = true;
+    console.log(`[withValhalla] Registered ${fileName} in Xcode project`);
+  }
+
+  if (modified) {
+    fs.writeFileSync(pbxprojPath, content);
   }
 }
 
@@ -231,6 +302,7 @@ function withValhalla(config) {
     'ios',
     (cfg) => {
       copyFiles();
+      registerNativeFiles();
       addSpmPackage();
       patchPodfile();
       return cfg;

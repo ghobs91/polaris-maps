@@ -4,6 +4,20 @@ jest.mock('../../src/native/valhalla', () => ({
   computeRoute: jest.fn(),
   reroute: jest.fn(),
 }));
+jest.mock('../../src/native/mapkit', () => ({
+  isMapKitAvailable: jest.fn().mockReturnValue(false),
+  computeRoute: jest.fn(),
+  reroute: jest.fn(),
+  searchPOI: jest.fn(),
+  searchPlace: jest.fn(),
+  searchPlaceAll: jest.fn(),
+  searchNearby: jest.fn(),
+}));
+jest.mock('react-native', () => ({
+  Platform: { OS: 'ios' },
+  NativeModules: {},
+  TurboModuleRegistry: { get: () => null },
+}));
 jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: jest.fn().mockReturnValue(true),
 }));
