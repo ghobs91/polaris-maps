@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { TextInput, View, StyleSheet } from 'react-native';
+import { TextInput, View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 
 interface SearchBarProps {
@@ -11,6 +12,7 @@ interface SearchBarProps {
 export function SearchBar({ onSearch, placeholder = 'Search for an address...' }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   const handleChangeText = useCallback(
     (text: string) => {
@@ -20,6 +22,57 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
     [onSearch],
   );
 
+  // Handle speech recognition results
+  useSpeechRecognitionEvent('result', (event) => {
+    const transcript = event.results[0]?.transcript ?? '';
+    if (transcript) {
+      setQuery(transcript);
+      onSearch(transcript);
+    }
+    setIsListening(false);
+  });
+
+  useSpeechRecognitionEvent('error', () => {
+    setIsListening(false);
+  });
+
+  useSpeechRecognitionEvent('end', () => {
+    setIsListening(false);
+  });
+
+  const toggleVoiceSearch = useCallback(async () => {
+    if (isListening) {
+      ExpoSpeechRecognitionModule.stop();
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const { granted } = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+      if (!granted) {
+        const { granted: requested } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+        if (!requested) return;
+      }
+    } catch {
+      return;
+    }
+
+    setQuery('');
+    setIsListening(true);
+
+    try {
+      ExpoSpeechRecognitionModule.start({
+        lang: 'en-US',
+        interimResults: false,
+        maxAlternatives: 1,
+        addsPunctuation: true,
+        iosTaskHint: 'search',
+      });
+    } catch {
+      setIsListening(false);
+    }
+  }, [isListening]);
+
   return (
     <View style={styles.container}>
       <View style={[styles.inputContainer, isFocused && styles.inputContainerFocused]}>
@@ -28,14 +81,30 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
           style={styles.input}
           value={query}
           onChangeText={handleChangeText}
-          placeholder={placeholder}
+          placeholder={isListening ? 'Listening...' : placeholder}
           placeholderTextColor={colors.textSecondary}
           autoCorrect={false}
           clearButtonMode="while-editing"
           returnKeyType="search"
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
+          accessibilityLabel="Search"
+          accessibilityHint="Type an address, place name, or category to search"
         />
+        <TouchableOpacity
+          onPress={toggleVoiceSearch}
+          style={[styles.micButton, isListening && styles.micButtonActive]}
+          activeOpacity={0.7}
+          accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
+          accessibilityHint="Tap to search by voice"
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name={isListening ? 'mic' : 'mic-outline'}
+            size={20}
+            color={isListening ? colors.error : colors.textSecondary}
+          />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -68,5 +137,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm + 2,
     color: colors.text,
+  },
+  micButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.xs,
+  },
+  micButtonActive: {
+    backgroundColor: 'rgba(239,68,68,0.12)',
   },
 });

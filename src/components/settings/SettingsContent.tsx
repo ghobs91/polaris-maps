@@ -9,7 +9,7 @@ import {
   TextInput,
   Linking,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
@@ -54,8 +54,10 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const permissions = useSettingsStore((s) => s.permissions);
   const themeMode = useSettingsStore((s) => s.themeMode);
   const voiceGuidanceEnabled = useSettingsStore((s) => s.voiceGuidanceEnabled);
+  const routePreferences = useSettingsStore((s) => s.routePreferences);
   const setResourceLimits = useSettingsStore((s) => s.setResourceLimits);
   const setPermissions = useSettingsStore((s) => s.setPermissions);
+  const setRoutePreferences = useSettingsStore((s) => s.setRoutePreferences);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const setVoiceGuidanceEnabled = useSettingsStore((s) => s.setVoiceGuidanceEnabled);
   const { colors } = useTheme();
@@ -110,6 +112,9 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
               style={[styles.themeChip, themeMode === opt.value && styles.themeChipActive]}
               onPress={() => setThemeMode(opt.value)}
               activeOpacity={0.7}
+              accessibilityLabel={`${opt.label} theme`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: themeMode === opt.value }}
             >
               <Text
                 style={[
@@ -191,6 +196,41 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             value={voiceGuidanceEnabled}
             onValueChange={setVoiceGuidanceEnabled}
             trackColor={{ false: colors.border, true: colors.primary }}
+            accessibilityLabel="Voice Guidance"
+            accessibilityHint="Speak turn-by-turn directions during navigation"
+          />
+        </View>
+
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>Avoid Tolls</Text>
+          <Switch
+            value={routePreferences.avoidTolls}
+            onValueChange={(v) => setRoutePreferences({ avoidTolls: v })}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            accessibilityLabel="Avoid Tolls"
+            accessibilityHint="Prefer routes that avoid toll roads"
+          />
+        </View>
+
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>Avoid Highways</Text>
+          <Switch
+            value={routePreferences.avoidHighways}
+            onValueChange={(v) => setRoutePreferences({ avoidHighways: v })}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            accessibilityLabel="Avoid Highways"
+            accessibilityHint="Prefer routes that avoid highways"
+          />
+        </View>
+
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>Avoid Ferries</Text>
+          <Switch
+            value={routePreferences.avoidFerries}
+            onValueChange={(v) => setRoutePreferences({ avoidFerries: v })}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            accessibilityLabel="Avoid Ferries"
+            accessibilityHint="Prefer routes that avoid ferry crossings"
           />
         </View>
       </View>
@@ -342,6 +382,32 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           />
         </View>
       </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>About</Text>
+        <TouchableOpacity
+          style={styles.linkRow}
+          onPress={() => Linking.openURL('https://polarismaps.com/privacy')}
+          activeOpacity={0.6}
+          accessibilityLabel="Privacy Policy"
+          accessibilityHint="Opens the Polaris Maps privacy policy in your browser"
+          accessibilityRole="link"
+        >
+          <Text style={[styles.linkLabel, { color: colors.text }]}>Privacy Policy</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.linkRow}
+          onPress={() => Linking.openURL('https://polarismaps.com/terms')}
+          activeOpacity={0.6}
+          accessibilityLabel="Terms of Service"
+          accessibilityHint="Opens the Polaris Maps terms of service in your browser"
+          accessibilityRole="link"
+        >
+          <Text style={[styles.linkLabel, { color: colors.text }]}>Terms of Service</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
@@ -442,5 +508,16 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.xs,
+    },
+    linkRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: spacing.sm + 2,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    linkLabel: {
+      ...typography.body,
     },
   });

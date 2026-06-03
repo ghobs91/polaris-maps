@@ -14,11 +14,18 @@ interface PermissionPreferences {
   imagerySharingEnabled: boolean;
 }
 
+export interface RoutePreferences {
+  avoidTolls: boolean;
+  avoidHighways: boolean;
+  avoidFerries: boolean;
+}
+
 export type ThemeMode = 'system' | 'light' | 'dark';
 
 interface SettingsState {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
+  routePreferences: RoutePreferences;
   themeMode: ThemeMode;
   /** When true, display speeds in km/h instead of mph. Default: false (mph). */
   useMetric: boolean;
@@ -26,6 +33,7 @@ interface SettingsState {
   voiceGuidanceEnabled: boolean;
   setResourceLimits: (limits: Partial<ResourceLimits>) => void;
   setPermissions: (prefs: Partial<PermissionPreferences>) => void;
+  setRoutePreferences: (prefs: Partial<RoutePreferences>) => void;
   setThemeMode: (mode: ThemeMode) => void;
   setUseMetric: (metric: boolean) => void;
   setVoiceGuidanceEnabled: (enabled: boolean) => void;
@@ -36,6 +44,7 @@ const STORAGE_KEY = 'settings';
 function loadSettings(): {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
+  routePreferences: RoutePreferences;
   themeMode: ThemeMode;
   useMetric: boolean;
   voiceGuidanceEnabled: boolean;
@@ -44,7 +53,12 @@ function loadSettings(): {
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      return { useMetric: false, voiceGuidanceEnabled: true, ...parsed };
+      return {
+        useMetric: false,
+        voiceGuidanceEnabled: true,
+        routePreferences: { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+        ...parsed,
+      };
     } catch {
       // ignore corrupt data
     }
@@ -61,6 +75,11 @@ function loadSettings(): {
       poiContributionsEnabled: true,
       imagerySharingEnabled: false,
     },
+    routePreferences: {
+      avoidTolls: false,
+      avoidHighways: false,
+      avoidFerries: false,
+    },
     themeMode: 'system',
     useMetric: false,
     voiceGuidanceEnabled: true,
@@ -70,6 +89,7 @@ function loadSettings(): {
 function persistSettings(state: {
   resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
+  routePreferences: RoutePreferences;
   themeMode: ThemeMode;
   useMetric: boolean;
   voiceGuidanceEnabled: boolean;
@@ -87,6 +107,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       persistSettings({
         resourceLimits: updated,
         permissions: get().permissions,
+        routePreferences: get().routePreferences,
         themeMode: get().themeMode,
         useMetric: get().useMetric,
         voiceGuidanceEnabled: get().voiceGuidanceEnabled,
@@ -98,6 +119,19 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       persistSettings({
         resourceLimits: get().resourceLimits,
         permissions: updated,
+        routePreferences: get().routePreferences,
+        themeMode: get().themeMode,
+        useMetric: get().useMetric,
+        voiceGuidanceEnabled: get().voiceGuidanceEnabled,
+      });
+    },
+    setRoutePreferences: (prefs) => {
+      const updated = { ...get().routePreferences, ...prefs };
+      set({ routePreferences: updated });
+      persistSettings({
+        resourceLimits: get().resourceLimits,
+        permissions: get().permissions,
+        routePreferences: updated,
         themeMode: get().themeMode,
         useMetric: get().useMetric,
         voiceGuidanceEnabled: get().voiceGuidanceEnabled,
@@ -108,6 +142,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       persistSettings({
         resourceLimits: get().resourceLimits,
         permissions: get().permissions,
+        routePreferences: get().routePreferences,
         themeMode: mode,
         useMetric: get().useMetric,
         voiceGuidanceEnabled: get().voiceGuidanceEnabled,
@@ -118,6 +153,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       persistSettings({
         resourceLimits: get().resourceLimits,
         permissions: get().permissions,
+        routePreferences: get().routePreferences,
         themeMode: get().themeMode,
         useMetric,
         voiceGuidanceEnabled: get().voiceGuidanceEnabled,
@@ -128,6 +164,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       persistSettings({
         resourceLimits: get().resourceLimits,
         permissions: get().permissions,
+        routePreferences: get().routePreferences,
         themeMode: get().themeMode,
         useMetric: get().useMetric,
         voiceGuidanceEnabled,
