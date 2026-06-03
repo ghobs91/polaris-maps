@@ -382,13 +382,19 @@ out body;`;
     }
   }
 
+  // Yield after JSON parsing — large Overpass responses can have thousands
+  // of elements, and the parsing loop above is synchronous.
+  if (data.elements.length > 100) {
+    await yieldToUI();
+  }
+
   const lines: TransitRouteLine[] = [];
   for (let i = 0; i < relations.length; i++) {
     const line = relationToLine(relations[i], stopNodes);
     if (line) lines.push(line);
-    // Yield every 4 relations so the UI thread stays responsive
+    // Yield every 2 relations so the UI thread stays responsive
     // during heavy Douglas-Peucker simplification of large geometries
-    if ((i + 1) % 4 === 0 && i < relations.length - 1) {
+    if ((i + 1) % 2 === 0 && i < relations.length - 1) {
       await yieldToUI();
     }
   }
@@ -884,13 +890,176 @@ const MEGA_TILE_SIZE = 0.2;
 // ── Public API ──────────────────────────────────────────────────────
 
 /**
+ * Fetch Overpass tiles for the given viewport.
+ *
+ * Extracted from fetchTransitLines so it can run in parallel with
+ * OTP/GTFS fetches.  Results are pushed into the global tile cache
+ * and reported via onProgress after each batch, giving the user
+ * visible transit lines within seconds even when a GTFS download
+ * takes much longer.
+ */
+async function fetchOverpassForViewport(
+  minLat: number,
+  minLng: number,
+  maxLat: number,
+  maxLng: number,
+  onProgress?: (lines: TransitRouteLine[]) => void,
+): Promise<void> {
+  // Cap the fetch area to avoid overwhelming Overpass on very zoomed-out views
+  const MAX_FETCH_SPAN = 0.6;
+  const latSpan = maxLat - minLat;
+  const lngSpan = maxLng - minLng;
+  if (latSpan > MAX_FETCH_SPAN || lngSpan > MAX_FETCH_SPAN) {
+    const cLat = (minLat + maxLat) / 2;
+    const cLng = (minLng + maxLng) / 2;
+    const halfLat = Math.min(latSpan, MAX_FETCH_SPAN) / 2;
+    const halfLng = Math.min(lngSpan, MAX_FETCH_SPAN) / 2;
+    minLat = cLat - halfLat;
+    maxLat = cLat + halfLat;
+    minLng = cLng - halfLng;
+    maxLng = cLng + halfLng;
+  }
+
+  // If a prewarm request is still in flight, abort it
+  cancelPrewarm();
+
+  const tiles = tilesForBounds(minLat, minLng, maxLat, maxLng);
+  const needed = tiles.filter((t) => !fetchedTiles.has(t.key));
+
+  if (needed.length === 0) return;
+
+  if (needed.length <= MAX_INDIVIDUAL_TILES) {
+    // ── Fine-grained path: few tiles → fetch individually ─────────
+
+    // Helper to fetch a single tile and update caches.
+    const fetchOneTile = async (tile: (typeof needed)[0]): Promise<void> => {
+      if (fetchedTiles.has(tile.key)) return;
+
+      let promise = inflight.get(tile.key);
+      if (!promise) {
+        promise = fetchTileWithRetry(tile.minLat, tile.minLng, tile.maxLat, tile.maxLng);
+        inflight.set(tile.key, promise);
+      }
+
+      try {
+        const lines = await promise;
+        tileData.set(tile.key, lines);
+        fetchedTiles.add(tile.key);
+      } catch {
+        // Don't mark as fetched — will retry next time
+      } finally {
+        inflight.delete(tile.key);
+      }
+    };
+
+    // Fetch the first tile individually — it fires immediately with no
+    // rate-limit wait, so the user sees transit lines within seconds
+    // instead of waiting for a full batch of 4 (3 s of rate-limiting
+    // + network time for each).
+    if (needed.length > 0) {
+      await fetchOneTile(needed[0]);
+      if (onProgress) {
+        onProgress(getAllCachedLines());
+      }
+      await yieldToUI();
+    }
+
+    // Remaining tiles in batches of 4
+    const remaining = needed.slice(1);
+    const batches: (typeof remaining)[] = [];
+    for (let i = 0; i < remaining.length; i += 4) {
+      batches.push(remaining.slice(i, i + 4));
+    }
+
+    for (const batch of batches) {
+      await Promise.all(batch.map(fetchOneTile));
+
+      // Push partial results after each batch so lines appear progressively
+      if (onProgress) {
+        onProgress(getAllCachedLines());
+      }
+      // Yield to UI thread so map remains responsive during heavy processing
+      await yieldToUI();
+    }
+  } else {
+    // ── Mega-tile path: many tiles → merge into coarser requests ──
+    // Group needed tiles into mega-tiles (MEGA_TILE_SIZE° grid)
+    const megaTiles = new Map<
+      string,
+      { minLat: number; minLng: number; maxLat: number; maxLng: number; tileKeys: string[] }
+    >();
+
+    for (const tile of needed) {
+      const mLat = Math.floor(tile.minLat / MEGA_TILE_SIZE) * MEGA_TILE_SIZE;
+      const mLng = Math.floor(tile.minLng / MEGA_TILE_SIZE) * MEGA_TILE_SIZE;
+      const mKey = `mega:${mLat.toFixed(2)},${mLng.toFixed(2)}`;
+      let mega = megaTiles.get(mKey);
+      if (!mega) {
+        mega = {
+          minLat: mLat,
+          minLng: mLng,
+          maxLat: mLat + MEGA_TILE_SIZE,
+          maxLng: mLng + MEGA_TILE_SIZE,
+          tileKeys: [],
+        };
+        megaTiles.set(mKey, mega);
+      }
+      mega.tileKeys.push(tile.key);
+    }
+
+    // Fetch mega-tiles with concurrency limit of 2 (larger requests)
+    const megaArr = Array.from(megaTiles.values());
+    const megaBatches: (typeof megaArr)[] = [];
+    for (let i = 0; i < megaArr.length; i += 2) {
+      megaBatches.push(megaArr.slice(i, i + 2));
+    }
+
+    for (const batch of megaBatches) {
+      await Promise.all(
+        batch.map(async (mega) => {
+          // Skip if all constituent tiles already fetched
+          if (mega.tileKeys.every((k) => fetchedTiles.has(k))) return;
+
+          try {
+            const lines = await fetchTileWithRetry(
+              mega.minLat,
+              mega.minLng,
+              mega.maxLat,
+              mega.maxLng,
+            );
+            // Store under a mega key and mark all fine-grained tiles as fetched
+            const megaKey = `mega:${mega.minLat.toFixed(2)},${mega.minLng.toFixed(2)}`;
+            tileData.set(megaKey, lines);
+            for (const tk of mega.tileKeys) {
+              if (!fetchedTiles.has(tk)) {
+                fetchedTiles.add(tk);
+                tileData.set(tk, []);
+              }
+            }
+          } catch {
+            // Will retry on next viewport update
+          }
+        }),
+      );
+
+      if (onProgress) {
+        onProgress(getAllCachedLines());
+      }
+      // Yield to UI thread so map remains responsive during heavy processing
+      await yieldToUI();
+    }
+  }
+}
+
+/**
  * Fetch transit route lines for the current viewport.
  *
- * Only tiles not yet fetched are queried. Previously-fetched tiles are
- * served from the persistent in-memory cache. Results accumulate across
- * calls so the map builds up coverage as the user pans.
+ * Runs OTP/GTFS and Overpass fetches in parallel.  Overpass typically
+ * returns within a few seconds and pushes partial results via onProgress,
+ * so transit lines appear on the map quickly even when a GTFS download
+ * (e.g. Netherlands, Switzerland) takes 30–90 s.
  *
- * Returns the *full accumulated set* of lines across all fetched tiles,
+ * Returns the *full accumulated set* of lines across all sources,
  * globally deduplicated.
  */
 export async function fetchTransitLines(
@@ -900,6 +1069,22 @@ export async function fetchTransitLines(
   maxLng: number,
   onProgress?: (lines: TransitRouteLine[]) => void,
 ): Promise<TransitRouteLine[]> {
+  // ── Start Overpass fetch in parallel for fast initial results ─────
+  // GTFS downloads (especially country-level feeds like Netherlands or
+  // Switzerland) can take 30–90 s.  Overpass typically returns within a
+  // few seconds, so we start it alongside OTP/GTFS and push partial
+  // results via onProgress.  If OTP/GTFS succeeds first, the Overpass
+  // tiles are already cached and won't be re-fetched on future pans.
+  const overpassPromise = fetchOverpassForViewport(
+    minLat,
+    minLng,
+    maxLat,
+    maxLng,
+    onProgress,
+  ).catch(() => {
+    // Overpass failure is non-fatal — OTP/GTFS may still succeed
+  });
+
   // ── Try OTP + BTS Amtrak in parallel (fast, reliable for registry-covered areas)
   // OTP returns the transit network for the region; BTS provides Amtrak
   // routes with real track geometry (OTP's Amtrak shapes are straight lines).
@@ -929,6 +1114,9 @@ export async function fetchTransitLines(
       for (const tile of tilesForBounds(minLat, minLng, maxLat, maxLng)) {
         fetchedTiles.add(tile.key);
       }
+      // Wait for Overpass to finish — it may have already pushed partial
+      // results via onProgress, and its tiles are useful for future pans.
+      await overpassPromise;
       return getAllCachedLines();
     }
 
@@ -943,136 +1131,8 @@ export async function fetchTransitLines(
     // OTP+BTS both failed — fall through to Overpass
   }
 
-  // ── Overpass fallback for regions without an OTP endpoint ─────────
-
-  // Cap the fetch area to avoid overwhelming Overpass on very zoomed-out views
-  const MAX_FETCH_SPAN = 0.6;
-  const latSpan = maxLat - minLat;
-  const lngSpan = maxLng - minLng;
-  if (latSpan > MAX_FETCH_SPAN || lngSpan > MAX_FETCH_SPAN) {
-    const cLat = (minLat + maxLat) / 2;
-    const cLng = (minLng + maxLng) / 2;
-    const halfLat = Math.min(latSpan, MAX_FETCH_SPAN) / 2;
-    const halfLng = Math.min(lngSpan, MAX_FETCH_SPAN) / 2;
-    minLat = cLat - halfLat;
-    maxLat = cLat + halfLat;
-    minLng = cLng - halfLng;
-    maxLng = cLng + halfLng;
-  }
-
-  // If a prewarm request is still in flight, abort it
-  cancelPrewarm();
-
-  const tiles = tilesForBounds(minLat, minLng, maxLat, maxLng);
-  const needed = tiles.filter((t) => !fetchedTiles.has(t.key));
-
-  if (needed.length > 0) {
-    if (needed.length <= MAX_INDIVIDUAL_TILES) {
-      // ── Fine-grained path: few tiles → fetch individually ─────────
-      const batches: (typeof needed)[] = [];
-      for (let i = 0; i < needed.length; i += 4) {
-        batches.push(needed.slice(i, i + 4));
-      }
-
-      for (const batch of batches) {
-        await Promise.all(
-          batch.map(async (tile) => {
-            if (fetchedTiles.has(tile.key)) return;
-
-            let promise = inflight.get(tile.key);
-            if (!promise) {
-              promise = fetchTileWithRetry(tile.minLat, tile.minLng, tile.maxLat, tile.maxLng);
-              inflight.set(tile.key, promise);
-            }
-
-            try {
-              const lines = await promise;
-              tileData.set(tile.key, lines);
-              fetchedTiles.add(tile.key);
-            } catch {
-              // Don't mark as fetched — will retry next time
-            } finally {
-              inflight.delete(tile.key);
-            }
-          }),
-        );
-
-        // Push partial results after each batch so lines appear progressively
-        if (onProgress) {
-          onProgress(getAllCachedLines());
-        }
-        // Yield to UI thread so map remains responsive during heavy processing
-        await yieldToUI();
-      }
-    } else {
-      // ── Mega-tile path: many tiles → merge into coarser requests ──
-      // Group needed tiles into mega-tiles (MEGA_TILE_SIZE° grid)
-      const megaTiles = new Map<
-        string,
-        { minLat: number; minLng: number; maxLat: number; maxLng: number; tileKeys: string[] }
-      >();
-
-      for (const tile of needed) {
-        const mLat = Math.floor(tile.minLat / MEGA_TILE_SIZE) * MEGA_TILE_SIZE;
-        const mLng = Math.floor(tile.minLng / MEGA_TILE_SIZE) * MEGA_TILE_SIZE;
-        const mKey = `mega:${mLat.toFixed(2)},${mLng.toFixed(2)}`;
-        let mega = megaTiles.get(mKey);
-        if (!mega) {
-          mega = {
-            minLat: mLat,
-            minLng: mLng,
-            maxLat: mLat + MEGA_TILE_SIZE,
-            maxLng: mLng + MEGA_TILE_SIZE,
-            tileKeys: [],
-          };
-          megaTiles.set(mKey, mega);
-        }
-        mega.tileKeys.push(tile.key);
-      }
-
-      // Fetch mega-tiles with concurrency limit of 2 (larger requests)
-      const megaArr = Array.from(megaTiles.values());
-      const megaBatches: (typeof megaArr)[] = [];
-      for (let i = 0; i < megaArr.length; i += 2) {
-        megaBatches.push(megaArr.slice(i, i + 2));
-      }
-
-      for (const batch of megaBatches) {
-        await Promise.all(
-          batch.map(async (mega) => {
-            // Skip if all constituent tiles already fetched
-            if (mega.tileKeys.every((k) => fetchedTiles.has(k))) return;
-
-            try {
-              const lines = await fetchTileWithRetry(
-                mega.minLat,
-                mega.minLng,
-                mega.maxLat,
-                mega.maxLng,
-              );
-              // Store under a mega key and mark all fine-grained tiles as fetched
-              const megaKey = `mega:${mega.minLat.toFixed(2)},${mega.minLng.toFixed(2)}`;
-              tileData.set(megaKey, lines);
-              for (const tk of mega.tileKeys) {
-                if (!fetchedTiles.has(tk)) {
-                  fetchedTiles.add(tk);
-                  tileData.set(tk, []);
-                }
-              }
-            } catch {
-              // Will retry on next viewport update
-            }
-          }),
-        );
-
-        if (onProgress) {
-          onProgress(getAllCachedLines());
-        }
-        // Yield to UI thread so map remains responsive during heavy processing
-        await yieldToUI();
-      }
-    }
-  }
+  // ── Wait for Overpass (already running in parallel) ───────────────
+  await overpassPromise;
 
   return getAllCachedLines();
 }

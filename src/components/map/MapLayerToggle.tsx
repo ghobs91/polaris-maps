@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Switch, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Switch,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +24,7 @@ export function MapLayerToggle() {
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
+  const isLoadingLines = useTransitStore((s) => s.isLoadingLines);
   const mapStyle = useMapStore((s) => s.mapStyle);
   const setMapStyle = useMapStore((s) => s.setMapStyle);
 
@@ -58,6 +67,7 @@ export function MapLayerToggle() {
                 onTrafficToggle={setTrafficLayerVisible}
                 transitVisible={transitLayerVisible}
                 onTransitToggle={setTransitLayerVisible}
+                transitLoading={transitLayerVisible && isLoadingLines}
                 mapStyle={mapStyle}
                 onMapStyleChange={setMapStyle}
               />
@@ -78,6 +88,7 @@ export function MapLayerToggle() {
                 onTrafficToggle={setTrafficLayerVisible}
                 transitVisible={transitLayerVisible}
                 onTransitToggle={setTransitLayerVisible}
+                transitLoading={transitLayerVisible && isLoadingLines}
                 mapStyle={mapStyle}
                 onMapStyleChange={setMapStyle}
               />
@@ -94,6 +105,7 @@ function CardContent({
   onTrafficToggle,
   transitVisible,
   onTransitToggle,
+  transitLoading,
   mapStyle,
   onMapStyleChange,
 }: {
@@ -102,6 +114,7 @@ function CardContent({
   onTrafficToggle: (v: boolean) => void;
   transitVisible: boolean;
   onTransitToggle: (v: boolean) => void;
+  transitLoading: boolean;
   mapStyle: 'default' | 'satellite' | 'terrain';
   onMapStyleChange: (style: 'default' | 'satellite' | 'terrain') => void;
 }) {
@@ -169,11 +182,18 @@ function CardContent({
       <View style={styles.row}>
         <Ionicons name="bus" size={18} color="#1A5BA5" style={styles.rowIcon} />
         <Text style={[styles.rowLabel, { color: textColor }]}>Transit</Text>
-        <Switch
-          value={transitVisible}
-          onValueChange={onTransitToggle}
-          trackColor={{ false: isDark ? '#555' : '#767577', true: isDark ? '#409CFF' : '#007AFF' }}
-        />
+        {transitLoading ? (
+          <ActivityIndicator size="small" color={isDark ? '#409CFF' : '#007AFF'} />
+        ) : (
+          <Switch
+            value={transitVisible}
+            onValueChange={onTransitToggle}
+            trackColor={{
+              false: isDark ? '#555' : '#767577',
+              true: isDark ? '#409CFF' : '#007AFF',
+            }}
+          />
+        )}
       </View>
     </>
   );
