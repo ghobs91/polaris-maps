@@ -579,17 +579,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         {/* Suppress raster overlay when traffic is shown on the route line instead */}
         <TrafficOverlay suppressRaster={!!routeGeometry} />
 
-        {/* Navigation marker — Apple Maps-style oval puck with solid arrow */}
-        {navigationMode && navPosition && (
-          <MapLibreGL.PointAnnotation
-            id="navChevron"
-            coordinate={navPosition}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <NavPuck isDark={isDark} />
-          </MapLibreGL.PointAnnotation>
-        )}
-
         {selectedLocation && (
           <MapLibreGL.ShapeSource
             id="selectedLocation"
@@ -615,6 +604,57 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         )}
 
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
+
+        {/* Nav puck rendered as map layers so it tilts with the 3D map view.
+            The background circle and triangle are in separate ShapeSources so
+            the CircleLayer only sees the Point feature (avoids extra
+            circles at the polygon's vertices/centroid). */}
+        {navigationMode && navPosition && (
+          <>
+            <MapLibreGL.ShapeSource
+              id="navPuckCircle"
+              shape={{
+                type: 'Feature',
+                properties: {},
+                geometry: { type: 'Point', coordinates: navPosition },
+              }}
+            >
+              <MapLibreGL.CircleLayer
+                id="navPuckCircleLayer"
+                style={
+                  {
+                    circleRadius: 26,
+                    circleColor: isDark ? 'rgba(44,44,46,0.65)' : 'rgba(255,255,255,0.65)',
+                  } as any
+                }
+              />
+            </MapLibreGL.ShapeSource>
+
+            <MapLibreGL.ShapeSource
+              id="navPuckTriangle"
+              shape={buildNavPuckTriangleGeoJSON(navPosition, navBearing)}
+            >
+              <MapLibreGL.FillLayer
+                id="navPuckTriangleFill"
+                style={
+                  {
+                    fillColor: '#4A8CFF',
+                  } as any
+                }
+              />
+              <MapLibreGL.LineLayer
+                id="navPuckTriangleBorder"
+                style={
+                  {
+                    lineColor: '#FFFFFF',
+                    lineWidth: 3.5,
+                    lineJoin: 'miter',
+                  } as any
+                }
+              />
+            </MapLibreGL.ShapeSource>
+          </>
+        )}
 
         {/* Stop search markers — shown during add-stop flow when user submits search */}
         {stopSearchMarkers.length > 0 && (
@@ -665,73 +705,78 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   );
 });
 
+/**
+ * Build a GeoJSON FeatureCollection for the nav puck triangle (fill + border)
+ * in map-plane coordinates so it tilts correctly when the map is pitched.
+ * The circle background lives in a separate source.
+ */
+function buildNavPuckTriangleGeoJSON(
+  position: [number, number],
+  bearing: number,
+): {
+  type: 'FeatureCollection';
+  features: Array<
+    | {
+        type: 'Feature';
+        properties: Record<string, never>;
+        geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+      }
+    | {
+        type: 'Feature';
+        properties: Record<string, never>;
+        geometry: { type: 'LineString'; coordinates: [number, number][] };
+      }
+  >;
+} {
+  const [lng, lat] = position;
+  const latRad = (lat * Math.PI) / 180;
+  const mPerDegLat = 111320;
+  const mPerDegLng = 111320 * Math.cos(latRad);
+
+  // Tall, narrow arrow: tip extends well forward, base is short and narrow
+  const forwardM = 14;
+  const backM = 4;
+  const halfWidthM = 5.5;
+
+  const rad = (bearing * Math.PI) / 180;
+  const perpRad = rad + Math.PI / 2;
+
+  const tipLng = lng + (forwardM * Math.sin(rad)) / mPerDegLng;
+  const tipLat = lat + (forwardM * Math.cos(rad)) / mPerDegLat;
+
+  const baseCenterLng = lng - (backM * Math.sin(rad)) / mPerDegLng;
+  const baseCenterLat = lat - (backM * Math.cos(rad)) / mPerDegLat;
+
+  const leftLng = baseCenterLng + (halfWidthM * Math.sin(perpRad)) / mPerDegLng;
+  const leftLat = baseCenterLat + (halfWidthM * Math.cos(perpRad)) / mPerDegLat;
+  const rightLng = baseCenterLng - (halfWidthM * Math.sin(perpRad)) / mPerDegLng;
+  const rightLat = baseCenterLat - (halfWidthM * Math.cos(perpRad)) / mPerDegLat;
+
+  const ring: [number, number][] = [
+    [tipLng, tipLat],
+    [leftLng, leftLat],
+    [rightLng, rightLat],
+    [tipLng, tipLat],
+  ];
+
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Polygon', coordinates: [ring] },
+      },
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: ring },
+      },
+    ],
+  };
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
-});
-
-/**
- * Apple Maps-style nav puck: oval circle background with a solid blue arrow.
- * Background colour adapts to light/dark mode.
- */
-function NavPuck({ isDark: dark }: { isDark: boolean }) {
-  return (
-    <View style={[puckStyles.oval, dark ? puckStyles.ovalDark : puckStyles.ovalLight]}>
-      {/* Layer a slightly larger white triangle behind the blue arrow for contrast. */}
-      <View style={puckStyles.arrowBorder} />
-      <View style={puckStyles.arrow} />
-    </View>
-  );
-}
-
-const ARROW_HALF = 11; // half of arrow base width
-const ARROW_H = 18; // arrow height
-const ARROW_BORDER = 2;
-
-const puckStyles = StyleSheet.create({
-  oval: {
-    width: 56,
-    height: 46,
-    borderRadius: 23,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 12,
-  },
-  ovalLight: {
-    backgroundColor: '#FFFFFF',
-  },
-  ovalDark: {
-    backgroundColor: '#2C2C2E',
-  },
-  // ▲ pointing UP — the CSS-border triangle trick
-  arrowBorder: {
-    position: 'absolute',
-    width: 0,
-    height: 0,
-    borderLeftWidth: ARROW_HALF + ARROW_BORDER,
-    borderRightWidth: ARROW_HALF + ARROW_BORDER,
-    borderBottomWidth: ARROW_H + ARROW_BORDER,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: '#FFFFFF',
-    marginBottom: Math.round(ARROW_H / 5),
-  },
-  arrow: {
-    position: 'absolute',
-    width: 0,
-    height: 0,
-    borderLeftWidth: ARROW_HALF,
-    borderRightWidth: ARROW_HALF,
-    borderBottomWidth: ARROW_H,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderBottomColor: '#007AFF',
-    // Visual centroid of a triangle is at 1/3 height from base;
-    // nudge up slightly so arrow looks centered in the oval.
-    marginBottom: Math.round(ARROW_H / 5),
-  },
 });

@@ -2,7 +2,7 @@ import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { haversineMeters } from '../../utils/routeSnap';
 
 /** Default route color when no traffic data is available. */
-export const DEFAULT_ROUTE_COLOR = '#4A90D9';
+export const DEFAULT_ROUTE_COLOR = '#4A8CFF';
 
 /** Display colors for the ETA number based on overall route traffic. */
 export const ETA_COLOR_GREEN = '#4ADE80';

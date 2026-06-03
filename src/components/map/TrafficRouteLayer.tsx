@@ -60,7 +60,7 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
         <MapLibreGL.LineLayer
           id="route-base-line"
           style={{
-            lineColor: '#4A90D9',
+            lineColor: '#4A8CFF',
             lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
             lineCap: 'round',
             lineJoin: 'round',
