@@ -61,7 +61,11 @@ export function NextTurnBanner({
   const displayDistance = distanceToTurnMeters ?? maneuver.distanceMeters;
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      accessibilityRole="summary"
+      accessibilityLabel={`Next turn: ${instruction}, in ${formatDistance(displayDistance)}`}
+    >
       {/* Main turn row */}
       <View style={styles.mainRow}>
         <View style={styles.iconBox}>
@@ -70,11 +74,24 @@ export function NextTurnBanner({
             size={36}
             color="#fff"
             style={rotate !== 0 ? { transform: [{ rotate: `${rotate}deg` }] } : undefined}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
           />
         </View>
         <View style={styles.textBox}>
-          <Text style={styles.distance}>{formatDistance(displayDistance)}</Text>
-          <Text style={styles.instruction} numberOfLines={2}>
+          <Text
+            style={styles.distance}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            {formatDistance(displayDistance)}
+          </Text>
+          <Text
+            style={styles.instruction}
+            numberOfLines={2}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
             {instruction}
           </Text>
         </View>

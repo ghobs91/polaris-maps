@@ -7,6 +7,7 @@ import type {
   ValhallaManeuver,
   ManeuverType,
   CostingModel,
+  LaneGuidance,
 } from '../../models/route';
 
 let initialized = false;
@@ -74,6 +75,43 @@ function valhallaTypeCode(code: number): ManeuverType {
     default:
       return 'continue';
   }
+}
+
+/** Parse Valhalla lane data into our LaneGuidance format.
+ *  Valhalla returns lanes as an array of objects with `active` boolean
+ *  and `direction` string (e.g. "left", "straight", "right"). */
+function parseLaneGuidance(
+  lanes: Array<Record<string, unknown>> | undefined,
+): LaneGuidance | undefined {
+  if (!lanes || lanes.length === 0) return undefined;
+
+  const activeLanes: number[] = [];
+  const laneDirections: LaneGuidance['laneDirections'] = [];
+
+  for (let i = 0; i < lanes.length; i++) {
+    const lane = lanes[i];
+    const active = lane['active'] === true;
+    const direction = (lane['direction'] as string) ?? 'straight';
+
+    if (active) {
+      activeLanes.push(i);
+    }
+
+    // Map Valhalla direction strings to our enum
+    let dir: LaneGuidance['laneDirections'][0] = 'straight';
+    if (direction === 'left' || direction === 'sharp_left') dir = 'left';
+    else if (direction === 'slight_left') dir = 'slight_left';
+    else if (direction === 'right' || direction === 'sharp_right') dir = 'right';
+    else if (direction === 'slight_right') dir = 'slight_right';
+
+    laneDirections.push(dir);
+  }
+
+  return {
+    laneCount: lanes.length,
+    activeLanes,
+    laneDirections,
+  };
 }
 
 /** Wrap a routing error with a human-friendly message. */
@@ -193,6 +231,11 @@ async function computeRouteOnline(
           streetNames: m['street_names'] as string[] | undefined,
           verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
           verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
+          speedLimitMph:
+            typeof m['speed_limit'] === 'number'
+              ? Math.round((m['speed_limit'] as number) * 0.621371) // km/h → mph
+              : undefined,
+          laneGuidance: parseLaneGuidance(m['lanes'] as Array<Record<string, unknown>> | undefined),
         }),
       ),
       distanceMeters:

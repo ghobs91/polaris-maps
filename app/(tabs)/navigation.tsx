@@ -6,8 +6,9 @@ import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
-import { NextTurnBanner, EtaDisplay } from '@/components/navigation';
+import { NextTurnBanner, EtaDisplay, SpeedLimitSign, LaneGuidance } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
+import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import { useNavigationStore } from '@/stores/navigationStore';
 import { spacing, typography } from '@/constants/theme';
@@ -27,6 +28,7 @@ import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh
 import { useLiveActivity } from '@/hooks/useLiveActivity';
 import { speakInstruction, stopNavigationSpeech } from '@/services/tts';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 
 export default function NavigationScreen() {
   const insets = useSafeAreaInsets();
@@ -103,6 +105,12 @@ export default function NavigationScreen() {
       if (text.trim()) {
         speakInstruction(text);
       }
+      // Haptic feedback at turn points — medium impact for turns, light for continues
+      if (currentManeuver.type === 'destination') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
     }
   }, [isNavigating, currentStepIndex, currentManeuver]);
 
@@ -123,6 +131,7 @@ export default function NavigationScreen() {
   // Camera follow state — breaks when user pans/zooms, restored by re-center button
   const [followCamera, setFollowCamera] = useState(true);
   const [showAddDestination, setShowAddDestination] = useState(false);
+  const [showIncidentReport, setShowIncidentReport] = useState(false);
   const mapRef = useRef<MapViewHandle>(null);
   const navPositionRef = useRef<[number, number] | null>(null);
   navPositionRef.current = navPosition;
@@ -381,6 +390,7 @@ export default function NavigationScreen() {
                 const navStore = useNavigationStore.getState();
                 if (navStore.isNavigating) {
                   navStore.replaceRoute(newRoute);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
                   // Reset DR anchor and GPS segment index to start of the new route.
                   // The next GPS callback will correct the segment index to the
                   // actual position; using 0 here prevents stale indices from the
@@ -503,13 +513,23 @@ export default function NavigationScreen() {
         onFollowCameraChange={handleFollowCameraChange}
       />
 
-      {/* Turn banner overlaid at top */}
+      {/* Turn banner + speed limit + lane guidance overlaid at top */}
       <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
-        <NextTurnBanner
-          maneuver={currentManeuver}
-          nextManeuver={nextManeuver}
-          distanceToTurnMeters={distanceToTurn ?? undefined}
-        />
+        <View style={styles.bannerRow}>
+          <View style={styles.bannerFlex}>
+            <NextTurnBanner
+              maneuver={currentManeuver}
+              nextManeuver={nextManeuver}
+              distanceToTurnMeters={distanceToTurn ?? undefined}
+            />
+            {currentManeuver?.laneGuidance && (
+              <LaneGuidance laneGuidance={currentManeuver.laneGuidance} />
+            )}
+          </View>
+          {currentManeuver?.speedLimitMph != null && (
+            <SpeedLimitSign speedLimitMph={currentManeuver.speedLimitMph} />
+          )}
+        </View>
       </View>
 
       {/* Floating bottom bar pinned above the safe area. */}
@@ -521,7 +541,14 @@ export default function NavigationScreen() {
             <Text style={styles.nextStopText} numberOfLines={1}>
               Next: {waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`}
             </Text>
-            <TouchableOpacity onPress={advanceLeg} style={styles.skipStopBtn} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={advanceLeg}
+              style={styles.skipStopBtn}
+              activeOpacity={0.7}
+              accessibilityLabel="Skip stop"
+              accessibilityHint="Skip the next waypoint and continue to the following stop"
+              accessibilityRole="button"
+            >
               <Text style={styles.skipStopText}>Skip</Text>
             </TouchableOpacity>
           </View>
@@ -531,6 +558,7 @@ export default function NavigationScreen() {
           remainingDistanceMeters={remainingDistanceMeters}
           onExit={stopNavigation}
           onAddDestination={handleOpenAddDestination}
+          destinationName={destination?.name}
         />
       </View>
 
@@ -540,11 +568,27 @@ export default function NavigationScreen() {
           style={[styles.recenterBtn, { bottom: insets.bottom + spacing.md + 100 }]}
           onPress={handleRecenter}
           activeOpacity={0.85}
+          accessibilityLabel="Re-center map"
+          accessibilityHint="Return the map view to your current location"
+          accessibilityRole="button"
         >
           <Ionicons name="navigate" size={16} color="#fff" />
           <Text style={styles.recenterText}>Re-center</Text>
         </TouchableOpacity>
       )}
+
+      {/* Report incident button */}
+      <TouchableOpacity
+        style={[styles.reportBtn, { bottom: insets.bottom + spacing.md + 100 }]}
+        onPress={() => setShowIncidentReport(true)}
+        activeOpacity={0.85}
+        accessibilityLabel="Report incident"
+        accessibilityHint="Report a traffic incident at your current location"
+        accessibilityRole="button"
+      >
+        <Ionicons name="alert-circle-outline" size={16} color="#fff" />
+        <Text style={styles.reportText}>Report</Text>
+      </TouchableOpacity>
 
       {/* Add destination search panel */}
       <AddDestinationPanel
@@ -554,6 +598,13 @@ export default function NavigationScreen() {
         searchCenter={
           navPosition ? { lat: navPosition[1], lng: navPosition[0] } : { lat: 0, lng: 0 }
         }
+      />
+
+      {/* Incident report panel */}
+      <IncidentReportPanel
+        visible={showIncidentReport}
+        onClose={() => setShowIncidentReport(false)}
+        position={navPosition ?? [0, 0]}
       />
     </View>
   );
@@ -567,6 +618,14 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       left: spacing.md,
       right: spacing.md,
     },
+    bannerRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+    },
+    bannerFlex: {
+      flex: 1,
+    },
     etaContainer: {
       position: 'absolute',
       left: spacing.md,
@@ -575,6 +634,28 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
     emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
     emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
+    reportBtn: {
+      position: 'absolute',
+      left: spacing.md,
+      zIndex: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(28,28,30,0.88)',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      borderRadius: 22,
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 8,
+    },
+    reportText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '600',
+    },
     recenterBtn: {
       position: 'absolute',
       alignSelf: 'center',

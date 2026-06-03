@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatDistance } from '../../utils/units';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -17,6 +17,8 @@ interface EtaDisplayProps {
   onPreview?: () => void;
   isPreviewMode?: boolean;
   onAddDestination?: () => void;
+  /** Destination name for share message */
+  destinationName?: string;
 }
 
 export function EtaDisplay({
@@ -26,6 +28,7 @@ export function EtaDisplay({
   onPreview,
   isPreviewMode,
   onAddDestination,
+  destinationName,
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
@@ -57,10 +60,24 @@ export function EtaDisplay({
   const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      accessibilityRole="summary"
+      accessibilityLabel={`ETA ${formatDuration(displayEta)}${remainingDistanceMeters != null ? `, ${formatDistance(remainingDistanceMeters)}` : ''}, arriving at ${arrivalStr}`}
+    >
       <View style={styles.info}>
-        <Text style={[styles.eta, { color: etaColor }]}>{formatDuration(displayEta)}</Text>
-        <Text style={styles.sub}>
+        <Text
+          style={[styles.eta, { color: etaColor }]}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          {formatDuration(displayEta)}
+        </Text>
+        <Text
+          style={styles.sub}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
           {remainingDistanceMeters != null ? `${formatDistance(remainingDistanceMeters)} · ` : ''}
           {arrivalStr}
         </Text>
@@ -84,6 +101,9 @@ export function EtaDisplay({
             style={styles.addDestBtn}
             onPress={onAddDestination}
             activeOpacity={0.85}
+            accessibilityLabel="Add stop"
+            accessibilityHint="Add an intermediate destination to your route"
+            accessibilityRole="button"
           >
             <View style={styles.addDestIconContainer}>
               <Ionicons name="location-outline" size={18} color="#fff" />
@@ -93,8 +113,39 @@ export function EtaDisplay({
             </View>
           </TouchableOpacity>
         )}
+        <TouchableOpacity
+          style={styles.shareBtn}
+          onPress={async () => {
+            const dest = destinationName ?? 'destination';
+            const arrival = new Date(Date.now() + (displayEta ?? 0) * 1000);
+            const arrivalStr = arrival.toLocaleTimeString([], {
+              hour: 'numeric',
+              minute: '2-digit',
+            });
+            try {
+              await Share.share({
+                message: `I'm navigating to ${dest} — arriving around ${arrivalStr}`,
+              });
+            } catch {
+              // User cancelled
+            }
+          }}
+          activeOpacity={0.85}
+          accessibilityLabel="Share trip"
+          accessibilityHint="Share your destination and ETA"
+          accessibilityRole="button"
+        >
+          <Ionicons name="share-outline" size={18} color="#fff" />
+        </TouchableOpacity>
         {onExit && (
-          <TouchableOpacity style={styles.exitBtn} onPress={onExit} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.exitBtn}
+            onPress={onExit}
+            activeOpacity={0.85}
+            accessibilityLabel="Exit navigation"
+            accessibilityHint="End turn-by-turn navigation"
+            accessibilityRole="button"
+          >
             <Text style={styles.exitText}>Exit</Text>
           </TouchableOpacity>
         )}
@@ -155,6 +206,14 @@ const styles = StyleSheet.create({
   },
   previewBtnActive: {
     backgroundColor: 'rgba(74,222,128,0.25)',
+  },
+  shareBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addDestBtn: {
     width: 44,

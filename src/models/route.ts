@@ -41,6 +41,16 @@ export type ManeuverType =
   | 'ferry'
   | 'name_change';
 
+/** Lane guidance data from Valhalla routing */
+export interface LaneGuidance {
+  /** Total number of lanes at this maneuver */
+  laneCount: number;
+  /** Which lanes are active (0-indexed from left) */
+  activeLanes: number[];
+  /** Direction arrows for each lane: 'left', 'slight_left', 'straight', 'slight_right', 'right' */
+  laneDirections: Array<'left' | 'slight_left' | 'straight' | 'slight_right' | 'right'>;
+}
+
 export interface ValhallaManeuver {
   type: ManeuverType;
   instruction: string;
@@ -51,6 +61,10 @@ export interface ValhallaManeuver {
   streetNames?: string[];
   verbalPreTransition: string;
   verbalPostTransition?: string;
+  /** Speed limit in mph for the road at the start of this maneuver, if available. */
+  speedLimitMph?: number;
+  /** Lane guidance for this maneuver, if available from routing engine. */
+  laneGuidance?: LaneGuidance;
 }
 
 export interface ValhallaLeg {
