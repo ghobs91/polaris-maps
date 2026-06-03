@@ -116,13 +116,21 @@ export async function searchByCategory(
   let overpassPois: OsmPoi[] = [];
   try {
     if (cuisineHint) {
-      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, [
-        ['cuisine', cuisineHint],
-      ]);
+      overpassPois = await fetchOsmPoisByTags(
+        south,
+        west,
+        north,
+        east,
+        allTags,
+        [['cuisine', cuisineHint]],
+        { requireName: false },
+      );
     }
     // Broaden to all category results if narrow query was empty or no hint
     if (overpassPois.length === 0) {
-      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags);
+      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, undefined, {
+        requireName: false,
+      });
       if (cuisineHint) {
         overpassPois = rankByCuisineRelevance(overpassPois, cuisineHint);
       }

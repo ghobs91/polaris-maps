@@ -364,6 +364,16 @@ const MODIFIER_WORDS = new Set([
   'to',
   'my',
   'i',
+  'stores',
+  'store',
+  'shop',
+  'shops',
+  'place',
+  'places',
+  'nearby',
+  'station',
+  'stations',
+  'food',
 ]);
 
 export function resolveSearchCategories(query: string): PlaceCategory[] | null {
@@ -431,10 +441,15 @@ export function categoryToOverpassTags(category: PlaceCategory): Array<[string, 
       ['amenity', 'fast_food'],
     ],
     grocery: [
+      ['shop', 'supermarket'],
+      ['shop', 'grocery'],
       ['shop', 'greengrocer'],
+      ['shop', 'convenience'],
+    ],
+    supermarket: [
+      ['shop', 'supermarket'],
       ['shop', 'grocery'],
     ],
-    supermarket: [['shop', 'supermarket']],
     convenience: [['shop', 'convenience']],
     pharmacy: [['amenity', 'pharmacy']],
     hospital: [['amenity', 'hospital']],

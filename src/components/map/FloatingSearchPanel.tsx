@@ -54,11 +54,19 @@ import {
 import { extractTar } from '../../utils/archiveExtract';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
+import { CategoryPills } from './CategoryPills';
+import { searchByCategory } from '../../services/poi/categorySearchService';
+import { fetchOsmPoisByTags } from '../../services/poi/osmFetcher';
+import {
+  categoryToOverpassTags,
+  resolveSearchCategories,
+} from '../../services/poi/categoryResolver';
 import { searchOtpStops, fetchOtpRoutesAtStop } from '../../services/transit/otpEndpointRegistry';
 import { formatDistance } from '../../utils/units';
 import { shouldOfferParkAndRide, planParkAndRide } from '../../services/routing/parkAndRideService';
 import { decodePolyline } from '../../utils/polyline';
 import { useTrafficStore } from '../../stores/trafficStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import {
   averageRouteTrafficColor,
   ETA_COLOR_GREEN,
@@ -229,7 +237,7 @@ function LayersCardContent({
   onTrafficToggle,
   transitVisible,
   onTransitToggle,
-  isDark: _isDark,
+  isDark,
 }: {
   trafficVisible: boolean;
   onTrafficToggle: (v: boolean) => void;
@@ -237,9 +245,10 @@ function LayersCardContent({
   onTransitToggle: (v: boolean) => void;
   isDark: boolean;
 }) {
-  const textColor = '#EBEBF5';
-  const subtextColor = '#A0A0B8';
-  const chipBg = '#3A3A58';
+  const { colors } = useTheme();
+  const textColor = isDark ? '#EBEBF5' : colors.text;
+  const subtextColor = isDark ? '#A0A0B8' : colors.textSecondary;
+  const chipBg = isDark ? '#3A3A58' : '#E5E5EA';
   const chipActiveBg = '#007AFF';
   const mapStyle = useMapStore((s) => s.mapStyle);
   const setMapStyle = useMapStore((s) => s.setMapStyle);
@@ -321,13 +330,14 @@ function LayersCardContent({
 function CtrlBtn({
   icon,
   onPress,
-  isDark: _isDark,
+  isDark,
 }: {
   icon: string;
   onPress: () => void;
   isDark: boolean;
 }) {
-  const iconColor = '#EBEBF5';
+  const { colors } = useTheme();
+  const iconColor = isDark ? '#EBEBF5' : colors.text;
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btn}>
       <Ionicons name={icon as any} size={20} color={iconColor} />
@@ -347,7 +357,7 @@ export function MapControlsColumn({
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
-  const blurTint = 'systemThickMaterialDark' as const;
+  const blurTint = isDark ? 'systemThickMaterialDark' : 'systemThickMaterialLight';
   const fallbackBackground = isDark ? 'rgba(28,28,30,0.94)' : 'rgba(255,255,255,0.96)';
 
   return (
@@ -495,7 +505,11 @@ function GlassPanel({
 }) {
   if (USE_NATIVE_BLUR) {
     return (
-      <BlurView intensity={78} tint="systemThickMaterialDark" style={[styles.glassPanel, style]}>
+      <BlurView
+        intensity={78}
+        tint={isDark ? 'systemThickMaterialDark' : 'systemThickMaterialLight'}
+        style={[styles.glassPanel, style]}
+      >
         {children}
       </BlurView>
     );
@@ -537,10 +551,11 @@ function FavChip({
   onPress,
   onLongPress,
   unset,
-  isDark: _isDark,
+  isDark,
 }: FavChipProps) {
-  const textColor = '#F2F2F7';
-  const subColor = '#8E8E93';
+  const { colors } = useTheme();
+  const textColor = isDark ? '#F2F2F7' : colors.text;
+  const subColor = isDark ? '#8E8E93' : colors.textSecondary;
 
   return (
     <TouchableOpacity
@@ -637,6 +652,7 @@ export function FloatingSearchPanel({
   const [addingStop, setAddingStop] = useState(false);
   const [stopSearchQuery, setStopSearchQuery] = useState('');
   const [stopSearchResults, setStopSearchResults] = useState<UnifiedSearchResult[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const searchAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const isCategorySearching = useOsmPoiStore((s) => s.isCategorySearching);
@@ -911,6 +927,12 @@ export function FloatingSearchPanel({
       setQuery(text);
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       const gen = ++searchGenRef.current;
+
+      // Clear active category if user manually typed something different
+      if (activeCategory && text !== activeCategory) {
+        setActiveCategory(null);
+      }
+
       if (text.length < 2) {
         setResults([]);
         useOsmPoiStore.getState().clearCategorySearch();
@@ -924,7 +946,7 @@ export function FloatingSearchPanel({
         void performSearch(text, gen);
       }, 180);
     },
-    [performSearch],
+    [performSearch, activeCategory],
   );
 
   const handleSearchSubmit = useCallback(() => {
@@ -948,6 +970,7 @@ export function FloatingSearchPanel({
     setMode('idle');
     setQuery('');
     setResults([]);
+    setActiveCategory(null);
     searchAnchorRef.current = null;
     setShowSearchThisArea(false);
     // Advance generation to discard any in-flight search before clearing.
@@ -1161,9 +1184,14 @@ export function FloatingSearchPanel({
           dest,
         ];
 
+        const routePrefs = useSettingsStore.getState().routePreferences;
         let routes: ValhallaRoute[] = [];
         try {
-          routes = await computeRoute(allPoints, costing);
+          routes = await computeRoute(allPoints, costing, {
+            avoidTolls: routePrefs.avoidTolls,
+            avoidHighways: routePrefs.avoidHighways,
+            avoidFerries: routePrefs.avoidFerries,
+          });
         } catch (routeErr: unknown) {
           // If online routing failed and offline tiles exist but weren't initialized,
           // try harder to find and init any available offline tiles
@@ -1402,7 +1430,12 @@ export function FloatingSearchPanel({
           ...waypoints,
           dest,
         ];
-        const routes = await computeRoute(allPoints, costing);
+        const routePrefs = useSettingsStore.getState().routePreferences;
+        const routes = await computeRoute(allPoints, costing, {
+          avoidTolls: routePrefs.avoidTolls,
+          avoidHighways: routePrefs.avoidHighways,
+          avoidFerries: routePrefs.avoidFerries,
+        });
         if (!routes.length) {
           setRouteError('No route found');
           return;
@@ -1693,12 +1726,13 @@ export function FloatingSearchPanel({
     ? [styles.rootEmbedded, st.embeddedRoot]
     : [styles.root, { bottom: panelBottom }];
 
-  // Panel always uses dark glass (like Apple Maps) — use light text always
-  const textColor = '#F2F2F7';
-  const subColor = '#8E8E93';
+  const textColor = isDark ? '#F2F2F7' : colors.text;
+  const subColor = isDark ? '#8E8E93' : colors.textSecondary;
 
   // ── Render results list (search or history) ──
-  const showResults = mode !== 'idle' && (isCategorySearching || results.length > 0);
+  const showResults =
+    mode !== 'idle' &&
+    (isCategorySearching || results.length > 0 || (categorySearchResults?.length ?? 0) > 0);
   const showHistory = mode === 'searching' && query.length < 2 && history.length > 0;
 
   const renderResultItem = useCallback(
@@ -2183,6 +2217,20 @@ export function FloatingSearchPanel({
     return (
       <View style={[styles.root, { bottom: panelBottom }]} pointerEvents="box-none">
         <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />
+        {gtfsLoadingAgency && (
+          <View style={styles.gtfsLoadingBanner} pointerEvents="none">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.gtfsLoadingText}>
+              Loading transit data from {gtfsLoadingAgency}…
+            </Text>
+          </View>
+        )}
+        {transitLayerVisible && isLoadingLines && !gtfsLoadingAgency && (
+          <View style={styles.gtfsLoadingBanner} pointerEvents="none">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.gtfsLoadingText}>Loading transit...</Text>
+          </View>
+        )}
         <View {...handlePanResponder.panHandlers}>
           {/* Subtle handle above the pill */}
           <View style={styles.miniHandleRow}>
@@ -2228,12 +2276,20 @@ export function FloatingSearchPanel({
       {!embedded && showSearchThisArea && (
         <View pointerEvents="box-none" style={[styles.searchThisAreaWrap, { top: insets.top + 8 }]}>
           <TouchableOpacity
-            style={styles.searchThisAreaBtn}
+            style={[
+              styles.searchThisAreaBtn,
+              {
+                backgroundColor: isDark ? 'rgba(28,28,30,0.92)' : 'rgba(255,255,255,0.92)',
+                borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)',
+              },
+            ]}
             onPress={handleSearchThisArea}
             activeOpacity={0.85}
           >
-            <Ionicons name="search" size={14} color="#fff" />
-            <Text style={styles.searchThisAreaText}>Search this area</Text>
+            <Ionicons name="search" size={14} color={isDark ? '#fff' : colors.text} />
+            <Text style={[styles.searchThisAreaText, { color: isDark ? '#fff' : colors.text }]}>
+              Search this area
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -2253,6 +2309,81 @@ export function FloatingSearchPanel({
             <Text style={styles.gtfsLoadingText}>Loading transit...</Text>
           </View>
         )}
+
+        {/* ── Category pills — floating quick search shortcuts ── */}
+        {mode === 'idle' && !minimized && !embedded && (
+          <CategoryPills
+            activeCategory={activeCategory}
+            loading={isCategorySearching}
+            onCategoryPress={(categoryId, query) => {
+              // Toggle off if already selected
+              if (categoryId === activeCategory) {
+                setActiveCategory(null);
+                ++searchGenRef.current;
+                useOsmPoiStore.getState().setIsCategorySearching(false);
+                useOsmPoiStore.getState().clearCategorySearch();
+                setResults([]);
+                return;
+              }
+
+              setActiveCategory(categoryId);
+              const gen = ++searchGenRef.current;
+              setResults([]);
+              useOsmPoiStore.getState().clearCategorySearch();
+
+              const vp = useMapStore.getState().viewport;
+              const vb = useOsmPoiStore.getState().viewportBounds;
+              const south = vb?.minLat ?? vp.lat - 0.05;
+              const north = vb?.maxLat ?? vp.lat + 0.05;
+              const west = vb?.minLng ?? vp.lng - 0.05;
+              const east = vb?.maxLng ?? vp.lng + 0.05;
+
+              useOsmPoiStore.getState().setIsCategorySearching(true);
+
+              // Resolve category to OSM tags and query Overpass directly
+              const categories = resolveSearchCategories(query);
+              if (!categories || categories.length === 0) {
+                useOsmPoiStore.getState().setIsCategorySearching(false);
+                useOsmPoiStore.getState().clearCategorySearch();
+                return;
+              }
+
+              const tagPairs = categories.flatMap(categoryToOverpassTags);
+
+              fetchOsmPoisByTags(south, west, north, east, tagPairs, undefined, {
+                requireName: false,
+              })
+                .then((pois) => {
+                  if (searchGenRef.current !== gen) return;
+                  useOsmPoiStore.getState().setIsCategorySearching(false);
+                  if (pois.length > 0) {
+                    useOsmPoiStore.getState().setCategorySearch(
+                      categories,
+                      pois,
+                      false, // not local primary
+                    );
+                    const fitPois = selectSearchFitPois(pois);
+                    const fb = boundsForPois(fitPois);
+                    if (fb && fitPois.length >= 2) {
+                      useMapStore
+                        .getState()
+                        .setFitBounds([fb.minLng, fb.minLat, fb.maxLng, fb.maxLat], 'search');
+                    }
+                    searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
+                  } else {
+                    useOsmPoiStore.getState().clearCategorySearch();
+                  }
+                })
+                .catch(() => {
+                  if (searchGenRef.current === gen) {
+                    useOsmPoiStore.getState().setIsCategorySearching(false);
+                    useOsmPoiStore.getState().clearCategorySearch();
+                  }
+                });
+            }}
+          />
+        )}
+
         <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
           {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
           {!embedded && (
@@ -2292,8 +2423,13 @@ export function FloatingSearchPanel({
                   activeOpacity={0.7}
                   style={styles.placesBtn}
                 >
-                  <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
-                    <Ionicons name="bookmark" size={18} color="#EBEBF0" />
+                  <View
+                    style={[
+                      styles.profileCircle,
+                      { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' },
+                    ]}
+                  >
+                    <Ionicons name="bookmark" size={18} color={isDark ? '#EBEBF0' : colors.text} />
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -2301,8 +2437,13 @@ export function FloatingSearchPanel({
                   activeOpacity={0.7}
                   style={styles.profileBtn}
                 >
-                  <View style={[styles.profileCircle, { backgroundColor: '#3A3A3C' }]}>
-                    <Ionicons name="person" size={18} color="#EBEBF0" />
+                  <View
+                    style={[
+                      styles.profileCircle,
+                      { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' },
+                    ]}
+                  >
+                    <Ionicons name="person" size={18} color={isDark ? '#EBEBF0' : colors.text} />
                   </View>
                 </TouchableOpacity>
               </View>
@@ -2316,7 +2457,28 @@ export function FloatingSearchPanel({
               <Animated.View style={{ opacity: fadeAnim }}>
                 <View style={st.divider} />
                 <FlatList
-                  data={showHistory ? history : results}
+                  data={
+                    showHistory
+                      ? history
+                      : categorySearchResults?.length
+                        ? categorySearchResults.map((poi) => ({
+                            entry: {
+                              id: poi.id,
+                              text: poi.name,
+                              type: 'place' as const,
+                              housenumber: poi.tags['addr:housenumber'] ?? null,
+                              street: poi.tags['addr:street'] ?? null,
+                              city: poi.tags['addr:city'] ?? null,
+                              state: poi.tags['addr:state'] ?? null,
+                              postcode: poi.tags['addr:postcode'] ?? null,
+                              country: poi.tags['addr:country'] ?? null,
+                              lat: poi.lat,
+                              lng: poi.lng,
+                            },
+                            rank: 50,
+                          }))
+                        : results
+                  }
                   keyExtractor={(item) => String(item.entry.id)}
                   renderItem={showHistory ? renderHistoryItem : renderResultItem}
                   keyboardShouldPersistTaps="handled"

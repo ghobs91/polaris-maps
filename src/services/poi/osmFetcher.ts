@@ -156,22 +156,28 @@ export async function fetchOsmPoisByTags(
   tagPairs: Array<[string, string]>,
   /** Extra tag filters ANDed onto every clause (e.g. cuisine=pizza). */
   extraFilters?: Array<[string, string]>,
+  /** When false, don't require a `name` tag — include unnamed POIs. Default: true. */
+  options?: { requireName?: boolean },
 ): Promise<OsmPoi[]> {
   if (tagPairs.length === 0) return [];
+
+  const requireName = options?.requireName ?? true;
 
   const filterSuffix = (extraFilters ?? [])
     .map(([k, v]) => `["${k.replace(/"/g, '')}"="${v.replace(/"/g, '')}"]`)
     .join('');
-  const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}${filterSuffix}:${bboxKey(south, west, north, east)}`;
+  const nameSuffix = requireName ? '["name"]' : '';
+  const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}${filterSuffix}:rn${requireName ? '1' : '0'}:${bboxKey(south, west, north, east)}`;
   const cached = cacheGet(key);
   if (cached) return cached;
 
   const bbox = `${south},${west},${north},${east}`;
 
-  // Build Overpass union of node+way queries for each tag pair
+  // Build Overpass union of node+way queries for each tag pair.
+  // Disabling requireName fetches POIs without a name tag (e.g. EV chargers).
   const clauses = tagPairs.flatMap(([k, v]) => [
-    `node["${k}"="${v}"]${filterSuffix}["name"](${bbox});`,
-    `way["${k}"="${v}"]${filterSuffix}["name"](${bbox});`,
+    `node["${k}"="${v}"]${filterSuffix}${nameSuffix}(${bbox});`,
+    `way["${k}"="${v}"]${filterSuffix}${nameSuffix}(${bbox});`,
   ]);
 
   const query = `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout body center;`;
@@ -182,7 +188,7 @@ export async function fetchOsmPoisByTags(
   });
 
   const pois = (data.elements as any[])
-    .filter((el) => (el.type === 'node' || el.type === 'way') && el.tags?.name)
+    .filter((el) => (el.type === 'node' || el.type === 'way') && (!requireName || el.tags?.name))
     .map((el) => {
       const t = el.tags as Record<string, string>;
       const type = t.amenity
@@ -204,12 +210,19 @@ export async function fetchOsmPoisByTags(
       const lat: number = el.type === 'node' ? el.lat : el.center?.lat;
       const lng: number = el.type === 'node' ? el.lon : el.center?.lon;
       if (lat == null || lng == null) return null;
-      return { id: el.id as number, lat, lng, name: t.name, type, subtype, tags: t };
+      // Fall back to operator name or tag value for unnamed POIs (e.g. "EV Charging Station")
+      const name = t.name ?? t.operator ?? `${capitaliseTag(subtype)}`;
+      return { id: el.id as number, lat, lng, name, type, subtype, tags: t };
     })
     .filter((p): p is OsmPoi => p !== null);
 
   cacheSet(key, pois);
   return pois;
+}
+
+/** Capitalise a tag value for display (e.g. "charging_station" → "Charging Station"). */
+function capitaliseTag(s: string): string {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**

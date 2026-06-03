@@ -11,6 +11,7 @@ import {
   PanResponder,
   Modal as RNModal,
   Image,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -24,6 +25,10 @@ import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
+import {
+  fetchChargingStations,
+  type ChargingStation,
+} from '../../services/poi/openChargeMapService';
 
 const SCREEN_H = Dimensions.get('window').height;
 // Two snap points: peek (55%) and expanded (85%)
@@ -274,9 +279,23 @@ function ActionPill({ icon, label, onPress, color, bg }: ActionPillProps) {
       style={[pillStyles.pill, { backgroundColor: bg }]}
       onPress={onPress}
       activeOpacity={0.75}
+      accessibilityLabel={label}
+      accessibilityRole="button"
     >
-      <Ionicons name={icon} size={20} color={color} />
-      <Text style={[pillStyles.label, { color }]}>{label}</Text>
+      <Ionicons
+        name={icon}
+        size={20}
+        color={color}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      />
+      <Text
+        style={[pillStyles.label, { color }]}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -314,6 +333,8 @@ export function POIInfoCard() {
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   // Use a ref so PanResponder closures always read the latest value
   const expandedRef = useRef(false);
+  // EV charging station data from Open Charge Map
+  const [chargingData, setChargingData] = useState<ChargingStation | null>(null);
 
   // Single translateY drives everything — fully native-driver-compatible.
   // Card is always FULL_H tall; translateY controls how much peeks above the bottom edge:
@@ -420,6 +441,31 @@ export function POIInfoCard() {
     };
   }, [poi, setEnrichedData, setIsEnriching]);
 
+  // Fetch EV charging data from Open Charge Map when a charging station is selected
+  useEffect(() => {
+    if (!poi || poi.subtype !== 'charging_station') {
+      setChargingData(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetchChargingStations(poi.lat, poi.lng, 0.1, 1) // Search within 100m for exact match
+      .then((stations) => {
+        if (!cancelled && stations.length > 0) {
+          setChargingData(stations[0]);
+        } else if (!cancelled) {
+          setChargingData(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setChargingData(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [poi]);
+
   // Merge OSM parsed data with Apple Maps enrichment — OSM takes priority
   const parsed = useMemo(() => {
     if (!rawParsed) return null;
@@ -489,6 +535,21 @@ export function POIInfoCard() {
     setSelectedPoi(null);
   }, [poi, setPendingDirectionsTarget, setSelectedPoi]);
 
+  const handleShare = useCallback(async () => {
+    if (!poi) return;
+    const lines = [poi.name];
+    if (parsed?.address) lines.push(parsed.address);
+    if (parsed?.website) {
+      const url = parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`;
+      lines.push(url);
+    }
+    try {
+      await Share.share({ message: lines.join('\n') });
+    } catch {
+      // User cancelled or share failed silently
+    }
+  }, [poi, parsed]);
+
   const handleInstagram = useCallback(() => {
     if (parsed?.instagram)
       Linking.openURL(
@@ -525,6 +586,8 @@ export function POIInfoCard() {
           style={styles.closeBtn}
           onPress={() => setSelectedPoi(null)}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel="Close place details"
+          accessibilityRole="button"
         >
           <View style={[styles.closeCircle, { backgroundColor: pillBg }]}>
             <Ionicons name="close" size={16} color={subtextColor} />
@@ -577,7 +640,12 @@ export function POIInfoCard() {
               </View>
             )}
             <View style={styles.headerText}>
-              <Text style={[styles.name, { color: textColor }]} numberOfLines={2}>
+              <Text
+                style={[styles.name, { color: textColor }]}
+                numberOfLines={2}
+                accessibilityRole="header"
+                accessibilityLabel={poi.name}
+              >
                 {poi.name}
               </Text>
               <Text style={[styles.categoryLabel, { color: subtextColor }]}>
@@ -642,6 +710,13 @@ export function POIInfoCard() {
               icon="bookmark-outline"
               label="Save"
               onPress={() => setShowSaveSheet(true)}
+              color={primary}
+              bg={pillBg}
+            />
+            <ActionPill
+              icon="share-outline"
+              label="Share"
+              onPress={handleShare}
               color={primary}
               bg={pillBg}
             />
@@ -780,6 +855,34 @@ export function POIInfoCard() {
                 icon: 'leaf-outline' as const,
                 label: parsed.diet,
                 iconColor: colors.success,
+              },
+              // EV Charging information from Open Charge Map
+              chargingData?.connections &&
+                chargingData.connections.length > 0 && {
+                  icon: 'flash-outline' as const,
+                  label: `${chargingData.connections.length} connector${chargingData.connections.length > 1 ? 's' : ''}: ${chargingData.connections.map((c) => c.type).join(', ')}`,
+                },
+              chargingData?.connections?.some((c) => c.isFastCharge) && {
+                icon: 'flash' as const,
+                label: 'Fast charging available',
+                iconColor: colors.success,
+              },
+              chargingData?.pricing && {
+                icon: 'pricetag-outline' as const,
+                label: chargingData.pricing,
+              },
+              chargingData?.accessType === 'public' && {
+                icon: 'people-outline' as const,
+                label: 'Public access',
+              },
+              chargingData?.accessType === 'members_only' && {
+                icon: 'lock-closed-outline' as const,
+                label: 'Members only',
+                iconColor: colors.warning,
+              },
+              chargingData?.operator && {
+                icon: 'business-outline' as const,
+                label: `Operator: ${chargingData.operator}`,
               },
             ]
               .filter(Boolean)
