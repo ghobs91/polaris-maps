@@ -35,6 +35,7 @@ target 'PolarisMaps' do
 
   use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
   use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
+  use_modular_headers!
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -64,6 +65,35 @@ target 'PolarisMaps' do
           config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         end
       end
+    end
+
+    # Disable Clang module dependency scanning. CocoaPods with use_modular_headers!
+    # generates -fmodule-map-file flags pointing to DerivedData, which doesn't exist
+    # on a clean build (e.g. after restarting Xcode/computer). The scanner then fails
+    # to find EXConstants.modulemap and cascades into "could not build module" errors.
+    installer.target_installation_results.pod_target_installation_results
+      .each do |pod_name, target_installation_result|
+      target_installation_result.native_target.build_configurations.each do |config|
+        config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
+      end
+    end
+    installer.generated_projects.each do |project|
+      project.build_configurations.each do |config|
+        config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
+      end
+    end
+    user_project_path = File.join(__dir__, 'PolarisMaps.xcodeproj')
+    if File.exist?(user_project_path)
+      user_project = Xcodeproj::Project.open(user_project_path)
+      user_project.build_configurations.each do |config|
+        config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
+      end
+      user_project.targets.each do |target|
+        target.build_configurations.each do |config|
+          config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
+        end
+      end
+      user_project.save
     end
 
     # Fix fmt 11.x consteval issue with iOS 26 SDK / Xcode 26.
