@@ -16,14 +16,14 @@ import {
   PanResponder,
   InteractionManager,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system';
 import { useTheme } from '../../contexts/ThemeContext';
-import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
@@ -74,10 +74,6 @@ import {
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 import { destinationToGeocodingResult, isSameDestination } from './floatingSearchPanelHelpers';
-
-const IOS_MAJOR_VERSION =
-  Platform.OS === 'ios' ? Number.parseInt(String(Platform.Version), 10) || 0 : 0;
-const USE_NATIVE_BLUR = Platform.OS === 'ios' && IOS_MAJOR_VERSION < 26;
 
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
@@ -339,9 +335,11 @@ function CtrlBtn({
   const { colors } = useTheme();
   const iconColor = isDark ? '#EBEBF5' : colors.text;
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btn}>
-      <Ionicons name={icon as any} size={20} color={iconColor} />
-    </TouchableOpacity>
+    <GlassView material="clear" isInteractive style={ctrlStyles.btn}>
+      <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btnInner}>
+        <Ionicons name={icon as any} size={20} color={iconColor} />
+      </TouchableOpacity>
+    </GlassView>
   );
 }
 
@@ -357,49 +355,28 @@ export function MapControlsColumn({
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
-  const blurTint = isDark ? 'systemThickMaterialDark' : 'systemThickMaterialLight';
-  const fallbackBackground = isDark ? 'rgba(28,28,30,0.94)' : 'rgba(255,255,255,0.96)';
 
   return (
     <View style={ctrlStyles.column}>
       {/* Layers popup — floats above the buttons */}
-      {layersOpen &&
-        (USE_NATIVE_BLUR ? (
-          <BlurView intensity={60} tint={blurTint} style={ctrlStyles.layersCard}>
-            <LayersCardContent
-              trafficVisible={trafficLayerVisible}
-              onTrafficToggle={setTrafficLayerVisible}
-              transitVisible={transitLayerVisible}
-              onTransitToggle={setTransitLayerVisible}
-              isDark={isDark}
-            />
-          </BlurView>
-        ) : (
-          <View style={[ctrlStyles.layersCard, { backgroundColor: fallbackBackground }]}>
-            <LayersCardContent
-              trafficVisible={trafficLayerVisible}
-              onTrafficToggle={setTrafficLayerVisible}
-              transitVisible={transitLayerVisible}
-              onTransitToggle={setTransitLayerVisible}
-              isDark={isDark}
-            />
-          </View>
-        ))}
+      {layersOpen && (
+        <GlassView material="regular" style={ctrlStyles.layersCard}>
+          <LayersCardContent
+            trafficVisible={trafficLayerVisible}
+            onTrafficToggle={setTrafficLayerVisible}
+            transitVisible={transitLayerVisible}
+            onTransitToggle={setTransitLayerVisible}
+            isDark={isDark}
+          />
+        </GlassView>
+      )}
 
       {/* Stacked glass buttons */}
-      {USE_NATIVE_BLUR ? (
-        <BlurView intensity={60} tint={blurTint} style={ctrlStyles.buttonsContainer}>
-          <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
-          <View style={ctrlStyles.separator} />
-          <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
-        </BlurView>
-      ) : (
-        <View style={[ctrlStyles.buttonsContainer, { backgroundColor: fallbackBackground }]}>
-          <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
-          <View style={ctrlStyles.separator} />
-          <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
-        </View>
-      )}
+      <GlassView material="regular" style={ctrlStyles.buttonsContainer}>
+        <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
+        <View style={ctrlStyles.separator} />
+        <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
+      </GlassView>
     </View>
   );
 }
@@ -413,16 +390,18 @@ const ctrlStyles = StyleSheet.create({
   },
   buttonsContainer: {
     borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 10,
   },
   btn: {
     width: 46,
     height: 46,
+    borderRadius: 999,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+  },
+  btnInner: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -433,18 +412,11 @@ const ctrlStyles = StyleSheet.create({
   },
   layersCard: {
     borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
     paddingVertical: 12,
     paddingHorizontal: 16,
     minWidth: 190,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 10,
-  },
-  layersCardAndroid: {
-    backgroundColor: 'rgba(255,255,255,0.96)',
   },
   cardTitle: {
     fontSize: 14,
@@ -492,40 +464,13 @@ const ctrlStyles = StyleSheet.create({
 });
 
 // ─────────────────────────────────────────────
-// Glass container — renders BlurView on iOS, semi-transparent on Android
+// Glass container — wraps GlassView for regular floating panels
 // ─────────────────────────────────────────────
-function GlassPanel({
-  children,
-  style,
-  isDark,
-}: {
-  children: React.ReactNode;
-  style?: object;
-  isDark: boolean;
-}) {
-  if (USE_NATIVE_BLUR) {
-    return (
-      <BlurView
-        intensity={78}
-        tint={isDark ? 'systemThickMaterialDark' : 'systemThickMaterialLight'}
-        style={[styles.glassPanel, style]}
-      >
-        {children}
-      </BlurView>
-    );
-  }
+function GlassPanel({ children, style }: { children: React.ReactNode; style?: object }) {
   return (
-    <View
-      style={[
-        styles.glassPanel,
-        {
-          backgroundColor: isDark ? 'rgba(28,28,30,0.93)' : 'rgba(255,255,255,0.96)',
-        },
-        style,
-      ]}
-    >
+    <GlassView material="regular" style={[styles.glassPanel, style]}>
       {children}
-    </View>
+    </GlassView>
   );
 }
 
@@ -664,7 +609,7 @@ export function FloatingSearchPanel({
 
   const inputRef = useRef<TextInput>(null);
   const stopSearchInputRef = useRef<TextInput>(null);
-  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Incremented on every query change and on explicit clear; in-flight results
    * compare against this to detect staleness and discard themselves. */
   const searchGenRef = useRef(0);
@@ -1818,7 +1763,7 @@ export function FloatingSearchPanel({
     return (
       <View style={rootStyle} pointerEvents="box-none">
         {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
-        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+        <GlassPanel style={[st.panel, embedded && st.embeddedPanel]}>
           {/* Location header */}
           <View style={st.locHeader}>
             <View style={st.locTitleBlock}>
@@ -1832,11 +1777,9 @@ export function FloatingSearchPanel({
               ) : null}
             </View>
             <TouchableOpacity onPress={dismissLocation} style={st.locCloseBtn} hitSlop={10}>
-              <View
-                style={[st.locCloseCircle, { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' }]}
-              >
+              <GlassView material="clear" isInteractive style={st.locCloseCircle}>
                 <Ionicons name="close" size={16} color={isDark ? '#EBEBF5' : '#3A3A3C'} />
-              </View>
+              </GlassView>
             </TouchableOpacity>
           </View>
 
@@ -1979,7 +1922,7 @@ export function FloatingSearchPanel({
     return (
       <View style={rootStyle} pointerEvents="box-none">
         {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
-        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+        <GlassPanel style={[st.panel, embedded && st.embeddedPanel]}>
           {!embedded && <View style={styles.handle} />}
 
           {/* Header */}
@@ -2001,11 +1944,9 @@ export function FloatingSearchPanel({
               </View>
             </View>
             <TouchableOpacity onPress={dismissLocation} style={st.locCloseBtn} hitSlop={10}>
-              <View
-                style={[st.locCloseCircle, { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' }]}
-              >
+              <GlassView material="clear" isInteractive style={st.locCloseCircle}>
                 <Ionicons name="close" size={16} color={isDark ? '#EBEBF5' : '#3A3A3C'} />
-              </View>
+              </GlassView>
             </TouchableOpacity>
           </View>
 
@@ -2199,7 +2140,7 @@ export function FloatingSearchPanel({
     return (
       <View style={rootStyle} pointerEvents="box-none">
         {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
-        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+        <GlassPanel style={[st.panel, embedded && st.embeddedPanel]}>
           {!embedded && <View style={styles.handle} />}
           <TransitDirectionsPanel
             onClose={() => {
@@ -2237,7 +2178,7 @@ export function FloatingSearchPanel({
             <View style={styles.miniHandle} />
           </View>
           <TouchableOpacity activeOpacity={0.85} onPress={expandPanel}>
-            <GlassPanel isDark={isDark} style={styles.miniPill}>
+            <GlassPanel style={styles.miniPill}>
               <Ionicons name="search" size={18} color={subColor} style={styles.miniSearchIcon} />
               <Text style={[styles.miniPlaceholder, { color: subColor }]}>Search</Text>
               <TouchableOpacity
@@ -2248,9 +2189,9 @@ export function FloatingSearchPanel({
                 activeOpacity={0.7}
                 style={styles.miniProfileBtn}
               >
-                <View style={[styles.miniProfileCircle, { backgroundColor: '#3A3A3C' }]}>
+                <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
                   <Ionicons name="person" size={16} color="#EBEBF0" />
-                </View>
+                </GlassView>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={(e) => {
@@ -2260,9 +2201,9 @@ export function FloatingSearchPanel({
                 activeOpacity={0.7}
                 style={styles.miniProfileBtn}
               >
-                <View style={[styles.miniProfileCircle, { backgroundColor: '#3A3A3C' }]}>
+                <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
                   <Ionicons name="bookmark" size={16} color="#EBEBF0" />
-                </View>
+                </GlassView>
               </TouchableOpacity>
             </GlassPanel>
           </TouchableOpacity>
@@ -2275,21 +2216,13 @@ export function FloatingSearchPanel({
     <>
       {!embedded && showSearchThisArea && (
         <View pointerEvents="box-none" style={[styles.searchThisAreaWrap, { top: insets.top + 8 }]}>
-          <TouchableOpacity
-            style={[
-              styles.searchThisAreaBtn,
-              {
-                backgroundColor: isDark ? 'rgba(28,28,30,0.92)' : 'rgba(255,255,255,0.92)',
-                borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)',
-              },
-            ]}
-            onPress={handleSearchThisArea}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="search" size={14} color={isDark ? '#fff' : colors.text} />
-            <Text style={[styles.searchThisAreaText, { color: isDark ? '#fff' : colors.text }]}>
-              Search this area
-            </Text>
+          <TouchableOpacity onPress={handleSearchThisArea} activeOpacity={0.85}>
+            <GlassView material="regular" isInteractive style={styles.searchThisAreaBtn}>
+              <Ionicons name="search" size={14} color={colors.text} />
+              <Text style={[styles.searchThisAreaText, { color: colors.text }]}>
+                Search this area
+              </Text>
+            </GlassView>
           </TouchableOpacity>
         </View>
       )}
@@ -2384,7 +2317,7 @@ export function FloatingSearchPanel({
           />
         )}
 
-        <GlassPanel isDark={isDark} style={[st.panel, embedded && st.embeddedPanel]}>
+        <GlassPanel style={[st.panel, embedded && st.embeddedPanel]}>
           {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
           {!embedded && (
             <View
@@ -2423,28 +2356,18 @@ export function FloatingSearchPanel({
                   activeOpacity={0.7}
                   style={styles.placesBtn}
                 >
-                  <View
-                    style={[
-                      styles.profileCircle,
-                      { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' },
-                    ]}
-                  >
+                  <GlassView material="clear" isInteractive style={styles.profileCircle}>
                     <Ionicons name="bookmark" size={18} color={isDark ? '#EBEBF0' : colors.text} />
-                  </View>
+                  </GlassView>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={onProfilePress ?? (() => router.push('/(tabs)/profile'))}
                   activeOpacity={0.7}
                   style={styles.profileBtn}
                 >
-                  <View
-                    style={[
-                      styles.profileCircle,
-                      { backgroundColor: isDark ? '#3A3A3C' : '#E5E5EA' },
-                    ]}
-                  >
+                  <GlassView material="clear" isInteractive style={styles.profileCircle}>
                     <Ionicons name="person" size={18} color={isDark ? '#EBEBF0' : colors.text} />
-                  </View>
+                  </GlassView>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -2678,7 +2601,9 @@ function shorten(text: string, max: number): string {
 const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) =>
   StyleSheet.create({
     panel: {
-      ...shadow.lg,
+      borderRadius: borderRadius.lg,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
     },
     embeddedRoot: {
       flex: 1,
@@ -2732,7 +2657,8 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     resultIconWrap: {
       width: 32,
       height: 32,
-      borderRadius: 16,
+      borderRadius: 999,
+      borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
       justifyContent: 'center',
       alignItems: 'center',
@@ -2741,7 +2667,8 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     recentIcon: {
       width: 32,
       height: 32,
-      borderRadius: 16,
+      borderRadius: 999,
+      borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
       justifyContent: 'center',
       alignItems: 'center',
@@ -2791,9 +2718,11 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     locCloseCircle: {
       width: 28,
       height: 28,
-      borderRadius: 14,
+      borderRadius: 999,
+      borderCurve: 'continuous',
       justifyContent: 'center',
       alignItems: 'center',
+      overflow: 'hidden',
     },
     locActions: {
       paddingHorizontal: spacing.md,
@@ -2806,6 +2735,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       gap: spacing.sm,
       backgroundColor: colors.primary,
       borderRadius: 999,
+      borderCurve: 'continuous',
       paddingVertical: spacing.md - 2,
       paddingHorizontal: spacing.xl,
     },
@@ -2861,7 +2791,8 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     stepBadge: {
       width: 22,
       height: 22,
-      borderRadius: 11,
+      borderRadius: 999,
+      borderCurve: 'continuous',
       justifyContent: 'center',
       alignItems: 'center',
       marginTop: 1,
@@ -2890,6 +2821,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       paddingVertical: spacing.xs,
       paddingHorizontal: spacing.sm,
       borderRadius: borderRadius.md,
+      borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(64,156,255,0.1)' : 'rgba(0,122,255,0.06)',
     },
     parkAndRideLeg: {
@@ -2923,41 +2855,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(28,28,30,0.92)',
     borderRadius: 999,
+    borderCurve: 'continuous',
     paddingVertical: 9,
     paddingHorizontal: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.2)',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 8,
   },
   searchThisAreaText: {
-    color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
   glassPanel: {
     borderRadius: 20,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.25)',
-    // iOS shadow via shadow* props
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 6 },
-    // Android elevation
-    elevation: 12,
   },
   handle: {
     alignSelf: 'center',
     width: 36,
     height: 4,
     borderRadius: 2,
+    borderCurve: 'continuous',
     backgroundColor: 'rgba(120,120,128,0.3)',
     marginTop: 8,
     marginBottom: 4,
@@ -2976,12 +2893,14 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
+    borderCurve: 'continuous',
     backgroundColor: 'rgba(120,120,128,0.3)',
   },
   miniPill: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 999,
+    borderCurve: 'continuous',
     paddingVertical: 10,
     paddingLeft: 14,
     paddingRight: 6,
@@ -3000,9 +2919,11 @@ const styles = StyleSheet.create({
   miniProfileCircle: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   searchRow: {
     flexDirection: 'row',
@@ -3050,9 +2971,11 @@ const styles = StyleSheet.create({
   profileCircle: {
     width: 34,
     height: 34,
-    borderRadius: 17,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   favRow: {
     flexDirection: 'row',
@@ -3068,7 +2991,8 @@ const styles = StyleSheet.create({
   favIconCircle: {
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 5,
@@ -3079,7 +3003,8 @@ const styles = StyleSheet.create({
     right: 2,
     width: 16,
     height: 16,
-    borderRadius: 8,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     backgroundColor: '#8E8E93',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3132,6 +3057,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingVertical: 8,
+    borderRadius: borderRadius.md,
+    borderCurve: 'continuous',
   },
   addStopText: {
     fontSize: 14,
@@ -3144,13 +3071,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
+    borderCurve: 'continuous',
   },
   stopResultsList: {
     marginTop: 4,
-    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   stopResultRow: {
@@ -3182,6 +3109,7 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: 'rgba(0,0,0,0.72)',
     borderRadius: 10,
+    borderCurve: 'continuous',
     paddingHorizontal: 14,
     paddingVertical: 8,
     marginBottom: 6,

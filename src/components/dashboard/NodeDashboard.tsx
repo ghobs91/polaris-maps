@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MetricCard } from './MetricCard';
-import { spacing, typography } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import { GlassView } from '../common/GlassView';
 import type { PeerNode } from '../../models/peer';
 
 interface NodeDashboardProps {
@@ -20,7 +21,7 @@ export function NodeDashboard({ node, activePeers, syncingFeeds, isOnline }: Nod
   const regionsCount = node?.regionIds.length ?? 0;
 
   return (
-    <View style={styles.container}>
+    <GlassView material="regular" style={styles.container}>
       <View style={styles.statusRow}>
         <View
           style={[
@@ -47,12 +48,16 @@ export function NodeDashboard({ node, activePeers, syncingFeeds, isOnline }: Nod
         <MetricCard label="Uptime" value={uptimeHours} unit="hrs" />
         <MetricCard label="Regions" value={regionsCount} />
       </View>
-    </View>
+    </GlassView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
+    padding: spacing.md,
     gap: spacing.sm,
   },
   statusRow: {

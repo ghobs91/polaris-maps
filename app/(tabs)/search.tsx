@@ -78,7 +78,7 @@ export default function SearchScreen() {
   const viewport = useMapStore((s) => s.viewport);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastQueryRef = useRef<string>('');
   const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(
     null,

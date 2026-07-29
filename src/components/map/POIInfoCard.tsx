@@ -16,13 +16,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { GlassView } from '../common/GlassView';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
-import { spacing, typography, borderRadius, shadow } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
 import {
@@ -270,32 +271,32 @@ interface ActionPillProps {
   label: string;
   onPress: () => void;
   color: string;
-  bg: string;
 }
 
-function ActionPill({ icon, label, onPress, color, bg }: ActionPillProps) {
+function ActionPill({ icon, label, onPress, color }: ActionPillProps) {
   return (
     <TouchableOpacity
-      style={[pillStyles.pill, { backgroundColor: bg }]}
       onPress={onPress}
       activeOpacity={0.75}
       accessibilityLabel={label}
       accessibilityRole="button"
     >
-      <Ionicons
-        name={icon}
-        size={20}
-        color={color}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-      />
-      <Text
-        style={[pillStyles.label, { color }]}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-      >
-        {label}
-      </Text>
+      <GlassView material="clear" isInteractive style={pillStyles.pill}>
+        <Ionicons
+          name={icon}
+          size={20}
+          color={color}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+        <Text
+          style={[pillStyles.label, { color }]}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        >
+          {label}
+        </Text>
+      </GlassView>
     </TouchableOpacity>
   );
 }
@@ -305,6 +306,7 @@ const pillStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
     paddingVertical: 10,
     paddingHorizontal: 14,
     gap: 4,
@@ -486,7 +488,6 @@ export function POIInfoCard() {
   const category = poi ? getPoiCategory(poi.type, poi.subtype) : null;
 
   // Theme shorthands
-  const bg = colors.surface;
   const textColor = colors.text;
   const subtextColor = colors.textSecondary;
   const borderColor = colors.border;
@@ -564,449 +565,432 @@ export function POIInfoCard() {
       style={[
         styles.card,
         {
-          backgroundColor: bg,
           bottom: 0,
           height: FULL_H,
           transform: [{ translateY }],
-          paddingBottom: insets.bottom,
         },
-        shadow.lg,
       ]}
     >
-      {/* Drag handle + close — attach PanResponder here so it doesn't conflict with scroll */}
-      <View {...pan.panHandlers} style={styles.topBar}>
-        <TouchableOpacity
-          onPress={toggleExpanded}
-          style={styles.handleWrap}
-          hitSlop={{ top: 16, bottom: 16, left: 80, right: 80 }}
-        >
-          <View style={[styles.handle, { backgroundColor: borderColor }]} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.closeBtn}
-          onPress={() => setSelectedPoi(null)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityLabel="Close place details"
-          accessibilityRole="button"
-        >
-          <View style={[styles.closeCircle, { backgroundColor: pillBg }]}>
-            <Ionicons name="close" size={16} color={subtextColor} />
-          </View>
-        </TouchableOpacity>
-      </View>
+      <GlassView material="regular" style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
+        {/* Drag handle + close — attach PanResponder here so it doesn't conflict with scroll */}
+        <View {...pan.panHandlers} style={styles.topBar}>
+          <TouchableOpacity
+            onPress={toggleExpanded}
+            style={styles.handleWrap}
+            hitSlop={{ top: 16, bottom: 16, left: 80, right: 80 }}
+          >
+            <View style={[styles.handle, { backgroundColor: borderColor }]} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.closeBtn}
+            onPress={() => setSelectedPoi(null)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Close place details"
+            accessibilityRole="button"
+          >
+            <GlassView material="clear" isInteractive style={styles.closeCircle}>
+              <Ionicons name="close" size={16} color={subtextColor} />
+            </GlassView>
+          </TouchableOpacity>
+        </View>
 
-      {poi && parsed && category && (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled
-          onScrollBeginDrag={() => {
-            scrollAtTop.current = false;
-          }}
-          onScroll={(e) => {
-            scrollAtTop.current = e.nativeEvent.contentOffset.y <= 0;
-          }}
-          scrollEventThrottle={100}
-          onScrollEndDrag={(e) => {
-            // If dragging down from top while peeking, collapse the card
-            if (
-              scrollAtTop.current &&
-              e.nativeEvent.velocity &&
-              e.nativeEvent.velocity.y > 0.5 &&
-              !expandedRef.current
-            ) {
-              setSelectedPoi(null);
-            }
-          }}
-        >
-          {/* ── Hero image ────────────────────────────────────────────── */}
-          {parsed.imageUrl && (
-            <Image source={{ uri: parsed.imageUrl }} style={styles.heroImage} resizeMode="cover" />
-          )}
-
-          {/* ── Header ────────────────────────────────────────────────── */}
-          <View style={styles.header}>
-            {enrichedData?.logoUrl && !logoLoadFailed ? (
+        {poi && parsed && category && (
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            scrollEnabled
+            onScrollBeginDrag={() => {
+              scrollAtTop.current = false;
+            }}
+            onScroll={(e) => {
+              scrollAtTop.current = e.nativeEvent.contentOffset.y <= 0;
+            }}
+            scrollEventThrottle={100}
+            onScrollEndDrag={(e) => {
+              // If dragging down from top while peeking, collapse the card
+              if (
+                scrollAtTop.current &&
+                e.nativeEvent.velocity &&
+                e.nativeEvent.velocity.y > 0.5 &&
+                !expandedRef.current
+              ) {
+                setSelectedPoi(null);
+              }
+            }}
+          >
+            {/* ── Hero image ────────────────────────────────────────────── */}
+            {parsed.imageUrl && (
               <Image
-                source={{ uri: enrichedData.logoUrl }}
-                style={styles.brandLogo}
-                resizeMode="contain"
-                onError={() => setLogoLoadFailed(true)}
+                source={{ uri: parsed.imageUrl }}
+                style={styles.heroImage}
+                resizeMode="cover"
               />
-            ) : (
-              <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
-                <Ionicons name={category.icon} size={22} color="#FFFFFF" />
+            )}
+
+            {/* ── Header ────────────────────────────────────────────────── */}
+            <View style={styles.header}>
+              {enrichedData?.logoUrl && !logoLoadFailed ? (
+                <Image
+                  source={{ uri: enrichedData.logoUrl }}
+                  style={styles.brandLogo}
+                  resizeMode="contain"
+                  onError={() => setLogoLoadFailed(true)}
+                />
+              ) : (
+                <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
+                  <Ionicons name={category.icon} size={22} color="#FFFFFF" />
+                </View>
+              )}
+              <View style={styles.headerText}>
+                <Text
+                  style={[styles.name, { color: textColor }]}
+                  numberOfLines={2}
+                  accessibilityRole="header"
+                  accessibilityLabel={poi.name}
+                >
+                  {poi.name}
+                </Text>
+                <Text style={[styles.categoryLabel, { color: subtextColor }]}>
+                  {enrichedData?.poiCategory ?? capitalise(poi.subtype)}
+                  {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
+                  {parsed.stars ? ` · ${parsed.stars}` : ''}
+                </Text>
+                {(parsed.brand ?? parsed.operator) && (
+                  <Text style={[styles.operatorLabel, { color: subtextColor }]}>
+                    {parsed.brand ?? parsed.operator}
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {/* ── Action pill buttons ────────────────────────────────────── */}
+            <View style={styles.actions}>
+              <ActionPill
+                icon="navigate"
+                label="Directions"
+                onPress={handleDirections}
+                color={primary}
+              />
+              {parsed.phone && (
+                <ActionPill icon="call" label="Call" onPress={handlePhone} color={primary} />
+              )}
+              {parsed.website && (
+                <ActionPill icon="globe" label="Website" onPress={handleWebsite} color={primary} />
+              )}
+              {parsed.menuUrl && (
+                <ActionPill
+                  icon="restaurant-outline"
+                  label="Menu"
+                  onPress={handleMenu}
+                  color={primary}
+                />
+              )}
+              {parsed.email && (
+                <ActionPill icon="mail" label="Email" onPress={handleEmail} color={primary} />
+              )}
+              <ActionPill
+                icon="bookmark-outline"
+                label="Save"
+                onPress={() => setShowSaveSheet(true)}
+                color={primary}
+              />
+              <ActionPill
+                icon="share-outline"
+                label="Share"
+                onPress={handleShare}
+                color={primary}
+              />
+            </View>
+
+            <RNModal
+              visible={showSaveSheet}
+              animationType="slide"
+              presentationStyle="pageSheet"
+              onRequestClose={() => setShowSaveSheet(false)}
+            >
+              {poi && (
+                <SaveToListSheet
+                  poiUuid={String(poi.id)}
+                  placeName={poi.name}
+                  lat={poi.lat}
+                  lng={poi.lng}
+                  address={parsed?.address ?? undefined}
+                  category={poi.subtype}
+                  onDone={() => setShowSaveSheet(false)}
+                />
+              )}
+            </RNModal>
+
+            {/* ── Description ───────────────────────────────────────────── */}
+            {parsed.description && (
+              <View style={[styles.section, { borderColor }]}>
+                <Text style={[styles.sectionDescription, { color: subtextColor }]}>
+                  {parsed.description}
+                </Text>
               </View>
             )}
-            <View style={styles.headerText}>
-              <Text
-                style={[styles.name, { color: textColor }]}
-                numberOfLines={2}
-                accessibilityRole="header"
-                accessibilityLabel={poi.name}
-              >
-                {poi.name}
-              </Text>
-              <Text style={[styles.categoryLabel, { color: subtextColor }]}>
-                {enrichedData?.poiCategory ?? capitalise(poi.subtype)}
-                {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
-                {parsed.stars ? ` · ${parsed.stars}` : ''}
-              </Text>
-              {(parsed.brand ?? parsed.operator) && (
-                <Text style={[styles.operatorLabel, { color: subtextColor }]}>
-                  {parsed.brand ?? parsed.operator}
-                </Text>
-              )}
-            </View>
-          </View>
 
-          {/* ── Action pill buttons ────────────────────────────────────── */}
-          <View style={styles.actions}>
-            <ActionPill
-              icon="navigate"
-              label="Directions"
-              onPress={handleDirections}
-              color={primary}
-              bg={pillBg}
-            />
-            {parsed.phone && (
-              <ActionPill
-                icon="call"
-                label="Call"
-                onPress={handlePhone}
-                color={primary}
-                bg={pillBg}
-              />
-            )}
-            {parsed.website && (
-              <ActionPill
-                icon="globe"
-                label="Website"
-                onPress={handleWebsite}
-                color={primary}
-                bg={pillBg}
-              />
-            )}
-            {parsed.menuUrl && (
-              <ActionPill
-                icon="restaurant-outline"
-                label="Menu"
-                onPress={handleMenu}
-                color={primary}
-                bg={pillBg}
-              />
-            )}
-            {parsed.email && (
-              <ActionPill
-                icon="mail"
-                label="Email"
-                onPress={handleEmail}
-                color={primary}
-                bg={pillBg}
-              />
-            )}
-            <ActionPill
-              icon="bookmark-outline"
-              label="Save"
-              onPress={() => setShowSaveSheet(true)}
-              color={primary}
-              bg={pillBg}
-            />
-            <ActionPill
-              icon="share-outline"
-              label="Share"
-              onPress={handleShare}
-              color={primary}
-              bg={pillBg}
-            />
-          </View>
-
-          <RNModal
-            visible={showSaveSheet}
-            animationType="slide"
-            presentationStyle="pageSheet"
-            onRequestClose={() => setShowSaveSheet(false)}
-          >
-            {poi && (
-              <SaveToListSheet
-                poiUuid={String(poi.id)}
-                placeName={poi.name}
-                lat={poi.lat}
-                lng={poi.lng}
-                address={parsed?.address ?? undefined}
-                category={poi.subtype}
-                onDone={() => setShowSaveSheet(false)}
-              />
-            )}
-          </RNModal>
-
-          {/* ── Description ───────────────────────────────────────────── */}
-          {parsed.description && (
-            <View style={[styles.section, { borderColor }]}>
-              <Text style={[styles.sectionDescription, { color: subtextColor }]}>
-                {parsed.description}
-              </Text>
-            </View>
-          )}
-
-          {/* ── Info rows ─────────────────────────────────────────────── */}
-          <View
-            style={[
-              styles.section,
-              {
-                borderColor,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderRadius: borderRadius.lg,
-                overflow: 'hidden',
-              },
-            ]}
-          >
-            {[
-              parsed.address && {
-                icon: 'location-outline' as const,
-                label: parsed.address,
-              },
-              parsed.hours && {
-                icon: 'time-outline' as const,
-                label: parsed.hours,
-              },
-              parsed.phone && {
-                icon: 'call-outline' as const,
-                label: parsed.phone,
-                onPress: handlePhone,
-                iconColor: primary,
-              },
-              parsed.website && {
-                icon: 'globe-outline' as const,
-                label: new URL(
-                  parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`,
-                ).hostname.replace(/^www\./, ''),
-                onPress: handleWebsite,
-                iconColor: primary,
-              },
-              parsed.email && {
-                icon: 'mail-outline' as const,
-                label: parsed.email,
-                onPress: handleEmail,
-                iconColor: primary,
-              },
-              parsed.wheelchair === 'yes' && {
-                icon: 'accessibility-outline' as const,
-                label: 'Wheelchair accessible',
-                iconColor: colors.success,
-              },
-              parsed.wheelchair === 'limited' && {
-                icon: 'accessibility-outline' as const,
-                label: 'Limited wheelchair access',
-              },
-              parsed.wheelchair === 'no' && {
-                icon: 'accessibility-outline' as const,
-                label: 'Not wheelchair accessible',
-                iconColor: colors.error,
-              },
-              parsed.wifi && {
-                icon: 'wifi-outline' as const,
-                label: parsed.wifi,
-                iconColor: colors.success,
-              },
-              parsed.outdoorSeating && {
-                icon: 'sunny-outline' as const,
-                label: 'Outdoor seating',
-              },
-              parsed.indoorSeating && {
-                icon: 'home-outline' as const,
-                label: 'Indoor seating',
-              },
-              parsed.takeaway && {
-                icon: 'bag-outline' as const,
-                label: parsed.takeaway,
-              },
-              parsed.delivery && {
-                icon: 'bicycle-outline' as const,
-                label: parsed.delivery,
-                iconColor: colors.success,
-              },
-              parsed.reservation && {
-                icon: 'calendar-outline' as const,
-                label: parsed.reservation,
-              },
-              parsed.smoking && {
-                icon: 'ban-outline' as const,
-                label: parsed.smoking,
-              },
-              parsed.fee && {
-                icon: 'pricetag-outline' as const,
-                label: parsed.fee,
-              },
-              parsed.level && {
-                icon: 'layers-outline' as const,
-                label: parsed.level,
-              },
-              parsed.capacity && {
-                icon: 'people-outline' as const,
-                label: parsed.capacity,
-              },
-              parsed.payment && {
-                icon: 'card-outline' as const,
-                label: parsed.payment,
-              },
-              parsed.diet && {
-                icon: 'leaf-outline' as const,
-                label: parsed.diet,
-                iconColor: colors.success,
-              },
-              // EV Charging information from Open Charge Map
-              chargingData?.connections &&
-                chargingData.connections.length > 0 && {
-                  icon: 'flash-outline' as const,
-                  label: `${chargingData.connections.length} connector${chargingData.connections.length > 1 ? 's' : ''}: ${chargingData.connections.map((c) => c.type).join(', ')}`,
+            {/* ── Info rows ─────────────────────────────────────────────── */}
+            <View
+              style={[
+                styles.section,
+                {
+                  borderRadius: borderRadius.lg,
+                  overflow: 'hidden',
                 },
-              chargingData?.connections?.some((c) => c.isFastCharge) && {
-                icon: 'flash' as const,
-                label: 'Fast charging available',
-                iconColor: colors.success,
-              },
-              chargingData?.pricing && {
-                icon: 'pricetag-outline' as const,
-                label: chargingData.pricing,
-              },
-              chargingData?.accessType === 'public' && {
-                icon: 'people-outline' as const,
-                label: 'Public access',
-              },
-              chargingData?.accessType === 'members_only' && {
-                icon: 'lock-closed-outline' as const,
-                label: 'Members only',
-                iconColor: colors.warning,
-              },
-              chargingData?.operator && {
-                icon: 'business-outline' as const,
-                label: `Operator: ${chargingData.operator}`,
-              },
-            ]
-              .filter(Boolean)
-              .map((row, i, arr) => {
-                const r = row as {
-                  icon: React.ComponentProps<typeof Ionicons>['name'];
-                  label: string;
-                  onPress?: () => void;
-                  iconColor?: string;
-                };
-                return (
-                  <InfoRow
-                    key={i}
-                    icon={r.icon}
-                    label={r.label}
-                    onPress={r.onPress}
-                    iconColor={r.iconColor}
-                    textColor={textColor}
-                    subtextColor={subtextColor}
-                    borderColor={borderColor}
-                    isLast={i === arr.length - 1}
-                  />
-                );
-              })}
-          </View>
-
-          {/* ── Social media ──────────────────────────────────────────── */}
-          {(parsed.facebook || parsed.instagram || parsed.twitter) && (
-            <View style={styles.socialRow}>
-              {parsed.facebook && (
-                <TouchableOpacity
-                  onPress={handleFacebook}
-                  style={[styles.socialBtn, { backgroundColor: pillBg }]}
-                >
-                  <Text style={[styles.socialLabel, { color: primary }]}>Facebook</Text>
-                </TouchableOpacity>
-              )}
-              {parsed.instagram && (
-                <TouchableOpacity
-                  onPress={handleInstagram}
-                  style={[styles.socialBtn, { backgroundColor: pillBg }]}
-                >
-                  <Text style={[styles.socialLabel, { color: primary }]}>Instagram</Text>
-                </TouchableOpacity>
-              )}
-              {parsed.twitter && (
-                <TouchableOpacity
-                  onPress={() =>
-                    Linking.openURL(
-                      parsed.twitter!.startsWith('http')
-                        ? parsed.twitter!
-                        : `https://twitter.com/${parsed.twitter}`,
-                    )
-                  }
-                  style={[styles.socialBtn, { backgroundColor: pillBg }]}
-                >
-                  <Text style={[styles.socialLabel, { color: primary }]}>X / Twitter</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {/* ── Note ──────────────────────────────────────────────────── */}
-          {parsed.note && (
-            <View style={[styles.noteBox, { backgroundColor: pillBg, borderColor }]}>
-              <Ionicons
-                name="information-circle-outline"
-                size={15}
-                color={subtextColor}
-                style={{ marginTop: 1 }}
-              />
-              <Text style={[styles.noteText, { color: subtextColor }]}>{parsed.note}</Text>
-            </View>
-          )}
-
-          {/* ── Update Place Info (OSM edit) ──────────────────────── */}
-          {selectedPoi && selectedPoi.id > 0 && (
-            <TouchableOpacity
-              style={[styles.updatePlaceBtn, { backgroundColor: pillBg, borderColor }]}
-              activeOpacity={0.7}
-              onPress={() => {
-                router.push({
-                  pathname: '/poi/osm-edit',
-                  params: {
-                    nodeId: String(selectedPoi.id),
-                    name: selectedPoi.name || '',
-                  },
-                });
-              }}
+              ]}
             >
-              <Ionicons name="create-outline" size={18} color={primary} />
-              <Text style={[styles.updatePlaceBtnText, { color: primary }]}>Update Place Info</Text>
-            </TouchableOpacity>
-          )}
+              {[
+                parsed.address && {
+                  icon: 'location-outline' as const,
+                  label: parsed.address,
+                },
+                parsed.hours && {
+                  icon: 'time-outline' as const,
+                  label: parsed.hours,
+                },
+                parsed.phone && {
+                  icon: 'call-outline' as const,
+                  label: parsed.phone,
+                  onPress: handlePhone,
+                  iconColor: primary,
+                },
+                parsed.website && {
+                  icon: 'globe-outline' as const,
+                  label: new URL(
+                    parsed.website.startsWith('http')
+                      ? parsed.website
+                      : `https://${parsed.website}`,
+                  ).hostname.replace(/^www\./, ''),
+                  onPress: handleWebsite,
+                  iconColor: primary,
+                },
+                parsed.email && {
+                  icon: 'mail-outline' as const,
+                  label: parsed.email,
+                  onPress: handleEmail,
+                  iconColor: primary,
+                },
+                parsed.wheelchair === 'yes' && {
+                  icon: 'accessibility-outline' as const,
+                  label: 'Wheelchair accessible',
+                  iconColor: colors.success,
+                },
+                parsed.wheelchair === 'limited' && {
+                  icon: 'accessibility-outline' as const,
+                  label: 'Limited wheelchair access',
+                },
+                parsed.wheelchair === 'no' && {
+                  icon: 'accessibility-outline' as const,
+                  label: 'Not wheelchair accessible',
+                  iconColor: colors.error,
+                },
+                parsed.wifi && {
+                  icon: 'wifi-outline' as const,
+                  label: parsed.wifi,
+                  iconColor: colors.success,
+                },
+                parsed.outdoorSeating && {
+                  icon: 'sunny-outline' as const,
+                  label: 'Outdoor seating',
+                },
+                parsed.indoorSeating && {
+                  icon: 'home-outline' as const,
+                  label: 'Indoor seating',
+                },
+                parsed.takeaway && {
+                  icon: 'bag-outline' as const,
+                  label: parsed.takeaway,
+                },
+                parsed.delivery && {
+                  icon: 'bicycle-outline' as const,
+                  label: parsed.delivery,
+                  iconColor: colors.success,
+                },
+                parsed.reservation && {
+                  icon: 'calendar-outline' as const,
+                  label: parsed.reservation,
+                },
+                parsed.smoking && {
+                  icon: 'ban-outline' as const,
+                  label: parsed.smoking,
+                },
+                parsed.fee && {
+                  icon: 'pricetag-outline' as const,
+                  label: parsed.fee,
+                },
+                parsed.level && {
+                  icon: 'layers-outline' as const,
+                  label: parsed.level,
+                },
+                parsed.capacity && {
+                  icon: 'people-outline' as const,
+                  label: parsed.capacity,
+                },
+                parsed.payment && {
+                  icon: 'card-outline' as const,
+                  label: parsed.payment,
+                },
+                parsed.diet && {
+                  icon: 'leaf-outline' as const,
+                  label: parsed.diet,
+                  iconColor: colors.success,
+                },
+                // EV Charging information from Open Charge Map
+                chargingData?.connections &&
+                  chargingData.connections.length > 0 && {
+                    icon: 'flash-outline' as const,
+                    label: `${chargingData.connections.length} connector${chargingData.connections.length > 1 ? 's' : ''}: ${chargingData.connections.map((c) => c.type).join(', ')}`,
+                  },
+                chargingData?.connections?.some((c) => c.isFastCharge) && {
+                  icon: 'flash' as const,
+                  label: 'Fast charging available',
+                  iconColor: colors.success,
+                },
+                chargingData?.pricing && {
+                  icon: 'pricetag-outline' as const,
+                  label: chargingData.pricing,
+                },
+                chargingData?.accessType === 'public' && {
+                  icon: 'people-outline' as const,
+                  label: 'Public access',
+                },
+                chargingData?.accessType === 'members_only' && {
+                  icon: 'lock-closed-outline' as const,
+                  label: 'Members only',
+                  iconColor: colors.warning,
+                },
+                chargingData?.operator && {
+                  icon: 'business-outline' as const,
+                  label: `Operator: ${chargingData.operator}`,
+                },
+              ]
+                .filter(Boolean)
+                .map((row, i, arr) => {
+                  const r = row as {
+                    icon: React.ComponentProps<typeof Ionicons>['name'];
+                    label: string;
+                    onPress?: () => void;
+                    iconColor?: string;
+                  };
+                  return (
+                    <InfoRow
+                      key={i}
+                      icon={r.icon}
+                      label={r.label}
+                      onPress={r.onPress}
+                      iconColor={r.iconColor}
+                      textColor={textColor}
+                      subtextColor={subtextColor}
+                      borderColor={borderColor}
+                      isLast={i === arr.length - 1}
+                    />
+                  );
+                })}
+            </View>
 
-          {/* ── Add to OpenStreetMap (Overture POI) ───────────────── */}
-          {selectedPoi &&
-            selectedPoi.id <= 0 &&
-            selectedPoi.tags['polaris:source'] === 'overture' && (
+            {/* ── Social media ──────────────────────────────────────────── */}
+            {(parsed.facebook || parsed.instagram || parsed.twitter) && (
+              <View style={styles.socialRow}>
+                {parsed.facebook && (
+                  <TouchableOpacity onPress={handleFacebook}>
+                    <GlassView material="clear" isInteractive style={styles.socialBtn}>
+                      <Text style={[styles.socialLabel, { color: primary }]}>Facebook</Text>
+                    </GlassView>
+                  </TouchableOpacity>
+                )}
+                {parsed.instagram && (
+                  <TouchableOpacity onPress={handleInstagram}>
+                    <GlassView material="clear" isInteractive style={styles.socialBtn}>
+                      <Text style={[styles.socialLabel, { color: primary }]}>Instagram</Text>
+                    </GlassView>
+                  </TouchableOpacity>
+                )}
+                {parsed.twitter && (
+                  <TouchableOpacity
+                    onPress={() =>
+                      Linking.openURL(
+                        parsed.twitter!.startsWith('http')
+                          ? parsed.twitter!
+                          : `https://twitter.com/${parsed.twitter}`,
+                      )
+                    }
+                  >
+                    <GlassView material="clear" isInteractive style={styles.socialBtn}>
+                      <Text style={[styles.socialLabel, { color: primary }]}>X / Twitter</Text>
+                    </GlassView>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* ── Note ──────────────────────────────────────────────────── */}
+            {parsed.note && (
+              <View style={[styles.noteBox, { backgroundColor: pillBg }]}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={15}
+                  color={subtextColor}
+                  style={{ marginTop: 1 }}
+                />
+                <Text style={[styles.noteText, { color: subtextColor }]}>{parsed.note}</Text>
+              </View>
+            )}
+
+            {/* ── Update Place Info (OSM edit) ──────────────────────── */}
+            {selectedPoi && selectedPoi.id > 0 && (
               <TouchableOpacity
-                style={[styles.osmAddBtn, { borderColor }]}
                 activeOpacity={0.7}
                 onPress={() => {
-                  const initialTags: Record<string, string> = {};
-                  for (const [k, v] of Object.entries(selectedPoi.tags)) {
-                    if (!k.startsWith('polaris:')) initialTags[k] = v;
-                  }
                   router.push({
                     pathname: '/poi/osm-edit',
                     params: {
+                      nodeId: String(selectedPoi.id),
                       name: selectedPoi.name || '',
-                      lat: String(selectedPoi.lat),
-                      lng: String(selectedPoi.lng),
-                      initialTags: JSON.stringify(initialTags),
                     },
                   });
                 }}
               >
-                <Ionicons name="add-circle-outline" size={18} color="#fff" />
-                <Text style={styles.osmAddBtnText}>Add to OpenStreetMap</Text>
+                <GlassView material="clear" isInteractive style={styles.updatePlaceBtn}>
+                  <Ionicons name="create-outline" size={18} color={primary} />
+                  <Text style={[styles.updatePlaceBtnText, { color: primary }]}>
+                    Update Place Info
+                  </Text>
+                </GlassView>
               </TouchableOpacity>
             )}
-        </ScrollView>
-      )}
+
+            {/* ── Add to OpenStreetMap (Overture POI) ───────────────── */}
+            {selectedPoi &&
+              selectedPoi.id <= 0 &&
+              selectedPoi.tags['polaris:source'] === 'overture' && (
+                <TouchableOpacity
+                  style={styles.osmAddBtn}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const initialTags: Record<string, string> = {};
+                    for (const [k, v] of Object.entries(selectedPoi.tags)) {
+                      if (!k.startsWith('polaris:')) initialTags[k] = v;
+                    }
+                    router.push({
+                      pathname: '/poi/osm-edit',
+                      params: {
+                        name: selectedPoi.name || '',
+                        lat: String(selectedPoi.lat),
+                        lng: String(selectedPoi.lng),
+                        initialTags: JSON.stringify(initialTags),
+                      },
+                    });
+                  }}
+                >
+                  <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                  <Text style={styles.osmAddBtnText}>Add to OpenStreetMap</Text>
+                </TouchableOpacity>
+              )}
+          </ScrollView>
+        )}
+      </GlassView>
     </Animated.View>
   );
 }
@@ -1016,8 +1000,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+  },
+  cardGlass: {
+    ...StyleSheet.absoluteFill,
     borderTopLeftRadius: borderRadius.xxl,
     borderTopRightRadius: borderRadius.xxl,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   topBar: {
@@ -1037,6 +1025,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
+    borderCurve: 'continuous',
   },
   closeBtn: {
     position: 'absolute',
@@ -1045,9 +1034,11 @@ const styles = StyleSheet.create({
   closeCircle: {
     width: 28,
     height: 28,
-    borderRadius: 14,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   scroll: {
     flex: 1,
@@ -1059,6 +1050,8 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 160,
     marginBottom: spacing.md,
+    borderRadius: borderRadius.md,
+    borderCurve: 'continuous',
   },
   header: {
     flexDirection: 'row',
@@ -1071,6 +1064,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -1079,6 +1073,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
+    borderCurve: 'continuous',
     flexShrink: 0,
     backgroundColor: '#ffffff',
   },
@@ -1108,6 +1103,8 @@ const styles = StyleSheet.create({
   section: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
   },
   sectionDescription: {
     ...typography.bodySmall,
@@ -1126,6 +1123,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.round,
+    borderCurve: 'continuous',
   },
   socialLabel: {
     ...typography.label,
@@ -1137,7 +1135,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     padding: spacing.sm,
     borderRadius: borderRadius.md,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderCurve: 'continuous',
     alignItems: 'flex-start',
   },
   noteText: {
@@ -1154,7 +1152,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     paddingVertical: 14,
     borderRadius: borderRadius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderCurve: 'continuous',
   },
   updatePlaceBtnText: {
     fontSize: 15,
@@ -1169,6 +1167,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     paddingVertical: 14,
     borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
     backgroundColor: '#7EBC6F',
   },
   osmAddBtnText: {

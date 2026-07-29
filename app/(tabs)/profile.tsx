@@ -72,11 +72,17 @@ export default function ProfileScreen() {
         />
 
         <View style={styles.actions}>
-          <Button title="Settings" onPress={() => router.push('/settings')} variant="outline" />
+          <Button
+            title="Settings"
+            onPress={() => router.push('/settings')}
+            variant="outline"
+            style={{ borderCurve: 'continuous' }}
+          />
           <Button
             title="Manage Regions"
             onPress={() => router.push('/regions')}
             variant="outline"
+            style={{ borderCurve: 'continuous' }}
           />
         </View>
       </ScrollView>

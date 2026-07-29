@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -11,7 +11,7 @@ import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import { useNavigationStore } from '@/stores/navigationStore';
-import { spacing, typography } from '@/constants/theme';
+import { spacing, typography, borderRadius } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
 import {
@@ -28,6 +28,7 @@ import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh
 import { useLiveActivity } from '@/hooks/useLiveActivity';
 import { speakInstruction, stopNavigationSpeech } from '@/services/tts';
 import { Ionicons } from '@expo/vector-icons';
+import { GlassView } from '@/components/common/GlassView';
 import * as Haptics from 'expo-haptics';
 
 export default function NavigationScreen() {
@@ -536,7 +537,7 @@ export default function NavigationScreen() {
       <View style={[styles.etaContainer, { bottom: insets.bottom + spacing.md }]}>
         {/* Multi-stop: show next stop name */}
         {waypoints.length > 0 && currentLegIndex < waypoints.length && (
-          <View style={styles.nextStopBanner}>
+          <GlassView material="regular" style={styles.nextStopBanner}>
             <Ionicons name="flag-outline" size={14} color="#fff" />
             <Text style={styles.nextStopText} numberOfLines={1}>
               Next: {waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`}
@@ -551,7 +552,7 @@ export default function NavigationScreen() {
             >
               <Text style={styles.skipStopText}>Skip</Text>
             </TouchableOpacity>
-          </View>
+          </GlassView>
         )}
         <EtaDisplay
           etaSeconds={etaSeconds}
@@ -564,31 +565,39 @@ export default function NavigationScreen() {
 
       {/* Re-center button — shown when user has panned/zoomed away */}
       {!followCamera && (
-        <TouchableOpacity
-          style={[styles.recenterBtn, { bottom: insets.bottom + spacing.md + 100 }]}
+        <Pressable
+          style={({ pressed }) => [
+            styles.recenterBtn,
+            { bottom: insets.bottom + spacing.md + 100, opacity: pressed ? 0.85 : 1 },
+          ]}
           onPress={handleRecenter}
-          activeOpacity={0.85}
           accessibilityLabel="Re-center map"
           accessibilityHint="Return the map view to your current location"
           accessibilityRole="button"
         >
-          <Ionicons name="navigate" size={16} color="#fff" />
-          <Text style={styles.recenterText}>Re-center</Text>
-        </TouchableOpacity>
+          <GlassView material="regular" isInteractive style={styles.recenterBtnInner}>
+            <Ionicons name="navigate" size={16} color="#fff" />
+            <Text style={styles.recenterText}>Re-center</Text>
+          </GlassView>
+        </Pressable>
       )}
 
       {/* Report incident button */}
-      <TouchableOpacity
-        style={[styles.reportBtn, { bottom: insets.bottom + spacing.md + 100 }]}
+      <Pressable
+        style={({ pressed }) => [
+          styles.reportBtn,
+          { bottom: insets.bottom + spacing.md + 100, opacity: pressed ? 0.85 : 1 },
+        ]}
         onPress={() => setShowIncidentReport(true)}
-        activeOpacity={0.85}
         accessibilityLabel="Report incident"
         accessibilityHint="Report a traffic incident at your current location"
         accessibilityRole="button"
       >
-        <Ionicons name="alert-circle-outline" size={16} color="#fff" />
-        <Text style={styles.reportText}>Report</Text>
-      </TouchableOpacity>
+        <GlassView material="regular" isInteractive style={styles.reportBtnInner}>
+          <Ionicons name="alert-circle-outline" size={16} color="#fff" />
+          <Text style={styles.reportText}>Report</Text>
+        </GlassView>
+      </Pressable>
 
       {/* Add destination search panel */}
       <AddDestinationPanel
@@ -638,18 +647,19 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       position: 'absolute',
       left: spacing.md,
       zIndex: 10,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+    },
+    reportBtnInner: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: 'rgba(28,28,30,0.88)',
       paddingVertical: 10,
       paddingHorizontal: 16,
-      borderRadius: 22,
-      shadowColor: '#000',
-      shadowOpacity: 0.3,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 8,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
     },
     reportText: {
       color: '#fff',
@@ -660,18 +670,19 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       position: 'absolute',
       alignSelf: 'center',
       zIndex: 10,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+    },
+    recenterBtnInner: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: 'rgba(28,28,30,0.88)',
       paddingVertical: 10,
       paddingHorizontal: 16,
-      borderRadius: 22,
-      shadowColor: '#000',
-      shadowOpacity: 0.3,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 8,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
     },
     recenterText: {
       color: '#fff',
@@ -682,11 +693,12 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: 'rgba(28,28,30,0.88)',
       marginBottom: 6,
       paddingVertical: 8,
       paddingHorizontal: 14,
-      borderRadius: 12,
+      borderRadius: borderRadius.md,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
     },
     nextStopText: {
       flex: 1,
@@ -697,6 +709,9 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     skipStopBtn: {
       paddingVertical: 2,
       paddingHorizontal: 8,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
     },
     skipStopText: {
       color: '#409CFF',

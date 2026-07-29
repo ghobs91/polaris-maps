@@ -2,7 +2,8 @@ import React, { useState, useCallback } from 'react';
 import { TextInput, View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
-import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
+import { colors, spacing, typography } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 
 interface SearchBarProps {
   onSearch: (query: string) => void;
@@ -11,7 +12,6 @@ interface SearchBarProps {
 
 export function SearchBar({ onSearch, placeholder = 'Search for an address...' }: SearchBarProps) {
   const [query, setQuery] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
   const handleChangeText = useCallback(
@@ -75,7 +75,7 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
 
   return (
     <View style={styles.container}>
-      <View style={[styles.inputContainer, isFocused && styles.inputContainerFocused]}>
+      <GlassView material="regular" style={styles.inputContainer}>
         <Ionicons name="search" size={18} color={colors.textSecondary} style={styles.searchIcon} />
         <TextInput
           style={styles.input}
@@ -86,8 +86,6 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
           autoCorrect={false}
           clearButtonMode="while-editing"
           returnKeyType="search"
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
           accessibilityLabel="Search"
           accessibilityHint="Type an address, place name, or category to search"
         />
@@ -105,7 +103,7 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
             color={isListening ? colors.error : colors.textSecondary}
           />
         </TouchableOpacity>
-      </View>
+      </GlassView>
     </View>
   );
 }
@@ -118,15 +116,10 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.sm,
-  },
-  inputContainerFocused: {
-    borderColor: colors.primary,
-    ...shadow.md,
+    borderRadius: 999,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
+    paddingHorizontal: spacing.sm,
   },
   searchIcon: {
     paddingLeft: spacing.md,
@@ -141,7 +134,9 @@ const styles = StyleSheet.create({
   micButton: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 999,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.xs,

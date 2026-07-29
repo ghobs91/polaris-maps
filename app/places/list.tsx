@@ -420,7 +420,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     },
     disambigCancelText: { ...typography.body, color: colors.primary, fontWeight: '600' },
     loadingOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: 'rgba(0,0,0,0.3)',
       justifyContent: 'center',
       alignItems: 'center',

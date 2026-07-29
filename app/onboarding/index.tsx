@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, Switch, Pressable } from 'react-native';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { Button } from '@/components/common';
+import { Button, GlassView } from '@/components/common';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import { useMapStore } from '@/stores/mapStore';
 import { storage } from '@/services/storage/mmkv';
@@ -77,7 +77,7 @@ export default function OnboardingScreen() {
   return (
     <SafeAreaView style={styles.container}>
       {step === 0 && (
-        <View style={styles.card}>
+        <GlassView material="regular" style={styles.card}>
           <Text style={styles.title}>Welcome to Polaris Maps</Text>
           <Text style={styles.body}>
             A fully decentralized mapping app. No servers, no tracking — just you and the open road.
@@ -87,11 +87,11 @@ export default function OnboardingScreen() {
           </Text>
           <Button title="Grant Location Access" onPress={requestLocation} />
           <Button title="Skip" onPress={() => setStep(1)} variant="ghost" />
-        </View>
+        </GlassView>
       )}
 
       {step === 1 && (
-        <View style={styles.card}>
+        <GlassView material="regular" style={styles.card}>
           <Text style={styles.title}>Privacy Choices</Text>
           <Text style={styles.body}>
             Choose what you share. Each option is independent — you can change these later in
@@ -122,11 +122,11 @@ export default function OnboardingScreen() {
             onToggle={(v) => updateConsent('imagerySharingEnabled', v)}
           />
           <Button title="Continue" onPress={submitConsent} />
-        </View>
+        </GlassView>
       )}
 
       {step === 2 && (
-        <View style={styles.card}>
+        <GlassView material="regular" style={styles.card}>
           <Text style={styles.title}>Download a Region</Text>
           <Text style={styles.body}>
             Polaris Maps works offline. Download a region to get started with map tiles, routing,
@@ -139,7 +139,7 @@ export default function OnboardingScreen() {
           )}
           <Button title="Browse Regions" onPress={completeOnboarding} />
           <Button title="Skip for Now" onPress={completeOnboarding} variant="ghost" />
-        </View>
+        </GlassView>
       )}
     </SafeAreaView>
   );
@@ -153,10 +153,11 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   card: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.lg,
     padding: spacing.xl,
     gap: spacing.md,
+    borderRadius: borderRadius.xl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
   },
   title: {
     ...typography.h1,

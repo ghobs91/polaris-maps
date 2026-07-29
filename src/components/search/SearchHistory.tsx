@@ -1,7 +1,8 @@
 import React, { useCallback } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
+import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
 
 interface SearchHistoryProps {
@@ -53,14 +54,15 @@ export function SearchHistory({ history, onSelect, onRemove, onClearAll }: Searc
           <Text style={styles.clearAll}>Clear all</Text>
         </Pressable>
       </View>
-      <FlatList
-        data={history}
-        keyExtractor={(item) => String(item.entry.id)}
-        style={styles.list}
-        keyboardShouldPersistTaps="handled"
-        scrollEnabled={false}
-        renderItem={renderItem}
-      />
+      <GlassView material="regular" style={styles.list}>
+        <FlatList
+          data={history}
+          keyExtractor={(item) => String(item.entry.id)}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={false}
+          renderItem={renderItem}
+        />
+      </GlassView>
     </View>
   );
 }
@@ -69,6 +71,7 @@ const styles = StyleSheet.create({
   wrapper: {
     marginHorizontal: spacing.md,
     marginTop: spacing.xs,
+    borderCurve: 'continuous',
   },
   header: {
     flexDirection: 'row',
@@ -89,15 +92,15 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   list: {
-    backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
-    ...shadow.sm,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
   },
   item: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.border + '40',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -108,7 +111,9 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.border,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
+    backgroundColor: colors.border + '60',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.sm,

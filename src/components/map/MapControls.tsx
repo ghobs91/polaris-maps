@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { spacing, shadow } from '../../constants/theme';
+import { spacing } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 
 interface MapControlsProps {
   onLocatePress: () => void;
@@ -12,15 +12,9 @@ interface MapControlsProps {
 function GlassButton({ onPress, icon }: { onPress: () => void; icon: string }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={styles.buttonOuter}>
-      {Platform.OS === 'ios' ? (
-        <BlurView intensity={60} tint="systemChromeMaterial" style={styles.button}>
-          <Ionicons name={icon as any} size={22} color="#333" />
-        </BlurView>
-      ) : (
-        <View style={[styles.button, styles.buttonAndroid]}>
-          <Ionicons name={icon as any} size={22} color="#333" />
-        </View>
-      )}
+      <GlassView material="clear" isInteractive style={styles.button}>
+        <Ionicons name={icon as any} size={22} color="#333" />
+      </GlassView>
     </TouchableOpacity>
   );
 }
@@ -41,22 +35,19 @@ const styles = StyleSheet.create({
     right: spacing.md,
     gap: spacing.sm,
     zIndex: 20,
-    elevation: 20,
   },
   buttonOuter: {
     borderRadius: 999,
+    borderCurve: 'continuous',
     overflow: 'hidden',
-    ...shadow.md,
   },
   button: {
     width: 48,
     height: 48,
     borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
-  },
-  buttonAndroid: {
-    backgroundColor: 'rgba(255,255,255,0.92)',
   },
 });

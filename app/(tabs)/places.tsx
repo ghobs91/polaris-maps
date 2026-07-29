@@ -16,7 +16,7 @@ import { useICloudSync } from '../../src/hooks/useICloudSync';
 import { isICloudAvailable } from '../../src/services/icloud/iCloudSyncService';
 import { parseImport } from '../../src/services/places/importService';
 import { PlaceListCard } from '../../src/components/places';
-import { Button, ErrorBoundary, Modal } from '../../src/components/common';
+import { Button, ErrorBoundary, Modal, GlassView } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import * as DocumentPicker from 'expo-document-picker';
@@ -221,13 +221,17 @@ export default function MyPlacesScreen() {
               </TouchableOpacity>
             )}
             {cloudAvailable !== null && (
-              <Text style={styles.syncBadge}>{cloudAvailable ? '☁️ iCloud' : 'Local only'}</Text>
+              <GlassView material="regular" style={styles.syncBadge}>
+                <Text style={styles.syncBadgeText}>
+                  {cloudAvailable ? '☁️ iCloud' : 'Local only'}
+                </Text>
+              </GlassView>
             )}
           </View>
         </View>
 
         <View style={styles.filterRow}>
-          <View style={styles.searchContainer}>
+          <GlassView material="regular" style={styles.searchContainer}>
             <Text style={styles.searchIcon}>🔍</Text>
             <TextInput
               style={styles.searchInput}
@@ -242,15 +246,21 @@ export default function MyPlacesScreen() {
                 <Text style={styles.searchClearText}>✕</Text>
               </TouchableOpacity>
             )}
-          </View>
-          <TouchableOpacity onPress={cycleSortMode} style={styles.sortButton}>
-            <Text style={styles.sortText}>{sortMode === 'recent' ? '↕ Recent' : '↕ A-Z'}</Text>
-          </TouchableOpacity>
+          </GlassView>
+          <Button
+            title={sortMode === 'recent' ? '↕ Recent' : '↕ A-Z'}
+            onPress={cycleSortMode}
+            variant="outline"
+            size="sm"
+            style={styles.sortButton}
+          />
         </View>
 
-        <TouchableOpacity style={styles.newListButton} onPress={() => setShowNewList(true)}>
-          <Text style={styles.newListText}>+ New list</Text>
-        </TouchableOpacity>
+        <Button
+          title="+ New list"
+          onPress={() => setShowNewList(true)}
+          style={styles.newListButton}
+        />
 
         <FlashList
           data={filteredSortedLists}
@@ -299,16 +309,18 @@ export default function MyPlacesScreen() {
             CSV, JSON, GeoJSON, KML, or GPX from a Google Maps export:
           </Text>
           <ScrollView style={styles.importScrollWrap}>
-            <TextInput
-              style={styles.importInput}
-              placeholder="Paste exported data here…"
-              placeholderTextColor={colors.textSecondary}
-              value={importText}
-              onChangeText={setImportText}
-              multiline
-              textAlignVertical="top"
-              autoFocus
-            />
+            <GlassView material="regular" style={styles.importInputWrapper}>
+              <TextInput
+                style={styles.importInput}
+                placeholder="Paste exported data here…"
+                placeholderTextColor={colors.textSecondary}
+                value={importText}
+                onChangeText={setImportText}
+                multiline
+                textAlignVertical="top"
+                autoFocus
+              />
+            </GlassView>
           </ScrollView>
           <View style={styles.modalActions}>
             <Button
@@ -324,23 +336,27 @@ export default function MyPlacesScreen() {
         </Modal>
 
         <Modal visible={showNewList} onClose={() => setShowNewList(false)} title="New List">
-          <TextInput
-            style={styles.input}
-            placeholder="List name"
-            placeholderTextColor={colors.textSecondary}
-            value={newName}
-            onChangeText={setNewName}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={handleCreateList}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Emoji icon (optional)"
-            placeholderTextColor={colors.textSecondary}
-            value={newEmoji}
-            onChangeText={setNewEmoji}
-          />
+          <GlassView material="regular" style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              placeholder="List name"
+              placeholderTextColor={colors.textSecondary}
+              value={newName}
+              onChangeText={setNewName}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleCreateList}
+            />
+          </GlassView>
+          <GlassView material="regular" style={styles.inputWrapper}>
+            <TextInput
+              style={styles.input}
+              placeholder="Emoji icon (optional)"
+              placeholderTextColor={colors.textSecondary}
+              value={newEmoji}
+              onChangeText={setNewEmoji}
+            />
+          </GlassView>
           <View style={styles.modalActions}>
             <Button title="Cancel" onPress={() => setShowNewList(false)} variant="ghost" />
             <Button title="Create" onPress={handleCreateList} disabled={!newName.trim()} />
@@ -378,10 +394,9 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       flex: 1,
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
-      backgroundColor: colors.surface,
-      borderRadius: borderRadius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
       paddingHorizontal: spacing.sm,
     },
     searchIcon: {
@@ -402,14 +417,8 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       color: colors.textSecondary,
     },
     sortButton: {
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.sm,
-      backgroundColor: colors.surface,
-      borderRadius: borderRadius.sm,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderCurve: 'continuous',
     },
-    sortText: { ...typography.caption, color: colors.textSecondary },
     closeBtn: {
       padding: spacing.xs,
     },
@@ -433,28 +442,24 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       color: '#e53935',
     },
     syncBadge: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      backgroundColor: colors.surface,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
       paddingHorizontal: spacing.sm,
       paddingVertical: spacing.xs,
-      borderRadius: borderRadius.sm,
-      overflow: 'hidden',
+    },
+    syncBadgeText: {
+      ...typography.caption,
+      color: colors.textSecondary,
     },
     newListButton: {
       marginHorizontal: spacing.lg,
       marginVertical: spacing.sm,
-      backgroundColor: colors.primary,
-      paddingVertical: spacing.sm + 2,
-      borderRadius: borderRadius.md,
-      alignItems: 'center',
+      borderCurve: 'continuous',
     },
-    newListText: { ...typography.subtitle, color: colors.white },
     listContent: { paddingBottom: spacing.xxl },
     footer: {
       padding: spacing.lg,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.border,
     },
     emptyState: {
       alignItems: 'center',
@@ -468,14 +473,17 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       color: colors.textSecondary,
       textAlign: 'center',
     },
+    inputWrapper: {
+      borderRadius: borderRadius.md,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      padding: spacing.md,
+      marginBottom: spacing.sm,
+    },
     input: {
       ...typography.body,
       color: colors.text,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: borderRadius.md,
-      padding: spacing.md,
-      marginBottom: spacing.sm,
+      width: '100%',
     },
     modalActions: {
       flexDirection: 'row',
@@ -497,13 +505,17 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     importScrollWrap: {
       maxHeight: 200,
     },
+    importInputWrapper: {
+      borderRadius: borderRadius.md,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      padding: spacing.md,
+      minHeight: 120,
+    },
     importInput: {
       ...typography.body,
       color: colors.text,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: borderRadius.md,
-      padding: spacing.md,
+      width: '100%',
       minHeight: 120,
       fontFamily: 'monospace',
       fontSize: 12,

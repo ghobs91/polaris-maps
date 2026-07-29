@@ -1,7 +1,8 @@
 import React, { useCallback } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
+import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
 
 interface SearchResultsProps {
@@ -36,13 +37,15 @@ export function SearchResults({ results, onSelect }: SearchResultsProps) {
   if (results.length === 0) return null;
 
   return (
-    <FlatList
-      data={results}
-      keyExtractor={(item) => String(item.entry.id)}
-      style={styles.list}
-      keyboardShouldPersistTaps="handled"
-      renderItem={renderItem}
-    />
+    <GlassView material="regular" style={styles.list}>
+      <FlatList
+        data={results}
+        keyExtractor={(item) => String(item.entry.id)}
+        style={styles.flatList}
+        keyboardShouldPersistTaps="handled"
+        renderItem={renderItem}
+      />
+    </GlassView>
   );
 }
 
@@ -50,15 +53,19 @@ const styles = StyleSheet.create({
   list: {
     marginHorizontal: spacing.md,
     marginTop: spacing.xs,
-    backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
-    ...shadow.sm,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
+    flex: 1,
+  },
+  flatList: {
+    flex: 1,
   },
   item: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.border + '40',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -69,6 +76,8 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
     backgroundColor: `${colors.primary}14`,
     justifyContent: 'center',
     alignItems: 'center',

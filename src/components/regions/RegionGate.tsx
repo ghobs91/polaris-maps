@@ -235,7 +235,7 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 999,
   },
   content: {

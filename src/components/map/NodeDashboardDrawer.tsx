@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { GlassView } from '../common/GlassView';
 import { usePeerStore } from '../../stores/peerStore';
 import { joinNetwork, getLocalNode } from '../../services/sync/peerService';
 import { startPeerMonitor, stopPeerMonitor } from '../../services/sync/peerMonitor';
@@ -147,7 +148,7 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
     : '—';
 
   return (
-    <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Backdrop */}
       <TouchableWithoutFeedback onPress={close}>
         <Animated.View
@@ -162,121 +163,126 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
         style={[
           styles.sheet,
           {
-            backgroundColor: colors.surface,
             paddingBottom: insets.bottom + spacing.md,
             transform: [{ translateY }],
           },
         ]}
       >
-        {/* Drag handle — the only area that triggers the pan gesture */}
-        <View {...panResponder.panHandlers} style={styles.handleArea}>
-          <View style={[styles.handle, { backgroundColor: colors.border }]} />
-        </View>
+        <GlassView material="regular" style={styles.sheetGlass}>
+          {/* Drag handle — the only area that triggers the pan gesture */}
+          <View {...panResponder.panHandlers} style={styles.handleArea}>
+            <View style={[styles.handle, { backgroundColor: colors.border }]} />
+          </View>
 
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerText}>
-            <Text style={[styles.heading, { color: colors.text }]}>
-              {showDashboard ? 'Node Dashboard' : 'Menu'}
-            </Text>
-            {showDashboard && (
-              <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.headerText}>
+              <Text style={[styles.heading, { color: colors.text }]}>
+                {showDashboard ? 'Node Dashboard' : 'Menu'}
+              </Text>
+              {showDashboard && (
+                <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
+              )}
+            </View>
+            {showDashboard ? (
+              <TouchableOpacity
+                onPress={() => setShowDashboard(false)}
+                hitSlop={12}
+                style={styles.closeBtn}
+              >
+                <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                  <Ionicons name="arrow-back" size={20} color={colors.textSecondary} />
+                </GlassView>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={close} hitSlop={12} style={styles.closeBtn}>
+                <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                  <Ionicons name="close" size={20} color={colors.textSecondary} />
+                </GlassView>
+              </TouchableOpacity>
             )}
           </View>
+
           {showDashboard ? (
-            <TouchableOpacity
-              onPress={() => setShowDashboard(false)}
-              hitSlop={12}
-              style={styles.closeBtn}
+            /* Scrollable dashboard content */
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.scrollContent}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+              showsVerticalScrollIndicator={false}
             >
-              <Ionicons name="arrow-back" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
+              <NodeDashboard
+                node={localNode}
+                activePeers={activePeers}
+                syncingFeeds={syncingFeeds}
+                isOnline={isOnline}
+              />
+            </ScrollView>
           ) : (
-            <TouchableOpacity onPress={close} hitSlop={12} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
+            /* Menu buttons */
+            <View style={styles.menuContent}>
+              <TouchableOpacity
+                style={[styles.menuBtn, { backgroundColor: colors.primary + '14' }]}
+                onPress={() => {
+                  close();
+                  router.push('/settings');
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name="settings-outline" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.menuBtnText}>
+                  <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Settings</Text>
+                  <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
+                    Resources, theme, permissions
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.menuBtn, { backgroundColor: colors.primary + '14' }]}
+                onPress={() => {
+                  loadNodeData();
+                  setShowDashboard(true);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name="pulse-outline" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.menuBtnText}>
+                  <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Node Dashboard</Text>
+                  <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
+                    Peers, feeds, network status
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.menuBtn, { backgroundColor: colors.primary + '14' }]}
+                onPress={() => {
+                  close();
+                  router.push('/regions');
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name="map-outline" size={22} color={colors.primary} />
+                </View>
+                <View style={styles.menuBtnText}>
+                  <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Manage Regions</Text>
+                  <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
+                    Download offline maps & routing
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
           )}
-        </View>
-
-        {showDashboard ? (
-          /* Scrollable dashboard content */
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-            showsVerticalScrollIndicator={false}
-          >
-            <NodeDashboard
-              node={localNode}
-              activePeers={activePeers}
-              syncingFeeds={syncingFeeds}
-              isOnline={isOnline}
-            />
-          </ScrollView>
-        ) : (
-          /* Menu buttons */
-          <View style={styles.menuContent}>
-            <TouchableOpacity
-              style={[styles.menuBtn, { backgroundColor: colors.surface }]}
-              onPress={() => {
-                close();
-                router.push('/settings');
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
-                <Ionicons name="settings-outline" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.menuBtnText}>
-                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Settings</Text>
-                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
-                  Resources, theme, permissions
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.menuBtn, { backgroundColor: colors.surface }]}
-              onPress={() => {
-                loadNodeData();
-                setShowDashboard(true);
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
-                <Ionicons name="pulse-outline" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.menuBtnText}>
-                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Node Dashboard</Text>
-                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
-                  Peers, feeds, network status
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.menuBtn, { backgroundColor: colors.surface }]}
-              onPress={() => {
-                close();
-                router.push('/regions');
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
-                <Ionicons name="map-outline" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.menuBtnText}>
-                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Manage Regions</Text>
-                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
-                  Download offline maps & routing
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        )}
+        </GlassView>
       </Animated.View>
     </View>
   );
@@ -284,7 +290,7 @@ export function NodeDashboardDrawer({ visible, onClose }: NodeDashboardDrawerPro
 
 const styles = StyleSheet.create({
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   sheet: {
@@ -293,23 +299,24 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: DRAWER_HEIGHT,
-    borderTopLeftRadius: borderRadius.xl,
-    borderTopRightRadius: borderRadius.xl,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 24,
   },
   handleArea: {
     alignItems: 'center',
     paddingTop: spacing.sm,
     paddingBottom: spacing.xs,
   },
+  sheetGlass: {
+    ...StyleSheet.absoluteFill,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+  },
   handle: {
     width: 36,
     height: 4,
     borderRadius: 2,
+    borderCurve: 'continuous',
   },
   header: {
     flexDirection: 'row',
@@ -333,6 +340,15 @@ const styles = StyleSheet.create({
     padding: spacing.xs,
     marginLeft: spacing.sm,
   },
+  closeCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    borderCurve: 'continuous',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
   scroll: {
     flex: 1,
   },
@@ -351,13 +367,13 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     borderRadius: borderRadius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(128,128,128,0.2)',
+    borderCurve: 'continuous',
   },
   menuIconCircle: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
   },

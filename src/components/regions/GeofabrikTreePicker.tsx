@@ -288,7 +288,7 @@ interface ContinentRowProps {
   seedingPaths?: Set<string>;
   seedPeerCounts?: Map<string, number>;
   onToggleSeed?: (node: GeoNode, seed: boolean) => void;
-  suggestedRef: React.RefObject<View>;
+  suggestedRef: React.RefObject<View | null>;
 }
 
 function ContinentRow({
@@ -389,7 +389,7 @@ interface CountryRowProps {
   seedingPaths?: Set<string>;
   seedPeerCounts?: Map<string, number>;
   onToggleSeed?: (node: GeoNode, seed: boolean) => void;
-  suggestedRef: React.RefObject<View>;
+  suggestedRef: React.RefObject<View | null>;
 }
 
 function CountryRow({
@@ -566,7 +566,7 @@ interface LeafRowProps {
   isSeeding: boolean;
   peerCount: number;
   onToggleSeed?: (node: GeoNode, seed: boolean) => void;
-  suggestedRef: React.RefObject<View>;
+  suggestedRef: React.RefObject<View | null>;
 }
 
 function LeafRow({
