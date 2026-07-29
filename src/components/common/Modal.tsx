@@ -5,10 +5,14 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  Pressable,
   type ViewStyle,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import { GlassView } from './GlassView';
+import { Symbol } from './Symbol';
 
 interface ModalProps {
   visible: boolean;
@@ -24,17 +28,23 @@ export function Modal({ visible, onClose, title, children, style }: ModalProps) 
   return (
     <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={[styles.content, style]}>
+        <BlurView
+          intensity={30}
+          tint="systemUltraThinMaterialDark"
+          style={StyleSheet.absoluteFill}
+        />
+        <Pressable style={styles.backdrop} onPress={onClose} />
+        <GlassView material="regular" style={[styles.content, style]}>
           {title && (
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
               <TouchableOpacity onPress={onClose} hitSlop={8}>
-                <Text style={styles.close}>✕</Text>
+                <Symbol name="xmark.circle.fill" size={22} tintColor={colors.textSecondary} />
               </TouchableOpacity>
             </View>
           )}
           {children}
-        </View>
+        </GlassView>
       </View>
     </RNModal>
   );
@@ -44,17 +54,19 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
       justifyContent: 'center',
       alignItems: 'center',
       padding: spacing.lg,
     },
+    backdrop: {
+      ...StyleSheet.absoluteFill,
+    },
     content: {
-      backgroundColor: colors.surface,
-      borderRadius: borderRadius.lg,
+      borderRadius: borderRadius.xl,
       padding: spacing.lg,
       width: '100%',
       maxHeight: '80%',
+      borderCurve: 'continuous',
     },
     header: {
       flexDirection: 'row',
@@ -66,10 +78,5 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       ...typography.h3,
       color: colors.text,
       flex: 1,
-    },
-    close: {
-      ...typography.h3,
-      color: colors.textSecondary,
-      paddingLeft: spacing.sm,
     },
   });

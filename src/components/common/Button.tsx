@@ -1,13 +1,16 @@
 import React from 'react';
 import {
-  TouchableOpacity,
+  Pressable,
   Text,
   StyleSheet,
   ActivityIndicator,
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
-import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { colors, spacing, typography } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { GlassView } from './GlassView';
+import { Symbol } from './Symbol';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost';
 type ButtonSize = 'sm' | 'md' | 'lg';
@@ -19,20 +22,27 @@ interface ButtonProps {
   size?: ButtonSize;
   disabled?: boolean;
   loading?: boolean;
+  icon?: string;
   style?: ViewStyle;
 }
 
-const sizeStyles: Record<ButtonSize, { container: ViewStyle; text: TextStyle }> = {
+const sizeStyles: Record<
+  ButtonSize,
+  { paddingVertical: number; paddingHorizontal: number; text: TextStyle }
+> = {
   sm: {
-    container: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
     text: typography.caption,
   },
   md: {
-    container: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     text: typography.body,
   },
   lg: {
-    container: { paddingVertical: spacing.md, paddingHorizontal: spacing.lg },
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     text: typography.subtitle,
   },
 };
@@ -44,69 +54,102 @@ export function Button({
   size = 'md',
   disabled = false,
   loading = false,
+  icon,
   style,
 }: ButtonProps) {
-  const variantStyle = styles[variant];
-  const textStyle = styles[`${variant}Text` as keyof typeof styles] as TextStyle;
+  const { colors, isDark } = useTheme();
   const sizeStyle = sizeStyles[size];
+  const isOutline = variant === 'outline';
+  const isGhost = variant === 'ghost';
+  const isFilled = variant === 'primary' || variant === 'secondary';
+  const textColor = isGhost ? colors.primary : isOutline ? colors.primary : '#FFFFFF';
+  const iconColor = textColor;
+
+  const content = (
+    <>
+      {loading ? (
+        <ActivityIndicator color={textColor} size="small" />
+      ) : (
+        <>
+          {icon && <Symbol name={icon} size={16} tintColor={iconColor} style={styles.icon} />}
+          <Text style={[styles.text, sizeStyle.text, { color: textColor }]}>{title}</Text>
+        </>
+      )}
+    </>
+  );
+
+  if (isFilled || isOutline) {
+    return (
+      <Pressable
+        onPress={onPress}
+        disabled={disabled || loading}
+        style={({ pressed }) => [
+          styles.base,
+          { opacity: disabled || loading ? 0.5 : pressed ? 0.85 : 1 },
+          style,
+        ]}
+      >
+        <GlassView
+          isInteractive
+          material={isOutline ? 'clear' : 'regular'}
+          style={[
+            styles.glass,
+            {
+              paddingVertical: sizeStyle.paddingVertical,
+              paddingHorizontal: sizeStyle.paddingHorizontal,
+              borderColor: isOutline ? colors.border : undefined,
+              borderWidth: isOutline ? StyleSheet.hairlineWidth : 0,
+              backgroundColor:
+                variant === 'primary' ? colors.primary + (isDark ? 'CC' : 'E6') : undefined,
+            },
+          ]}
+        >
+          {content}
+        </GlassView>
+      </Pressable>
+    );
+  }
 
   return (
-    <TouchableOpacity
+    <Pressable
       onPress={onPress}
       disabled={disabled || loading}
-      style={[styles.base, variantStyle, sizeStyle.container, disabled && styles.disabled, style]}
-      activeOpacity={0.7}
+      style={({ pressed }) => [
+        styles.base,
+        styles.ghost,
+        { opacity: disabled || loading ? 0.5 : pressed ? 0.7 : 1 },
+        style,
+      ]}
     >
-      {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? colors.white : colors.primary} />
-      ) : (
-        <Text style={[textStyle, sizeStyle.text, disabled && styles.disabledText]}>{title}</Text>
-      )}
-    </TouchableOpacity>
+      {content}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: borderRadius.md,
+    borderRadius: 999,
+    alignSelf: 'stretch',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
   },
-  primary: {
-    backgroundColor: colors.primary,
-  },
-  primaryText: {
-    color: colors.white,
-    fontWeight: '600',
-  },
-  secondary: {
-    backgroundColor: colors.secondary,
-  },
-  secondaryText: {
-    color: colors.white,
-    fontWeight: '600',
-  },
-  outline: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  outlineText: {
-    color: colors.primary,
-    fontWeight: '600',
+  glass: {
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
   },
   ghost: {
-    backgroundColor: 'transparent',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.xs,
   },
-  ghostText: {
-    color: colors.primary,
+  text: {
     fontWeight: '600',
   },
-  disabled: {
-    opacity: 0.5,
-  },
-  disabledText: {
-    opacity: 0.7,
+  icon: {
+    marginRight: spacing.xs,
   },
 });
