@@ -1,15 +1,28 @@
+# Set by expo-router. This enables Fabric-only features from react-native-screens
+ENV['RNS_GAMMA_ENABLED'] ||= '1'
 require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts/autolinking")
 require File.join(File.dirname(`node --print "require.resolve('react-native/package.json')"`), "scripts/react_native_pods")
 
 require 'json'
 podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
 
-ENV['RCT_NEW_ARCH_ENABLED'] = podfile_properties['newArchEnabled'] == 'true' ? '1' : '0'
-ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] = podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
+def ccache_enabled?(podfile_properties)
+  # Environment variable takes precedence
+  return ENV['USE_CCACHE'] == '1' if ENV['USE_CCACHE']
 
-platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
-install! 'cocoapods',
-  :deterministic_uuids => false
+  # Fall back to Podfile properties
+  podfile_properties['apple.ccacheEnabled'] == 'true'
+end
+
+ENV['EX_DEV_CLIENT_NETWORK_INSPECTOR'] ||= podfile_properties['EX_DEV_CLIENT_NETWORK_INSPECTOR']
+ENV['RCT_USE_RN_DEP'] ||= podfile_properties['ios.buildReactNativeFromSource'] == 'true' ? '0' : '1'
+ENV['RCT_USE_PREBUILT_RNCORE'] ||= podfile_properties['ios.buildReactNativeFromSource'] == 'true' ? '0' : '1'
+ENV['RCT_HERMES_V1_ENABLED'] ||= '0' if podfile_properties['expo.useHermesV1'] == 'false'
+# An explicit `ios.usePrecompiledModules: false` must win even when the env var is already set
+# (e.g. EXPO_USE_PRECOMPILED_MODULES exported by EAS Build), so force-disable here before the default.
+ENV['EXPO_USE_PRECOMPILED_MODULES'] = '0' if podfile_properties['EXPO_USE_PRECOMPILED_MODULES'] == 'false'
+ENV['EXPO_USE_PRECOMPILED_MODULES'] ||= '1'
+platform :ios, podfile_properties['ios.deploymentTarget'] || '16.4'
 
 prepare_react_native_project!
 
@@ -23,7 +36,8 @@ target 'PolarisMaps' do
       'node',
       '--no-warnings',
       '--eval',
-      'require(require.resolve(\'expo-modules-autolinking\', { paths: [require.resolve(\'expo/package.json\')] }))(process.argv.slice(1))',
+      'require(\'expo/bin/autolinking\')',
+      'expo-modules-autolinking',
       'react-native-config',
       '--json',
       '--platform',
@@ -35,7 +49,6 @@ target 'PolarisMaps' do
 
   use_frameworks! :linkage => podfile_properties['ios.useFrameworks'].to_sym if podfile_properties['ios.useFrameworks']
   use_frameworks! :linkage => ENV['USE_FRAMEWORKS'].to_sym if ENV['USE_FRAMEWORKS']
-  use_modular_headers!
 
   use_react_native!(
     :path => config[:reactNativePath],
@@ -53,90 +66,7 @@ target 'PolarisMaps' do
       installer,
       config[:reactNativePath],
       :mac_catalyst_enabled => false,
-      :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
+      :ccache_enabled => ccache_enabled?(podfile_properties),
     )
-
-    # This is necessary for Xcode 14, because it signs resource bundles by default
-    # when building for devices.
-    installer.target_installation_results.pod_target_installation_results
-      .each do |pod_name, target_installation_result|
-      target_installation_result.resource_bundle_targets.each do |resource_bundle_target|
-        resource_bundle_target.build_configurations.each do |config|
-          config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-        end
-      end
-    end
-
-    # Disable Clang module dependency scanning. CocoaPods with use_modular_headers!
-    # generates -fmodule-map-file flags pointing to DerivedData, which doesn't exist
-    # on a clean build (e.g. after restarting Xcode/computer). The scanner then fails
-    # to find EXConstants.modulemap and cascades into "could not build module" errors.
-    installer.target_installation_results.pod_target_installation_results
-      .each do |pod_name, target_installation_result|
-      target_installation_result.native_target.build_configurations.each do |config|
-        config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
-      end
-    end
-    installer.generated_projects.each do |project|
-      project.build_configurations.each do |config|
-        config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
-      end
-    end
-    user_project_path = File.join(__dir__, 'PolarisMaps.xcodeproj')
-    if File.exist?(user_project_path)
-      user_project = Xcodeproj::Project.open(user_project_path)
-      user_project.build_configurations.each do |config|
-        config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
-      end
-      user_project.targets.each do |target|
-        target.build_configurations.each do |config|
-          config.build_settings['ENABLE_MODULE_DEPENDENCY_SCANNING'] = 'NO'
-        end
-      end
-      user_project.save
-    end
-
-    # Fix fmt 11.x consteval issue with iOS 26 SDK / Xcode 26.
-    # Patches fmt/base.h after pod install downloads fresh sources.
-    fmt_base_h = File.join(__dir__, 'Pods', 'fmt', 'include', 'fmt', 'base.h')
-    if File.exist?(fmt_base_h)
-      content = File.read(fmt_base_h)
-      unless content.include?('FMT_CONSTEVAL_PATCHED')
-        lines = content.lines
-        new_lines = []
-        i = 0
-        while i < lines.length
-          line = lines[i]
-          if line.include?('Detect consteval, C++20 constexpr extensions')
-            new_lines << "// FMT_CONSTEVAL_PATCHED: Force consteval off for iOS 26 SDK / Xcode 26 compatibility.\n"
-            new_lines << "#define FMT_USE_CONSTEVAL 0\n"
-            new_lines << "#define FMT_CONSTEVAL\n"
-            new_lines << "#define FMT_CONSTEXPR20\n"
-            found_first_endif = false
-            i += 1
-            while i < lines.length
-              if lines[i].strip == '#if FMT_USE_CONSTEVAL' && found_first_endif
-                i += 1
-                while i < lines.length
-                  break if lines[i].strip == '#endif'
-                  i += 1
-                end
-                break
-              end
-              if lines[i].strip == '#endif' && !found_first_endif
-                found_first_endif = true
-              end
-              i += 1
-            end
-          else
-            new_lines << line
-          end
-          i += 1
-        end
-        FileUtils.chmod(0644, fmt_base_h)
-        File.write(fmt_base_h, new_lines.join)
-      end
-    end
-
   end
 end
