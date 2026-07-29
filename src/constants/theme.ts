@@ -4,14 +4,14 @@ export const colors = {
   primaryLight: '#409CFF',
   secondary: '#8E8E93',
   background: '#F2F2F7',
-  backgroundDark: '#111827',
+  backgroundDark: '#000000',
   surface: '#FFFFFF',
-  surfaceDark: '#1F2937',
+  surfaceDark: '#1C1C1E',
   text: '#000000',
-  textDark: '#F9FAFB',
-  textSecondary: '#5A5A5F',
+  textDark: '#FFFFFF',
+  textSecondary: '#6C6C70',
   border: '#C6C6C8',
-  borderDark: '#374151',
+  borderDark: '#38383A',
   error: '#FF3B30',
   warning: '#FF9500',
   success: '#34C759',
@@ -20,7 +20,7 @@ export const colors = {
   // Glass design tokens
   glass: {
     background: 'rgba(255,255,255,0.72)',
-    backgroundDark: 'rgba(30,30,30,0.72)',
+    backgroundDark: 'rgba(28,28,30,0.72)',
     border: 'rgba(255,255,255,0.3)',
     shadow: 'rgba(0,0,0,0.08)',
   },
@@ -42,43 +42,43 @@ export const colors = {
 } as const;
 
 export const darkColors = {
-  primary: '#409CFF',
-  primaryDark: '#007AFF',
-  primaryLight: '#66B2FF',
-  secondary: '#636366',
-  background: '#111827',
-  backgroundDark: '#111827',
-  surface: '#1F2937',
-  surfaceDark: '#1F2937',
-  text: '#F9FAFB',
-  textDark: '#F9FAFB',
-  textSecondary: '#9CA3AF',
-  border: '#374151',
-  borderDark: '#374151',
+  primary: '#0A84FF',
+  primaryDark: '#0066CC',
+  primaryLight: '#409CFF',
+  secondary: '#8E8E93',
+  background: '#000000',
+  backgroundDark: '#000000',
+  surface: '#1C1C1E',
+  surfaceDark: '#1C1C1E',
+  text: '#FFFFFF',
+  textDark: '#FFFFFF',
+  textSecondary: '#8E8E93',
+  border: '#38383A',
+  borderDark: '#38383A',
   error: '#FF453A',
   warning: '#FF9F0A',
-  success: '#32D74B',
+  success: '#30D158',
   white: '#FFFFFF',
   black: '#000000',
   glass: {
-    background: 'rgba(30,30,30,0.82)',
-    backgroundDark: 'rgba(30,30,30,0.82)',
-    border: 'rgba(255,255,255,0.1)',
-    shadow: 'rgba(0,0,0,0.4)',
+    background: 'rgba(28,28,30,0.72)',
+    backgroundDark: 'rgba(28,28,30,0.72)',
+    border: 'rgba(255,255,255,0.08)',
+    shadow: 'rgba(0,0,0,0.5)',
   },
   tabBar: {
-    active: '#409CFF',
-    inactive: '#636366',
-    background: 'rgba(28,28,30,0.94)',
+    active: '#0A84FF',
+    inactive: '#8E8E93',
+    background: 'rgba(22,22,23,0.92)',
   },
-  trafficFreeFlow: '#34C759',
-  trafficSlow: '#FF9500',
-  trafficCongested: '#FF3B30',
+  trafficFreeFlow: '#30D158',
+  trafficSlow: '#FF9F0A',
+  trafficCongested: '#FF453A',
   trafficStopped: '#991B1B',
   traffic: {
-    freeFlow: '#34C759',
-    slow: '#FF9500',
-    congested: '#FF3B30',
+    freeFlow: '#30D158',
+    slow: '#FF9F0A',
+    congested: '#FF453A',
     stopped: '#991B1B',
   },
 } as const;
@@ -129,6 +129,8 @@ export const typography = {
   heading1: { fontSize: 28, fontWeight: '700' as const, lineHeight: 34 },
   heading2: { fontSize: 22, fontWeight: '600' as const, lineHeight: 28 },
   heading3: { fontSize: 18, fontWeight: '600' as const, lineHeight: 24 },
+  /** iOS large title used by the Settings page heading (34pt, bold). */
+  largeTitle: { fontSize: 34, fontWeight: '700' as const, lineHeight: 41 },
   subtitle: { fontSize: 16, fontWeight: '500' as const, lineHeight: 22 },
   body: { fontSize: 16, fontWeight: '400' as const, lineHeight: 22 },
   bodySmall: { fontSize: 14, fontWeight: '400' as const, lineHeight: 20 },
@@ -142,8 +144,25 @@ export const borderRadius = {
   lg: 14,
   xl: 20,
   xxl: 28,
+  /** iOS Settings list uses a chunky radius on the grouped section container. */
+  iosGrouped: 10,
   round: 999,
   full: 999,
+} as const;
+
+export const iosListGroup = {
+  /** Section background in the Apple Settings grouped list. */
+  sectionBackground: '#1C1C1E',
+  /** Page background under the grouped list (true black in dark mode). */
+  pageBackground: '#000000',
+  /** Hairline separator between rows. */
+  separator: 'rgba(84,84,88,0.34)',
+  /** Section header text color. */
+  sectionHeader: '#8E8E93',
+  /** Tappable-row highlight on press. */
+  pressedOverlay: 'rgba(255,255,255,0.06)',
+  /** Background of a "destructive" row (red text). */
+  destructive: '#FF453A',
 } as const;
 
 export const shadow = {

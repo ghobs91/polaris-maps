@@ -1,20 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Switch,
-  TouchableOpacity,
-  TextInput,
-  Linking,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, TextInput, Linking } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
-import { Button, GlassView } from '../common';
-import { spacing, typography, borderRadius } from '../../constants/theme';
+import { Button, SettingsGroup, SettingsRow, SFSymbol } from '../common';
+import { spacing, typography, borderRadius, iosListGroup } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
@@ -36,8 +27,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const setRoutePreferences = useSettingsStore((s) => s.setRoutePreferences);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const setVoiceGuidanceEnabled = useSettingsStore((s) => s.setVoiceGuidanceEnabled);
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => createStyles(isDark), [isDark]);
   const bskySession = useAtprotoAuthStore((s) => s.session);
   const bskyError = useAtprotoAuthStore((s) => s.error);
   const bskyIsLoading = useAtprotoAuthStore((s) => s.isLoading);
@@ -55,348 +46,312 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {showHeading && <Text style={styles.heading}>Settings</Text>}
 
-      <GlassView material="regular" style={styles.section}>
-        <Text style={styles.sectionTitle}>Appearance</Text>
+      <SettingsGroup header="Appearance" footer="Choose how Polaris Maps looks on this device.">
         <View style={styles.themeRow}>
-          {THEME_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[styles.themeChip, themeMode === opt.value && styles.themeChipActive]}
-              onPress={() => setThemeMode(opt.value)}
-              activeOpacity={0.7}
-              accessibilityLabel={`${opt.label} theme`}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: themeMode === opt.value }}
-            >
-              <Text
-                style={[
-                  styles.themeChipText,
-                  themeMode === opt.value && styles.themeChipTextActive,
-                ]}
-              >
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {THEME_OPTIONS.map((opt, idx) => {
+            const active = themeMode === opt.value;
+            return (
+              <React.Fragment key={opt.value}>
+                <View style={styles.themeCell}>
+                  <Text
+                    style={[styles.themeCellText, active ? styles.themeCellTextActive : null]}
+                    onPress={() => setThemeMode(opt.value)}
+                    suppressHighlighting={false}
+                  >
+                    {opt.label}
+                  </Text>
+                </View>
+                {idx < THEME_OPTIONS.length - 1 ? <View style={styles.themeSeparator} /> : null}
+              </React.Fragment>
+            );
+          })}
         </View>
-      </GlassView>
+      </SettingsGroup>
 
-      <GlassView material="regular" style={styles.section}>
-        <Text style={styles.sectionTitle}>Navigation</Text>
+      <SettingsGroup header="Navigation">
+        <SettingsRow
+          title="Voice Guidance"
+          rightAdornment={
+            <Switch
+              value={voiceGuidanceEnabled}
+              onValueChange={setVoiceGuidanceEnabled}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
+          title="Avoid Tolls"
+          rightAdornment={
+            <Switch
+              value={routePreferences.avoidTolls}
+              onValueChange={(v) => setRoutePreferences({ avoidTolls: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
+          title="Avoid Highways"
+          rightAdornment={
+            <Switch
+              value={routePreferences.avoidHighways}
+              onValueChange={(v) => setRoutePreferences({ avoidHighways: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
+          title="Avoid Ferries"
+          rightAdornment={
+            <Switch
+              value={routePreferences.avoidFerries}
+              onValueChange={(v) => setRoutePreferences({ avoidFerries: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+      </SettingsGroup>
 
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Voice Guidance</Text>
-          <Switch
-            value={voiceGuidanceEnabled}
-            onValueChange={setVoiceGuidanceEnabled}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            accessibilityLabel="Voice Guidance"
-            accessibilityHint="Speak turn-by-turn directions during navigation"
-          />
-        </View>
-
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Avoid Tolls</Text>
-          <Switch
-            value={routePreferences.avoidTolls}
-            onValueChange={(v) => setRoutePreferences({ avoidTolls: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            accessibilityLabel="Avoid Tolls"
-            accessibilityHint="Prefer routes that avoid toll roads"
-          />
-        </View>
-
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Avoid Highways</Text>
-          <Switch
-            value={routePreferences.avoidHighways}
-            onValueChange={(v) => setRoutePreferences({ avoidHighways: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            accessibilityLabel="Avoid Highways"
-            accessibilityHint="Prefer routes that avoid highways"
-          />
-        </View>
-
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Avoid Ferries</Text>
-          <Switch
-            value={routePreferences.avoidFerries}
-            onValueChange={(v) => setRoutePreferences({ avoidFerries: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            accessibilityLabel="Avoid Ferries"
-            accessibilityHint="Prefer routes that avoid ferry crossings"
-          />
-        </View>
-      </GlassView>
-
-      <GlassView material="regular" style={styles.section}>
-        <Text style={styles.sectionTitle}>Accounts</Text>
-
-        <GlassView material="clear" style={styles.accountCard}>
-          <Text style={[styles.toggleLabel, styles.toggleLabelSemiBold]}>OpenStreetMap</Text>
+      <SettingsGroup
+        header="Accounts"
+        footer="Sign in to add or update places and save reviews to your own PDS."
+      >
+        <View style={styles.accountCard}>
           {osmAccessToken && osmUser ? (
-            <View style={styles.accountDetails}>
-              <View style={styles.accountHeaderRow}>
-                <MaterialCommunityIcons name="map" size={20} color="#7EBC6F" />
-                <View style={styles.flexOne}>
-                  <Text style={[styles.toggleLabel, styles.toggleLabelStrong]}>
+            <>
+              <View style={styles.accountRow}>
+                <View style={[styles.accountIcon, { backgroundColor: '#7EBC6F' }]}>
+                  <MaterialCommunityIcons name="map" size={16} color="#FFFFFF" />
+                </View>
+                <View style={styles.accountTextCol}>
+                  <Text style={styles.accountName} numberOfLines={1}>
                     {osmUser.displayName}
                   </Text>
-                  <Text style={styles.accountCaption}>Signed in to OpenStreetMap</Text>
+                  <Text style={styles.accountCaption} numberOfLines={1}>
+                    OpenStreetMap
+                  </Text>
                 </View>
               </View>
-              <Text style={styles.accountBody}>
-                You can add and update places on OpenStreetMap. Your contributions are public.
-              </Text>
-              <View style={styles.osmStatsRow}>
-                <MaterialCommunityIcons
-                  name="star-outline"
-                  size={16}
-                  color={colors.textSecondary}
-                />
-                <Text style={styles.accountBody}>
-                  {osmUser.changesetCount} changesets on OpenStreetMap
-                </Text>
-              </View>
-              <Button
+              <SettingsRow
                 title="View Latest Contributions"
-                variant="ghost"
                 onPress={() => {
                   Linking.openURL(
                     `https://www.openstreetmap.org/user/${encodeURIComponent(osmUser.displayName)}/history`,
                   );
                 }}
               />
-              <Button title="Sign Out" variant="ghost" onPress={osmLogout} />
-            </View>
+              <SettingsRow title="Sign Out" onPress={osmLogout} />
+            </>
           ) : (
-            <View style={styles.accountDetails}>
-              <Text style={styles.accountBody}>
-                Connect your OpenStreetMap account to add places to OSM directly from the map.
-              </Text>
+            <View style={styles.accountSigninRow}>
               <Button
                 title={osmIsLoggingIn ? 'Signing in…' : 'Sign in with OpenStreetMap'}
                 variant="primary"
                 onPress={() => osmLogin().catch(() => {})}
                 disabled={osmIsLoggingIn}
+                style={styles.signinBtn}
               />
             </View>
           )}
-        </GlassView>
+        </View>
 
-        <GlassView material="clear" style={styles.accountCard}>
-          <Text style={[styles.toggleLabel, styles.toggleLabelSemiBold]}>Bluesky</Text>
+        <View style={styles.accountCard}>
           {bskySession ? (
-            <View style={styles.accountDetails}>
-              <View style={styles.accountHeaderRow}>
-                <MaterialCommunityIcons name="butterfly" size={20} color="#0085FF" />
-                <View style={styles.flexOne}>
-                  <Text style={[styles.toggleLabel, styles.toggleLabelStrong]}>
+            <>
+              <View style={styles.accountRow}>
+                <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
+                  <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
+                </View>
+                <View style={styles.accountTextCol}>
+                  <Text style={styles.accountName} numberOfLines={1}>
                     @{bskySession.handle}
                   </Text>
-                  <Text style={styles.accountCaption}>{bskySession.did}</Text>
+                  <Text style={styles.accountCaption} numberOfLines={1}>
+                    {bskySession.did}
+                  </Text>
                 </View>
               </View>
-              <Text style={styles.accountBody}>Your reviews are stored on your Bluesky PDS.</Text>
-              <Button title="Disconnect" variant="ghost" onPress={bskyLogout} />
-            </View>
+              <SettingsRow title="Disconnect" onPress={bskyLogout} destructive />
+            </>
           ) : (
-            <View style={styles.accountDetails}>
-              <Text style={styles.accountBody}>
-                Sign in to save reviews to your Bluesky account. Reviews are stored on your own PDS
-                and remain yours. You can still leave anonymous reviews without connecting.
-              </Text>
-              <TextInput
-                style={styles.accountInput}
-                value={bskyHandle}
-                onChangeText={setBskyHandle}
-                placeholder="you.bsky.social"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TextInput
-                style={styles.accountInput}
-                value={bskyPassword}
-                onChangeText={setBskyPassword}
-                placeholder="App password"
-                placeholderTextColor={colors.textSecondary}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {bskyError ? <Text style={styles.accountError}>{bskyError}</Text> : null}
-              <Button
-                title={bskyIsLoading ? 'Connecting…' : 'Connect Bluesky'}
-                variant="primary"
-                onPress={() => bskyLogin(bskyHandle.trim(), bskyPassword)}
-                disabled={bskyIsLoading || !bskyHandle.trim() || !bskyPassword}
-              />
+            <View style={styles.bskySigninBlock}>
+              <View style={styles.accountRow}>
+                <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
+                  <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
+                </View>
+                <View style={styles.accountTextCol}>
+                  <Text style={styles.accountName}>Bluesky</Text>
+                  <Text style={styles.accountCaption}>Reviews, identity</Text>
+                </View>
+              </View>
+              <View style={styles.bskyForm}>
+                <TextInput
+                  style={styles.input}
+                  value={bskyHandle}
+                  onChangeText={setBskyHandle}
+                  placeholder="you.bsky.social"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TextInput
+                  style={styles.input}
+                  value={bskyPassword}
+                  onChangeText={setBskyPassword}
+                  placeholder="App password"
+                  placeholderTextColor={colors.textSecondary}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
+                <Button
+                  title={bskyIsLoading ? 'Connecting…' : 'Connect Bluesky'}
+                  variant="primary"
+                  onPress={() => bskyLogin(bskyHandle.trim(), bskyPassword)}
+                  disabled={bskyIsLoading || !bskyHandle.trim() || !bskyPassword}
+                />
+              </View>
             </View>
           )}
-        </GlassView>
-      </GlassView>
-
-      <GlassView material="regular" style={styles.section}>
-        <Text style={styles.sectionTitle}>Privacy</Text>
-
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Location Access</Text>
-          <Switch
-            value={permissions.locationEnabled}
-            onValueChange={(v) => setPermissions({ locationEnabled: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-          />
         </View>
+      </SettingsGroup>
 
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Traffic Telemetry</Text>
-          <Switch
-            value={permissions.trafficTelemetryEnabled}
-            onValueChange={(v) => setPermissions({ trafficTelemetryEnabled: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-          />
-        </View>
+      <SettingsGroup header="Privacy">
+        <SettingsRow
+          title="Location Access"
+          rightAdornment={
+            <Switch
+              value={permissions.locationEnabled}
+              onValueChange={(v) => setPermissions({ locationEnabled: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
+          title="Traffic Telemetry"
+          rightAdornment={
+            <Switch
+              value={permissions.trafficTelemetryEnabled}
+              onValueChange={(v) => setPermissions({ trafficTelemetryEnabled: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
+          title="POI Contributions"
+          rightAdornment={
+            <Switch
+              value={permissions.poiContributionsEnabled}
+              onValueChange={(v) => setPermissions({ poiContributionsEnabled: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
+          title="Imagery Sharing"
+          rightAdornment={
+            <Switch
+              value={permissions.imagerySharingEnabled}
+              onValueChange={(v) => setPermissions({ imagerySharingEnabled: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+      </SettingsGroup>
 
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>POI Contributions</Text>
-          <Switch
-            value={permissions.poiContributionsEnabled}
-            onValueChange={(v) => setPermissions({ poiContributionsEnabled: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-          />
-        </View>
-
-        <View style={styles.toggleRow}>
-          <Text style={styles.toggleLabel}>Imagery Sharing</Text>
-          <Switch
-            value={permissions.imagerySharingEnabled}
-            onValueChange={(v) => setPermissions({ imagerySharingEnabled: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-          />
-        </View>
-      </GlassView>
-
-      <GlassView material="regular" style={styles.section}>
-        <Text style={styles.sectionTitle}>About</Text>
-        <TouchableOpacity
-          style={styles.linkRow}
+      <SettingsGroup header="About">
+        <SettingsRow
+          title="Privacy Policy"
+          rightAdornment={
+            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+          }
           onPress={() => Linking.openURL('https://polarismaps.com/privacy')}
-          activeOpacity={0.6}
-          accessibilityLabel="Privacy Policy"
-          accessibilityHint="Opens the Polaris Maps privacy policy in your browser"
-          accessibilityRole="link"
-        >
-          <Text style={[styles.linkLabel, { color: colors.text }]}>Privacy Policy</Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.linkRow}
+        />
+        <SettingsRow
+          title="Terms of Service"
+          rightAdornment={
+            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+          }
           onPress={() => Linking.openURL('https://polarismaps.com/terms')}
-          activeOpacity={0.6}
-          accessibilityLabel="Terms of Service"
-          accessibilityHint="Opens the Polaris Maps terms of service in your browser"
-          accessibilityRole="link"
-        >
-          <Text style={[styles.linkLabel, { color: colors.text }]}>Terms of Service</Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-        </TouchableOpacity>
-      </GlassView>
+        />
+      </SettingsGroup>
     </ScrollView>
   );
 }
 
-const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    content: { padding: spacing.lg },
-    heading: { ...typography.h1, color: colors.text, marginBottom: spacing.lg },
-    section: {
-      marginBottom: spacing.xl,
-      padding: spacing.md,
-      borderRadius: borderRadius.xl,
-      borderCurve: 'continuous',
-      overflow: 'hidden',
-    },
-    sectionTitle: { ...typography.subtitle, color: colors.text, marginBottom: spacing.md },
-    themeRow: { flexDirection: 'row', gap: spacing.sm },
-    themeChip: {
-      flex: 1,
-      paddingVertical: spacing.sm,
-      alignItems: 'center',
-      borderRadius: 999,
-      borderCurve: 'continuous',
-      backgroundColor: colors.glass.background,
-    },
-    themeChipActive: {
-      backgroundColor: colors.primary + '24',
-    },
-    themeChipText: { ...typography.label, color: colors.textSecondary },
-    themeChipTextActive: { color: colors.primary, fontWeight: '700' },
-    toggleRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingVertical: spacing.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
-    },
-    toggleLabel: { ...typography.body, color: colors.text },
-    toggleLabelStrong: { fontWeight: '700' },
-    toggleLabelSemiBold: { fontWeight: '600' },
-    accountCard: {
+const createStyles = (isDark: boolean) => {
+  const pageBg = isDark ? iosListGroup.pageBackground : '#F2F2F7';
+  const headingColor = isDark ? '#FFFFFF' : '#000000';
+  const inputBg = isDark ? '#2C2C2E' : '#FFFFFF';
+  const inputBorder = isDark ? '#3A3A3C' : '#C6C6C8';
+  const captionColor = isDark ? '#8E8E93' : '#6C6C70';
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: pageBg },
+    content: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxl },
+    heading: {
+      ...typography.largeTitle,
+      color: headingColor,
       marginBottom: spacing.lg,
-      padding: spacing.md,
-      borderRadius: borderRadius.lg,
-      borderCurve: 'continuous',
-      overflow: 'hidden',
+      marginLeft: spacing.sm,
+    },
+    themeRow: {
+      flexDirection: 'row',
+      minHeight: 44,
+    },
+    themeCell: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: spacing.sm + 2,
+    },
+    themeSeparator: {
+      width: StyleSheet.hairlineWidth,
+      alignSelf: 'stretch',
+      backgroundColor: isDark ? 'rgba(84,84,88,0.34)' : 'rgba(60,60,67,0.18)',
+    },
+    themeCellText: { ...typography.body, fontSize: 17, color: captionColor },
+    themeCellTextActive: { color: isDark ? '#0A84FF' : '#007AFF', fontWeight: '600' },
+    accountCard: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
       gap: spacing.xs,
     },
-    accountDetails: {
-      gap: spacing.sm,
-    },
-    accountHeaderRow: {
+    accountRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+      gap: spacing.md,
     },
-    flexOne: {
-      flex: 1,
+    accountIcon: {
+      width: 28,
+      height: 28,
+      borderRadius: 6,
+      borderCurve: 'continuous',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    accountCaption: {
-      ...typography.caption,
-      color: colors.textSecondary,
-    },
-    accountBody: {
-      ...typography.bodySmall,
-      color: colors.textSecondary,
-    },
-    accountInput: {
+    accountTextCol: { flex: 1 },
+    accountName: { ...typography.body, fontSize: 16, fontWeight: '500' },
+    accountCaption: { ...typography.caption, fontSize: 12, color: captionColor, marginTop: 1 },
+    accountSigninRow: { paddingVertical: spacing.sm },
+    signinBtn: { alignSelf: 'stretch' },
+    bskySigninBlock: { paddingVertical: spacing.sm, gap: spacing.md },
+    bskyForm: { gap: spacing.sm },
+    input: {
+      ...typography.body,
+      fontSize: 16,
+      color: isDark ? '#FFFFFF' : '#000000',
+      backgroundColor: inputBg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: inputBorder,
       borderRadius: borderRadius.md,
       borderCurve: 'continuous',
-      padding: spacing.sm,
-      ...typography.body,
-      color: colors.text,
-      backgroundColor: colors.glass.background,
-    },
-    accountError: {
-      ...typography.caption,
-      color: colors.error,
-    },
-    osmStatsRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.xs,
-    },
-    linkRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
+      paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm + 2,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
     },
-    linkLabel: {
-      ...typography.body,
-    },
+    errorText: { ...typography.caption, color: '#FF453A' },
   });
+};
+
+// Re-export SFSymbol so consumers don't have to import it separately.
+export { SFSymbol };

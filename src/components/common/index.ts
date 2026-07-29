@@ -5,4 +5,6 @@ export { ErrorBoundary } from './ErrorBoundary';
 export { SkeletonScreen } from './SkeletonScreen';
 export { ConnectivityBanner } from './ConnectivityBanner';
 export { GlassView } from './GlassView';
-export { Symbol } from './Symbol';
+export { SFSymbol } from './SFSymbol';
+export { SettingsGroup } from './SettingsGroup';
+export { SettingsRow } from './SettingsRow';

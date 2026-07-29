@@ -12,7 +12,7 @@ import { BlurView } from 'expo-blur';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from './GlassView';
-import { Symbol } from './Symbol';
+import { SFSymbol } from './SFSymbol';
 
 interface ModalProps {
   visible: boolean;
@@ -39,7 +39,7 @@ export function Modal({ visible, onClose, title, children, style }: ModalProps) 
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
               <TouchableOpacity onPress={onClose} hitSlop={8}>
-                <Symbol name="xmark.circle.fill" size={22} tintColor={colors.textSecondary} />
+                <SFSymbol name="xmark.circle.fill" size={22} tintColor={colors.textSecondary} />
               </TouchableOpacity>
             </View>
           )}

@@ -10,7 +10,7 @@ import {
 import { colors, spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from './GlassView';
-import { Symbol } from './Symbol';
+import { SFSymbol } from './SFSymbol';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost';
 type ButtonSize = 'sm' | 'md' | 'lg';
@@ -71,7 +71,7 @@ export function Button({
         <ActivityIndicator color={textColor} size="small" />
       ) : (
         <>
-          {icon && <Symbol name={icon} size={16} tintColor={iconColor} style={styles.icon} />}
+          {icon && <SFSymbol name={icon} size={16} tintColor={iconColor} style={styles.icon} />}
           <Text style={[styles.text, sizeStyle.text, { color: textColor }]}>{title}</Text>
         </>
       )}
