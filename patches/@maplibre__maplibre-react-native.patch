@@ -1,0 +1,295 @@
+diff --git a/ios/MLRN/CameraStop.h b/ios/MLRN/CameraStop.h
+index 26d77b07281a6fc8735942c3fe61cd8df2a4d6ff..a4329e22fec3b5dd4c6f1c2e82fc5bc76b6fbef7 100644
+--- a/ios/MLRN/CameraStop.h
++++ b/ios/MLRN/CameraStop.h
+@@ -1,4 +1,4 @@
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ #import "MLRNCamera.h"
+ 
+ @interface CameraStop : NSObject
+diff --git a/ios/MLRN/MLRNCallout.h b/ios/MLRN/MLRNCallout.h
+index 66b00b9240fde071f9e852cdc781ad814d5fce2e..ff1f1548c96bb002297b9b9efe249fc27b0319ec 100644
+--- a/ios/MLRN/MLRNCallout.h
++++ b/ios/MLRN/MLRNCallout.h
+@@ -1,6 +1,6 @@
+ #import <React/RCTView.h>
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNCallout : RCTView <MLNCalloutView>
+ 
+diff --git a/ios/MLRN/MLRNImageSource.m b/ios/MLRN/MLRNImageSource.m
+index 5ff712bc62132a9adbd0b2306f7d681d3ee6c8a6..156dcf4dbd4cb8eeba5ee248c94a1cac715a8123 100644
+--- a/ios/MLRN/MLRNImageSource.m
++++ b/ios/MLRN/MLRNImageSource.m
+@@ -1,5 +1,5 @@
+ #import "MLRNImageSource.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @implementation MLRNImageSource
+ 
+diff --git a/ios/MLRN/MLRNImages.h b/ios/MLRN/MLRNImages.h
+index 9bc76e9c67df6478fe5a2b00965649a5b5c96039..f1981bbe520b9633af1b7fc2e0ee33b2d98cd916 100644
+--- a/ios/MLRN/MLRNImages.h
++++ b/ios/MLRN/MLRNImages.h
+@@ -2,7 +2,7 @@
+ #import <React/RCTComponent.h>
+ #import <UIKit/UIKit.h>
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @class MLRNMapView;
+ 
+diff --git a/ios/MLRN/MLRNLayer.h b/ios/MLRN/MLRNLayer.h
+index 581ccd4a63a5c65df008799916296909f4e27773..200e25a6a2fcb23c9ec69ea33eb8b1c5a73ce62e 100644
+--- a/ios/MLRN/MLRNLayer.h
++++ b/ios/MLRN/MLRNLayer.h
+@@ -3,7 +3,7 @@
+ 
+ @class MLRNMapView;
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNLayer<T> : UIView
+ 
+diff --git a/ios/MLRN/MLRNLight.h b/ios/MLRN/MLRNLight.h
+index 16823ad7b2d2d66381155a6885cbdf67b2d8ac1a..d7842fae6de234bbdb3a4d5380b2436ff1a9ce9c 100644
+--- a/ios/MLRN/MLRNLight.h
++++ b/ios/MLRN/MLRNLight.h
+@@ -1,5 +1,5 @@
+ #import <UIKit/UIKit.h>
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNLight : UIView
+ 
+diff --git a/ios/MLRN/MLRNLogging.m b/ios/MLRN/MLRNLogging.m
+index 8573c30b4e871a0c345b30576df79c8c99ca3d56..3d13aeeb34ee7779dbf45df8badb5c91dba6b9b5 100644
+--- a/ios/MLRN/MLRNLogging.m
++++ b/ios/MLRN/MLRNLogging.m
+@@ -1,6 +1,6 @@
+ #import "MLRNLogging.h"
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNLogging ()
+ @property (nonatomic) BOOL hasListeners;
+diff --git a/ios/MLRN/MLRNMapTouchEvent.h b/ios/MLRN/MLRNMapTouchEvent.h
+index 87600f1a00b35abd5cb7000832a8b10c159d67d8..e30b358a14ef8760f489ab6e2359bbdff2bb1f4a 100644
+--- a/ios/MLRN/MLRNMapTouchEvent.h
++++ b/ios/MLRN/MLRNMapTouchEvent.h
+@@ -1,7 +1,7 @@
+ #import <Foundation/Foundation.h>
+ #import "MLRNEvent.h"
+ #import "MLRNPointAnnotation.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNMapTouchEvent : MLRNEvent
+ 
+diff --git a/ios/MLRN/MLRNMapTouchEvent.m b/ios/MLRN/MLRNMapTouchEvent.m
+index 904a558dfb5615fb175fecbd8bd3fddcd70cda4d..731b475eae5f2060ec593a743220dc291bc2200c 100644
+--- a/ios/MLRN/MLRNMapTouchEvent.m
++++ b/ios/MLRN/MLRNMapTouchEvent.m
+@@ -1,7 +1,7 @@
+ #import "MLRNMapTouchEvent.h"
+ #import "MLRNEventTypes.h"
+ #import "MLRNPointAnnotation.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @implementation MLRNMapTouchEvent
+ 
+diff --git a/ios/MLRN/MLRNMapView.h b/ios/MLRN/MLRNMapView.h
+index d1f24aee0f089c94d4b11f5c115b3a1900c561b1..d77f8cbc9d5fe9fd30398444c7bf353a1fb1f26e 100644
+--- a/ios/MLRN/MLRNMapView.h
++++ b/ios/MLRN/MLRNMapView.h
+@@ -4,7 +4,7 @@
+ #import "MLRNShapeSource.h"
+ #import "MLRNSource.h"
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @class CameraUpdateQueue;
+ @class MLRNImages;
+diff --git a/ios/MLRN/MLRNMapViewManager.h b/ios/MLRN/MLRNMapViewManager.h
+index 461b8c730672ffea1c823c6030099078d57feb37..37fa5975cb4e2bf50c433dd48c11f601842a7c24 100644
+--- a/ios/MLRN/MLRNMapViewManager.h
++++ b/ios/MLRN/MLRNMapViewManager.h
+@@ -1,5 +1,5 @@
+ #import "ViewManager.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNMapViewManager : ViewManager
+ 
+diff --git a/ios/MLRN/MLRNModule.m b/ios/MLRN/MLRNModule.m
+index 3e4d2afe21fbaf9f5778ac02737075bb4bf465e1..59914580c1a42a483633312d7b86e6471c31d8ff 100644
+--- a/ios/MLRN/MLRNModule.m
++++ b/ios/MLRN/MLRNModule.m
+@@ -4,7 +4,7 @@
+ #import "MLRNEventTypes.h"
+ #import "MLRNOfflineModule.h"
+ #import "MLRNSource.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @implementation MLRNModule
+ 
+diff --git a/ios/MLRN/MLRNOfflineModule.h b/ios/MLRN/MLRNOfflineModule.h
+index 25208cd39ccd4e197bd4725f2965cc606554a626..8b45a7108c90b2c6c91023736b65ba8123107bfc 100644
+--- a/ios/MLRN/MLRNOfflineModule.h
++++ b/ios/MLRN/MLRNOfflineModule.h
+@@ -1,7 +1,7 @@
+ #import <React/RCTBridgeModule.h>
+ #import <React/RCTEventEmitter.h>
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNOfflineModule : RCTEventEmitter <RCTBridgeModule>
+ 
+diff --git a/ios/MLRN/MLRNPointAnnotation.h b/ios/MLRN/MLRNPointAnnotation.h
+index 15ec879b942370be3c33e2d265beefa6beda9c66..f050a466baf087bd9bad89018e87efd47b793205 100644
+--- a/ios/MLRN/MLRNPointAnnotation.h
++++ b/ios/MLRN/MLRNPointAnnotation.h
+@@ -3,7 +3,7 @@
+ #import <UIKit/UIKit.h>
+ #import "MLRNCallout.h"
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNPointAnnotation : MLNAnnotationView <MLNAnnotation>
+ 
+diff --git a/ios/MLRN/MLRNRasterSource.h b/ios/MLRN/MLRNRasterSource.h
+index 42e3b76e0bee4f539b0eb5ecb18d5b7a30e3e762..ab22c6d5f93e89e3f585b921967179bb2fd69fa2 100644
+--- a/ios/MLRN/MLRNRasterSource.h
++++ b/ios/MLRN/MLRNRasterSource.h
+@@ -1,5 +1,5 @@
+ #import "MLRNTileSource.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNRasterSource : MLRNTileSource
+ 
+diff --git a/ios/MLRN/MLRNShapeSource.h b/ios/MLRN/MLRNShapeSource.h
+index b8996eb795110852dc86a33305a31f8e9cbc6d04..d5637e0f5d79b9188d0d4438b1a344e38ae9fa46 100644
+--- a/ios/MLRN/MLRNShapeSource.h
++++ b/ios/MLRN/MLRNShapeSource.h
+@@ -1,7 +1,7 @@
+ #import <React/RCTBridge.h>
+ #import "MLRNSource.h"
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNShapeSource : MLRNSource
+ 
+diff --git a/ios/MLRN/MLRNSnapshotModule.m b/ios/MLRN/MLRNSnapshotModule.m
+index b5fd5ce0a9f4a96f915f9091eb182b04387941d3..e186700be691a89899832e7d21554ef78c1ee9e4 100644
+--- a/ios/MLRN/MLRNSnapshotModule.m
++++ b/ios/MLRN/MLRNSnapshotModule.m
+@@ -1,7 +1,7 @@
+ #import "MLRNSnapshotModule.h"
+ #import "MLRNImageUtils.h"
+ #import "MLRNUtils.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @implementation MLRNSnapshotModule
+ 
+diff --git a/ios/MLRN/MLRNSource.h b/ios/MLRN/MLRNSource.h
+index 74eb3ddd45a8fc25b4d229d781faf165ae34b107..9c67ed0a08830137da50e8c5d7830ff5b0bef77b 100644
+--- a/ios/MLRN/MLRNSource.h
++++ b/ios/MLRN/MLRNSource.h
+@@ -1,7 +1,7 @@
+ #import <React/RCTComponent.h>
+ #import <UIKit/UIKit.h>
+ #import "MLRNLayer.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNSource : UIView
+ 
+diff --git a/ios/MLRN/MLRNStyle.h b/ios/MLRN/MLRNStyle.h
+index cc340fd5d1cdd03c65a18dca5ffab9859a0290a4..87252cbc4f15577852576a9b6164a64181bb7e26 100644
+--- a/ios/MLRN/MLRNStyle.h
++++ b/ios/MLRN/MLRNStyle.h
+@@ -5,7 +5,7 @@
+ #import "MLRNStyleValue.h"
+ #import <React/RCTBridge.h>
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNStyle : NSObject
+ 
+diff --git a/ios/MLRN/MLRNStyleValue.h b/ios/MLRN/MLRNStyleValue.h
+index 6a9ff77fc85b17cae14d5d269b94ec2d27de6709..8a4b5d94dce0b01bb1859d9af6e985e551fbcc33 100644
+--- a/ios/MLRN/MLRNStyleValue.h
++++ b/ios/MLRN/MLRNStyleValue.h
+@@ -1,5 +1,5 @@
+ #import <Foundation/Foundation.h>
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNStyleValue : NSObject
+ 
+diff --git a/ios/MLRN/MLRNTileSource.h b/ios/MLRN/MLRNTileSource.h
+index cfb3d4100a407d4dd63c4d010f76a26f58fcead9..14597110001b42906853788485f01bfefdc5ec9f 100644
+--- a/ios/MLRN/MLRNTileSource.h
++++ b/ios/MLRN/MLRNTileSource.h
+@@ -4,7 +4,7 @@
+ //
+ 
+ #import "MLRNSource.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNTileSource : MLRNSource
+ 
+diff --git a/ios/MLRN/MLRNUtils.h b/ios/MLRN/MLRNUtils.h
+index 6b8519193dd7320cef88fc814e22f4046be509a6..61ec445e56202f2cf420157fbd54d8530eb3e6b2 100644
+--- a/ios/MLRN/MLRNUtils.h
++++ b/ios/MLRN/MLRNUtils.h
+@@ -3,7 +3,7 @@
+ #import <React/RCTConvert.h>
+ #import <React/RCTImageLoader.h>
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNUtils : NSObject
+ 
+diff --git a/ios/MLRN/MLRNUtils.m b/ios/MLRN/MLRNUtils.m
+index e7a3b82c5196bcc206378f7865aeabf84deecf18..2b34cf224fbd1a8a167d335c1b6cfe4e5523b086 100644
+--- a/ios/MLRN/MLRNUtils.m
++++ b/ios/MLRN/MLRNUtils.m
+@@ -1,7 +1,7 @@
+ #import "MLRNUtils.h"
+ #import "MLRNImageQueue.h"
+ 
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @implementation MLRNUtils
+ 
+diff --git a/ios/MLRN/MLRNVectorSource.h b/ios/MLRN/MLRNVectorSource.h
+index fe6b280e619361fd059e6152f9d2fcdef7197d32..2e803f2f2af7de51bf51a7c7b523765c0c144f4d 100644
+--- a/ios/MLRN/MLRNVectorSource.h
++++ b/ios/MLRN/MLRNVectorSource.h
+@@ -1,5 +1,5 @@
+ #import "MLRNTileSource.h"
+-@import MapLibre;
++#import <MapLibre/MapLibre.h>
+ 
+ @interface MLRNVectorSource : MLRNTileSource
+ 

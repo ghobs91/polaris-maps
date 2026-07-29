@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "polaris-maps",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.polarismaps.app",
@@ -31,7 +30,11 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -52,16 +55,28 @@
           "cameraPermission": "Polaris Maps uses the camera to capture street-level imagery."
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-asset",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      "expo-image"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "reactCompiler": true
     },
-    "privacy": "https://polarismaps.com/privacy",
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5b85425d-974c-43bd-a31d-315d8966c653"
+      }
     }
   }
 }
