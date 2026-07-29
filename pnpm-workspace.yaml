@@ -1,8 +1,3 @@
-onlyBuiltDependencies:
-  - core-js
-  - duckdb
-  - unrs-resolver
-
 patchedDependencies:
   '@atproto/oauth-client-expo@0.1.8': patches/@atproto__oauth-client-expo@0.1.8.patch
   '@maplibre/maplibre-react-native': patches/@maplibre__maplibre-react-native.patch

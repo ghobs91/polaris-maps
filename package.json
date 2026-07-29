@@ -111,12 +111,5 @@
     "react-native-dotenv": "^3.4.11",
     "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "core-js",
-      "duckdb",
-      "unrs-resolver"
-    ]
   }
 }
