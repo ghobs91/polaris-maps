@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { InteractionManager } from 'react-native';
 import { ConnectivityBanner } from '@/components/common';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
@@ -8,7 +8,7 @@ import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 
 function RootLayoutInner() {
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
 
   useEffect(() => {
     useAtprotoAuthStore.getState().restore();
@@ -22,11 +22,25 @@ function RootLayoutInner() {
     });
     return () => task.cancel();
   }, []);
+
+  // Theme-aware header chrome so the nav bar matches dark/light Settings.
+  const screenOptions = useMemo(
+    () => ({
+      headerStyle: { backgroundColor: colors.background },
+      headerTintColor: colors.primary,
+      headerTitleStyle: { color: colors.text, fontWeight: '600' as const },
+      headerShadowVisible: false,
+      headerBackVisible: true,
+      contentStyle: { backgroundColor: colors.background },
+    }),
+    [colors.background, colors.primary, colors.text],
+  );
+
   return (
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <ConnectivityBanner />
-      <Stack>
+      <Stack screenOptions={screenOptions}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding/index" options={{ headerShown: false }} />
         <Stack.Screen name="poi/[id]" options={{ title: 'Place Details' }} />
@@ -37,7 +51,7 @@ function RootLayoutInner() {
         <Stack.Screen name="regions/offline" options={{ title: 'Offline Regions' }} />
         <Stack.Screen name="imagery/viewer" options={{ title: 'Street View' }} />
         <Stack.Screen name="imagery/capture" options={{ title: 'Capture' }} />
-        <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
+        <Stack.Screen name="settings/index" options={{ title: '', headerBackTitle: 'Back' }} />
         <Stack.Screen name="places/list" options={{ headerShown: false }} />
       </Stack>
     </>

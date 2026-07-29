@@ -285,6 +285,7 @@ const createStyles = (isDark: boolean) => {
   const inputBg = isDark ? '#2C2C2E' : '#FFFFFF';
   const inputBorder = isDark ? '#3A3A3C' : '#C6C6C8';
   const captionColor = isDark ? '#8E8E93' : '#6C6C70';
+  const primaryTextColor = isDark ? '#FFFFFF' : '#000000';
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: pageBg },
     content: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxl },
@@ -331,7 +332,7 @@ const createStyles = (isDark: boolean) => {
       justifyContent: 'center',
     },
     accountTextCol: { flex: 1 },
-    accountName: { ...typography.body, fontSize: 16, fontWeight: '500' },
+    accountName: { ...typography.body, fontSize: 16, fontWeight: '500', color: primaryTextColor },
     accountCaption: { ...typography.caption, fontSize: 12, color: captionColor, marginTop: 1 },
     accountSigninRow: { paddingVertical: spacing.sm },
     signinBtn: { alignSelf: 'stretch' },
