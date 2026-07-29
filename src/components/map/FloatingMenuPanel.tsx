@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { GlassView } from '../common/GlassView';
 import { usePeerStore } from '../../stores/peerStore';
 import { joinNetwork, getLocalNode } from '../../services/sync/peerService';
 import { startPeerMonitor, stopPeerMonitor } from '../../services/sync/peerMonitor';
@@ -40,7 +41,7 @@ export function FloatingMenuPanel({
   topInset,
   bottomInset,
 }: FloatingMenuPanelProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
 
   const [layer, setLayer] = useState<PanelLayer>('menu');
@@ -163,10 +164,19 @@ export function FloatingMenuPanel({
     : '\u2014';
 
   return (
-    <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {/* Backdrop */}
       <TouchableWithoutFeedback onPress={close}>
-        <Animated.View pointerEvents="auto" style={[styles.backdrop, { opacity: backdropAnim }]} />
+        <Animated.View
+          pointerEvents="auto"
+          style={[
+            styles.backdrop,
+            {
+              opacity: backdropAnim,
+              backgroundColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)',
+            },
+          ]}
+        />
       </TouchableWithoutFeedback>
 
       {/* Primary floating panel */}
@@ -179,29 +189,35 @@ export function FloatingMenuPanel({
             bottom: panelBottom,
             width: PANEL_WIDTH,
             left: leftInset,
-            backgroundColor: colors.surface,
-            borderColor: colors.border,
             transform: [{ translateX: menuSlideAnim }],
           },
         ]}
       >
-        <View style={styles.panelFill}>
+        <GlassView material="regular" style={styles.panelFill}>
           <View style={styles.layerHeader}>
             <Text style={[styles.layerTitle, { color: colors.text }]}>Menu</Text>
             <TouchableOpacity onPress={close} hitSlop={12} style={styles.layerCloseBtn}>
-              <View style={[styles.closeCircle, { backgroundColor: colors.border + '60' }]}>
+              <GlassView material="clear" isInteractive style={styles.closeCircle}>
                 <Ionicons name="close" size={18} color={colors.text} />
-              </View>
+              </GlassView>
             </TouchableOpacity>
           </View>
 
           <View style={styles.menuContent}>
             <TouchableOpacity
-              style={[styles.menuBtn, { borderColor: colors.border }]}
+              style={[
+                styles.menuBtn,
+                { backgroundColor: isDark ? 'rgba(255,255,255,0.09)' : colors.primary + '14' },
+              ]}
               onPress={() => navigateToLayer('settings')}
               activeOpacity={0.7}
             >
-              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+              <View
+                style={[
+                  styles.menuIconCircle,
+                  { backgroundColor: isDark ? colors.primary + '35' : colors.primary + '20' },
+                ]}
+              >
                 <Ionicons name="settings-outline" size={22} color={colors.primary} />
               </View>
               <View style={styles.menuBtnText}>
@@ -214,14 +230,22 @@ export function FloatingMenuPanel({
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.menuBtn, { borderColor: colors.border }]}
+              style={[
+                styles.menuBtn,
+                { backgroundColor: isDark ? 'rgba(255,255,255,0.09)' : colors.primary + '14' },
+              ]}
               onPress={() => {
                 loadNodeData();
                 navigateToLayer('dashboard');
               }}
               activeOpacity={0.7}
             >
-              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+              <View
+                style={[
+                  styles.menuIconCircle,
+                  { backgroundColor: isDark ? colors.primary + '35' : colors.primary + '20' },
+                ]}
+              >
                 <Ionicons name="pulse-outline" size={22} color={colors.primary} />
               </View>
               <View style={styles.menuBtnText}>
@@ -234,11 +258,19 @@ export function FloatingMenuPanel({
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.menuBtn, { borderColor: colors.border }]}
+              style={[
+                styles.menuBtn,
+                { backgroundColor: isDark ? 'rgba(255,255,255,0.09)' : colors.primary + '14' },
+              ]}
               onPress={() => navigateToLayer('regions')}
               activeOpacity={0.7}
             >
-              <View style={[styles.menuIconCircle, { backgroundColor: colors.primary + '20' }]}>
+              <View
+                style={[
+                  styles.menuIconCircle,
+                  { backgroundColor: isDark ? colors.primary + '35' : colors.primary + '20' },
+                ]}
+              >
                 <Ionicons name="map-outline" size={22} color={colors.primary} />
               </View>
               <View style={styles.menuBtnText}>
@@ -250,7 +282,7 @@ export function FloatingMenuPanel({
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
-        </View>
+        </GlassView>
       </Animated.View>
 
       {/* Secondary floating panel */}
@@ -265,13 +297,11 @@ export function FloatingMenuPanel({
               bottom: panelBottom,
               width: PANEL_WIDTH,
               left: leftInset + PANEL_WIDTH + PANEL_GAP,
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
               transform: [{ translateX: detailSlideAnim }],
             },
           ]}
         >
-          <View style={styles.panelFill}>
+          <GlassView material="regular" style={styles.panelFill}>
             {layer === 'dashboard' && (
               <>
                 <View style={styles.layerHeader}>
@@ -281,9 +311,9 @@ export function FloatingMenuPanel({
                     hitSlop={12}
                     style={styles.layerCloseBtn}
                   >
-                    <View style={[styles.closeCircle, { backgroundColor: colors.border + '60' }]}>
+                    <GlassView material="clear" isInteractive style={styles.closeCircle}>
                       <Ionicons name="close" size={18} color={colors.text} />
-                    </View>
+                    </GlassView>
                   </TouchableOpacity>
                 </View>
                 <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
@@ -313,9 +343,9 @@ export function FloatingMenuPanel({
                     hitSlop={12}
                     style={styles.layerCloseBtn}
                   >
-                    <View style={[styles.closeCircle, { backgroundColor: colors.border + '60' }]}>
+                    <GlassView material="clear" isInteractive style={styles.closeCircle}>
                       <Ionicons name="close" size={18} color={colors.text} />
-                    </View>
+                    </GlassView>
                   </TouchableOpacity>
                 </View>
                 {layer === 'settings' ? (
@@ -325,7 +355,7 @@ export function FloatingMenuPanel({
                 )}
               </>
             )}
-          </View>
+          </GlassView>
         </Animated.View>
       )}
     </View>
@@ -334,27 +364,21 @@ export function FloatingMenuPanel({
 
 const styles = StyleSheet.create({
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
   panel: {
     position: 'absolute',
     left: 0,
-    borderRadius: borderRadius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    shadowColor: '#000',
-    shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 30,
-    overflow: 'hidden',
   },
   panelSecondary: {
     zIndex: 31,
-    elevation: 31,
   },
   panelFill: {
     flex: 1,
+    borderRadius: borderRadius.xl,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
   },
   layerHeader: {
     flexDirection: 'row',
@@ -373,9 +397,11 @@ const styles = StyleSheet.create({
   closeCircle: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   pubkey: {
     ...typography.caption,
@@ -395,12 +421,13 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     borderRadius: borderRadius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderCurve: 'continuous',
   },
   menuIconCircle: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 999,
+    borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
   },
