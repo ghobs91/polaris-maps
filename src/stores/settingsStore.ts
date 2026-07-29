@@ -1,12 +1,6 @@
 import { create } from 'zustand';
 import { storage } from '../services/storage/mmkv';
 
-interface ResourceLimits {
-  maxStorageMb: number;
-  maxBandwidthMbps: number;
-  maxBatteryPctHr: number;
-}
-
 interface PermissionPreferences {
   locationEnabled: boolean;
   trafficTelemetryEnabled: boolean;
@@ -23,7 +17,6 @@ export interface RoutePreferences {
 export type ThemeMode = 'system' | 'light' | 'dark';
 
 interface SettingsState {
-  resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
   routePreferences: RoutePreferences;
   themeMode: ThemeMode;
@@ -31,7 +24,6 @@ interface SettingsState {
   useMetric: boolean;
   /** When true, speak turn-by-turn instructions during active navigation. Default: true. */
   voiceGuidanceEnabled: boolean;
-  setResourceLimits: (limits: Partial<ResourceLimits>) => void;
   setPermissions: (prefs: Partial<PermissionPreferences>) => void;
   setRoutePreferences: (prefs: Partial<RoutePreferences>) => void;
   setThemeMode: (mode: ThemeMode) => void;
@@ -42,7 +34,6 @@ interface SettingsState {
 const STORAGE_KEY = 'settings';
 
 function loadSettings(): {
-  resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
   routePreferences: RoutePreferences;
   themeMode: ThemeMode;
@@ -64,11 +55,6 @@ function loadSettings(): {
     }
   }
   return {
-    resourceLimits: {
-      maxStorageMb: 2048,
-      maxBandwidthMbps: 10,
-      maxBatteryPctHr: 5,
-    },
     permissions: {
       locationEnabled: true,
       trafficTelemetryEnabled: true,
@@ -87,7 +73,6 @@ function loadSettings(): {
 }
 
 function persistSettings(state: {
-  resourceLimits: ResourceLimits;
   permissions: PermissionPreferences;
   routePreferences: RoutePreferences;
   themeMode: ThemeMode;
@@ -101,23 +86,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
   const initial = loadSettings();
   return {
     ...initial,
-    setResourceLimits: (limits) => {
-      const updated = { ...get().resourceLimits, ...limits };
-      set({ resourceLimits: updated });
-      persistSettings({
-        resourceLimits: updated,
-        permissions: get().permissions,
-        routePreferences: get().routePreferences,
-        themeMode: get().themeMode,
-        useMetric: get().useMetric,
-        voiceGuidanceEnabled: get().voiceGuidanceEnabled,
-      });
-    },
     setPermissions: (prefs) => {
       const updated = { ...get().permissions, ...prefs };
       set({ permissions: updated });
       persistSettings({
-        resourceLimits: get().resourceLimits,
         permissions: updated,
         routePreferences: get().routePreferences,
         themeMode: get().themeMode,
@@ -129,7 +101,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       const updated = { ...get().routePreferences, ...prefs };
       set({ routePreferences: updated });
       persistSettings({
-        resourceLimits: get().resourceLimits,
         permissions: get().permissions,
         routePreferences: updated,
         themeMode: get().themeMode,
@@ -140,7 +111,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     setThemeMode: (mode) => {
       set({ themeMode: mode });
       persistSettings({
-        resourceLimits: get().resourceLimits,
         permissions: get().permissions,
         routePreferences: get().routePreferences,
         themeMode: mode,
@@ -151,7 +121,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     setUseMetric: (useMetric) => {
       set({ useMetric });
       persistSettings({
-        resourceLimits: get().resourceLimits,
         permissions: get().permissions,
         routePreferences: get().routePreferences,
         themeMode: get().themeMode,
@@ -162,7 +131,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     setVoiceGuidanceEnabled: (voiceGuidanceEnabled) => {
       set({ voiceGuidanceEnabled });
       persistSettings({
-        resourceLimits: get().resourceLimits,
         permissions: get().permissions,
         routePreferences: get().routePreferences,
         themeMode: get().themeMode,

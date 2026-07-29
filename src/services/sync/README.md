@@ -10,7 +10,7 @@ The sync layer manages all peer-to-peer data exchange beyond real-time traffic (
 2. **Hyperdrive bridge** — IPC between React Native and the nodejs-mobile sidecar for seeding/downloading file archives
 3. **Offline queue** — queues outbound actions (traffic probes, POI edits, reviews, attestations) in MMKV when offline, replayed when connectivity returns
 4. **Peer service** — manages the local peer node identity, resource usage, and uptime metrics in SQLite
-5. **Resource management** — enforces user-configured budgets for storage, bandwidth, and battery consumption
+5. **Resource management** — computes device-adaptive budgets for storage, bandwidth, and battery consumption automatically
 
 ## Architecture
 
@@ -23,7 +23,7 @@ feedSyncService.ts        Hyperdrive seed / download / tar extract
     ↓
 peerService.ts → peer_node SQLite table
     ↓
-resourceManager.ts → settingsStore (limits)
+resourceManager.ts → device state (adaptive limits)
     ↓
 offlineQueue.ts ← MMKV (500-entry cap)
 ```
@@ -35,8 +35,8 @@ offlineQueue.ts ← MMKV (500-entry cap)
 | `feedSyncService.ts`  | Manages Hypercore feed lifecycle — join, leave, get entries for region data replication. Tracks download progress and peer counts per feed.                                       |
 | `hyperdriveBridge.ts` | Bridge between React Native and the nodejs-mobile sidecar for Hyperdrive operations (seed, download, status). Uses `NativeEventEmitter` + request/response IPC pattern.           |
 | `offlineQueue.ts`     | Queues outbound actions in MMKV when offline. Supports traffic probes, POI edits, reviews, and attestations. 500-entry cap with FIFO eviction. Replays when connectivity returns. |
-| `peerService.ts`      | Manages local peer node identity in SQLite — joining the P2P network, recording resource limits, uptime, and data served metrics.                                                 |
-| `resourceManager.ts`  | Reads user-configured resource budgets (storage MB, bandwidth Mbps, battery %/hr) from settings and computes current usage against those limits.                                  |
+| `peerService.ts`      | Manages local peer node identity in SQLite — joining the P2P network, recording computed resource limits, uptime, and data served metrics.                                        |
+| `resourceManager.ts`  | Computes adaptive resource budgets (storage MB, bandwidth Mbps, battery %/hr) from free disk space and network type, then checks current usage against those limits.              |
 
 ## P2P Data Flow
 

@@ -1,6 +1,6 @@
 import { getDatabase } from '../database/init';
 import { getOrCreateKeypair } from '../identity/keypair';
-import { useSettingsStore } from '../../stores/settingsStore';
+import { getBudget } from './resourceManager';
 import type { PeerNode } from '../../models/peer';
 
 let joinedAt: number | null = null;
@@ -11,7 +11,7 @@ export async function joinNetwork(): Promise<PeerNode> {
   const now = Math.floor(Date.now() / 1000);
   joinedAt = now;
 
-  const settings = useSettingsStore.getState();
+  const budget = await getBudget();
 
   // Upsert local node record
   const existing = await db.getFirstAsync<Record<string, unknown>>(
@@ -31,9 +31,9 @@ export async function joinNetwork(): Promise<PeerNode> {
         '[]',
         now,
         now,
-        settings.resourceLimits.maxStorageMb,
-        settings.resourceLimits.maxBandwidthMbps,
-        settings.resourceLimits.maxBatteryPctHr,
+        budget.storageMb,
+        budget.bandwidthMbps,
+        budget.batteryPctHr,
       ],
     );
   } else {
@@ -98,26 +98,6 @@ export async function updatePeerMetrics(updates: {
 
   params.push(keypair.publicKey);
   await db.runAsync(`UPDATE peer_node SET ${sets.join(', ')} WHERE pubkey = ?`, params);
-}
-
-export async function syncResourceLimits(): Promise<void> {
-  const keypair = await getOrCreateKeypair();
-  const db = await getDatabase();
-  const settings = useSettingsStore.getState();
-
-  await db.runAsync(
-    `UPDATE peer_node SET
-      resource_limit_storage_mb = ?,
-      resource_limit_bandwidth_mbps = ?,
-      resource_limit_battery_pct_hr = ?
-    WHERE pubkey = ?`,
-    [
-      settings.resourceLimits.maxStorageMb,
-      settings.resourceLimits.maxBandwidthMbps,
-      settings.resourceLimits.maxBatteryPctHr,
-      keypair.publicKey,
-    ],
-  );
 }
 
 interface PeerNodeRow {

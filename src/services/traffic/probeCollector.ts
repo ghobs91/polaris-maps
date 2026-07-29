@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import { randomBytes } from '@noble/curves/abstract/utils';
+import { randomBytes } from '@noble/hashes/utils';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { publishProbe as hyperswarmPublish, isStarted as isSwarmStarted } from './hyperswarmBridge';
 import { publishProbe as nostrPublish } from './nostrFallback';
