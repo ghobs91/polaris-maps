@@ -3,6 +3,10 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  onlyBuiltDependencies:
+    - core-js
+    - duckdb
+    - unrs-resolver
 
 patchedDependencies:
   '@atproto/oauth-client-expo@0.1.8':

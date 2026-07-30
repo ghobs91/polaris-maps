@@ -16,7 +16,7 @@ const mockDeleteRecord = jest.fn();
 
 let mockAgentRef: { agent: ReturnType<typeof createMockAgent> | null } = { agent: null };
 let mockSessionRef: {
-  session: { did: string; handle: string; accessJwt: string; refreshJwt: string } | null;
+  session: { did: string; handle: string } | null;
 } = { session: null };
 
 function createMockAgent() {
@@ -38,7 +38,6 @@ function createMockAgent() {
 jest.mock('../../src/services/atproto/atprotoAuthService', () => ({
   getAgent: jest.fn(() => mockAgentRef.agent),
   getBlueskySession: jest.fn(() => Promise.resolve(mockSessionRef.session)),
-  refreshBlueskySession: jest.fn().mockResolvedValue(undefined),
 }));
 
 import {
@@ -46,14 +45,11 @@ import {
   fetchReviewsFromAtproto,
   deleteReviewFromAtproto,
 } from '../../src/services/atproto/atprotoReviewService';
-import { refreshBlueskySession } from '../../src/services/atproto/atprotoAuthService';
 import type { Review, PlaceReviewContext } from '../../src/models/review';
 
 const TEST_SESSION = {
   did: 'did:plc:testuser',
   handle: 'alice.bsky.social',
-  accessJwt: 'jwt-access',
-  refreshJwt: 'jwt-refresh',
 };
 
 const TEST_REVIEW: Review = {
@@ -122,20 +118,15 @@ describe('publishReviewToAtproto', () => {
     );
   });
 
-  it('retries on 401 after refreshing session', async () => {
-    const agent = createMockAgent();
-    mockAgentRef.agent = agent;
+  it('propagates API errors (refresh is handled by the OAuth agent)', async () => {
+    mockAgentRef.agent = createMockAgent();
     mockSessionRef.session = TEST_SESSION;
+    const apiError = new Error('Internal Server Error');
+    mockCreateRecord.mockRejectedValue(apiError);
 
-    const error401 = Object.assign(new Error('Unauthorized'), { status: 401 });
-    mockCreateRecord.mockRejectedValueOnce(error401).mockResolvedValueOnce({
-      data: { uri: 'at://did:plc:testuser/io.polaris.place.review/retry123' },
-    });
-
-    const uri = await publishReviewToAtproto(TEST_REVIEW, TEST_CONTEXT);
-
-    expect(refreshBlueskySession).toHaveBeenCalled();
-    expect(uri).toBe('at://did:plc:testuser/io.polaris.place.review/retry123');
+    await expect(publishReviewToAtproto(TEST_REVIEW, TEST_CONTEXT)).rejects.toThrow(
+      'Internal Server Error',
+    );
   });
 });
 

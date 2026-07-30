@@ -3,7 +3,7 @@ import {
   loginWithBluesky,
   logoutBluesky,
   getBlueskySession,
-  refreshBlueskySession,
+  restoreBlueskySession,
   AuthError,
   type AtprotoSession,
 } from '../services/atproto/atprotoAuthService';
@@ -12,8 +12,10 @@ interface AtprotoAuthState {
   session: AtprotoSession | null;
   isLoading: boolean;
   error: string | null;
-  login: (handle: string, password: string) => Promise<void>;
+  /** Start the OAuth login flow for the given Bluesky handle. */
+  login: (handle: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-establish a previously-saved session on app start. */
   restore: () => Promise<void>;
 }
 
@@ -22,10 +24,10 @@ export const useAtprotoAuthStore = create<AtprotoAuthState>((set) => ({
   isLoading: false,
   error: null,
 
-  login: async (handle: string, password: string) => {
+  login: async (handle: string) => {
     set({ isLoading: true, error: null });
     try {
-      await loginWithBluesky(handle, password);
+      await loginWithBluesky(handle);
       const session = await getBlueskySession();
       set({ session, isLoading: false });
     } catch (err) {
@@ -40,13 +42,9 @@ export const useAtprotoAuthStore = create<AtprotoAuthState>((set) => ({
   },
 
   restore: async () => {
-    const stored = await getBlueskySession();
-    if (!stored) return;
-    set({ session: stored });
     try {
-      await refreshBlueskySession();
-      const refreshed = await getBlueskySession();
-      set({ session: refreshed });
+      const session = await restoreBlueskySession();
+      set({ session });
     } catch {
       set({ session: null });
     }

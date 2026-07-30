@@ -1,4 +1,4 @@
-import { getAgent, getBlueskySession, refreshBlueskySession } from './atprotoAuthService';
+import { getAgent, getBlueskySession } from './atprotoAuthService';
 import type { Review, PlaceReviewContext } from '../../models/review';
 
 const COLLECTION = 'io.polaris.place.review';
@@ -37,37 +37,14 @@ export async function publishReviewToAtproto(
     record.text = review.text;
   }
 
-  try {
-    const response = await currentAgent.api.com.atproto.repo.createRecord({
-      repo: session.did,
-      collection: COLLECTION,
-      record,
-    });
-    return response.data.uri;
-  } catch (err: unknown) {
-    // On 401, try refreshing session once then retry
-    const isUnauthorized =
-      err instanceof Error &&
-      ('status' in err ? (err as Record<string, unknown>).status === 401 : false);
-
-    if (isUnauthorized) {
-      await refreshBlueskySession();
-      const retryAgent = getAgent();
-      const retrySession = await getBlueskySession();
-      if (!retryAgent || !retrySession) {
-        throw new Error('Session refresh failed');
-      }
-
-      const retryResponse = await retryAgent.api.com.atproto.repo.createRecord({
-        repo: retrySession.did,
-        collection: COLLECTION,
-        record,
-      });
-      return retryResponse.data.uri;
-    }
-
-    throw err;
-  }
+  // The OAuth-based agent handles token refresh automatically. If a 401
+  // still bubbles up, the session is dead and the user must re-authenticate.
+  const response = await currentAgent.api.com.atproto.repo.createRecord({
+    repo: session.did,
+    collection: COLLECTION,
+    record,
+  });
+  return response.data.uri;
 }
 
 interface AtprotoListRecord {

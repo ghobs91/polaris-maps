@@ -96,3 +96,5 @@ nodejs-assets/nodejs-project/node_modules/
 
 expo-env.d.ts
 # @end expo-cli
+# Local Netlify folder
+.netlify

@@ -16,6 +16,7 @@
 		5C19A0C0B0D54FA49E16A2A6 /* NavigationAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D4807103E54291ADC8B55C /* NavigationAttributes.swift */; };
 		7D7FE7046A4FB556B082EDB0 /* libPods-PolarisMaps.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E44F8B137D54533F2EE1AC7 /* libPods-PolarisMaps.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		C8A87913301979230035EC70 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = F1526E8453151D258EB69FEC /* MapLibre */; };
 		E0FAC1129EB44B0890F1AE37 /* PolarisMapsLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47237B09C68F4127AC0E989F /* PolarisMapsLiveActivityBundle.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
@@ -35,14 +36,14 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		03CBB43165594DE5A43D4E27 /* PolarisMapsLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = undefined; name = PolarisMapsLiveActivity.appex; path = PolarisMapsLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		03CBB43165594DE5A43D4E27 /* PolarisMapsLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = 518743418793; includeInIndex = 0; path = PolarisMapsLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0D3D4054B5DAFD98EE9E24AD /* Pods-PolarisMaps.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.debug.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.debug.xcconfig"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* PolarisMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PolarisMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = PolarisMaps/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = PolarisMaps/Info.plist; sourceTree = "<group>"; };
 		26A65A5227FBBEF456C9DDCA /* Pods-PolarisMaps.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.release.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig"; sourceTree = "<group>"; };
 		2E44F8B137D54533F2EE1AC7 /* libPods-PolarisMaps.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PolarisMaps.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		33D514989EE199E67514CA4D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		33D514989EE199E67514CA4D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		47237B09C68F4127AC0E989F /* PolarisMapsLiveActivityBundle.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisMapsLiveActivityBundle.swift; path = PolarisMapsLiveActivity/PolarisMapsLiveActivityBundle.swift; sourceTree = "<group>"; };
 		53D4807103E54291ADC8B55C /* NavigationAttributes.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = NavigationAttributes.swift; path = PolarisMaps/NavigationAttributes.swift; sourceTree = "<group>"; };
 		665931E6A7164ABAB1E0DAD1 /* NavigationLiveActivity.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = NavigationLiveActivity.swift; path = PolarisMapsLiveActivity/NavigationLiveActivity.swift; sourceTree = "<group>"; };
@@ -59,6 +60,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C8A87913301979230035EC70 /* MapLibre in Frameworks */,
 				7D7FE7046A4FB556B082EDB0 /* libPods-PolarisMaps.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -103,7 +105,6 @@
 				0D3D4054B5DAFD98EE9E24AD /* Pods-PolarisMaps.debug.xcconfig */,
 				26A65A5227FBBEF456C9DDCA /* Pods-PolarisMaps.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -123,6 +124,7 @@
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				49B66947A9662E5AD61A6429 /* Pods */,
 				A2E409F198337B695A3FD1E9 /* ExpoModulesProviders */,
+				C8A87914301979230035EC70 /* Recovered References */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -153,6 +155,16 @@
 			);
 			name = Supporting;
 			path = PolarisMaps/Supporting;
+			sourceTree = "<group>";
+		};
+		C8A87914301979230035EC70 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				665931E6A7164ABAB1E0DAD1 /* NavigationLiveActivity.swift */,
+				47237B09C68F4127AC0E989F /* PolarisMapsLiveActivityBundle.swift */,
+				53D4807103E54291ADC8B55C /* NavigationAttributes.swift */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -453,7 +465,7 @@
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -461,13 +473,15 @@
 					"FB_SONARKIT_ENABLED=1",
 				);
 				INFOPLIST_FILE = PolarisMaps/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
+				IPHONEOS_DEPLOYMENT_TARGET = "$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.4;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -494,16 +508,18 @@
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				INFOPLIST_FILE = PolarisMaps/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
+				IPHONEOS_DEPLOYMENT_TARGET = "$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.4;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -536,7 +552,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps Live Activity";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				IPHONEOS_DEPLOYMENT_TARGET = "$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -563,7 +579,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Polaris Maps Live Activity";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivitiesFrequentUpdates = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.1;
+				IPHONEOS_DEPLOYMENT_TARGET = "$(RECOMMENDED_IPHONEOS_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

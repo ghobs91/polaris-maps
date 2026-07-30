@@ -1,0 +1,8 @@
+[build]
+  command = ""
+  publish = "."
+
+[[redirects]]
+  from = "/.well-known/oauth-client-metadata.json"
+  to = "/.well-known/oauth-client-metadata.json"
+  status = 200

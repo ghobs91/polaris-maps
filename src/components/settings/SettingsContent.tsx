@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, TextInput, Linking } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, Switch, Linking } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { Button, SettingsGroup, SettingsRow, SFSymbol } from '../common';
-import { spacing, typography, borderRadius, iosListGroup } from '../../constants/theme';
+import { spacing, typography, iosListGroup } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
@@ -39,9 +39,6 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const osmIsLoggingIn = useOsmAuthStore((s) => s.isLoggingIn);
   const osmLogin = useOsmAuthStore((s) => s.login);
   const osmLogout = useOsmAuthStore((s) => s.logout);
-  const [bskyHandle, setBskyHandle] = useState('');
-  const [bskyPassword, setBskyPassword] = useState('');
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {showHeading && <Text style={styles.heading}>Settings</Text>}
@@ -113,7 +110,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
 
       <SettingsGroup
         header="Accounts"
-        footer="Sign in to add or update places and save reviews to your own PDS."
+        footer="Sign in with OpenStreetMap to edit places and with Bluesky to leave reviews."
       >
         <View style={styles.accountCard}>
           {osmAccessToken && osmUser ? (
@@ -166,7 +163,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                     @{bskySession.handle}
                   </Text>
                   <Text style={styles.accountCaption} numberOfLines={1}>
-                    {bskySession.did}
+                    Signed in for reviews
                   </Text>
                 </View>
               </View>
@@ -180,37 +177,17 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                 </View>
                 <View style={styles.accountTextCol}>
                   <Text style={styles.accountName}>Bluesky</Text>
-                  <Text style={styles.accountCaption}>Reviews, identity</Text>
+                  <Text style={styles.accountCaption}>Leave reviews on places</Text>
                 </View>
               </View>
-              <View style={styles.bskyForm}>
-                <TextInput
-                  style={styles.input}
-                  value={bskyHandle}
-                  onChangeText={setBskyHandle}
-                  placeholder="you.bsky.social"
-                  placeholderTextColor={colors.textSecondary}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <TextInput
-                  style={styles.input}
-                  value={bskyPassword}
-                  onChangeText={setBskyPassword}
-                  placeholder="App password"
-                  placeholderTextColor={colors.textSecondary}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
-                <Button
-                  title={bskyIsLoading ? 'Connecting…' : 'Connect Bluesky'}
-                  variant="primary"
-                  onPress={() => bskyLogin(bskyHandle.trim(), bskyPassword)}
-                  disabled={bskyIsLoading || !bskyHandle.trim() || !bskyPassword}
-                />
-              </View>
+              {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
+              <Button
+                title={bskyIsLoading ? 'Signing in…' : 'Sign in to leave reviews'}
+                variant="primary"
+                onPress={() => bskyLogin('bsky.social')}
+                disabled={bskyIsLoading}
+                style={styles.signinBtn}
+              />
             </View>
           )}
         </View>
@@ -282,8 +259,6 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
 const createStyles = (isDark: boolean) => {
   const pageBg = isDark ? iosListGroup.pageBackground : '#F2F2F7';
   const headingColor = isDark ? '#FFFFFF' : '#000000';
-  const inputBg = isDark ? '#2C2C2E' : '#FFFFFF';
-  const inputBorder = isDark ? '#3A3A3C' : '#C6C6C8';
   const captionColor = isDark ? '#8E8E93' : '#6C6C70';
   const primaryTextColor = isDark ? '#FFFFFF' : '#000000';
   return StyleSheet.create({
@@ -336,20 +311,7 @@ const createStyles = (isDark: boolean) => {
     accountCaption: { ...typography.caption, fontSize: 12, color: captionColor, marginTop: 1 },
     accountSigninRow: { paddingVertical: spacing.sm },
     signinBtn: { alignSelf: 'stretch' },
-    bskySigninBlock: { paddingVertical: spacing.sm, gap: spacing.md },
-    bskyForm: { gap: spacing.sm },
-    input: {
-      ...typography.body,
-      fontSize: 16,
-      color: isDark ? '#FFFFFF' : '#000000',
-      backgroundColor: inputBg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: inputBorder,
-      borderRadius: borderRadius.md,
-      borderCurve: 'continuous',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm + 2,
-    },
+    bskySigninBlock: { paddingVertical: spacing.sm, gap: spacing.sm },
     errorText: { ...typography.caption, color: '#FF453A' },
   });
 };

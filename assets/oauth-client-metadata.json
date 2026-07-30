@@ -1,0 +1,12 @@
+{
+  "client_id": "https://polaris-maps-bsky-auth.netlify.app/.well-known/oauth-client-metadata.json",
+  "client_name": "Polaris Maps",
+  "client_uri": "https://polarismaps.com",
+  "redirect_uris": ["polaris-maps:/oauth/callback"],
+  "scope": "atproto transition:generic",
+  "token_endpoint_auth_method": "none",
+  "response_types": ["code"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "application_type": "native",
+  "dpop_bound_access_tokens": true
+}
