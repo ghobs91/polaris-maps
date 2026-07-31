@@ -93,7 +93,6 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "core-js",
-      "duckdb",
       "unrs-resolver"
     ]
   },
@@ -107,7 +106,7 @@
     "@types/react": "~19.2.17",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "duckdb-async": "^1.4.2",
+
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.0",
     "eslint-config-prettier": "^9.0.0",
