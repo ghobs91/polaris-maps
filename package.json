@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "main": "index.js",
-  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "start": "expo start",
     "ios": "expo run:ios",
@@ -25,6 +24,7 @@
     "mapkit:token": "node scripts/generate-mapkit-token.mjs",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "prebuild": "expo prebuild --clean",
+    "postinstall": "node scripts/patch-atproto-oauth.mjs",
     "prepare": "husky"
   },
   "dependencies": {
@@ -112,17 +112,5 @@
     "react-native-dotenv": "^3.4.11",
     "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "core-js",
-      "duckdb",
-      "unrs-resolver"
-    ],
-    "patchedDependencies": {
-      "@atproto/oauth-client-expo@0.1.8": "patches/@atproto__oauth-client-expo@0.1.8.patch",
-      "@maplibre/maplibre-react-native": "patches/@maplibre__maplibre-react-native.patch",
-      "react-native-bare-kit@0.13.3": "patches/react-native-bare-kit@0.13.3.patch"
-    }
   }
 }
