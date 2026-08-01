@@ -1,4 +1,9 @@
-const { withInfoPlist, withXcodeProject, withEntitlementsPlist, withDangerousMod } = require('expo/config-plugins');
+const {
+  withInfoPlist,
+  withXcodeProject,
+  withEntitlementsPlist,
+  withDangerousMod,
+} = require('expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -136,9 +141,7 @@ ${fmtFix}
 
 function withLiveActivities(config) {
   const appBundleId = config.ios?.bundleIdentifier || config.expo?.ios?.bundleIdentifier;
-  const extensionBundleId = appBundleId
-    ? `${appBundleId}${EXTENSION_BUNDLE_SUFFIX}`
-    : undefined;
+  const extensionBundleId = appBundleId ? `${appBundleId}${EXTENSION_BUNDLE_SUFFIX}` : undefined;
 
   config = withInfoPlist(config, (cfg) => {
     cfg.modResults.NSSupportsLiveActivities = true;
@@ -206,12 +209,13 @@ function withLiveActivities(config) {
     const configList = project.pbxXCConfigurationList()[configListUuid];
     if (configList) {
       for (const buildConfig of configList.buildConfigurations) {
-        const buildSettings = project.pbxXCBuildConfigurationSection()[buildConfig.value]?.buildSettings;
+        const buildSettings =
+          project.pbxXCBuildConfigurationSection()[buildConfig.value]?.buildSettings;
         if (buildSettings) {
           buildSettings.INFOPLIST_FILE = `"${EXTENSION_NAME}/Info.plist"`;
           buildSettings.IPHONEOS_DEPLOYMENT_TARGET = IOS_DEPLOYMENT_TARGET;
           buildSettings.SWIFT_VERSION = SWIFT_VERSION;
-          buildSettings.CODE_SIGN_STYLE = 'Automatic';
+          buildSettings.CODE_SIGN_STYLE = 'Manual';
           buildSettings.MARKETING_VERSION = '0.1.0';
           buildSettings.CURRENT_PROJECT_VERSION = '1';
           buildSettings.GENERATE_INFOPLIST_FILE = 'YES';
