@@ -562,6 +562,7 @@
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.polarismaps.app.live-activity";
 				PRODUCT_NAME = PolarisMapsLiveActivity;
+				PROVISIONING_PROFILE = "8bd14f9e-a4ae-417f-b007-69501c1026a7";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -570,7 +571,7 @@
 		52227F6EB7C5438C897957DC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
@@ -589,6 +590,7 @@
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.polarismaps.app.live-activity";
 				PRODUCT_NAME = PolarisMapsLiveActivity;
+				PROVISIONING_PROFILE = "8bd14f9e-a4ae-417f-b007-69501c1026a7";
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 			};
