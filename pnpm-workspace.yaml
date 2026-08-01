@@ -5,6 +5,10 @@ onlyBuiltDependencies:
   - core-js
   - unrs-resolver
 
+allowBuilds:
+  core-js: true
+  unrs-resolver: true
+
 patchedDependencies:
   '@maplibre/maplibre-react-native': patches/@maplibre__maplibre-react-native.patch
   react-native-bare-kit@0.13.3: patches/react-native-bare-kit@0.13.3.patch
