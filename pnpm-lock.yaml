@@ -5,12 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@maplibre/maplibre-react-native':
-    hash: c6d0d0fdccea5c3c938eea1c9027b53c58461a2e3789aa4b3d4e969696e01000
-    path: patches/@maplibre__maplibre-react-native.patch
-  react-native-bare-kit@0.13.3:
-    hash: 6fa7f35433a2483c1d8da10684cfa9fdd2ab957564c6c8bdff114eacda9f14d1
-    path: patches/react-native-bare-kit@0.13.3.patch
+  '@maplibre/maplibre-react-native': c6d0d0fdccea5c3c938eea1c9027b53c58461a2e3789aa4b3d4e969696e01000
+  react-native-bare-kit@0.13.3: 6fa7f35433a2483c1d8da10684cfa9fdd2ab957564c6c8bdff114eacda9f14d1
 
 importers:
 

@@ -1,10 +1,6 @@
 packages:
   - '.'
 
-onlyBuiltDependencies:
-  - core-js
-  - unrs-resolver
-
 allowBuilds:
   core-js: true
   unrs-resolver: true
