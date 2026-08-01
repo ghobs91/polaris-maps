@@ -90,12 +90,6 @@
     "react-native-worklets": "0.10.0",
     "zustand": "5.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "core-js",
-      "unrs-resolver"
-    ]
-  },
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@commitlint/cli": "^19.0.0",
