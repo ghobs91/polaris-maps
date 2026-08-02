@@ -15,9 +15,7 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Polaris Maps uses your location in the background to contribute anonymous traffic data to the P2P network.",
         "NSCameraUsageDescription": "Polaris Maps uses the camera to capture street-level imagery for the community.",
         "NSPhotoLibraryUsageDescription": "Polaris Maps needs access to your photo library to save and share maps, routes, and locations.",
-        "NSSpeechRecognitionUsageDescription": "Polaris Maps uses speech recognition to enable voice commands for hands-free navigation.",
-        "NSSupportsLiveActivities": true,
-        "NSSupportsLiveActivitiesFrequentUpdates": true
+        "NSSpeechRecognitionUsageDescription": "Polaris Maps uses speech recognition to enable voice commands for hands-free navigation."
       }
     },
     "android": {
@@ -38,7 +36,6 @@
       ]
     },
     "plugins": [
-      "./plugins/withLiveActivities",
       "./plugins/withValhalla",
       "@maplibre/maplibre-react-native",
       "expo-router",
