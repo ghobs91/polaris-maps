@@ -63,10 +63,6 @@
 	<string>Polaris Maps needs access to your photo library to save and share maps, routes, and locations.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Polaris Maps uses speech recognition to enable voice commands for hands-free navigation.</string>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<true/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
