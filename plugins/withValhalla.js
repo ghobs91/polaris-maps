@@ -140,6 +140,23 @@ function addSpmPackage(project) {
   console.log('[withValhalla] Added valhalla-mobile SPM to pbxproj');
 }
 
+function patchBridgingHeader() {
+  const bridgingHeader = path.join(IOS_DIR, 'PolarisMaps', 'PolarisMaps-Bridging-Header.h');
+  if (!fs.existsSync(bridgingHeader)) {
+    console.warn('[withValhalla] Bridging header not found: ' + bridgingHeader);
+    return;
+  }
+
+  let content = fs.readFileSync(bridgingHeader, 'utf8');
+  if (content.includes('#import <React/RCTBridgeModule.h>')) {
+    return;
+  }
+
+  content = content.trimEnd() + '\n\n#import <React/RCTBridgeModule.h>\n';
+  fs.writeFileSync(bridgingHeader, content);
+  console.log('[withValhalla] Patched PolarisMaps-Bridging-Header.h');
+}
+
 function patchPodfile() {
   const podfilePath = path.join(IOS_DIR, 'Podfile');
   if (!fs.existsSync(podfilePath)) return;
@@ -221,6 +238,7 @@ function withValhalla(config) {
     'ios',
     (cfg) => {
       copyFiles();
+      patchBridgingHeader();
       patchPodfile();
       return cfg;
     },
