@@ -1,15 +1,21 @@
 {
   "cli": {
-    "version": ">= 14.0.0"
+    "version": ">= 16.0.1",
+    "appVersionSource": "remote"
   },
   "build": {
     "production": {
+      "autoIncrement": true,
       "ios": {
         "resourceClass": "m-medium"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios":{
+        "ascAppId": "6760763483"
+      }
+    }
   }
 }
