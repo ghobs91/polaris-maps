@@ -20,8 +20,65 @@ import { fetchWmataLines } from './wmataFetcher';
 import { fetchGtfsStaticLines, type GtfsFetcherConfig } from './gtfsStaticFetcher';
 import { fetchDotGtfsLines } from './dotGtfsFetcher';
 import { overpassFetch } from '../overpassClient';
+import { storage } from '../storage/mmkv';
 
 const OVERPASS_TIMEOUT_MS = 75_000;
+
+// ── Persistent tile cache (MMKV) ────────────────────────────────────
+
+/** 7 days — transit networks change seasonally, not daily. */
+const TILE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+
+function tilePersistentKey(tileKey: string): string {
+  return `transit_tile:${tileKey}`;
+}
+
+function saveTileToPersistentCache(tileKey: string, lines: TransitRouteLine[]): void {
+  if (lines.length === 0) return;
+  try {
+    storage.set(tilePersistentKey(tileKey), JSON.stringify({ lines, cachedAt: Date.now() }));
+  } catch {
+    // Storage full or unavailable — non-fatal
+  }
+}
+
+function loadTileFromPersistentCache(tileKey: string): TransitRouteLine[] | null {
+  try {
+    const raw = storage.getString(tilePersistentKey(tileKey));
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as { lines: TransitRouteLine[]; cachedAt: number };
+    if (Date.now() - entry.cachedAt > TILE_CACHE_TTL) {
+      storage.delete(tilePersistentKey(tileKey));
+      return null;
+    }
+    return entry.lines;
+  } catch {
+    return null;
+  }
+}
+
+let persistentCacheHydrated = false;
+
+/** Hydrate tileData from MMKV on first access after module load. */
+function hydratePersistentCache(): void {
+  if (persistentCacheHydrated) return;
+  persistentCacheHydrated = true;
+  try {
+    const keys = storage.getAllKeys();
+    for (const key of keys) {
+      if (!key.startsWith('transit_tile:')) continue;
+      const tileKey = key.slice('transit_tile:'.length);
+      if (fetchedTiles.has(tileKey)) continue;
+      const lines = loadTileFromPersistentCache(tileKey);
+      if (lines && lines.length > 0) {
+        tileData.set(tileKey, lines);
+        fetchedTiles.add(tileKey);
+      }
+    }
+  } catch {
+    // Non-fatal — cache will be repopulated via Overpass
+  }
+}
 
 /**
  * Yield the JS thread so React Native can process UI events.
@@ -525,11 +582,11 @@ async function fetchOtpLines(ep: OtpEndpoint): Promise<TransitRouteLine[]> {
           !AMTRAK_AGENCY.test(r.agencyName ?? ''),
       );
 
-      // 2–4. Fetch pattern geometry + stops for each route (8 concurrent)
+      // 2–4. Fetch pattern geometry + stops for each route (16 concurrent)
       const lines: TransitRouteLine[] = [];
       const batches: (typeof railRoutes)[] = [];
-      for (let i = 0; i < railRoutes.length; i += 8) {
-        batches.push(railRoutes.slice(i, i + 8));
+      for (let i = 0; i < railRoutes.length; i += 16) {
+        batches.push(railRoutes.slice(i, i + 16));
       }
 
       for (const batch of batches) {
@@ -945,6 +1002,7 @@ async function fetchOverpassForViewport(
         const lines = await promise;
         tileData.set(tile.key, lines);
         fetchedTiles.add(tile.key);
+        saveTileToPersistentCache(tile.key, lines);
       } catch {
         // Don't mark as fetched — will retry next time
       } finally {
@@ -1030,6 +1088,7 @@ async function fetchOverpassForViewport(
             // Store under a mega key and mark all fine-grained tiles as fetched
             const megaKey = `mega:${mega.minLat.toFixed(2)},${mega.minLng.toFixed(2)}`;
             tileData.set(megaKey, lines);
+            saveTileToPersistentCache(megaKey, lines);
             for (const tk of mega.tileKeys) {
               if (!fetchedTiles.has(tk)) {
                 fetchedTiles.add(tk);
@@ -1069,76 +1128,108 @@ export async function fetchTransitLines(
   maxLng: number,
   onProgress?: (lines: TransitRouteLine[]) => void,
 ): Promise<TransitRouteLine[]> {
-  // ── Start Overpass fetch in parallel for fast initial results ─────
-  // GTFS downloads (especially country-level feeds like Netherlands or
-  // Switzerland) can take 30–90 s.  Overpass typically returns within a
-  // few seconds, so we start it alongside OTP/GTFS and push partial
-  // results via onProgress.  If OTP/GTFS succeeds first, the Overpass
-  // tiles are already cached and won't be re-fetched on future pans.
+  // ── Early-return mechanism ────────────────────────────────────────
+  // We race Overpass vs OTP/GTFS and return as soon as either produces
+  // results.  The slower source continues in background and pushes its
+  // results via onProgress.  This means the user sees transit lines in
+  // 2–5 s (Overpass) instead of 30–90 s (country-level GTFS downloads).
+  let earlyResolve: ((lines: TransitRouteLine[]) => void) | null = null;
+
+  const wrappedProgress = (lines: TransitRouteLine[]) => {
+    if (onProgress) onProgress(lines);
+    if (lines.length > 0 && earlyResolve) {
+      earlyResolve(lines);
+      earlyResolve = null;
+    }
+  };
+
+  // ── Start Overpass fetch in parallel ──────────────────────────────
   const overpassPromise = fetchOverpassForViewport(
     minLat,
     minLng,
     maxLat,
     maxLng,
-    onProgress,
+    wrappedProgress,
   ).catch(() => {
     // Overpass failure is non-fatal — OTP/GTFS may still succeed
   });
 
-  // ── Try OTP + BTS Amtrak in parallel (fast, reliable for registry-covered areas)
-  // OTP returns the transit network for the region; BTS provides Amtrak
-  // routes with real track geometry (OTP's Amtrak shapes are straight lines).
-  try {
-    const [otpLines, amtrakLines] = await Promise.all([
-      tryFetchViaOtp(minLat, minLng, maxLat, maxLng).catch(() => null),
-      fetchAmtrakSupplement(minLat, minLng, maxLat, maxLng),
-    ]);
+  // ── OTP + BTS Amtrak (runs in background, pushes via wrappedProgress) ──
+  const otpPromise = (async (): Promise<void> => {
+    try {
+      const [otpLines, amtrakLines] = await Promise.all([
+        tryFetchViaOtp(minLat, minLng, maxLat, maxLng).catch(() => null),
+        fetchAmtrakSupplement(minLat, minLng, maxLat, maxLng),
+      ]);
 
-    const hasOtp = otpLines && otpLines.length > 0;
-    const hasAmtrak = amtrakLines.length > 0;
+      const hasOtp = otpLines && otpLines.length > 0;
+      const hasAmtrak = amtrakLines.length > 0;
 
-    console.warn(
-      `[transit] fetchTransitLines result: otp=${hasOtp ? otpLines!.length : 0}, ` +
-        `amtrak=${amtrakLines.length}, fallingThrough=${!hasOtp}`,
-    );
+      console.warn(
+        `[transit] fetchTransitLines result: otp=${hasOtp ? otpLines!.length : 0}, ` +
+          `amtrak=${amtrakLines.length}, fallingThrough=${!hasOtp}`,
+      );
 
-    // OTP covers the transit network for the entire region — no need to
-    // fall back to Overpass.  Mark all viewport tiles as fetched so
-    // Overpass won't fire later.
-    if (hasOtp) {
-      const OTP_CACHE_KEY = '__otp__';
-      tileData.set(OTP_CACHE_KEY, otpLines!);
-      if (hasAmtrak) {
+      if (hasOtp) {
+        const OTP_CACHE_KEY = '__otp__';
+        tileData.set(OTP_CACHE_KEY, otpLines!);
+        if (hasAmtrak) {
+          tileData.set(AMTRAK_CACHE_KEY, amtrakLines);
+        }
+        for (const tile of tilesForBounds(minLat, minLng, maxLat, maxLng)) {
+          fetchedTiles.add(tile.key);
+        }
+        // Fire-and-forget Overpass — its tiles are useful for future pans,
+        // but we already have OTP results so don't block on it.
+        overpassPromise.catch(() => {});
+      } else if (hasAmtrak) {
         tileData.set(AMTRAK_CACHE_KEY, amtrakLines);
       }
-      for (const tile of tilesForBounds(minLat, minLng, maxLat, maxLng)) {
-        fetchedTiles.add(tile.key);
+
+      // Push merged results via onProgress
+      wrappedProgress(getAllCachedLines());
+    } catch {
+      // OTP+BTS both failed — Overpass will provide results
+    }
+  })();
+
+  // ── Return cached data immediately if available ───────────────────
+  hydratePersistentCache();
+  const cached = getAllCachedLines();
+  if (cached.length > 0) return cached;
+
+  // ── Race: return first non-empty result ───────────────────────────
+  let overpassDone = false;
+  let otpDone = false;
+
+  const earlyResult = new Promise<TransitRouteLine[]>((resolve) => {
+    earlyResolve = resolve;
+
+    // Safety net: if both sources settle without producing results,
+    // resolve with whatever we have (possibly empty).
+    overpassPromise.then(() => {
+      overpassDone = true;
+      if (otpDone && earlyResolve) {
+        earlyResolve(getAllCachedLines());
+        earlyResolve = null;
       }
-      // Wait for Overpass to finish — it may have already pushed partial
-      // results via onProgress, and its tiles are useful for future pans.
-      await overpassPromise;
-      return getAllCachedLines();
-    }
+    });
 
-    // Amtrak supplement without OTP coverage (e.g. Chicago, DC, SF, LA):
-    // cache the Amtrak lines so they're included in the final result, but
-    // DO NOT block the Overpass fallback — the local transit systems in
-    // these cities need Overpass to show their lines.
-    if (hasAmtrak) {
-      tileData.set(AMTRAK_CACHE_KEY, amtrakLines);
-    }
-  } catch {
-    // OTP+BTS both failed — fall through to Overpass
-  }
+    otpPromise.then(() => {
+      otpDone = true;
+      if (overpassDone && earlyResolve) {
+        earlyResolve(getAllCachedLines());
+        earlyResolve = null;
+      }
+    });
+  });
 
-  // ── Wait for Overpass (already running in parallel) ───────────────
-  await overpassPromise;
-
-  return getAllCachedLines();
+  return earlyResult;
 }
 
 /** Collect and deduplicate all cached lines across all tiles. */
 function getAllCachedLines(): TransitRouteLine[] {
+  hydratePersistentCache();
   const all: TransitRouteLine[] = [];
   for (const lines of tileData.values()) {
     all.push(...lines);
@@ -1151,22 +1242,36 @@ function getAllCachedLines(): TransitRouteLine[] {
  * after a toggle without any network call.
  */
 export function getCachedLines(): TransitRouteLine[] {
+  hydratePersistentCache();
   if (tileData.size === 0) return [];
   return getAllCachedLines();
 }
 
 /** Check if we have any cached transit data. */
 export function hasCachedLines(): boolean {
+  hydratePersistentCache();
   return tileData.size > 0;
 }
 
-/** Exposed for testing. Reset all tile/OTP/Amtrak caches. */
+/** Exposed for testing. Reset all tile/OTP/Amtrak caches (in-memory + persistent). */
 export function __clearTransitLineCache(): void {
   tileData.clear();
   fetchedTiles.clear();
   inflight.clear();
   otpLineCache.clear();
   otpLineFetchInFlight.clear();
+  persistentCacheHydrated = false;
+  // Clear persistent tile cache keys
+  try {
+    const keys = storage.getAllKeys();
+    for (const key of keys) {
+      if (key.startsWith('transit_tile:')) {
+        storage.delete(key);
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
 }
 
 // ── Background metro-area pre-warm ──────────────────────────────────
@@ -1273,6 +1378,28 @@ out body;`;
   })();
 
   return prewarmInFlight;
+}
+
+/**
+ * Pre-warm OTP transit lines for the user's region on app start.
+ *
+ * If the user is in an OTP-covered region (NYC, Portland, London, etc.),
+ * kick off the OTP route-line fetch in the background so that when the
+ * transit layer is toggled on, lines appear instantly from the in-memory
+ * OTP cache (otpLineCache).
+ *
+ * Fire-and-forget — call without await from the startup location effect.
+ */
+export function prewarmOtpLines(lat: number, lng: number): void {
+  // Check if OTP lines are already cached for this region
+  const ep = findEndpointForCoords(lat, lng);
+  if (!ep) return;
+
+  // Already cached or in-flight — don't double-fetch
+  if (otpLineCache.has(ep.label) || otpLineFetchInFlight.has(ep.label)) return;
+
+  // Kick off the fetch in background — results cache permanently in otpLineCache
+  tryFetchViaOtp(lat - 0.1, lng - 0.1, lat + 0.1, lng + 0.1).catch(() => {});
 }
 
 /**

@@ -102,23 +102,34 @@ async function fetchAndMergeLines(bounds: {
 }) {
   const store = useTransitStore.getState();
   store.setIsLoadingLines(true);
+
+  // Hide loading spinner as soon as we have any lines (via onProgress).
+  // fetchTransitLines races Overpass vs OTP/GTFS and returns early when
+  // either source produces results.  The slower source continues in
+  // background and pushes its results via onProgress.
+  let loadingCleared = false;
+
   try {
-    // fetchTransitLines returns the globally accumulated & deduplicated set.
-    // The onProgress callback pushes partial results after each batch so
-    // lines appear progressively instead of all-at-once after the last fetch.
     const lines = await fetchTransitLines(
       bounds.minLat,
       bounds.minLng,
       bounds.maxLat,
       bounds.maxLng,
-      (partial) => useTransitStore.getState().setRouteLines(partial),
+      (partial) => {
+        useTransitStore.getState().setRouteLines(partial);
+        if (!loadingCleared && partial.length > 0) {
+          loadingCleared = true;
+          useTransitStore.getState().setIsLoadingLines(false);
+        }
+      },
     );
     useTransitStore.getState().setRouteLines(lines);
   } catch (err) {
-    // Log for debugging — Overpass may be unavailable or timed out
     console.error('[transit] fetchTransitLines failed:', err);
   } finally {
-    useTransitStore.getState().setIsLoadingLines(false);
+    if (!loadingCleared) {
+      useTransitStore.getState().setIsLoadingLines(false);
+    }
   }
 }
 

@@ -16,7 +16,7 @@ import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { useTransitStops } from '@/hooks/useTransitStops';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useTransitStore } from '@/stores/transitStore';
-import { prewarmTransitCache } from '@/services/transit/transitLineFetcher';
+import { prewarmTransitCache, prewarmOtpLines } from '@/services/transit/transitLineFetcher';
 import { preloadOtpStops } from '@/services/transit/otpEndpointRegistry';
 import { resolveMapSelectionPoi } from '@/services/poi/mapSelectionPoi';
 import { ErrorBoundary } from '@/components/common';
@@ -55,6 +55,8 @@ export default function MapScreen() {
       setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 15 });
       // Pre-warm transit cache for metro area in background — non-blocking
       prewarmTransitCache(loc.coords.latitude, loc.coords.longitude).catch(() => {});
+      // Pre-warm OTP route lines so transit layer appears instantly in OTP regions
+      prewarmOtpLines(loc.coords.latitude, loc.coords.longitude);
       // Pre-load OTP stops index so station search is instant
       preloadOtpStops(loc.coords.latitude, loc.coords.longitude);
     })();
