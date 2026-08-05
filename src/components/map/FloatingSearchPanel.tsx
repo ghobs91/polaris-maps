@@ -27,7 +27,6 @@ import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
-import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
   getSearchHistory,
@@ -56,7 +55,11 @@ import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
 import { searchByCategory } from '../../services/poi/categorySearchService';
-import { fetchOsmPoisByTags } from '../../services/poi/osmFetcher';
+import { fetchOsmPoisByTags, type OsmPoi } from '../../services/poi/osmFetcher';
+import {
+  fetchChargingStations,
+  type ChargingStation,
+} from '../../services/poi/openChargeMapService';
 import {
   categoryToOverpassTags,
   resolveSearchCategories,
@@ -91,6 +94,61 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
     lng: r.lng,
   };
   return { entry, rank: r.score };
+}
+
+// ─────────────────────────────────────────────
+// Open Charge Map → OsmPoi conversion helpers
+// ─────────────────────────────────────────────
+
+/**
+ * Convert an Open Charge Map charging station to an OsmPoi for display
+ * alongside OSM results on the map.
+ */
+function chargingStationToOsmPoi(station: ChargingStation): OsmPoi {
+  const tags: Record<string, string> = {
+    amenity: 'charging_station',
+  };
+  if (station.operator) tags['operator'] = station.operator;
+  if (station.connections.length > 0) {
+    tags['capacity'] = String(station.connections.length);
+    tags['socket:type'] = station.connections.map((c) => c.type).join(';');
+  }
+  const maxPower = station.connections.reduce((max, c) => Math.max(max, c.powerKW ?? 0), 0);
+  if (maxPower > 0) tags['charging:max_power'] = `${maxPower} kW`;
+
+  return {
+    // Use negative IDs to distinguish OCM-sourced POIs from OSM ones
+    id: -station.id,
+    lat: station.lat,
+    lng: station.lng,
+    name: station.name || 'EV Charging Station',
+    type: 'amenity',
+    subtype: 'charging_station',
+    tags,
+  };
+}
+
+/**
+ * Merge OSM POIs with Open Charge Map POIs. Open Charge Map is the primary
+ * source for charging stations — OSM duplicates within ~30m of an OCM station
+ * are filtered out to avoid clutter.
+ */
+function mergeChargingPois(osmPois: OsmPoi[], ocmPois: OsmPoi[]): OsmPoi[] {
+  if (ocmPois.length === 0) return osmPois;
+
+  const DEDUP_THRESHOLD_KM = 0.03; // 30 meters
+  // Filter out OSM stations that already exist in Open Charge Map
+  const filteredOsm = osmPois.filter((osm) => {
+    return !ocmPois.some((ocm) => {
+      const dlat = osm.lat - ocm.lat;
+      const dlng = osm.lng - ocm.lng;
+      const dist = Math.sqrt(dlat * dlat + dlng * dlng) * 111; // approx km
+      return dist < DEDUP_THRESHOLD_KM;
+    });
+  });
+
+  // OCM results first — primary data source for charging stations
+  return [...ocmPois, ...filteredOsm];
 }
 
 // ─────────────────────────────────────────────
@@ -829,13 +887,22 @@ export function FloatingSearchPanel({
           },
         }));
 
+      // Only show map markers for results within ~20 km of the search anchor.
+      // This prevents far-away results (e.g. Manhattan locations when the user
+      // is in another region) from pilling up on the map and hijacking the
+      // camera fit bounds.
+      const MAX_NEARBY_DEG = 0.18;
+      const isNearby = (p: OsmPoi) =>
+        Math.abs(p.lat - vp.lat) < MAX_NEARBY_DEG && Math.abs(p.lng - vp.lng) < MAX_NEARBY_DEG;
+      const nearbyMapPois = mapPois.filter(isNearby);
+
       if (searchGenRef.current !== gen) return;
       setResults(displayedResults);
 
-      if (mapPois.length > 0) {
-        useOsmPoiStore.getState().setCategorySearch([], mapPois, false);
+      if (nearbyMapPois.length > 0) {
+        useOsmPoiStore.getState().setCategorySearch([], nearbyMapPois, false);
 
-        const fitPois = selectSearchFitPois(mapPois);
+        const fitPois = selectSearchFitPois(nearbyMapPois);
         const fitBounds = boundsForPois(fitPois);
 
         if (fitBounds) {
@@ -850,6 +917,10 @@ export function FloatingSearchPanel({
               'search',
             );
         }
+      } else if (mapPois.length > 0) {
+        // Results exist but none are nearby — clear map markers to avoid
+        // polluting the map with distant POI pills, but keep the list results.
+        useOsmPoiStore.getState().clearCategorySearch();
       } else {
         useOsmPoiStore.getState().clearCategorySearch();
       }
@@ -2283,12 +2354,40 @@ export function FloatingSearchPanel({
 
               const tagPairs = categories.flatMap(categoryToOverpassTags);
 
-              fetchOsmPoisByTags(south, west, north, east, tagPairs, undefined, {
-                requireName: false,
-              })
-                .then((pois) => {
+              // Build promises for all data sources
+              const fetches: Promise<OsmPoi[]>[] = [
+                fetchOsmPoisByTags(south, west, north, east, tagPairs, undefined, {
+                  requireName: false,
+                }),
+              ];
+
+              // For EV charging, also query Open Charge Map for richer station data
+              if (categories.includes('ev_charging')) {
+                const centerLat = (south + north) / 2;
+                const centerLng = (west + east) / 2;
+                // Approximate viewport diagonal in km
+                const dlat = (north - south) * 111;
+                const dlng = (east - west) * 111 * Math.cos((centerLat * Math.PI) / 180);
+                const radiusKm = Math.max(Math.sqrt(dlat * dlat + dlng * dlng) / 2, 3);
+
+                fetches.push(
+                  fetchChargingStations(centerLat, centerLng, radiusKm, 100)
+                    .then((stations) => stations.map(chargingStationToOsmPoi))
+                    .catch(() => [] as OsmPoi[]),
+                );
+              }
+
+              Promise.all(fetches)
+                .then((results) => {
                   if (searchGenRef.current !== gen) return;
                   useOsmPoiStore.getState().setIsCategorySearching(false);
+
+                  // Merge results from all sources — OCM takes priority
+                  let pois = results[0]; // OSM results
+                  if (results.length > 1) {
+                    pois = mergeChargingPois(pois, results[1]);
+                  }
+
                   if (pois.length > 0) {
                     useOsmPoiStore.getState().setCategorySearch(
                       categories,
