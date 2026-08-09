@@ -4,21 +4,21 @@ set -e
 # ── ci_post_clone.sh ──────────────────────────────────────────────────
 # Xcode Cloud post-clone script for Polaris Maps (Expo / React Native).
 #
-# Xcode Cloud runs this after cloning the repo and before building.
-# Install all dependencies so the "Bundle React Native code and images"
-# build phase can find Node.js, pnpm, and the bundled Metro server.
+# Xcode Cloud runs this after cloning the repo and BEFORE resolving
+# SPM dependencies and building.
 # ──────────────────────────────────────────────────────────────────────
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Xcode Cloud — post-clone"
+echo "  PWD: $(pwd)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Node.js is pre-installed on Xcode Cloud runners. Verify it's available.
+# Node.js is pre-installed on Xcode Cloud runners.
+echo ""
 echo "→ Node.js $(node --version)"
 echo "→ npm $(npm --version)"
 
 # ── pnpm ──────────────────────────────────────────────────────────────
-# Xcode Cloud may not have pnpm. Install it globally if missing.
 echo ""
 echo "→ Ensuring pnpm is available…"
 if ! command -v pnpm >/dev/null 2>&1; then
@@ -35,14 +35,19 @@ pnpm install --frozen-lockfile
 # ── Ruby gems ─────────────────────────────────────────────────────────
 echo ""
 echo "→ Installing Ruby gems (bundle install)…"
-bundle install --quiet
+bundle install
 
 # ── CocoaPods ─────────────────────────────────────────────────────────
+# Must use bundle exec to match the Gemfile's CocoaPods version.
 echo ""
-echo "→ Installing CocoaPods (pod install)…"
+echo "→ Installing CocoaPods (bundle exec pod install)…"
 cd ios
-pod install
+bundle exec pod install
 cd ..
+
+echo ""
+echo "→ Verifying critical files exist…"
+ls -la ios/Pods/Target\ Support\ Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
