@@ -1,0 +1,51 @@
+{
+  "originHash" : "25d0dc6734aa7835f9a5d9aa14d5429fb6b68162e0a10b6c633b56ada9eea22a",
+  "pins" : [
+    {
+      "identity" : "anycodable",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Flight-School/AnyCodable",
+      "state" : {
+        "revision" : "862808b2070cd908cb04f9aafe7de83d35f81b05",
+        "version" : "0.6.7"
+      }
+    },
+    {
+      "identity" : "light-swift-untar",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/UInt2048/Light-Swift-Untar.git",
+      "state" : {
+        "revision" : "fcff1f1b82373ea64b9565a364f63ffe7fdecf9f",
+        "version" : "1.0.4"
+      }
+    },
+    {
+      "identity" : "maplibre-gl-native-distribution",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/maplibre/maplibre-gl-native-distribution",
+      "state" : {
+        "revision" : "c68c970ff3ece56cfc3b36849db70167fa208beb",
+        "version" : "6.17.1"
+      }
+    },
+    {
+      "identity" : "valhalla-mobile",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Rallista/valhalla-mobile.git",
+      "state" : {
+        "revision" : "fe12a51499db3be67ed03ae20a974be6ffdbd867",
+        "version" : "0.5.1"
+      }
+    },
+    {
+      "identity" : "valhalla-openapi-models-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Rallista/valhalla-openapi-models-swift.git",
+      "state" : {
+        "revision" : "440addd4a9f5b07c44c4c2e8c9eb18e6e9334687",
+        "version" : "0.2.2"
+      }
+    }
+  ],
+  "version" : 3
+}
