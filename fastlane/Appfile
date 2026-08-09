@@ -1,0 +1,17 @@
+# Fastlane Appfile — Polaris Maps
+#
+# This file stores shared configuration used across lanes.
+# See: https://docs.fastlane.tools/advanced/Appfile/
+
+# App Store Connect app identifier (found in App Store Connect → App → App Information → Apple ID)
+app_identifier "com.polarismaps.app"
+
+# Apple Developer Team ID (found in Apple Developer → Membership)
+# The value below is a placeholder; replace with your actual team ID.
+# ENV["FASTLANE_TEAM_ID"] overrides this at runtime.
+team_id ENV["FASTLANE_TEAM_ID"] || "XTXZ3CYRPX"
+
+# App Store Connect App Apple ID (the numeric ID from eas.json submit profile)
+# ENV["FASTLANE_ASC_APP_ID"] overrides this at runtime.
+# app_store_connect_app_id is not supported in fastlane 2.237.0
+# app_store_connect_app_id ENV["FASTLANE_ASC_APP_ID"] || "6760763483"

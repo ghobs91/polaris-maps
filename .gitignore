@@ -73,11 +73,20 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
 # Native build artifacts
 *.o
 *.so
 *.a
 *.dylib
+
+# Build derived data (local builds)
+build_derived_data/
 
 # Test data (large binary files)
 test-data/
@@ -98,3 +107,4 @@ expo-env.d.ts
 # @end expo-cli
 # Local Netlify folder
 .netlify
+AppStore_*.mobileprovision

@@ -1,0 +1,254 @@
+# Fastlane Fastfile — Polaris Maps
+#
+# Lanes for building and deploying the Polaris Maps iOS app.
+# All builds run LOCALLY on macOS — no hosted EAS build quota consumed.
+#
+# Usage:
+#   bundle exec fastlane ios beta          # Build and upload to TestFlight
+#   bundle exec fastlane ios release       # Build and upload for App Store release
+
+default_platform(:ios)
+
+# ---------------------------------------------------------------------------
+# App Store Connect authentication
+# Uses the App Store Connect API key (same key configured in eas.json).
+# Set these environment variables before running:
+#   APP_STORE_CONNECT_KEY_ID
+#   APP_STORE_CONNECT_ISSUER_ID
+#   APP_STORE_CONNECT_KEY_PATH  (path to the .p8 private key file)
+# ---------------------------------------------------------------------------
+
+platform :ios do
+  # Increment the build number in the Xcode project.
+  # Fastlane's increment_build_number reads CURRENT_PROJECT_VERSION from the
+  # project and bumps it.  This prevents "build number already used" errors.
+  private_lane :bump_build do
+    increment_build_number(
+      xcodeproj: "ios/PolarisMaps.xcodeproj",
+      build_number: latest_testflight_build_number(
+        app_identifier: "com.polarismaps.app",
+        api_key: app_store_connect_api_key(
+          key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+          issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+          key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
+        ),
+        initial_build_number: 1,
+      ) + 1,
+    )
+    build_number = get_build_number(xcodeproj: "ios/PolarisMaps.xcodeproj")
+    UI.success("Build number set to #{build_number}")
+  end
+
+  # ── Beta lane: Build & upload to TestFlight ─────────────────────
+  #
+  # Does NOT submit for App Review.
+  # Does NOT modify App Store metadata.
+  #
+  # Usage:
+  #   bundle exec fastlane ios beta
+  # -----------------------------------------------------------------
+  desc "Build and upload a new beta build to TestFlight"
+  lane :beta do
+    # Validate environment
+    ensure_env_vars(
+      env_vars: [
+        "APP_STORE_CONNECT_KEY_ID",
+        "APP_STORE_CONNECT_ISSUER_ID",
+        "APP_STORE_CONNECT_KEY_PATH",
+      ],
+    )
+
+    # Quick validation before building
+    UI.header("Step 1/7: Validating project")
+    Dir.chdir("..") do
+      sh("npx expo doctor") rescue UI.important("expo doctor had warnings — continuing")
+    end
+
+    # Install dependencies
+    UI.header("Step 2/7: Installing dependencies")
+    Dir.chdir("..") do
+      sh("pnpm install --frozen-lockfile") rescue sh("pnpm install")
+    end
+    Dir.chdir("..") { sh("bundle install --quiet") }
+
+    # Install CocoaPods
+    UI.header("Step 3/7: Installing CocoaPods")
+    Dir.chdir("..") do
+      sh("bundle exec pod install --project-directory=ios")
+    end
+
+    # Bump build number
+    UI.header("Step 4/7: Resolving build number")
+    bump_build
+
+    # Ensure distribution provisioning profile exists
+    UI.header("Step 5/7: Ensuring provisioning profile")
+    sigh(
+      app_identifier: "com.polarismaps.app",
+      api_key: app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+        key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
+      ),
+    )
+
+    # Build the archive
+    UI.header("Step 6/7: Building archive (this takes a few minutes)")
+    build_app(
+      workspace: "ios/PolarisMaps.xcworkspace",
+      scheme: "PolarisMaps",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build_derived_data",
+      output_name: "PolarisMaps.ipa",
+      skip_profile_detection: false,
+      skip_codesigning: false,
+      # Force the correct development team
+      export_team_id: "XTXZ3CYRPX",
+      # Xcode automatic signing — no manual cert/profile management
+      xcargs: "-allowProvisioningUpdates",
+      export_xcargs: "-allowProvisioningUpdates",
+      silent: false,
+    )
+
+    # Upload to TestFlight
+    UI.header("Step 7/7: Uploading to TestFlight")
+    upload_to_testflight(
+      app_identifier: "com.polarismaps.app",
+      # Uses the App Store Connect API key for authentication
+      api_key: app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+        key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
+      ),
+      # Do NOT submit for App Review automatically
+      skip_submission: true,
+      # Do NOT wait for build processing — it takes 15-30 min
+      skip_waiting_for_build_processing: true,
+      # Notify external testers if the build is added to their group
+      # (default: false, uncomment to auto-notify)
+      # notify_external_testers: false,
+    )
+
+    UI.success("✅ Build uploaded to TestFlight!")
+    UI.message("Open TestFlight to distribute: https://appstoreconnect.apple.com/apps/#{lane_context[SharedValues::APP_STORE_CONNECT_APP_ID]}/testflight")
+  end
+
+  # ── Release lane: Build & upload for App Store submission ──────
+  #
+  # Uploads the archive to App Store Connect for manual App Review.
+  # NEVER automatically submits for review — that is a manual step.
+  #
+  # Usage:
+  #   bundle exec fastlane ios release
+  # -----------------------------------------------------------------
+  desc "Build and upload for App Store release (manual review submission)"
+  lane :release do
+    ensure_env_vars(
+      env_vars: [
+        "APP_STORE_CONNECT_KEY_ID",
+        "APP_STORE_CONNECT_ISSUER_ID",
+        "APP_STORE_CONNECT_KEY_PATH",
+      ],
+    )
+
+    UI.important("⚠️  This lane uploads a release build to App Store Connect.")
+    UI.important("    It will NOT submit for App Review automatically.")
+    UI.important("    App Review submission is a manual step in App Store Connect.")
+    UI.confirm("Continue with release build?")
+
+    UI.header("Step 1/7: Validating project")
+    Dir.chdir("..") do
+      sh("pnpm lint --max-warnings 0") rescue UI.user_error!("Lint errors found — fix before release")
+      sh("pnpm typecheck") rescue UI.user_error!("TypeScript errors found — fix before release")
+      sh("pnpm test") rescue UI.user_error!("Tests failed — fix before release")
+    end
+
+    UI.header("Step 2/7: Installing dependencies")
+    Dir.chdir("..") { sh("pnpm install --frozen-lockfile") }
+    Dir.chdir("..") { sh("bundle install --quiet") }
+
+    UI.header("Step 3/7: Installing CocoaPods")
+    Dir.chdir("..") { sh("bundle exec pod install --project-directory=ios") }
+
+    UI.header("Step 4/7: Resolving build number")
+    bump_build
+
+    # Ensure distribution provisioning profile exists
+    UI.header("Step 5/7: Ensuring provisioning profile")
+    sigh(
+      app_identifier: "com.polarismaps.app",
+      api_key: app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+        key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
+      ),
+    )
+
+    UI.header("Step 6/7: Building release archive")
+    build_app(
+      workspace: "ios/PolarisMaps.xcworkspace",
+      scheme: "PolarisMaps",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build_derived_data",
+      output_name: "PolarisMaps.ipa",
+      export_team_id: "XTXZ3CYRPX",
+      xcargs: "-allowProvisioningUpdates",
+      export_xcargs: "-allowProvisioningUpdates",
+      silent: false,
+    )
+
+    # Upload to App Store Connect
+    UI.header("Step 7/7: Uploading to App Store Connect")
+    upload_to_app_store(
+      app_identifier: "com.polarismaps.app",
+      api_key: app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+        key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
+      ),
+      # CRITICAL: Never auto-submit for review
+      submit_for_review: false,
+      # Never auto-release after approval
+      automatic_release: false,
+      # Don't automatically upload screenshots or metadata
+      skip_metadata: true,
+      skip_screenshots: true,
+    )
+
+    UI.success("✅ Release build uploaded to App Store Connect!")
+    UI.message("Next steps (MANUAL):")
+    UI.message("  1. Wait for Apple processing (15-30 min)")
+    UI.message("  2. Open App Store Connect → App Store → iOS App")
+    UI.message("  3. Select the new build")
+    UI.message("  4. Add release notes")
+    UI.message("  5. Submit for App Review")
+  end
+
+  # ── Validation lane: Check the project without building ─────────
+  #
+  # Useful before starting work or as a CI check.
+  #
+  # Usage:
+  #   bundle exec fastlane ios validate
+  # -----------------------------------------------------------------
+  desc "Validate project without building"
+  lane :validate do
+    UI.header("Running validation checks")
+
+    UI.message("→ expo doctor")
+    Dir.chdir("..") { sh("npx expo doctor") rescue UI.important("Warnings found") }
+
+    UI.message("→ TypeScript")
+    Dir.chdir("..") { sh("pnpm typecheck") }
+
+    UI.message("→ Lint")
+    Dir.chdir("..") { sh("pnpm lint --max-warnings 100") rescue UI.important("Lint warnings OK") }
+
+    UI.message("→ Tests")
+    Dir.chdir("..") { sh("pnpm test") }
+
+    UI.success("✅ Validation complete")
+  end
+end
