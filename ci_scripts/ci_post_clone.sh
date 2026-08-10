@@ -1,64 +1,54 @@
 #!/bin/sh
 
 # ── ci_post_clone.sh ──────────────────────────────────────────────────
-# Xcode Cloud post-clone script for Polaris Maps (Expo / React Native).
+# Xcode Cloud post-clone script for Polaris Maps.
 #
-# Xcode Cloud runs this from the ios/ci_scripts/ directory.
-# We need to cd back to the repo root first.
+# Runs from ios/ci_scripts/ — we cd ../.. to get to repo root.
 # ──────────────────────────────────────────────────────────────────────
 
 echo "━━━ Xcode Cloud post-clone ━━━"
-echo "→ PWD: $(pwd)"
-
-# Navigate to repo root (ci_scripts runs from ios/ci_scripts/)
 cd ../..
+echo "→ Repo root: $(pwd)"
 
-echo "→ PWD (repo root): $(pwd)"
+# ── 1. Install Node.js ────────────────────────────────────────────────
+# Xcode Cloud runners don't have Node.js on PATH.
+# Download a portable arm64 binary — most reliable approach.
+echo ""
+echo "→ Installing Node.js…"
+NODE_VERSION="22.11.0"
+NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-darwin-arm64.tar.gz"
+curl -fsSL "$NODE_URL" -o /tmp/node.tar.gz
+mkdir -p /tmp/node
+tar -xzf /tmp/node.tar.gz -C /tmp/node --strip-components=1
+export PATH="/tmp/node/bin:$PATH"
+echo "→ Node $(node --version)"
+echo "→ npm $(npm --version)"
 
-# ── 1. Node.js ─────────────────────────────────────────────────────────
-# Xcode Cloud has Node.js but it may not be on PATH.
-# Source nvm if available, otherwise look in common locations.
-if [ -s "$HOME/.nvm/nvm.sh" ]; then
-  echo "→ Loading nvm…"
-  . "$HOME/.nvm/nvm.sh"
-  nvm use 22 2>/dev/null || nvm use node 2>/dev/null || true
-fi
-
-# Try to find node
-if ! command -v node >/dev/null 2>&1; then
-  for candidate in /usr/local/bin/node /opt/homebrew/bin/node; do
-    if [ -x "$candidate" ]; then
-      export PATH="$(dirname "$candidate"):$PATH"
-      break
-    fi
-  done
-fi
-
-if command -v node >/dev/null 2>&1; then
-  echo "→ Node.js $(node --version)"
-else
-  echo "! WARNING: Node.js not found — React Native bundle step may fail"
-fi
+# Write .xcode.env so build-phase scripts (Expo configure, Metro bundle)
+# can find Node.js via $NODE_BINARY.
+cat > ios/.xcode.env << XCODEENV
+export NODE_BINARY="/tmp/node/bin/node"
+XCODEENV
+echo "→ Wrote ios/.xcode.env with NODE_BINARY"
 
 # ── 2. pnpm ────────────────────────────────────────────────────────────
-if ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-  echo "→ Installing pnpm…"
-  npm install -g pnpm
-fi
-echo "→ pnpm $(pnpm --version 2>/dev/null || echo 'not found')"
+echo ""
+echo "→ Installing pnpm…"
+npm install -g pnpm
+echo "→ pnpm $(pnpm --version)"
 
 # ── 3. Node deps ───────────────────────────────────────────────────────
+echo ""
 echo "→ pnpm install"
-pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+pnpm install --frozen-lockfile
 
-# ── 4. Ruby gems ───────────────────────────────────────────────────────
-echo "→ bundle install"
-bundle install 2>/dev/null || gem install bundler -v "$(grep -A1 'BUNDLED WITH' Gemfile.lock | tail -1 | xargs)" && bundle install
-
-# ── 5. CocoaPods ───────────────────────────────────────────────────────
+# ── 4. CocoaPods ───────────────────────────────────────────────────────
+# Xcode Cloud has CocoaPods pre-installed.
+echo ""
 echo "→ pod install"
 cd ios
-bundle exec pod install --repo-update 2>/dev/null || bundle exec pod install
+pod install
 cd ..
 
+echo ""
 echo "━━━ post-clone complete ━━━"
