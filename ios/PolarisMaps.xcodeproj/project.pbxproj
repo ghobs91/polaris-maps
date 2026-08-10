@@ -266,7 +266,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cp \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\"\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			shellScript = "# Synced by ci_post_clone.sh — skip if missing\nif [ -f \"${PODS_ROOT}/Manifest.lock\" ]; then\n  echo \"Already synced\"\nelse\n  cp \"${SRCROOT}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" 2>/dev/null || true\nfi\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
 		379550D7A120DAEE991D1785 /* [CP] Embed Pods Frameworks */ = {
