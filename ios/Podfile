@@ -59,6 +59,18 @@ target 'PolarisMaps' do
   )
 
   post_install do |installer|
+    # Xcode 16 / 17 treats user script sandboxing as a strict default, which breaks
+    # many React Native/Expo script phases (e.g. ExpoModulesJSI) by flagging any
+    # stderr output as a build error. Disable it across all targets.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+      end
+    end
+    installer.pods_project.build_configurations.each do |config|
+      config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+    end
+
 # @generated begin @maplibre/maplibre-react-native:post-install - expo prebuild (DO NOT MODIFY) sync-6e76c80af0d70c0003d06822dd59b7c729fca472
     $MLRN.post_install(installer)
 # @generated end @maplibre/maplibre-react-native:post-install

@@ -293,3 +293,92 @@ index fe6b280e619361fd059e6152f9d2fcdef7197d32..2e803f2f2af7de51bf51a7c7b523765c
  
  @interface MLRNVectorSource : MLRNTileSource
  
+diff --git a/lib/commonjs/utils/animated/AnimatedPoint.js b/lib/commonjs/utils/animated/AnimatedPoint.js
+index 154d8298cead2d175d686aa91b2f710b8e45f7f4..3056c4c83592481da2549b7b855426b2bb730045 100644
+--- a/lib/commonjs/utils/animated/AnimatedPoint.js
++++ b/lib/commonjs/utils/animated/AnimatedPoint.js
+@@ -105,6 +105,25 @@ class AnimatedPoint extends AnimatedWithChildren {
+     this.longitude.__removeChild(this);
+     this.latitude.__removeChild(this);
+   }
++
++  // React Native 0.86+ stores `_listeners` as a Map in AnimatedNode, but this
++  // class keeps its own plain-object registry and delegates callbacks to the
++  // underlying longitude/latitude Animated.Values. The inherited
++  // __callListeners implementation is therefore incompatible, so we replace it
++  // with the same child-propagation logic minus the broken Map-based listener
++  // call. This prevents the "undefined is not a function" crash while still
++  // notifying child nodes (e.g. AnimatedProps for AnimatedShapeSource).
++  __callListeners(_value) {
++    if (!this.__isNative) {
++      const children = this._children;
++      for (let ii = 0, length = children.length; ii < length; ii++) {
++        const child = children[ii];
++        if (child.__getValue) {
++          child.__callListeners(child.__getValue());
++        }
++      }
++    }
++  }
+ }
+ exports.AnimatedPoint = AnimatedPoint;
+ //# sourceMappingURL=AnimatedPoint.js.map
+\ No newline at end of file
+diff --git a/lib/module/utils/animated/AnimatedPoint.js b/lib/module/utils/animated/AnimatedPoint.js
+index cf0e89cbd9c0c5c3cd221d97e45ea1eceed3b5f8..b86b66cdb1940c96c1da40d617bc3f29a3bca1dd 100644
+--- a/lib/module/utils/animated/AnimatedPoint.js
++++ b/lib/module/utils/animated/AnimatedPoint.js
+@@ -102,5 +102,24 @@ export class AnimatedPoint extends AnimatedWithChildren {
+     this.longitude.__removeChild(this);
+     this.latitude.__removeChild(this);
+   }
++
++  // React Native 0.86+ stores `_listeners` as a Map in AnimatedNode, but this
++  // class keeps its own plain-object registry and delegates callbacks to the
++  // underlying longitude/latitude Animated.Values. The inherited
++  // __callListeners implementation is therefore incompatible, so we replace it
++  // with the same child-propagation logic minus the broken Map-based listener
++  // call. This prevents the "undefined is not a function" crash while still
++  // notifying child nodes (e.g. AnimatedProps for AnimatedShapeSource).
++  __callListeners(_value) {
++    if (!this.__isNative) {
++      const children = this._children;
++      for (let ii = 0, length = children.length; ii < length; ii++) {
++        const child = children[ii];
++        if (child.__getValue) {
++          child.__callListeners(child.__getValue());
++        }
++      }
++    }
++  }
+ }
+ //# sourceMappingURL=AnimatedPoint.js.map
+\ No newline at end of file
+diff --git a/src/utils/animated/AnimatedPoint.ts b/src/utils/animated/AnimatedPoint.ts
+index d8d37d7c0529b4482c5a465e42b45afafd4fa537..d949ec11e8b764c79f52ded0fdbd06000e173447 100644
+--- a/src/utils/animated/AnimatedPoint.ts
++++ b/src/utils/animated/AnimatedPoint.ts
+@@ -129,4 +129,23 @@ export class AnimatedPoint extends AnimatedWithChildren {
+     this.longitude.__removeChild(this);
+     this.latitude.__removeChild(this);
+   }
++
++  // React Native 0.86+ stores `_listeners` as a Map in AnimatedNode, but this
++  // class keeps its own plain-object registry and delegates callbacks to the
++  // underlying longitude/latitude Animated.Values. The inherited
++  // __callListeners implementation is therefore incompatible, so we replace it
++  // with the same child-propagation logic minus the broken Map-based listener
++  // call. This prevents the "undefined is not a function" crash while still
++  // notifying child nodes (e.g. AnimatedProps for AnimatedShapeSource).
++  __callListeners(_value: number): void {
++    if (!this.__isNative) {
++      const children = this._children;
++      for (let ii = 0, length = children.length; ii < length; ii++) {
++        const child = children[ii];
++        if (child.__getValue) {
++          child.__callListeners(child.__getValue());
++        }
++      }
++    }
++  }
+ }

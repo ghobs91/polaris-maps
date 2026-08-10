@@ -1,6 +1,7 @@
 internal import Expo
 import React
 import ReactAppDependencyProvider
+import UIKit
 
 @main
 class AppDelegate: ExpoAppDelegate {

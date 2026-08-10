@@ -36,6 +36,7 @@
       ]
     },
     "plugins": [
+      "./plugins/withXcode16Fixes",
       "./plugins/withValhalla",
       "@maplibre/maplibre-react-native",
       "expo-router",
