@@ -3,9 +3,6 @@ set -e
 
 # ── ci_post_clone.sh ──────────────────────────────────────────────────
 # Xcode Cloud post-clone script for Polaris Maps (Expo / React Native).
-#
-# Xcode Cloud runs this after cloning the repo and BEFORE resolving
-# SPM dependencies and building.
 # ──────────────────────────────────────────────────────────────────────
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -38,16 +35,30 @@ echo "→ Installing Ruby gems (bundle install)…"
 bundle install
 
 # ── CocoaPods ─────────────────────────────────────────────────────────
-# Must use bundle exec to match the Gemfile's CocoaPods version.
+# Remove any stale pod cache, then do a clean install.
 echo ""
-echo "→ Installing CocoaPods (bundle exec pod install)…"
+echo "→ Cleaning CocoaPods cache…"
 cd ios
-bundle exec pod install
-cd ..
+rm -rf Pods
+bundle exec pod cache clean --all 2>/dev/null || true
 
 echo ""
-echo "→ Verifying critical files exist…"
-ls -la ios/Pods/Target\ Support\ Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig
+echo "→ Running pod install (this may take a few minutes)…"
+bundle exec pod install
+
+# After pod install, ensure Manifest.lock is an exact copy of Podfile.lock.
+# The build phase "[CP] Check Pods Manifest.lock" diffs these two files.
+echo ""
+echo "→ Syncing Manifest.lock…"
+cp Podfile.lock Pods/Manifest.lock
+
+echo ""
+echo "→ Verifying critical files…"
+ls -la "Pods/Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig"
+ls -la Pods/Manifest.lock
+diff Podfile.lock Pods/Manifest.lock && echo "  ✓ Manifest.lock matches Podfile.lock"
+
+cd ..
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
