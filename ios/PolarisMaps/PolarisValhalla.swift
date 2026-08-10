@@ -34,7 +34,7 @@ class PolarisValhalla: NSObject {
                 // Determine if the path is a tar file or extracted directory
                 var valhallaConfig: ValhallaConfigModels.ValhallaConfig
                 if graphTilePath.hasSuffix(".tar") {
-                    valhallaConfig = try ValhallaConfigModels.ValhallaConfig(tileExtract: URL(fileURLWithPath: graphTilePath))
+                    valhallaConfig = try ValhallaConfigModels.ValhallaConfig(tileExtractTar: URL(fileURLWithPath: graphTilePath))
                 } else {
                     valhallaConfig = try ValhallaConfigModels.ValhallaConfig(tilesDir: URL(fileURLWithPath: graphTilePath))
                 }
@@ -45,10 +45,7 @@ class PolarisValhalla: NSObject {
                 self.valhallaInstance = try Valhalla(valhallaConfig)
                 self.isInitialized = true
                 resolve(nil)
-            } catch let error as ValhallaError {
-                self.isInitialized = false
-                reject("VALHALLA_INIT_ERROR", "Failed to initialize Valhalla: \(error.localizedDescription)", error)
-            } catch {
+            } catch let error {
                 self.isInitialized = false
                 reject("VALHALLA_INIT_ERROR", "Failed to initialize Valhalla: \(error.localizedDescription)", error)
             }
@@ -69,9 +66,7 @@ class PolarisValhalla: NSObject {
                 let response = try valhalla.route(request: request)
                 let mapped = self.mapRouteResponseToNative(response, waypoints: waypoints)
                 resolve(mapped)
-            } catch let error as ValhallaError {
-                reject("VALHALLA_ROUTE_ERROR", "Route computation failed: \(error.localizedDescription)", error)
-            } catch {
+            } catch let error {
                 reject("VALHALLA_ROUTE_ERROR", "Route computation failed: \(error.localizedDescription)", error)
             }
         }
@@ -98,15 +93,15 @@ class PolarisValhalla: NSObject {
                         RoutingWaypoint(lat: toLat, lon: toLng),
                     ],
                     costing: self.mapCostingModel(costing as String),
-                    directionsOptions: DirectionsOptions(units: .km)
+                    units: .km,
+                    directionsType: .instructions,
+                    format: .json
                 )
 
                 let response = try valhalla.route(request: request)
                 let mapped = self.mapSingleRouteToNative(response)
                 resolve(mapped)
-            } catch let error as ValhallaError {
-                reject("VALHALLA_REROUTE_ERROR", "Reroute failed: \(error.localizedDescription)", error)
-            } catch {
+            } catch let error {
                 reject("VALHALLA_REROUTE_ERROR", "Reroute failed: \(error.localizedDescription)", error)
             }
         }
@@ -162,30 +157,29 @@ class PolarisValhalla: NSObject {
         let avoidFerries = (options?["avoidFerries"] as? Bool) ?? false
         let alternates = (options?["alternates"] as? NSNumber)?.intValue ?? 0
 
-        var costingOptions: [String: Any] = [:]
-        switch costing {
-        case "auto":
-            costingOptions = [
-                "use_tolls": avoidTolls ? 0 : 1,
-                "use_highways": avoidHighways ? 0 : 1,
-                "use_ferry": avoidFerries ? 0 : 1,
-            ]
-        case "pedestrian":
-            costingOptions = [:]
-        case "bicycle":
-            costingOptions = [:]
-        default:
-            costingOptions = [:]
-        }
+        let costingOptions: CostingOptions? = {
+            switch costing {
+            case "auto":
+                return CostingOptions(
+                    auto: AutoCostingOptions(
+                        useFerry: avoidFerries ? 0 : 1,
+                        useHighways: avoidHighways ? 0 : 1,
+                        useTolls: avoidTolls ? 0 : 1
+                    )
+                )
+            default:
+                return nil
+            }
+        }()
 
         return RouteRequest(
             locations: locations,
             costing: mapCostingModel(costing),
-            directionsOptions: DirectionsOptions(
-                units: .km,
-                format: .json
-            ),
-            costingOptions: costingOptions
+            costingOptions: costingOptions,
+            units: .km,
+            directionsType: .instructions,
+            format: .json,
+            alternates: alternates
         )
     }
 
@@ -209,15 +203,15 @@ class PolarisValhalla: NSObject {
         let trip = response.trip
         let summary = trip.summary
 
-        let legs: [[String: Any]] = (trip.legs ?? []).map { leg in
-            let maneuvers: [[String: Any]] = (leg.maneuvers ?? []).map { m in
+        let legs: [[String: Any]] = trip.legs.map { leg in
+            let maneuvers: [[String: Any]] = leg.maneuvers.map { m in
                 [
-                    "type": mapManeuverType(m.type ?? 0),
-                    "instruction": m.instruction ?? "",
-                    "distance_meters": (m.length ?? 0) * 1000,
-                    "duration_seconds": m.time ?? 0,
-                    "begin_shape_index": m.beginShapeIndex ?? 0,
-                    "end_shape_index": m.endShapeIndex ?? 0,
+                    "type": mapManeuverType(m.type),
+                    "instruction": m.instruction,
+                    "distance_meters": m.length * 1000,
+                    "duration_seconds": m.time,
+                    "begin_shape_index": m.beginShapeIndex,
+                    "end_shape_index": m.endShapeIndex,
                     "street_names": m.streetNames ?? [],
                     "verbal_pre_transition": m.verbalPreTransitionInstruction ?? "",
                     "verbal_post_transition": m.verbalPostTransitionInstruction as Any,
@@ -227,27 +221,37 @@ class PolarisValhalla: NSObject {
             let legSummary = leg.summary
             return [
                 "maneuvers": maneuvers,
-                "distance_meters": (legSummary?.length ?? 0) * 1000,
-                "duration_seconds": legSummary?.time ?? 0,
+                "distance_meters": legSummary.length * 1000,
+                "duration_seconds": legSummary.time,
             ]
         }
 
-        let shape = trip.legs?.first?.shape ?? ""
+        let shape = trip.legs.first?.shape ?? ""
+
+        // RouteSummary no longer exposes hasToll/hasFerry, so derive them from maneuvers.
+        var hasToll = false
+        var hasFerry = false
+        for leg in trip.legs {
+            for m in leg.maneuvers {
+                if m.toll == true { hasToll = true }
+                if m.ferry == true { hasFerry = true }
+            }
+        }
 
         return [
             "summary": [
-                "distance_meters": (summary?.length ?? 0) * 1000,
-                "duration_seconds": summary?.time ?? 0,
-                "has_toll": summary?.hasToll ?? false,
-                "has_ferry": summary?.hasFerry ?? false,
+                "distance_meters": summary.length * 1000,
+                "duration_seconds": summary.time,
+                "has_toll": hasToll,
+                "has_ferry": hasFerry,
             ] as [String: Any],
             "legs": legs,
             "geometry": shape,
             "bounding_box": [
-                summary?.minLon ?? 0,
-                summary?.minLat ?? 0,
-                summary?.maxLon ?? 0,
-                summary?.maxLat ?? 0,
+                summary.minLon,
+                summary.minLat,
+                summary.maxLon,
+                summary.maxLat,
             ],
         ]
     }
