@@ -1,0 +1,113 @@
+# iOS TestFlight Build (macOS GitHub Actions)
+#
+# This workflow builds the Polaris Maps iOS app and uploads to TestFlight
+# using Fastlane. It runs on a macOS runner and is triggered manually via
+# workflow_dispatch.
+#
+# It does NOT submit for App Review or release to the public App Store.
+#
+# Required secrets (set in GitHub → Settings → Secrets and variables → Actions):
+#   APP_STORE_CONNECT_KEY_ID       — App Store Connect API Key ID
+#   APP_STORE_CONNECT_ISSUER_ID    — App Store Connect API Issuer ID
+#   APP_STORE_CONNECT_PRIVATE_KEY  — Full contents of the .p8 private key file
+
+name: iOS TestFlight Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        type: choice
+        default: 'beta'
+        options:
+          - beta
+          - release
+
+# Cancel in-progress runs when a new one is triggered
+concurrency:
+  group: ios-testflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    name: Build and upload to TestFlight
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      # -------------------------------------------------------------------
+      # Checkout
+      # -------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------------------------
+      # Environment
+      # -------------------------------------------------------------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+
+      # -------------------------------------------------------------------
+      # Install dependencies
+      # -------------------------------------------------------------------
+      - name: Install Node.js dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          bundle exec pod install
+          cd ..
+
+      # -------------------------------------------------------------------
+      # Validate (fail early on obvious issues)
+      # -------------------------------------------------------------------
+      - name: TypeScript check
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
+      # -------------------------------------------------------------------
+      # Write App Store Connect API key from secret
+      # -------------------------------------------------------------------
+      - name: Write App Store Connect API key
+        if: ${{ env.APP_STORE_CONNECT_PRIVATE_KEY != '' }}
+        run: |
+          mkdir -p ~/.appstoreconnect
+          echo "$APP_STORE_CONNECT_PRIVATE_KEY" > ~/.appstoreconnect/ci_key.p8
+        env:
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+      # -------------------------------------------------------------------
+      # Build and upload via Fastlane
+      # -------------------------------------------------------------------
+      - name: Build and upload to TestFlight
+        run: bundle exec fastlane ios ${{ github.event.inputs.build_type || 'beta' }}
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_PATH: ${{ env.APP_STORE_CONNECT_KEY_PATH || '$HOME/.appstoreconnect/ci_key.p8' }}
+        timeout-minutes: 45
+
+      # -------------------------------------------------------------------
+      # Cleanup
+      # -------------------------------------------------------------------
+      - name: Clean up API key
+        if: always()
+        run: rm -f ~/.appstoreconnect/ci_key.p8
