@@ -9,11 +9,20 @@
       "ios": {
         "resourceClass": "m-medium"
       }
+    },
+    "development": {
+      "autoIncrement": true,
+      "developmentClient": true
     }
   },
   "submit": {
     "production": {
       "ios":{
+        "ascAppId": "6760763483"
+      }
+    },
+    "development": {
+      "ios": {
         "ascAppId": "6760763483"
       }
     }
