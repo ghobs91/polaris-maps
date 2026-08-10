@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { getOrCreateKeypair } from '../identity/keypair';

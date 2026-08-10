@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getGun } from '../gun/init';
 import { getDatabase } from '../database/init';
 import { blurImage, computeImageHash } from './blurService';

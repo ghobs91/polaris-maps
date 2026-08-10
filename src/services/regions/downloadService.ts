@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';

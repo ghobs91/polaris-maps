@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { importOverturePlacesFromGeoJSON } from '../poi/overtureFetcher';
 import type { OverturePlaceCollection } from '../../types/overture';
 

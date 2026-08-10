@@ -24,7 +24,7 @@ import {
   unseedRegion,
   getHyperdriveStatus,
 } from '../../services/sync/hyperdriveBridge';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { GeofabrikTreePicker } from './GeofabrikTreePicker';
 
 interface RegionGateProps {
