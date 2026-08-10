@@ -27,7 +27,7 @@ function contrastRatio(l1: number, l2: number): number {
 
 describe('darkMapStyle', () => {
   const style = JSON.parse(DARK_MAP_STYLE_JSON);
-  const bgColor = '#2B2B2F';
+  const bgColor = '#1C1C2E';
   const bgLum = hexToLuminance(bgColor);
 
   it('should parse as valid JSON with version 8', () => {
@@ -39,7 +39,9 @@ describe('darkMapStyle', () => {
   it('should have a dark background color', () => {
     const bgLayer = style.layers.find((l: any) => l.id === 'background');
     expect(bgLayer).toBeDefined();
-    expect(bgLayer.paint['background-color']).toBe(bgColor);
+    const bg = bgLayer.paint['background-color'];
+    expect(Array.isArray(bg)).toBe(true);
+    expect(bg[bg.length - 1]).toBe(bgColor);
   });
 
   it('should have motorway road color with sufficient contrast against background', () => {
@@ -83,8 +85,7 @@ describe('darkMapStyle', () => {
     const ratio = contrastRatio(hexToLuminance(waterColor), bgLum);
     // Water should be visibly different from land — at least 1.2:1
     expect(ratio).not.toBe(1); // not identical
-    // Water is darker than background, which is the desired effect
-    expect(hexToLuminance(waterColor)).toBeLessThan(bgLum);
+    expect(ratio).toBeGreaterThanOrEqual(1.2);
   });
 
   it('should have road labels readable with at least 3:1 contrast', () => {
