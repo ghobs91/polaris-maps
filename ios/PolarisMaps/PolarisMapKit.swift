@@ -337,7 +337,7 @@ class PolarisMapKit: NSObject {
 
   private static func serializeRoute(_ route: MKRoute) -> [String: Any] {
     let steps = route.steps
-    let coordinates = route.polyline.coordinates
+    let coordinates = Self.coordinates(of: route.polyline)
     let geometry = encodePolyline(coordinates: coordinates, precision: 1e6)
 
     var minLat = 90.0, maxLat = -90.0, minLon = 180.0, maxLon = -180.0
@@ -368,7 +368,7 @@ class PolarisMapKit: NSObject {
         "type": maneuverType,
         "instruction": step.instructions,
         "distance_meters": step.distance,
-        "duration_seconds": step.expectedTravelTime,
+        "duration_seconds": route.distance > 0 ? route.expectedTravelTime * (step.distance / route.distance) : 0,
         "begin_shape_index": beginIdx,
         "end_shape_index": endIdx,
         "verbal_pre_transition": step.instructions,
@@ -422,6 +422,13 @@ class PolarisMapKit: NSObject {
     return encoded
   }
 
+  /// Extract the CLLocationCoordinate2D array from an MKPolyline.
+  private static func coordinates(of polyline: MKPolyline) -> [CLLocationCoordinate2D] {
+    var coords = [CLLocationCoordinate2D](repeating: kCLLocationCoordinate2DInvalid, count: polyline.pointCount)
+    polyline.getCoordinates(&coords, range: NSRange(location: 0, length: polyline.pointCount))
+    return coords
+  }
+
   // MARK: - Routing Helpers
 
   private static func transportType(for costing: String) -> MKDirectionsTransportType {
@@ -433,7 +440,7 @@ class PolarisMapKit: NSObject {
     }
   }
 
-  private static func inferManeuverType(from step: MKRouteStep) -> String {
+  private static func inferManeuverType(from step: MKRoute.Step) -> String {
     let instr = step.instructions.lowercased()
     if instr.contains("roundabout") || instr.contains("traffic circle") {
       return instr.contains("exit") || instr.contains("leave") ? "exit_roundabout" : "enter_roundabout"
