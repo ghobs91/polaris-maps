@@ -11,7 +11,7 @@
  * - Quick coarse results while online sources load
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 import { NativeEventEmitter, NativeModules } from 'react-native';
 import { GEONAMES_DB_URL } from '../../constants/config';

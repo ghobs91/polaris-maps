@@ -1,5 +1,6 @@
 import { getDatabase } from '../database/init';
 import type { GeocodingEntry } from '../../models/geocoding';
+import type { OsmPoi } from '../poi/osmFetcher';
 
 /** Nominatim requires max 1 request per second per their usage policy. */
 const NOMINATIM_MIN_INTERVAL_MS = 1_000;
@@ -8,6 +9,8 @@ let _lastNominatimRequestAt = 0;
 export interface GeocodingResult {
   entry: GeocodingEntry;
   rank: number;
+  /** Original POI data from unified search, if this result came from a POI. */
+  poi?: OsmPoi;
 }
 
 export async function searchAddress(
