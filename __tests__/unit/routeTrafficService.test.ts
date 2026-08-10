@@ -13,9 +13,9 @@ import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 // congestionColor
 // ---------------------------------------------------------------------------
 describe('congestionColor', () => {
-  it('returns green for free-flow (ratio >= 0.75)', () => {
-    expect(congestionColor(0.75)).toBe('#00C853');
-    expect(congestionColor(1.0)).toBe('#00C853');
+  it('returns blue for free-flow (ratio >= 0.75)', () => {
+    expect(congestionColor(0.75)).toBe('#4A8CFF');
+    expect(congestionColor(1.0)).toBe('#4A8CFF');
   });
 
   it('returns yellow for slow traffic (0.50 – 0.74)', () => {
@@ -69,7 +69,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     expect(result.features.every((f) => f.properties.color === DEFAULT_ROUTE_COLOR)).toBe(true);
   });
 
-  it('colors a route chunk green when a nearby free-flow segment exists', () => {
+  it('colors a route chunk blue when a nearby free-flow segment exists', () => {
     const route: [number, number][] = [
       [-71.06, 42.36],
       [-71.061, 42.361],
@@ -84,7 +84,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     expect(result.features.length).toBeGreaterThanOrEqual(1);
 
     const colors = result.features.map((f) => f.properties.color);
-    expect(colors).toContain('#00C853'); // green
+    expect(colors).toContain('#4A8CFF'); // blue
   });
 
   it('colors a route chunk red when stopped traffic is nearby', () => {
@@ -137,7 +137,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     const far = makeSeg({
       id: 'far',
       coordinates: [[-71.0615, 42.3615]],
-      congestionRatio: 0.95, // free flow → green
+      congestionRatio: 0.95, // free flow → blue
     });
 
     const result = buildRouteTrafficGeoJSON(route, [close, far]);
@@ -185,7 +185,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     const result = buildRouteTrafficGeoJSON(route, [seg]);
     // All pairs should be green → merged into 1 feature
     expect(result.features).toHaveLength(1);
-    expect(result.features[0].properties.color).toBe('#00C853');
+    expect(result.features[0].properties.color).toBe('#4A8CFF');
     // Merged feature should contain all 5 coordinates
     expect(result.features[0].geometry.coordinates).toHaveLength(5);
   });
@@ -227,7 +227,7 @@ describe('buildRouteTrafficGeoJSON', () => {
         coordinates: [
           [-73.999, 40.7005], // midpoint of pair 0 exactly
         ],
-        congestionRatio: 0.9, // free flow → green
+        congestionRatio: 0.9, // free flow → blue
       }),
       makeSeg({
         id: 'route-seg-2',
@@ -251,7 +251,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     const uniqueColors = new Set(colors);
     expect(uniqueColors.size).toBeGreaterThan(1);
     // Should contain traffic colors from the matched segments
-    expect(colors).toContain('#00C853'); // green from seg-1
+    expect(colors).toContain('#4A8CFF'); // green from seg-1
     expect(colors).toContain('#D50000'); // red from seg-2
   });
 

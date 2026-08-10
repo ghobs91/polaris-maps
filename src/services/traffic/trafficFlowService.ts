@@ -1,7 +1,9 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 import { useTrafficStore } from '../../stores/trafficStore';
-import { fetchTomTomTraffic, type ViewportBounds, fetchTomTomRouteTraffic } from './tomtomFetcher';
+import { useNavigationStore } from '../../stores/navigationStore';
+import { fetchTomTomTraffic, type ViewportBounds } from './tomtomFetcher';
+import { sampleRouteTileColors } from './tilePixelSampler';
 import { convertP2PToNormalized, mergeTrafficSources } from './trafficMerger';
 import {
   initHyperswarmBridge,
@@ -22,11 +24,18 @@ import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../co
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
+let routeFetchInProgress = false;
 
 /** Fetch traffic from all sources, merge, and update the store. */
 async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
   const store = useTrafficStore.getState();
   if (store.isExternalFetchLoading) return;
+
+  // Don't overwrite route-specific traffic data with viewport data when a
+  // route is currently displayed (preview or active navigation). The
+  // route-aligned fetch provides more accurate per-segment data.
+  const navStore = useNavigationStore.getState();
+  if (navStore.activeRoute ?? navStore.routePreview) return;
 
   useTrafficStore.getState().setExternalFetchLoading(true);
   try {
@@ -41,7 +50,6 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       useTrafficStore.getState().segmentTraffic,
     ).map(convertP2PToNormalized);
 
-    // Merge all sources with confidence weighting
     const allSegments = [...tomtomSegments, ...p2pSegments];
 
     if (allSegments.length > 0) {
@@ -131,14 +139,13 @@ export async function fetchTrafficImmediate(viewport: ViewportBounds): Promise<v
  * align with the actual path (instead of a viewport grid).
  */
 async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Promise<void> {
-  const store = useTrafficStore.getState();
-  if (store.isExternalFetchLoading) return;
+  if (routeFetchInProgress) return;
 
-  useTrafficStore.getState().setExternalFetchLoading(true);
+  routeFetchInProgress = true;
   try {
-    const tomtomSegments = await fetchTomTomRouteTraffic(routeCoords).catch(
-      () => [] as NormalizedTrafficSegment[],
-    );
+    // Sample colors from TomTom raster tiles (same source as the traffic
+    // overlay) instead of calling the point-based Flow Segment API.
+    const tomtomSegments = await sampleRouteTileColors(routeCoords);
 
     const p2pSegments: NormalizedTrafficSegment[] = Object.values(
       useTrafficStore.getState().segmentTraffic,
@@ -147,18 +154,26 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
     const allSegments = [...tomtomSegments, ...p2pSegments];
 
     if (allSegments.length > 0) {
-      const previousTimestamp = store.lastExternalFetchAt ?? undefined;
+      const previousTimestamp = useTrafficStore.getState().lastExternalFetchAt ?? undefined;
       const merged = mergeTrafficSources(allSegments, previousTimestamp);
       if (merged.length > 0) {
         useTrafficStore.getState().setNormalizedSegments(merged);
+        if (__DEV__)
+          console.log(
+            `[TrafficFlowService] route store updated: ${merged.length} segments`,
+          );
+      } else if (__DEV__) {
+        console.log('[TrafficFlowService] route merge returned empty');
       }
+    } else if (__DEV__) {
+      console.log('[TrafficFlowService] route fetch returned no segments');
     }
   } catch (error) {
     const msg =
       error instanceof Error ? error.message.replace(/key=[^&]*/g, 'key=REDACTED') : String(error);
     console.warn('[TrafficFlowService] Route traffic fetch failed:', msg);
   } finally {
-    useTrafficStore.getState().setExternalFetchLoading(false);
+    routeFetchInProgress = false;
   }
 }
 

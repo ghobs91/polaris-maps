@@ -110,7 +110,7 @@ export async function fetchTomTomTraffic(
   const zoom = Math.round(Math.min(22, Math.max(0, viewport.zoom)));
 
   const promises = points.map(async (pt) => {
-    const url = `${TOMTOM_FLOW_BASE_URL}/${zoom}/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?key=${encodeURIComponent(tomtomApiKey)}&unit=MPH&thickness=1`;
+    const url = `${TOMTOM_FLOW_BASE_URL}/${zoom}/json?point=${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}&key=${encodeURIComponent(tomtomApiKey)}&unit=MPH`;
     try {
       const res = await fetch(url);
       if (!res.ok) return null;
@@ -140,9 +140,10 @@ export async function fetchTomTomTraffic(
 
 /**
  * Minimum distance (degrees) between successive sample points along the route.
- * ~0.008° ≈ 800 m at mid-latitudes — avoids redundant API hits on dense polylines.
+ * ~0.005° ≈ 500 m at mid-latitudes. Coarse enough to keep API call counts
+ * reasonable; gaps are filled by the TomTom segment's own polyline geometry.
  */
-const ROUTE_SAMPLE_SPACING_DEG = 0.008;
+const ROUTE_SAMPLE_SPACING_DEG = 0.005;
 
 /** Max concurrent TomTom requests per batch to avoid rate-limiting. */
 const ROUTE_BATCH_SIZE = 10;
@@ -196,7 +197,7 @@ export async function fetchTomTomRouteTraffic(
   for (let b = 0; b < points.length; b += ROUTE_BATCH_SIZE) {
     const batch = points.slice(b, b + ROUTE_BATCH_SIZE);
     const promises = batch.map(async (pt) => {
-      const url = `${TOMTOM_FLOW_BASE_URL}/14/${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}.json?key=${encodeURIComponent(tomtomApiKey)}&unit=MPH&thickness=1`;
+      const url = `${TOMTOM_FLOW_BASE_URL}/14/json?point=${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}&key=${encodeURIComponent(tomtomApiKey)}&unit=MPH`;
       try {
         const res = await fetch(url);
         if (!res.ok) return null;
@@ -221,6 +222,13 @@ export async function fetchTomTomRouteTraffic(
         segments.push(r.value);
       }
     }
+  }
+
+  if (__DEV__) {
+    const ratios = segments.map((s) => s.congestionRatio.toFixed(2));
+    console.log(
+      `[TomTomRouteTraffic] ${points.length} sampled points → ${segments.length} unique segments; ratios: ${ratios.slice(0, 30).join(', ')}`,
+    );
   }
 
   return segments;

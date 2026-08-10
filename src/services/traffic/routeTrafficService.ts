@@ -10,16 +10,15 @@ export const ETA_COLOR_ORANGE = '#FF9500';
 export const ETA_COLOR_RED = '#FF3B30';
 
 /**
- * Proximity threshold in degrees (~300 m at mid-latitudes).
- * Route points farther than this from any traffic segment keep the default blue.
- * Set generously because Valhalla and TomTom represent the same road with
- * slightly different geometries.
+ * Proximity threshold in degrees (~400 m at mid-latitudes).
+ * Wider than half the sample spacing so every route midpoint falls within
+ * range of a sampled point or the segment's own geometry extent.
  */
-const MATCH_THRESHOLD_DEG = 0.003;
+const MATCH_THRESHOLD_DEG = 0.004;
 
 /** Map a congestion ratio (0–1) to a traffic color. */
 export function congestionColor(ratio: number): string {
-  if (ratio >= 0.75) return '#00C853'; // green — free flow
+  if (ratio >= 0.75) return '#4A8CFF'; // blue — free flow (same as default route color)
   if (ratio >= 0.5) return '#FFD600'; // yellow — slow
   if (ratio >= 0.25) return '#FF6D00'; // orange — congested
   return '#D50000'; // dark red — stopped / heavy delay
@@ -30,6 +29,47 @@ function distSq(a: [number, number], b: [number, number]): number {
   const dlng = a[0] - b[0];
   const dlat = a[1] - b[1];
   return dlng * dlng + dlat * dlat;
+}
+
+/**
+ * Compute the bearing (0–360°) from point a to point b.
+ * Returns degrees clockwise from north.
+ */
+function bearingDeg(a: [number, number], b: [number, number]): number {
+  const dlng = b[0] - a[0];
+  const dlat = b[1] - a[1];
+  const rad = Math.atan2(dlng, dlat);
+  return ((rad * 180) / Math.PI + 360) % 360;
+}
+
+/**
+ * Effective distance that penalizes segments whose direction differs
+ * significantly from the route's direction. In dense urban grids, the
+ * closest segment by pure distance may be on a parallel street with
+ * completely different traffic conditions.
+ *
+ * Returns the squared distance multiplied by a penalty factor when the
+ * bearing difference exceeds 45°.
+ */
+function penalizedDistSq(
+  mid: [number, number],
+  pt: [number, number],
+  routeBearing: number,
+  segBearing: number,
+): number {
+  const dSq = distSq(mid, pt);
+  const bearingDiff = Math.abs(routeBearing - segBearing);
+  const diff = Math.min(bearingDiff, 360 - bearingDiff);
+  // Strong penalty when directions differ by > 45° — effectively pushes
+  // the algorithm to prefer same-direction segments even if a cross-street
+  // segment is physically closer.
+  if (diff > 45) {
+    return dSq * 4; // 2x in linear distance terms
+  }
+  if (diff > 20) {
+    return dSq * 1.5;
+  }
+  return dSq;
 }
 
 /**
@@ -76,6 +116,15 @@ export function buildRouteTrafficGeoJSON(
   const thresholdSq = MATCH_THRESHOLD_DEG * MATCH_THRESHOLD_DEG;
   const features: TrafficFeatureCollection['features'] = [];
 
+  // Pre-compute each segment's bearing so we only calculate it once
+  const segBearings = segments.map((seg) => {
+    const coords = seg.coordinates;
+    if (coords.length >= 2) {
+      return bearingDeg(coords[0], coords[coords.length - 1]);
+    }
+    return -1; // single-point segment, no bearing
+  });
+
   let runColor: string | null = null;
   let runCoords: [number, number][] = [];
 
@@ -95,22 +144,37 @@ export function buildRouteTrafficGeoJSON(
       (routeCoords[i][1] + routeCoords[i + 1][1]) / 2,
     ];
 
+    // Bearing of this route segment
+    const routeBearing = bearingDeg(routeCoords[i], routeCoords[i + 1]);
+
     let bestDistSq = Infinity;
     let bestRatio = -1;
 
-    for (const seg of segments) {
-      // Check distance to each coordinate point
+    for (let s = 0; s < segments.length; s++) {
+      const seg = segments[s];
+      const segBearing = segBearings[s];
+
+      // Check distance to each coordinate point with bearing penalty
       for (const pt of seg.coordinates) {
-        const d = distSq(mid, pt);
+        const d =
+          segBearing >= 0
+            ? penalizedDistSq(mid, pt, routeBearing, segBearing)
+            : distSq(mid, pt);
         if (d < bestDistSq) {
           bestDistSq = d;
           bestRatio = seg.congestionRatio;
         }
       }
       // Also check distance to line segments between consecutive coordinates
-      // — handles sparse polylines where endpoints are far apart
       for (let j = 0; j < seg.coordinates.length - 1; j++) {
-        const d = pointToSegDistSq(mid, seg.coordinates[j], seg.coordinates[j + 1]);
+        let d = pointToSegDistSq(mid, seg.coordinates[j], seg.coordinates[j + 1]);
+        if (segBearing >= 0) {
+          // Apply the same bearing penalty to line-segment distance
+          const bearingDiff = Math.abs(routeBearing - segBearing);
+          const diff = Math.min(bearingDiff, 360 - bearingDiff);
+          if (diff > 45) d *= 4;
+          else if (diff > 20) d *= 1.5;
+        }
         if (d < bestDistSq) {
           bestDistSq = d;
           bestRatio = seg.congestionRatio;
@@ -158,6 +222,16 @@ export function averageRouteTrafficColor(
   if (routeCoords.length < 2) return ETA_COLOR_GREEN;
 
   const thresholdSq = MATCH_THRESHOLD_DEG * MATCH_THRESHOLD_DEG;
+
+  // Pre-compute segment bearings
+  const segBearings = segments.map((seg) => {
+    const coords = seg.coordinates;
+    if (coords.length >= 2) {
+      return bearingDeg(coords[0], coords[coords.length - 1]);
+    }
+    return -1;
+  });
+
   let totalWeightedRatio = 0;
   let totalWeight = 0;
 
@@ -165,20 +239,33 @@ export function averageRouteTrafficColor(
     const a = routeCoords[i];
     const b = routeCoords[i + 1];
     const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const routeBearing = bearingDeg(a, b);
 
     let bestDistSq = Infinity;
     let bestRatio = -1;
 
-    for (const seg of segments) {
+    for (let s = 0; s < segments.length; s++) {
+      const seg = segments[s];
+      const segBearing = segBearings[s];
+
       for (const pt of seg.coordinates) {
-        const d = distSq(mid, pt);
+        const d =
+          segBearing >= 0
+            ? penalizedDistSq(mid, pt, routeBearing, segBearing)
+            : distSq(mid, pt);
         if (d < bestDistSq) {
           bestDistSq = d;
           bestRatio = seg.congestionRatio;
         }
       }
       for (let j = 0; j < seg.coordinates.length - 1; j++) {
-        const d = pointToSegDistSq(mid, seg.coordinates[j], seg.coordinates[j + 1]);
+        let d = pointToSegDistSq(mid, seg.coordinates[j], seg.coordinates[j + 1]);
+        if (segBearing >= 0) {
+          const bearingDiff = Math.abs(routeBearing - segBearing);
+          const diff = Math.min(bearingDiff, 360 - bearingDiff);
+          if (diff > 45) d *= 4;
+          else if (diff > 20) d *= 1.5;
+        }
         if (d < bestDistSq) {
           bestDistSq = d;
           bestRatio = seg.congestionRatio;

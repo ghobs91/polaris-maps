@@ -205,13 +205,29 @@ export function calculateTrafficETA(
     const mid = midpoint(seg.startCoord, seg.endCoord);
 
     const matched = findNearestTrafficSegment(mid, spatialIndex);
-    if (matched && matched.currentSpeedMph > 0) {
-      // Live traffic speed available → use it for the traffic-adjusted time
-      totalSeconds += seg.distanceMeters / (matched.currentSpeedMph * 0.44704);
-      // Use traffic source's free-flow speed for a more accurate baseline when available
-      const baselineSpeed =
-        matched.freeFlowSpeedMph > 0 ? matched.freeFlowSpeedMph : seg.freeFlowSpeedMph;
-      freeFlowTotalSeconds += seg.distanceMeters / (baselineSpeed * 0.44704);
+
+    // Determine the current speed to use for this segment:
+    // - If the matched segment has a live speed (Flow Segment API), use it directly.
+    // - If it only has a congestionRatio (tile sampler), derive speed from the
+    //   route segment's free-flow speed × congestionRatio.
+    // - Otherwise fall back to free-flow.
+    let currentSpeedMph = 0;
+    let baselineFreeFlow = seg.freeFlowSpeedMph;
+
+    if (matched) {
+      if (matched.currentSpeedMph > 0) {
+        currentSpeedMph = matched.currentSpeedMph;
+      } else if (matched.congestionRatio > 0) {
+        currentSpeedMph = seg.freeFlowSpeedMph * matched.congestionRatio;
+      }
+      if (matched.freeFlowSpeedMph > 0) {
+        baselineFreeFlow = matched.freeFlowSpeedMph;
+      }
+    }
+
+    if (currentSpeedMph > 0) {
+      totalSeconds += seg.distanceMeters / (currentSpeedMph * 0.44704);
+      freeFlowTotalSeconds += seg.distanceMeters / (baselineFreeFlow * 0.44704);
       matchedCount++;
     } else {
       const freeFlowSeconds = seg.distanceMeters / (seg.freeFlowSpeedMph * 0.44704);

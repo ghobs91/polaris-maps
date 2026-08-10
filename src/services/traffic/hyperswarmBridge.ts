@@ -44,7 +44,7 @@ interface RpcRequest {
   send: (d: Uint8Array) => void;
 }
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   CMD_JOIN_TOPIC,
   CMD_LEAVE_TOPIC,
