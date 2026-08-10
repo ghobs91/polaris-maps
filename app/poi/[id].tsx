@@ -30,6 +30,10 @@ import { placeToOsmTags } from '../../src/utils/placeToOsmPoi';
 import { checkPoiExistsInOsm } from '../../src/services/poi/osmFetcher';
 import { submitOsmNodeCreate } from '../../src/services/osm/osmEditService';
 import type { StreetImagery } from '../../src/models/imagery';
+import {
+  fetchChargingStations,
+  type ChargingStation,
+} from '../../src/services/poi/openChargeMapService';
 
 const SAFE_URL_SCHEMES = ['https:', 'http:'];
 
@@ -75,6 +79,7 @@ export default function POIDetailScreen() {
   const [nearbyImages, setNearbyImages] = useState<StreetImagery[]>([]);
   const [showSaveSheet, setShowSaveSheet] = useState(false);
   const [seedStatus, setSeedStatus] = useState<'idle' | 'submitting' | 'success'>('idle');
+  const [chargingData, setChargingData] = useState<ChargingStation | null>(null);
 
   const loadPlace = useCallback(async () => {
     if (!id) return;
@@ -101,6 +106,25 @@ export default function POIDetailScreen() {
     loadPlace();
     return () => setSelectedPlace(null);
   }, [loadPlace, setSelectedPlace]);
+
+  // Fetch EV charging details from Open Charge Map when viewing a charging station
+  useEffect(() => {
+    if (!selectedPlace || selectedPlace.category !== 'ev_charging') {
+      setChargingData(null);
+      return;
+    }
+    let cancelled = false;
+    fetchChargingStations(selectedPlace.lat, selectedPlace.lng, 0.1, 1)
+      .then((stations) => {
+        if (!cancelled) setChargingData(stations.length > 0 ? stations[0] : null);
+      })
+      .catch(() => {
+        if (!cancelled) setChargingData(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPlace]);
 
   // Selective auto-seed: when an Overture-sourced POI is opened, check if it
   // already exists in OSM.  If not, submit it automatically.
@@ -312,6 +336,37 @@ export default function POIDetailScreen() {
           </View>
         )}
 
+        {/* EV Charging speed from Open Charge Map */}
+        {chargingData && chargingData.connections.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Charging Speed</Text>
+            {chargingData.connections.map((conn, i) => {
+              const speed = conn.powerKW ? `${conn.powerKW} kW` : 'Unknown speed';
+              const fastBadge = conn.isFastCharge ? ' ⚡ Fast' : '';
+              return (
+                <View key={i} style={styles.chargeConnector}>
+                  <Ionicons
+                    name={conn.isFastCharge ? 'flash' : 'flash-outline'}
+                    size={18}
+                    color={conn.isFastCharge ? '#34C759' : colors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sectionBody}>{conn.type}</Text>
+                    <Text style={[styles.sectionBody, { color: colors.textSecondary, fontSize: 13 }]}>
+                      {speed}{fastBadge}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+            {chargingData.operator && (
+              <Text style={[styles.sectionBody, { marginTop: spacing.xs, color: colors.textSecondary }]}>
+                Operator: {chargingData.operator}
+              </Text>
+            )}
+          </View>
+        )}
+
         {seedStatus !== 'idle' && (
           <View style={[styles.seedBanner, seedStatus === 'success' && styles.seedBannerSuccess]}>
             {seedStatus === 'submitting' ? (
@@ -330,7 +385,11 @@ export default function POIDetailScreen() {
           </View>
         )}
 
-        <View style={styles.actions}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.actions}
+        >
           <Button title="Directions" onPress={handleDirectionsPress} variant="primary" />
           <Button
             title="Write Review"
@@ -369,7 +428,7 @@ export default function POIDetailScreen() {
               <Text style={styles.osmAddButtonText}>Add to OpenStreetMap</Text>
             </Pressable>
           )}
-        </View>
+        </ScrollView>
 
         <Modal visible={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Save to List">
           <SaveToListSheet
@@ -488,8 +547,14 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sectionTitle: { ...typography.subtitle, color: colors.text, marginBottom: spacing.sm },
   sectionBody: { ...typography.body, color: colors.text },
+  chargeConnector: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
   link: { color: colors.primary },
-  actions: { marginTop: spacing.lg, gap: spacing.sm },
+  actions: { marginTop: spacing.lg, gap: spacing.sm, flexDirection: 'row', alignItems: 'center' },
   editCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,

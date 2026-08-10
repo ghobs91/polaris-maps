@@ -20,6 +20,7 @@ import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
+import { fetchTrafficDebounced } from '../../services/traffic/trafficFlowService';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
@@ -335,6 +336,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       if (rawBounds) {
         const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
         useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
+
+        // Fetch viewport traffic data so normalizedSegments are populated for
+        // route-line traffic coloring even before a route is computed.
+        const centerLat = (minLat + maxLat) / 2;
+        const centerLng = (minLng + maxLng) / 2;
+        fetchTrafficDebounced({ lat: centerLat, lng: centerLng, zoom });
       }
 
       if (zoom < POI_MIN_ZOOM) {

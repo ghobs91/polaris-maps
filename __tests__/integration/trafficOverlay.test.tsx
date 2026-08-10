@@ -1,93 +1,168 @@
 import React from 'react';
+import { View } from 'react-native';
 import { render } from '@testing-library/react-native';
-import { useTrafficStore } from '../../src/stores/trafficStore';
-import type { NormalizedTrafficSegment } from '../../src/models/traffic';
+import { useMapStore } from '../../src/stores/mapStore';
 
-// Mock MapLibreGL components
+// ── Mock external dependencies ─────────────────────────────────────
+
+// Control the API key at the module level so tests can toggle it.
+let mockTomtomApiKey = 'test-api-key';
+
+jest.mock('../../src/constants/config', () => ({
+  get tomtomApiKey() {
+    return mockTomtomApiKey;
+  },
+  TOMTOM_FLOW_TILES_BASE_URL: 'https://api.tomtom.com/traffic/map/4/tile/flow/absolute',
+}));
+
 jest.mock('@maplibre/maplibre-react-native', () => ({
-  ShapeSource: ({
+  RasterSource: ({
     children,
-    shape,
+    tileUrlTemplates,
+    id,
+    tileSize,
+    minZoomLevel,
+    maxZoomLevel,
   }: {
     children: React.ReactNode;
-    shape: GeoJSON.FeatureCollection;
+    tileUrlTemplates: string[];
+    id: string;
+    tileSize: number;
+    minZoomLevel: number;
+    maxZoomLevel: number;
   }) => {
-    // Expose shape for assertions via testID
     return (
-      <mock-shape-source testID="traffic-shape-source" data-shape={JSON.stringify(shape)}>
+      <View
+        testID="tomtom-traffic-source"
+        accessibilityLabel={`src:${id} url:${tileUrlTemplates[0]} size:${tileSize} minz:${minZoomLevel} maxz:${maxZoomLevel}`}
+      >
         {children}
-      </mock-shape-source>
+      </View>
     );
   },
-  LineLayer: ({ style }: { style: Record<string, unknown> }) => {
-    return <mock-line-layer testID="traffic-line-layer" data-style={JSON.stringify(style)} />;
+  RasterLayer: ({ id, style }: { id: string; style: Record<string, unknown> }) => {
+    return (
+      <View
+        testID="tomtom-traffic-layer"
+        accessibilityLabel={`layer:${id} opacity:${style.rasterOpacity}`}
+      />
+    );
   },
 }));
 
 // Import after mocks
 import { TrafficOverlay } from '../../src/components/map/TrafficOverlay';
 
-const MOCK_SEGMENTS: NormalizedTrafficSegment[] = [
-  {
-    id: 'tomtom:abc123',
-    coordinates: [
-      [4.84, 52.41],
-      [4.85, 52.42],
-    ],
-    currentSpeedMph: 45,
-    freeFlowSpeedMph: 60,
-    congestionRatio: 0.75,
-    confidence: 0.9,
-    source: 'tomtom',
-    timestamp: 1000000,
-  },
-  {
-    id: 'tomtom:def456',
-    coordinates: [
-      [4.86, 52.43],
-      [4.87, 52.44],
-    ],
-    currentSpeedMph: 10,
-    freeFlowSpeedMph: 60,
-    congestionRatio: 0.167,
-    confidence: 0.9,
-    source: 'tomtom',
-    timestamp: 1000000,
-  },
-];
+// ── Helpers ────────────────────────────────────────────────────────
+
+function setTrafficVisible(visible: boolean) {
+  useMapStore.setState({ trafficLayerVisible: visible });
+}
+
+function setApiKey(key: string) {
+  mockTomtomApiKey = key;
+}
+
+/** Extract a labelled value from the accessibilityLabel of a test instance. */
+function getAccessibilityLabelValue(
+  instance: { props: { accessibilityLabel?: string } },
+  key: string,
+): string | undefined {
+  const label: string = instance.props.accessibilityLabel ?? '';
+  const regex = new RegExp(`${key}:([^ ]+)`);
+  const match = label.match(regex);
+  return match?.[1];
+}
+
+// ── Tests ──────────────────────────────────────────────────────────
 
 describe('TrafficOverlay', () => {
   beforeEach(() => {
-    useTrafficStore.setState({
-      normalizedSegments: [],
-      segmentTraffic: {},
+    // Reset to defaults
+    setApiKey('test-api-key');
+    useMapStore.setState({ trafficLayerVisible: false });
+  });
+
+  describe('when no API key is configured', () => {
+    it('renders nothing (returns null)', () => {
+      setApiKey('');
+
+      const { queryByTestId } = render(<TrafficOverlay />);
+
+      expect(queryByTestId('tomtom-traffic-source')).toBeNull();
+      expect(queryByTestId('tomtom-traffic-layer')).toBeNull();
     });
   });
 
-  it('renders nothing when there are no normalized segments', () => {
-    const { queryByTestId } = render(<TrafficOverlay />);
-    expect(queryByTestId('traffic-shape-source')).toBeNull();
-  });
+  describe('when an API key is configured', () => {
+    it('renders the RasterSource and RasterLayer', () => {
+      setTrafficVisible(true);
 
-  it('renders ShapeSource and LineLayer when segments are available', () => {
-    useTrafficStore.setState({ normalizedSegments: MOCK_SEGMENTS });
-    const { getByTestId } = render(<TrafficOverlay />);
+      const { getByTestId } = render(<TrafficOverlay />);
 
-    expect(getByTestId('traffic-shape-source')).toBeTruthy();
-    expect(getByTestId('traffic-line-layer')).toBeTruthy();
-  });
+      expect(getByTestId('tomtom-traffic-source')).toBeTruthy();
+      expect(getByTestId('tomtom-traffic-layer')).toBeTruthy();
+    });
 
-  it('creates LineString features from normalized segments', () => {
-    useTrafficStore.setState({ normalizedSegments: MOCK_SEGMENTS });
-    const { getByTestId } = render(<TrafficOverlay />);
+    it('passes the TomTom tile URL to RasterSource', () => {
+      setTrafficVisible(true);
+      setApiKey('my-secret-key');
 
-    const shapeSource = getByTestId('traffic-shape-source');
-    const shape = JSON.parse(shapeSource.props['data-shape']);
+      const { getByTestId } = render(<TrafficOverlay />);
 
-    expect(shape.type).toBe('FeatureCollection');
-    expect(shape.features).toHaveLength(2);
-    expect(shape.features[0].geometry.type).toBe('LineString');
-    expect(shape.features[0].properties.congestionRatio).toBe(0.75);
-    expect(shape.features[1].properties.congestionRatio).toBeCloseTo(0.167, 2);
+      const source = getByTestId('tomtom-traffic-source');
+      const url = getAccessibilityLabelValue(source, 'url');
+      expect(url).toContain('key=my-secret-key');
+      expect(url).toContain('tileSize=256');
+      expect(url).toContain('thickness=3');
+    });
+
+    it('uses tileSize=256, minZoom=6, maxZoom=18', () => {
+      setTrafficVisible(true);
+
+      const { getByTestId } = render(<TrafficOverlay />);
+
+      const source = getByTestId('tomtom-traffic-source');
+      expect(getAccessibilityLabelValue(source, 'size')).toBe('256');
+      expect(getAccessibilityLabelValue(source, 'minz')).toBe('6');
+      expect(getAccessibilityLabelValue(source, 'maxz')).toBe('18');
+    });
+
+    it('sets raster opacity to 0.7 when traffic is visible and not suppressed', () => {
+      setTrafficVisible(true);
+
+      const { getByTestId } = render(<TrafficOverlay suppressRaster={false} />);
+
+      const layer = getByTestId('tomtom-traffic-layer');
+      expect(getAccessibilityLabelValue(layer, 'opacity')).toBe('0.7');
+    });
+
+    it('sets raster opacity to 0 when traffic is toggled off', () => {
+      setTrafficVisible(false);
+
+      const { getByTestId } = render(<TrafficOverlay />);
+
+      const layer = getByTestId('tomtom-traffic-layer');
+      expect(getAccessibilityLabelValue(layer, 'opacity')).toBe('0');
+    });
+
+    it('sets raster opacity to 0 when suppressRaster is true (even when visible)', () => {
+      setTrafficVisible(true);
+
+      const { getByTestId } = render(<TrafficOverlay suppressRaster={true} />);
+
+      const layer = getByTestId('tomtom-traffic-layer');
+      expect(getAccessibilityLabelValue(layer, 'opacity')).toBe('0');
+    });
+
+    it('still renders (not null) when traffic is off — just at opacity 0', () => {
+      setTrafficVisible(false);
+
+      const { getByTestId } = render(<TrafficOverlay />);
+
+      // Component should still render (not return null) — opacity handles visibility
+      expect(getByTestId('tomtom-traffic-source')).toBeTruthy();
+      expect(getByTestId('tomtom-traffic-layer')).toBeTruthy();
+    });
   });
 });

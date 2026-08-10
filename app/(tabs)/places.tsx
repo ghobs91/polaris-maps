@@ -20,7 +20,7 @@ import { Button, ErrorBoundary, Modal, GlassView } from '../../src/components/co
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { PlaceList } from '../../src/models/placeList';
 
 type ListSortMode = 'recent' | 'alpha';

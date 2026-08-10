@@ -17,7 +17,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { useTrafficStore } from '../../stores/trafficStore';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
 import type { ValhallaRoute } from '../../models/route';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
@@ -34,6 +34,7 @@ import {
   averageRouteTrafficColor,
   ETA_COLOR_GREEN,
 } from '../../services/traffic/routeTrafficService';
+import { fetchRouteTrafficImmediate } from '../../services/traffic/trafficFlowService';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import {
   shouldOfferParkAndRide,
@@ -180,6 +181,11 @@ export function LocationActionPanel() {
         // Store as preview (not active navigation)
         setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
 
+        // Fetch traffic data along the route so the route line shows
+        // color-coded congestion segments immediately.
+        const routeCoords = decodePolyline(routes[0].geometry);
+        fetchRouteTrafficImmediate(routeCoords);
+
         // Zoom map to show the entire route
         if (routes[0].boundingBox) {
           setFitBounds(routes[0].boundingBox);
@@ -293,6 +299,10 @@ export function LocationActionPanel() {
       setParkAndRideResult(result);
       setRoutePreview(result.drivingLeg, [], selectedLocation, 'auto');
       if (result.drivingLeg.boundingBox) setFitBounds(result.drivingLeg.boundingBox);
+
+      // Fetch traffic data for the park-and-ride driving leg
+      const routeCoords = decodePolyline(result.drivingLeg.geometry);
+      fetchRouteTrafficImmediate(routeCoords);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setRouteError(msg || 'Park & Ride routing failed');

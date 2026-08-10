@@ -36,12 +36,26 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
 
   // Build traffic-colored GeoJSON from store segments (reactive)
   const trafficGeoJSON: TrafficFeatureCollection | null = useMemo(() => {
-    if (normalizedSegments.length === 0) return null;
+    if (normalizedSegments.length === 0) {
+      if (__DEV__) console.log('[TrafficRouteLayer] no segments yet');
+      return null;
+    }
     const result = buildRouteTrafficGeoJSON(coordinates, normalizedSegments);
+    if (__DEV__)
+      console.log(
+        `[TrafficRouteLayer] ${normalizedSegments.length} segments → ${result.features.length} features; 1st color: ${result.features[0]?.properties.color}`,
+      );
     return result.features.length > 0 ? result : null;
   }, [coordinates, normalizedSegments]);
 
   const hasTraffic = !!trafficGeoJSON;
+
+  // Empty shape for the traffic source so it's always mounted — avoids
+  // MapLibre unmount/remount issues when switching from fallback to colored.
+  const emptyTrafficShape = useMemo(
+    () => ({ type: 'FeatureCollection' as const, features: [] }),
+    [],
+  );
 
   return (
     <>
@@ -69,29 +83,33 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
         />
       </MapLibreGL.ShapeSource>
 
-      {/* Traffic-colored segments — rendered on top once data is available */}
-      {trafficGeoJSON && (
-        <MapLibreGL.ShapeSource id="route-traffic" shape={trafficGeoJSON as any}>
-          <MapLibreGL.LineLayer
-            id="route-traffic-casing"
-            style={{
-              lineColor: '#ffffff',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
-              lineCap: 'round',
-              lineJoin: 'round',
-            }}
-          />
-          <MapLibreGL.LineLayer
-            id="route-traffic-line"
-            style={{
-              lineColor: ['get', 'color'] as any,
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
-              lineCap: 'round',
-              lineJoin: 'round',
-            }}
-          />
-        </MapLibreGL.ShapeSource>
-      )}
+      {/* Traffic-colored segments — always mounted so MapLibre layers
+          persist; toggled on/off via opacity to avoid mount/remount. */}
+      <MapLibreGL.ShapeSource
+        id="route-traffic"
+        shape={(trafficGeoJSON || emptyTrafficShape) as any}
+      >
+        <MapLibreGL.LineLayer
+          id="route-traffic-casing"
+          style={{
+            lineColor: '#ffffff',
+            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
+            lineCap: 'round',
+            lineJoin: 'round',
+            lineOpacity: hasTraffic ? 1 : 0,
+          }}
+        />
+        <MapLibreGL.LineLayer
+          id="route-traffic-line"
+          style={{
+            lineColor: ['get', 'color'] as any,
+            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
+            lineCap: 'round',
+            lineJoin: 'round',
+            lineOpacity: hasTraffic ? 1 : 0,
+          }}
+        />
+      </MapLibreGL.ShapeSource>
     </>
   );
 }

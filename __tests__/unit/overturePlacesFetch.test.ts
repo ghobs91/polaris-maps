@@ -1,11 +1,13 @@
 // Mock native/expo modules before imports
-jest.mock('expo-file-system', () => ({
+const mockFileSystem = {
   downloadAsync: jest.fn(),
   deleteAsync: jest.fn(),
   makeDirectoryAsync: jest.fn(),
   getInfoAsync: jest.fn(),
   documentDirectory: '/mock/docs/',
-}));
+};
+jest.mock('expo-file-system', () => mockFileSystem);
+jest.mock('expo-file-system/legacy', () => mockFileSystem);
 jest.mock('expo-sqlite', () => ({}));
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(),

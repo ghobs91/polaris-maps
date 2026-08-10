@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { GlassView } from '../common/GlassView';
@@ -69,6 +69,7 @@ import { formatDistance } from '../../utils/units';
 import { shouldOfferParkAndRide, planParkAndRide } from '../../services/routing/parkAndRideService';
 import { decodePolyline } from '../../utils/polyline';
 import { useTrafficStore } from '../../stores/trafficStore';
+import { fetchRouteTrafficImmediate } from '../../services/traffic/trafficFlowService';
 import { useSettingsStore } from '../../stores/settingsStore';
 import {
   averageRouteTrafficColor,
@@ -93,7 +94,7 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
     lat: r.lat,
     lng: r.lng,
   };
-  return { entry, rank: r.score };
+  return { entry, rank: r.score, poi: r.poi };
 }
 
 // ─────────────────────────────────────────────
@@ -393,7 +394,7 @@ function CtrlBtn({
   const { colors } = useTheme();
   const iconColor = isDark ? '#EBEBF5' : colors.text;
   return (
-    <GlassView material="clear" isInteractive style={ctrlStyles.btn}>
+    <GlassView material="regular" isInteractive style={ctrlStyles.btn}>
       <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btnInner}>
         <Ionicons name={icon as any} size={20} color={iconColor} />
       </TouchableOpacity>
@@ -429,12 +430,9 @@ export function MapControlsColumn({
         </GlassView>
       )}
 
-      {/* Stacked glass buttons */}
-      <GlassView material="regular" style={ctrlStyles.buttonsContainer}>
-        <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
-        <View style={ctrlStyles.separator} />
-        <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
-      </GlassView>
+      {/* Stacked floating glass buttons */}
+      <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
+      <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
     </View>
   );
 }
@@ -444,12 +442,7 @@ const ctrlStyles = StyleSheet.create({
     alignSelf: 'flex-end',
     alignItems: 'flex-end',
     marginBottom: 8,
-    gap: 6,
-  },
-  buttonsContainer: {
-    borderRadius: borderRadius.lg,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
+    gap: 8,
   },
   btn: {
     width: 46,
@@ -462,11 +455,6 @@ const ctrlStyles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(120,120,128,0.3)',
-    marginHorizontal: 10,
   },
   layersCard: {
     borderRadius: borderRadius.lg,
@@ -870,22 +858,24 @@ export function FloatingSearchPanel({
       const displayedResults = [...stationResults, ...filteredApple, ...filteredUnified];
       const mapPois: OsmPoi[] = displayedResults
         .filter((result) => result.entry.type !== 'station')
-        .map((result) => ({
-          id: result.entry.id,
-          lat: result.entry.lat,
-          lng: result.entry.lng,
-          name: result.entry.text,
-          type: 'amenity',
-          subtype: 'place',
-          tags: {
-            ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
-            ...(result.entry.housenumber ? { 'addr:housenumber': result.entry.housenumber } : {}),
-            ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
-            ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
-            ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
-            ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
+        .map((result) =>
+          result.poi ?? {
+            id: result.entry.id,
+            lat: result.entry.lat,
+            lng: result.entry.lng,
+            name: result.entry.text,
+            type: 'amenity',
+            subtype: 'place',
+            tags: {
+              ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
+              ...(result.entry.housenumber ? { 'addr:housenumber': result.entry.housenumber } : {}),
+              ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
+              ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
+              ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
+              ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
+            },
           },
-        }));
+        );
 
       // Only show map markers for results within ~20 km of the search anchor.
       // This prevents far-away results (e.g. Manhattan locations when the user
@@ -1119,10 +1109,19 @@ export function FloatingSearchPanel({
       }
 
       navigateToResult(result);
-      setSelectedResult(result);
-      setRouteError(null);
-      clearRoutePreview();
-      setMode('location');
+
+      if (result.poi) {
+        // Rich POI result — open the full place card instead of the directions panel
+        useOsmPoiStore.getState().setSelectedPoi(result.poi);
+        setSelectedResult(null);
+        setMode('idle');
+      } else {
+        // Simple address/geocode result — show directions panel
+        setSelectedResult(result);
+        setRouteError(null);
+        clearRoutePreview();
+        setMode('location');
+      }
     },
     [mode, dismissSearch, navigateToResult, clearRoutePreview],
   );
@@ -1238,6 +1237,10 @@ export function FloatingSearchPanel({
         setRoutePreview(routes[0], routes.slice(1), dest, costing, currentWaypoints);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
         setMode('route-preview');
+
+        // Fetch traffic data along the route for color-coded segments
+        const routeCoords = decodePolyline(routes[0].geometry);
+        fetchRouteTrafficImmediate(routeCoords);
 
         // Check if park-and-ride should be offered (runs in background)
         shouldOfferParkAndRide(pos.coords.latitude, pos.coords.longitude)
@@ -1357,6 +1360,10 @@ export function FloatingSearchPanel({
       setRoutePreview(result.drivingLeg, [], dest, 'auto');
       if (result.drivingLeg.boundingBox) setFitBounds(result.drivingLeg.boundingBox);
       setMode('route-preview');
+
+      // Fetch traffic data for the park-and-ride driving leg
+      const routeCoords = decodePolyline(result.drivingLeg.geometry);
+      fetchRouteTrafficImmediate(routeCoords);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setRouteError(msg || 'Park & Ride routing failed');
@@ -1458,6 +1465,10 @@ export function FloatingSearchPanel({
         }
         setRoutePreview(routes[0], routes.slice(1), dest, costing, waypoints);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
+
+        // Fetch traffic data along the rerouted path
+        const routeCoords = decodePolyline(routes[0].geometry);
+        fetchRouteTrafficImmediate(routeCoords);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         setRouteError(msg || 'Could not compute route');
@@ -2498,6 +2509,7 @@ export function FloatingSearchPanel({
                               lng: poi.lng,
                             },
                             rank: 50,
+                            poi,
                           }))
                         : results
                   }

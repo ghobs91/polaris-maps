@@ -29,6 +29,7 @@ import { SaveToListSheet } from '../places/SaveToListSheet';
 import {
   fetchChargingStations,
   type ChargingStation,
+  type ChargingConnection,
 } from '../../services/poi/openChargeMapService';
 
 const SCREEN_H = Dimensions.get('window').height;
@@ -57,6 +58,43 @@ function buildAddress(tags: Record<string, string>): string | null {
 
 function capitalise(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Map raw MKPOI category strings (from MapKit enrichment) to human-readable labels. */
+const MKPOI_LABELS: Record<string, string> = {
+  MKPOICategoryRestaurant: 'Restaurant',
+  MKPOICategoryCafe: 'Café',
+  MKPOICategoryBakery: 'Bakery',
+  MKPOICategoryNightlife: 'Nightlife',
+  MKPOICategoryGasStation: 'Gas Station',
+  MKPOICategoryParking: 'Parking',
+  MKPOICategoryHospital: 'Hospital',
+  MKPOICategoryPharmacy: 'Pharmacy',
+  MKPOICategorySchool: 'School',
+  MKPOICategoryUniversity: 'University',
+  MKPOICategoryLibrary: 'Library',
+  MKPOICategoryMuseum: 'Museum',
+  MKPOICategoryTheater: 'Theatre',
+  MKPOICategoryPark: 'Park',
+  MKPOICategoryBeach: 'Beach',
+  MKPOICategoryStore: 'Store',
+  MKPOICategoryGrocery: 'Grocery',
+  MKPOICategoryFitnessCenter: 'Fitness Center',
+  MKPOICategoryHotel: 'Hotel',
+  MKPOICategoryBank: 'Bank',
+  MKPOICategoryATM: 'ATM',
+  MKPOICategoryPostOffice: 'Post Office',
+  MKPOICategoryLaundry: 'Laundry',
+  MKPOICategoryCarRental: 'Car Rental',
+  MKPOICategoryAmusementPark: 'Amusement Park',
+  MKPOICategoryAquarium: 'Aquarium',
+  MKPOICategoryZoo: 'Zoo',
+  MKPOICategoryMovieTheater: 'Cinema',
+};
+
+/** Return a clean human-readable category label, handling both MKPOI raw strings and OSM subtypes. */
+function formatPoiCategory(rawCategory: string): string {
+  return MKPOI_LABELS[rawCategory] ?? capitalise(rawCategory);
 }
 
 /** Return human-readable list from semicolon-separated OSM values */
@@ -271,9 +309,10 @@ interface ActionPillProps {
   label: string;
   onPress: () => void;
   color: string;
+  fillColor: string;
 }
 
-function ActionPill({ icon, label, onPress, color }: ActionPillProps) {
+function ActionPill({ icon, label, onPress, color, fillColor }: ActionPillProps) {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -281,7 +320,7 @@ function ActionPill({ icon, label, onPress, color }: ActionPillProps) {
       accessibilityLabel={label}
       accessibilityRole="button"
     >
-      <GlassView material="clear" isInteractive style={pillStyles.pill}>
+      <GlassView material="regular" isInteractive style={[pillStyles.pill, { backgroundColor: fillColor }]}>
         <Ionicons
           name={icon}
           size={20}
@@ -312,6 +351,7 @@ const pillStyles = StyleSheet.create({
     gap: 4,
     minWidth: 68,
     flex: 1,
+    overflow: 'hidden',
   },
   label: {
     fontSize: 11,
@@ -324,7 +364,7 @@ const pillStyles = StyleSheet.create({
 // ---------------------------------------------------------------------------
 
 export function POIInfoCard() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
@@ -492,8 +532,8 @@ export function POIInfoCard() {
   const subtextColor = colors.textSecondary;
   const borderColor = colors.border;
   const primary = colors.primary;
-  // Pill button background — subtle tint of surface
-  const pillBg = colors.background;
+  // Pill button background — semi-transparent surface for contrast against card glass
+  const pillFill = isDark ? 'rgba(44,44,46,0.65)' : 'rgba(235,235,240,0.7)';
 
   const handlePhone = useCallback(() => {
     if (parsed?.phone) Linking.openURL(`tel:${parsed.phone.replace(/\s+/g, '')}`);
@@ -597,7 +637,7 @@ export function POIInfoCard() {
         {poi && parsed && category && (
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: spacing.xxl + insets.bottom }]}
             showsVerticalScrollIndicator={false}
             scrollEnabled
             onScrollBeginDrag={() => {
@@ -652,7 +692,9 @@ export function POIInfoCard() {
                   {poi.name}
                 </Text>
                 <Text style={[styles.categoryLabel, { color: subtextColor }]}>
-                  {enrichedData?.poiCategory ?? capitalise(poi.subtype)}
+                  {enrichedData?.poiCategory
+                    ? formatPoiCategory(enrichedData.poiCategory)
+                    : capitalise(poi.subtype)}
                   {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
                   {parsed.stars ? ` · ${parsed.stars}` : ''}
                 </Text>
@@ -671,12 +713,13 @@ export function POIInfoCard() {
                 label="Directions"
                 onPress={handleDirections}
                 color={primary}
+                fillColor={pillFill}
               />
               {parsed.phone && (
-                <ActionPill icon="call" label="Call" onPress={handlePhone} color={primary} />
+                <ActionPill icon="call" label="Call" onPress={handlePhone} color={primary} fillColor={pillFill} />
               )}
               {parsed.website && (
-                <ActionPill icon="globe" label="Website" onPress={handleWebsite} color={primary} />
+                <ActionPill icon="globe" label="Website" onPress={handleWebsite} color={primary} fillColor={pillFill} />
               )}
               {parsed.menuUrl && (
                 <ActionPill
@@ -684,22 +727,25 @@ export function POIInfoCard() {
                   label="Menu"
                   onPress={handleMenu}
                   color={primary}
+                  fillColor={pillFill}
                 />
               )}
               {parsed.email && (
-                <ActionPill icon="mail" label="Email" onPress={handleEmail} color={primary} />
+                <ActionPill icon="mail" label="Email" onPress={handleEmail} color={primary} fillColor={pillFill} />
               )}
               <ActionPill
                 icon="bookmark-outline"
                 label="Save"
                 onPress={() => setShowSaveSheet(true)}
                 color={primary}
+                fillColor={pillFill}
               />
               <ActionPill
                 icon="share-outline"
                 label="Share"
                 onPress={handleShare}
                 color={primary}
+                fillColor={pillFill}
               />
             </View>
 
@@ -724,15 +770,16 @@ export function POIInfoCard() {
 
             {/* ── Description ───────────────────────────────────────────── */}
             {parsed.description && (
-              <View style={[styles.section, { borderColor }]}>
+              <GlassView material="regular" style={[styles.section, { borderColor }]}>
                 <Text style={[styles.sectionDescription, { color: subtextColor }]}>
                   {parsed.description}
                 </Text>
-              </View>
+              </GlassView>
             )}
 
             {/* ── Info rows ─────────────────────────────────────────────── */}
-            <View
+            <GlassView
+              material="regular"
               style={[
                 styles.section,
                 {
@@ -838,16 +885,18 @@ export function POIInfoCard() {
                   iconColor: colors.success,
                 },
                 // EV Charging information from Open Charge Map
-                chargingData?.connections &&
-                  chargingData.connections.length > 0 && {
-                    icon: 'flash-outline' as const,
-                    label: `${chargingData.connections.length} connector${chargingData.connections.length > 1 ? 's' : ''}: ${chargingData.connections.map((c) => c.type).join(', ')}`,
-                  },
-                chargingData?.connections?.some((c) => c.isFastCharge) && {
-                  icon: 'flash' as const,
-                  label: 'Fast charging available',
-                  iconColor: colors.success,
-                },
+                // Show each connector with its charging speed (power in kW)
+                ...(chargingData?.connections?.length
+                  ? chargingData.connections.map((conn: ChargingConnection) => {
+                      const speed = conn.powerKW ? ` · ${conn.powerKW} kW` : '';
+                      const fastBadge = conn.isFastCharge ? ' ⚡' : '';
+                      return {
+                        icon: conn.isFastCharge ? 'flash' : 'flash-outline',
+                        label: `${conn.type}${speed}${fastBadge}`,
+                        iconColor: conn.isFastCharge ? colors.success : undefined,
+                      };
+                    })
+                  : []),
                 chargingData?.pricing && {
                   icon: 'pricetag-outline' as const,
                   label: chargingData.pricing,
@@ -888,21 +937,19 @@ export function POIInfoCard() {
                     />
                   );
                 })}
-            </View>
-
-            {/* ── Social media ──────────────────────────────────────────── */}
+            </GlassView>
             {(parsed.facebook || parsed.instagram || parsed.twitter) && (
               <View style={styles.socialRow}>
                 {parsed.facebook && (
                   <TouchableOpacity onPress={handleFacebook}>
-                    <GlassView material="clear" isInteractive style={styles.socialBtn}>
+                    <GlassView material="regular" isInteractive style={styles.socialBtn}>
                       <Text style={[styles.socialLabel, { color: primary }]}>Facebook</Text>
                     </GlassView>
                   </TouchableOpacity>
                 )}
                 {parsed.instagram && (
                   <TouchableOpacity onPress={handleInstagram}>
-                    <GlassView material="clear" isInteractive style={styles.socialBtn}>
+                    <GlassView material="regular" isInteractive style={styles.socialBtn}>
                       <Text style={[styles.socialLabel, { color: primary }]}>Instagram</Text>
                     </GlassView>
                   </TouchableOpacity>
@@ -917,7 +964,7 @@ export function POIInfoCard() {
                       )
                     }
                   >
-                    <GlassView material="clear" isInteractive style={styles.socialBtn}>
+                    <GlassView material="regular" isInteractive style={styles.socialBtn}>
                       <Text style={[styles.socialLabel, { color: primary }]}>X / Twitter</Text>
                     </GlassView>
                   </TouchableOpacity>
@@ -927,7 +974,7 @@ export function POIInfoCard() {
 
             {/* ── Note ──────────────────────────────────────────────────── */}
             {parsed.note && (
-              <View style={[styles.noteBox, { backgroundColor: pillBg }]}>
+              <GlassView material="regular" style={styles.noteBox}>
                 <Ionicons
                   name="information-circle-outline"
                   size={15}
@@ -935,7 +982,7 @@ export function POIInfoCard() {
                   style={{ marginTop: 1 }}
                 />
                 <Text style={[styles.noteText, { color: subtextColor }]}>{parsed.note}</Text>
-              </View>
+              </GlassView>
             )}
 
             {/* ── Update Place Info (OSM edit) ──────────────────────── */}
@@ -952,7 +999,7 @@ export function POIInfoCard() {
                   });
                 }}
               >
-                <GlassView material="clear" isInteractive style={styles.updatePlaceBtn}>
+                <GlassView material="regular" isInteractive style={styles.updatePlaceBtn}>
                   <Ionicons name="create-outline" size={18} color={primary} />
                   <Text style={[styles.updatePlaceBtnText, { color: primary }]}>
                     Update Place Info
@@ -1105,6 +1152,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     borderRadius: borderRadius.lg,
     borderCurve: 'continuous',
+    overflow: 'hidden',
   },
   sectionDescription: {
     ...typography.bodySmall,
@@ -1124,6 +1172,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.round,
     borderCurve: 'continuous',
+    overflow: 'hidden',
   },
   socialLabel: {
     ...typography.label,
@@ -1137,6 +1186,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     borderCurve: 'continuous',
     alignItems: 'flex-start',
+    overflow: 'hidden',
   },
   noteText: {
     ...typography.caption,
@@ -1153,6 +1203,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: borderRadius.lg,
     borderCurve: 'continuous',
+    overflow: 'hidden',
   },
   updatePlaceBtnText: {
     fontSize: 15,

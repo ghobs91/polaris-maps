@@ -754,9 +754,14 @@ export function TransitStopCard() {
             />
           </View>
 
-          {/* Route badges */}
+          {/* Route badges — horizontally scrollable single row */}
           {uniqueRoutes.length > 0 && (
-            <View style={styles.routeBadges}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.routeBadgesScroll}
+              contentContainerStyle={styles.routeBadgesContent}
+            >
               {uniqueRoutes.map((r, i) => (
                 <RouteBadge
                   key={`${r.name}-${i}`}
@@ -765,7 +770,7 @@ export function TransitStopCard() {
                   mode={r.mode}
                 />
               ))}
-            </View>
+            </ScrollView>
           )}
 
           {/* Departures */}
@@ -1291,7 +1296,6 @@ const badgeStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
-    marginRight: 8,
   },
   text: {
     fontSize: 14,
@@ -1406,12 +1410,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  routeBadges: {
+  routeBadgesScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 8,
+  },
+  routeBadgesContent: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    gap: 6,
     paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 4,
   },
   departuresList: {
     flex: 1,
