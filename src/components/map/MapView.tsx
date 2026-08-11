@@ -189,6 +189,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Track whether camera should follow nav position (breaks on user gesture)
   const followCameraRef = useRef(true);
   const suppressNextPressRef = useRef(false);
+  // Keep arrow/map-circle sizing in sync as the user zooms.
+  // Default to 17 because the puck only renders in navigation mode, where the
+  // camera is locked to zoom 17 until a region event updates this value.
+  const [currentZoom, setCurrentZoom] = useState(17);
+  const lastZoomRef = useRef(17);
 
   // Sync external followCamera prop into ref
   useEffect(() => {
@@ -293,8 +298,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         followCameraRef.current = false;
         onFollowCameraChange?.(false);
       }
-      if (navigationMode || zoomClearedRef.current) return;
       const zoom: number = event?.properties?.zoomLevel ?? 0;
+      if (zoom > 0 && Math.abs(zoom - lastZoomRef.current) >= 0.1) {
+        lastZoomRef.current = zoom;
+        setCurrentZoom(zoom);
+      }
+      if (navigationMode || zoomClearedRef.current) return;
       const { currentZoom, categorySearchResults } = useOsmPoiStore.getState();
       if (!categorySearchResults && Math.abs(zoom - currentZoom) >= 1) {
         useOsmPoiStore.getState().setPois([]);
@@ -325,9 +334,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       // Don't fetch POIs while actively navigating — camera moves constantly and
       // POI annotations would fight the nav UI.
-      if (navigationMode) return;
-
       const zoom: number = event?.properties?.zoomLevel ?? 0;
+      if (zoom > 0 && Math.abs(zoom - lastZoomRef.current) >= 0.1) {
+        lastZoomRef.current = zoom;
+        setCurrentZoom(zoom);
+      }
+
+      if (navigationMode) return;
       const rawBounds: [[number, number], [number, number]] | undefined =
         event?.properties?.visibleBounds;
 
@@ -559,6 +572,19 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
   }, [styleLoadFailed]);
 
+  // Build the nav puck shapes in map-plane coordinates.  Memoizing avoids
+  // re-computing the GeoJSON on every render while still reacting to zoom,
+  // bearing and position changes.
+  const navPuckShapes = useMemo(() => {
+    if (!navigationMode || !navPosition) return null;
+    const lat = navPosition[1];
+    return {
+      shadow: buildNavPuckShadowGeoJSON(navPosition, navBearing, lat, currentZoom),
+      arrowBody: buildNavPuckArrowBodyGeoJSON(navPosition, navBearing, lat, currentZoom),
+      arrowTop: buildNavPuckArrowTopGeoJSON(navPosition, navBearing, lat, currentZoom),
+    };
+  }, [navigationMode, navPosition, navBearing, currentZoom]);
+
   return (
     <View style={styles.container}>
       <MapLibreGL.MapView
@@ -613,10 +639,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
 
         {/* Nav puck rendered as map layers so it tilts with the 3D map view.
-            The background circle and triangle are in separate ShapeSources so
-            the CircleLayer only sees the Point feature (avoids extra
-            circles at the polygon's vertices/centroid). */}
-        {navigationMode && navPosition && (
+            The shadow, background circle and arrow each live in their own
+            ShapeSource so the CircleLayer only sees the Point feature (avoids
+            extra circles at the polygon's vertices/centroid). */}
+        {navigationMode && navPosition && navPuckShapes && (
           <>
             <MapLibreGL.ShapeSource
               id="navPuckCircle"
@@ -631,31 +657,45 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 style={
                   {
                     circleRadius: 26,
-                    circleColor: isDark ? 'rgba(44,44,46,0.65)' : 'rgba(255,255,255,0.65)',
+                    circleColor: 'rgba(255, 255, 255, 0.65)',
+                    circleStrokeWidth: 3.5,
+                    circleStrokeColor: PUCK_BLUE,
+                    circleOpacity: 1,
                   } as any
                 }
               />
             </MapLibreGL.ShapeSource>
 
-            <MapLibreGL.ShapeSource
-              id="navPuckTriangle"
-              shape={buildNavPuckTriangleGeoJSON(navPosition, navBearing)}
-            >
+            {/* Cast shadow on the map behind the puck. */}
+            <MapLibreGL.ShapeSource id="navPuckShadow" shape={navPuckShapes.shadow}>
               <MapLibreGL.FillLayer
-                id="navPuckTriangleFill"
+                id="navPuckShadowFill"
                 style={
                   {
-                    fillColor: '#4A8CFF',
+                    fillColor: 'rgba(74, 140, 255, 0.16)',
                   } as any
                 }
               />
-              <MapLibreGL.LineLayer
-                id="navPuckTriangleBorder"
+            </MapLibreGL.ShapeSource>
+
+            {/* 3D arrow: light-blue body shifted back, white top face on front. */}
+            <MapLibreGL.ShapeSource id="navPuckArrowBody" shape={navPuckShapes.arrowBody}>
+              <MapLibreGL.FillLayer
+                id="navPuckArrowBodyFill"
                 style={
                   {
-                    lineColor: '#FFFFFF',
-                    lineWidth: 3.5,
-                    lineJoin: 'miter',
+                    fillColor: 'rgba(74, 140, 255, 0.35)',
+                  } as any
+                }
+              />
+            </MapLibreGL.ShapeSource>
+
+            <MapLibreGL.ShapeSource id="navPuckArrowTop" shape={navPuckShapes.arrowTop}>
+              <MapLibreGL.FillLayer
+                id="navPuckArrowTopFill"
+                style={
+                  {
+                    fillColor: '#FFFFFF',
                   } as any
                 }
               />
@@ -712,74 +752,150 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   );
 });
 
+const PUCK_BLUE = '#4A8CFF';
+
+// Screen-pixel sizes for the nav puck arrow.  They are converted to meters at
+// the current zoom/latitude so the arrow stays proportionate to the fixed-pixel
+// CircleLayer background.
+const ARROW_FORWARD_PX = 18;
+const ARROW_BACK_PX = 2;
+const ARROW_HALF_WIDTH_PX = 5.5;
+const BODY_SHIFT_PX = 3;
+const SHADOW_SHIFT_PX = 5;
+const SHADOW_SCALE = 1.15;
+
 /**
- * Build a GeoJSON FeatureCollection for the nav puck triangle (fill + border)
- * in map-plane coordinates so it tilts correctly when the map is pitched.
- * The circle background lives in a separate source.
+ * Convert a screen-pixel dimension to ground meters at the given zoom/latitude.
+ * This lets map-layer shapes stay a constant screen size as the user zooms.
  */
-function buildNavPuckTriangleGeoJSON(
-  position: [number, number],
-  bearing: number,
-): {
-  type: 'FeatureCollection';
-  features: Array<
-    | {
-        type: 'Feature';
-        properties: Record<string, never>;
-        geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
-      }
-    | {
-        type: 'Feature';
-        properties: Record<string, never>;
-        geometry: { type: 'LineString'; coordinates: [number, number][] };
-      }
-  >;
-} {
-  const [lng, lat] = position;
+function pxToMeters(px: number, lat: number, zoom: number): number {
+  const metersPerPixel = (156543.03 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
+  return px * metersPerPixel;
+}
+
+function getMetersPerDegree(lat: number): { lat: number; lng: number } {
   const latRad = (lat * Math.PI) / 180;
   const mPerDegLat = 111320;
-  const mPerDegLng = 111320 * Math.cos(latRad);
+  return { lat: mPerDegLat, lng: mPerDegLat * Math.cos(latRad) };
+}
 
-  // Tall, narrow arrow: tip extends well forward, base is short and narrow
-  const forwardM = 14;
-  const backM = 4;
-  const halfWidthM = 5.5;
+function buildArrowRing(
+  centerLng: number,
+  centerLat: number,
+  bearing: number,
+  zoom: number,
+  scale: number,
+): [number, number][] {
+  const m = getMetersPerDegree(centerLat);
+
+  const forwardM = pxToMeters(ARROW_FORWARD_PX * scale, centerLat, zoom);
+  const backM = pxToMeters(ARROW_BACK_PX * scale, centerLat, zoom);
+  const halfWidthM = pxToMeters(ARROW_HALF_WIDTH_PX * scale, centerLat, zoom);
 
   const rad = (bearing * Math.PI) / 180;
   const perpRad = rad + Math.PI / 2;
 
-  const tipLng = lng + (forwardM * Math.sin(rad)) / mPerDegLng;
-  const tipLat = lat + (forwardM * Math.cos(rad)) / mPerDegLat;
+  const tipLng = centerLng + (forwardM * Math.sin(rad)) / m.lng;
+  const tipLat = centerLat + (forwardM * Math.cos(rad)) / m.lat;
 
-  const baseCenterLng = lng - (backM * Math.sin(rad)) / mPerDegLng;
-  const baseCenterLat = lat - (backM * Math.cos(rad)) / mPerDegLat;
+  const baseCenterLng = centerLng - (backM * Math.sin(rad)) / m.lng;
+  const baseCenterLat = centerLat - (backM * Math.cos(rad)) / m.lat;
 
-  const leftLng = baseCenterLng + (halfWidthM * Math.sin(perpRad)) / mPerDegLng;
-  const leftLat = baseCenterLat + (halfWidthM * Math.cos(perpRad)) / mPerDegLat;
-  const rightLng = baseCenterLng - (halfWidthM * Math.sin(perpRad)) / mPerDegLng;
-  const rightLat = baseCenterLat - (halfWidthM * Math.cos(perpRad)) / mPerDegLat;
+  const leftLng = baseCenterLng + (halfWidthM * Math.sin(perpRad)) / m.lng;
+  const leftLat = baseCenterLat + (halfWidthM * Math.cos(perpRad)) / m.lat;
+  const rightLng = baseCenterLng - (halfWidthM * Math.sin(perpRad)) / m.lng;
+  const rightLat = baseCenterLat - (halfWidthM * Math.cos(perpRad)) / m.lat;
 
-  const ring: [number, number][] = [
+  return [
     [tipLng, tipLat],
     [leftLng, leftLat],
     [rightLng, rightLat],
     [tipLng, tipLat],
   ];
+}
+
+/**
+ * Build a soft shadow polygon cast behind the navigation puck.
+ */
+function buildNavPuckShadowGeoJSON(
+  position: [number, number],
+  bearing: number,
+  lat: number,
+  zoom: number,
+): {
+  type: 'Feature';
+  properties: Record<string, never>;
+  geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+} {
+  const [lng] = position;
+  const m = getMetersPerDegree(lat);
+
+  const shadowShiftM = pxToMeters(SHADOW_SHIFT_PX, lat, zoom);
+  const rad = (bearing * Math.PI) / 180;
+  const shadowCenterLng = lng - (shadowShiftM * Math.sin(rad)) / m.lng;
+  const shadowCenterLat = lat - (shadowShiftM * Math.cos(rad)) / m.lat;
+
+  const ring = buildArrowRing(shadowCenterLng, shadowCenterLat, bearing, zoom, SHADOW_SCALE);
 
   return {
-    type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'Polygon', coordinates: [ring] },
-      },
-      {
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: ring },
-      },
-    ],
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'Polygon', coordinates: [ring] },
+  };
+}
+
+/**
+ * Build the light-blue body polygon of the 3D nav puck arrow.  It is the same
+ * shape as the top face but shifted slightly backward so it peeks out as the
+ * side/back faces.  Map-plane coordinates keep it tilted with the map, and
+ * pxToMeters keeps the screen size constant as the user zooms.
+ */
+function buildNavPuckArrowBodyGeoJSON(
+  position: [number, number],
+  bearing: number,
+  lat: number,
+  zoom: number,
+): {
+  type: 'Feature';
+  properties: Record<string, never>;
+  geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+} {
+  const [lng] = position;
+  const m = getMetersPerDegree(lat);
+
+  const bodyShiftM = pxToMeters(BODY_SHIFT_PX, lat, zoom);
+  const rad = (bearing * Math.PI) / 180;
+  const bodyCenterLng = lng - (bodyShiftM * Math.sin(rad)) / m.lng;
+  const bodyCenterLat = lat - (bodyShiftM * Math.cos(rad)) / m.lat;
+  const bodyRing = buildArrowRing(bodyCenterLng, bodyCenterLat, bearing, zoom, 1);
+
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'Polygon', coordinates: [bodyRing] },
+  };
+}
+
+/**
+ * Build the white top-face polygon of the 3D nav puck arrow.
+ */
+function buildNavPuckArrowTopGeoJSON(
+  position: [number, number],
+  bearing: number,
+  lat: number,
+  zoom: number,
+): {
+  type: 'Feature';
+  properties: Record<string, never>;
+  geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+} {
+  const [lng] = position;
+  const topRing = buildArrowRing(lng, lat, bearing, zoom, 1);
+
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'Polygon', coordinates: [topRing] },
   };
 }
 
