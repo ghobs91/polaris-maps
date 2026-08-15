@@ -32,22 +32,18 @@ export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) 
   }, [apiKey]);
 
   if (!apiKey) {
-    if (__DEV__) {
-      console.warn(
-        '[TrafficOverlay] No TomTom API key configured. Set EXPO_PUBLIC_TOMTOM_API_KEY in .env',
-      );
-    }
+    console.warn(
+      '[TrafficOverlay] No TomTom API key configured. Set EXPO_PUBLIC_TOMTOM_API_KEY in .env',
+    );
     return null;
   }
 
   const opacity = suppressRaster || !trafficLayerVisible ? 0 : 0.7;
 
-  if (__DEV__) {
-    const keyPreview = apiKey.length >= 6 ? apiKey.slice(0, 6) + '...' : '(empty)';
-    console.log(
-      `[TrafficOverlay] visible=${trafficLayerVisible} suppress=${suppressRaster} opacity=${opacity} key=${keyPreview} url=${tileUrl.slice(0, 80)}...`,
-    );
-  }
+  const keyPreview = apiKey.length >= 6 ? apiKey.slice(0, 6) + '...' : '(empty)';
+  console.log(
+    `[TrafficOverlay] visible=${trafficLayerVisible} suppress=${suppressRaster} opacity=${opacity} key=${keyPreview} url=${tileUrl.slice(0, 80)}...`,
+  );
 
   return (
     <MapLibreGL.RasterSource

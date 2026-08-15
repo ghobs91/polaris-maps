@@ -274,7 +274,19 @@ export default function NavigationScreen() {
     // Each frame advances the displayed position along the route at the last
     // known speed, computed from the elapsed time since the GPS anchor.
     // This produces continuous, Google/Apple-Maps-style gliding between GPS ticks.
-    const BEARING_ALPHA = 0.12; // low-pass weight for bearing smoothing
+
+    // Helper: shortest signed angle delta in [-180, 180].
+    const shortestAngleDelta = (from: number, to: number) => ((to - from + 540) % 360) - 180;
+
+    // Helper: interpolate between two angles along the shortest path.
+    const interpolateBearing = (from: number, to: number, t: number) =>
+      (from + shortestAngleDelta(from, to) * t + 360) % 360;
+
+    // Bearing interpolation state.
+    const BEARING_DURATION_MS = 200;
+    let bearingTarget = smoothBearingRef.current;
+    let bearingStart = smoothBearingRef.current;
+    let bearingStartTime = performance.now();
 
     // Distance from pos/segIdx to coords[targetIdx], walking the polyline.
     const distToIndex = (pos: [number, number], segIdx: number, targetIdx: number): number => {
@@ -298,13 +310,22 @@ export default function NavigationScreen() {
             anchor.segIdx,
             anchor.speedMps * elapsed,
           );
-          // Low-pass filter the bearing from the route direction
+          // Compute the route bearing and smoothly interpolate toward it.
+          // Uses shortest-path interpolation over BEARING_DURATION_MS so
+          // turns animate naturally without a visible snap.
+          // Only restart interpolation when the target changes meaningfully
+          // (>0.5°) to avoid micro-restarts from floating-point drift.
           const rawBearing = computeBearing(
             coords[curSegIdx],
             coords[Math.min(curSegIdx + 1, coords.length - 1)],
           );
-          const delta = ((rawBearing - smoothBearingRef.current + 540) % 360) - 180;
-          smoothBearingRef.current = (smoothBearingRef.current + delta * BEARING_ALPHA + 360) % 360;
+          if (Math.abs(shortestAngleDelta(bearingTarget, rawBearing)) > 0.5) {
+            bearingStart = smoothBearingRef.current;
+            bearingTarget = rawBearing;
+            bearingStartTime = now;
+          }
+          const t = Math.min((now - bearingStartTime) / BEARING_DURATION_MS, 1.0);
+          smoothBearingRef.current = interpolateBearing(bearingStart, bearingTarget, t);
           setNavPosition(curPos);
           setNavBearing(smoothBearingRef.current);
         } else {

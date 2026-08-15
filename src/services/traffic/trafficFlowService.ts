@@ -139,9 +139,13 @@ export async function fetchTrafficImmediate(viewport: ViewportBounds): Promise<v
  * align with the actual path (instead of a viewport grid).
  */
 async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Promise<void> {
-  if (routeFetchInProgress) return;
+  if (routeFetchInProgress) {
+    console.log('[TrafficFlowService] route fetch already in progress, skipping');
+    return;
+  }
 
   routeFetchInProgress = true;
+  console.log(`[TrafficFlowService] fetching route traffic for ${routeCoords.length} coords`);
   try {
     // Sample colors from TomTom raster tiles (same source as the traffic
     // overlay) instead of calling the point-based Flow Segment API.
@@ -158,14 +162,11 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       const merged = mergeTrafficSources(allSegments, previousTimestamp);
       if (merged.length > 0) {
         useTrafficStore.getState().setNormalizedSegments(merged);
-        if (__DEV__)
-          console.log(
-            `[TrafficFlowService] route store updated: ${merged.length} segments`,
-          );
-      } else if (__DEV__) {
+        console.log(`[TrafficFlowService] route store updated: ${merged.length} segments`);
+      } else {
         console.log('[TrafficFlowService] route merge returned empty');
       }
-    } else if (__DEV__) {
+    } else {
       console.log('[TrafficFlowService] route fetch returned no segments');
     }
   } catch (error) {

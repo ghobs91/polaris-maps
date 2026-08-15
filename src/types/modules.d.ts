@@ -135,6 +135,11 @@ declare module '@react-native-community/slider' {
   export default class Slider extends Component<SliderProps> {}
 }
 
+declare module '*.png' {
+  const value: number;
+  export default value;
+}
+
 declare module 'expo-document-picker' {
   export interface DocumentPickerAsset {
     uri: string;

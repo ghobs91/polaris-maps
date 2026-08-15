@@ -103,7 +103,12 @@ export interface ViewportBounds {
 export async function fetchTomTomTraffic(
   viewport: ViewportBounds,
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!tomtomApiKey) return [];
+  if (!tomtomApiKey) {
+    console.warn(
+      '[TomTomFetcher] No TomTom API key configured. Viewport traffic data unavailable.',
+    );
+    return [];
+  }
 
   const gridSize = gridSizeForZoom(viewport.zoom);
   const points = sampleGrid(viewport.west, viewport.south, viewport.east, viewport.north, gridSize);

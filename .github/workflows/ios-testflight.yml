@@ -68,6 +68,15 @@ jobs:
       - name: Install Node.js dependencies
         run: pnpm install --frozen-lockfile
 
+      # Write EXPO_PUBLIC_* env vars to .env so @expo/env inlines them
+      # during Metro bundling (triggered by the Xcode build phase).
+      # The .env file is gitignored; this creates it on the CI runner only.
+      - name: Write CI .env file
+        run: |
+          echo "EXPO_PUBLIC_TOMTOM_API_KEY=$EXPO_PUBLIC_TOMTOM_API_KEY" > .env
+        env:
+          EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
+
       - name: Install CocoaPods
         run: |
           cd ios
@@ -103,6 +112,7 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_PATH: ${{ env.APP_STORE_CONNECT_KEY_PATH || '$HOME/.appstoreconnect/ci_key.p8' }}
+          EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
         timeout-minutes: 45
 
       # -------------------------------------------------------------------
@@ -111,3 +121,7 @@ jobs:
       - name: Clean up API key
         if: always()
         run: rm -f ~/.appstoreconnect/ci_key.p8
+
+      - name: Clean up temporary .env
+        if: always()
+        run: rm -f .env

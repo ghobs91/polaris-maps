@@ -147,7 +147,8 @@ function decodePng(buffer: ArrayBuffer): DecodedTile | null {
     const rowStart = row * stride;
     const filter = inflated[rowStart];
     const src = inflated.subarray(rowStart + 1, rowStart + stride);
-    const prevRow = row > 0 ? inflated.subarray((row - 1) * stride + 1, (row - 1) * stride + stride) : null;
+    const prevRow =
+      row > 0 ? inflated.subarray((row - 1) * stride + 1, (row - 1) * stride + stride) : null;
 
     // Unfilter
     const unfiltered = new Uint8Array(width * bytesPerPixel);
@@ -236,35 +237,41 @@ const tileCache = new Map<string, DecodedTile>();
 async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<DecodedTile | null> {
   const key = `${z}/${x}/${y}`;
   const cached = tileCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    console.log(`[TileSampler] tile ${key} cache hit`);
+    return cached;
+  }
 
   const url = `${TOMTOM_FLOW_TILES_BASE_URL}/${z}/${x}/${y}.png?key=${encodeURIComponent(tomtomApiKey)}&tileSize=256&thickness=3`;
+  const redactedUrl = url.replace(/key=[^&]+/, 'key=REDACTED');
 
   try {
+    console.log(`[TileSampler] fetching tile ${key}: ${redactedUrl}`);
     const res = await fetch(url);
     if (!res.ok) {
-      if (__DEV__) console.warn(`[TileSampler] tile ${key} HTTP ${res.status}`);
+      console.warn(`[TileSampler] tile ${key} HTTP ${res.status} for ${redactedUrl}`);
       return null;
     }
     const buffer = await res.arrayBuffer();
+    console.log(`[TileSampler] tile ${key} fetched ${buffer.byteLength} bytes`);
     let decoded: DecodedTile | null = null;
     try {
       decoded = decodePng(buffer);
     } catch (err) {
-      if (__DEV__) console.warn(`[TileSampler] tile ${key} PNG decode threw:`, err);
+      console.warn(`[TileSampler] tile ${key} PNG decode threw:`, err);
       return null;
     }
     if (!decoded) {
-      if (__DEV__)
-        console.warn(
-          `[TileSampler] tile ${key} PNG decode returned null (${buffer.byteLength} bytes)`,
-        );
+      console.warn(
+        `[TileSampler] tile ${key} PNG decode returned null (${buffer.byteLength} bytes)`,
+      );
       return null;
     }
+    console.log(`[TileSampler] tile ${key} decoded ${decoded.width}x${decoded.height}`);
     tileCache.set(key, decoded);
     return decoded;
   } catch (err) {
-    if (__DEV__) console.warn(`[TileSampler] tile ${key} fetch error:`, err);
+    console.warn(`[TileSampler] tile ${key} fetch error:`, err);
     return null;
   }
 }
@@ -283,7 +290,10 @@ async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<Deco
 export async function sampleRouteTileColors(
   routeCoords: [number, number][],
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!tomtomApiKey) return [];
+  if (!tomtomApiKey) {
+    console.warn('[TileSampler] No TomTom API key configured. Traffic route colors unavailable.');
+    return [];
+  }
 
   // Sample roughly every 500 m along the route (same as old ROUTE_SAMPLE_SPACING_DEG)
   const sampleSpacingDeg = 0.005;
@@ -362,12 +372,10 @@ export async function sampleRouteTileColors(
 
   await Promise.all(tilePromises);
 
-  if (__DEV__) {
-    const ratios = segments.map((s) => s.congestionRatio.toFixed(2));
-    console.log(
-      `[TileSampler] ${routeCoords.length} route coords → ${sampled.length} sampled points → ${byTile.size} tiles → ${segments.length} colored segments; ratios: ${ratios.slice(0, 20).join(', ')}`,
-    );
-  }
+  const ratios = segments.map((s) => s.congestionRatio.toFixed(2));
+  console.log(
+    `[TileSampler] ${routeCoords.length} route coords → ${sampled.length} sampled points → ${byTile.size} tiles → ${segments.length} colored segments; ratios: ${ratios.slice(0, 20).join(', ')}`,
+  );
 
   return segments;
 }
