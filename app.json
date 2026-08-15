@@ -36,6 +36,7 @@
       ]
     },
     "plugins": [
+      "./plugins/withSceneLifecycle",
       "./plugins/withXcode16Fixes",
       "./plugins/withValhalla",
       "@maplibre/maplibre-react-native",
