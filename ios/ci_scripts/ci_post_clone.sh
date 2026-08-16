@@ -53,6 +53,7 @@ echo ""
 echo "→ pod install"
 cd ios
 
+# ── 5. CocoaPods (with retry for network flakes) ───────────────────────
 # Retry up to 3 times — Maven Central / GitHub can be flaky on CI
 for i in 1 2 3; do
   echo "  Attempt $i/3…"
@@ -70,6 +71,20 @@ for i in 1 2 3; do
 done
 
 cd ..
+
+# ── 6. Write .env from Xcode Cloud environment variables ────────────────
+# Xcode Cloud secrets/variables are exposed as environment variables.
+# Expo's Metro bundler reads .env files to inline EXPO_PUBLIC_* values
+# into the production JS bundle. The .env file is gitignored and lives
+# only in the Xcode Cloud working directory.
+echo ""
+echo "→ Writing .env from Xcode Cloud environment"
+env | grep '^EXPO_PUBLIC_' > .env
+if [ -s .env ]; then
+  echo "→ Wrote $(wc -l < .env | tr -d ' ') EXPO_PUBLIC_* entries to .env"
+else
+  echo "⚠️ No EXPO_PUBLIC_* variables found in Xcode Cloud environment"
+fi
 
 echo ""
 echo "━━━ post-clone complete ━━━"
