@@ -22,6 +22,12 @@ interface TrafficState {
   isExternalFetchLoading: boolean;
   lastExternalFetchAt: number | null;
 
+  // Historical condition index state
+  historyEntryCount: number;
+  lastResolveSource: string | null;
+  /** Bumped when new traffic tiles are seeded — cache-busts the raster source. */
+  trafficTileSeedVersion: number;
+
   updateSegment: (state: AggregatedTrafficState) => void;
   removeSegment: (segmentId: string) => void;
   bulkUpdateSegments: (states: AggregatedTrafficState[]) => void;
@@ -32,6 +38,9 @@ interface TrafficState {
   setTrafficMode: (mode: TrafficMode) => void;
   setNormalizedSegments: (segments: NormalizedTrafficSegment[]) => void;
   setExternalFetchLoading: (loading: boolean) => void;
+  setHistoryEntryCount: (count: number) => void;
+  setLastResolveSource: (source: string | null) => void;
+  bumpTrafficTileSeedVersion: () => void;
   clearAll: () => void;
 }
 
@@ -46,6 +55,10 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   normalizedSegments: [],
   isExternalFetchLoading: false,
   lastExternalFetchAt: null,
+
+  historyEntryCount: 0,
+  lastResolveSource: null,
+  trafficTileSeedVersion: 0,
 
   updateSegment: (state) =>
     set((prev) => ({
@@ -73,6 +86,10 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   setNormalizedSegments: (normalizedSegments) =>
     set({ normalizedSegments, lastExternalFetchAt: Math.floor(Date.now() / 1000) }),
   setExternalFetchLoading: (isExternalFetchLoading) => set({ isExternalFetchLoading }),
+  setHistoryEntryCount: (historyEntryCount) => set({ historyEntryCount }),
+  setLastResolveSource: (lastResolveSource) => set({ lastResolveSource }),
+  bumpTrafficTileSeedVersion: () =>
+    set((s) => ({ trafficTileSeedVersion: s.trafficTileSeedVersion + 1 })),
   clearAll: () =>
     set({
       segmentTraffic: {},

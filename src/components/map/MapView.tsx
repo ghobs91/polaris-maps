@@ -20,8 +20,8 @@ import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
-import { TrafficDebugOverlay } from './TrafficDebugOverlay';
-import { fetchTrafficDebounced } from '../../services/traffic/trafficFlowService';
+import { fetchTrafficDebounced, seedTrafficTilesForViewport } from '../../services/traffic/trafficFlowService';
+import { onViewportChange } from '../../services/traffic/topicManager';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
@@ -344,6 +344,18 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         const centerLat = (minLat + maxLat) / 2;
         const centerLng = (minLng + maxLng) / 2;
         fetchTrafficDebounced({ lat: centerLat, lng: centerLng, zoom });
+
+        // Sync the P2P traffic topic subscriptions (geohash4 cells) with the
+        // visible area so probes/conditions flow for where the user is looking.
+        onViewportChange(centerLat, centerLng);
+
+        // Seed traffic raster tiles (disk → P2P → TomTom) for the visible area.
+        if (useMapStore.getState().trafficLayerVisible) {
+          const { width, height } = Dimensions.get('window');
+          void seedTrafficTilesForViewport(centerLat, centerLng, zoom, width, height).catch(
+            () => {},
+          );
+        }
       }
 
       if (zoom < POI_MIN_ZOOM) {
@@ -729,9 +741,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
         <POILayer />
       </MapLibreGL.MapView>
-
-      {/* Temporary debug overlay for traffic layer diagnosis */}
-      <TrafficDebugOverlay />
     </View>
   );
 });

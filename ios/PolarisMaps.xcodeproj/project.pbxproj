@@ -12,6 +12,8 @@
 		251037C88B0DD2D3BACA85F4 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		46E7E3615A6344C3A2DBA2AD /* PolarisMapKit.m in Sources */ = {isa = PBXBuildFile; fileRef = F2BC011838D044099F21DB03 /* PolarisMapKit.m */; };
+		7A1B2C3D4E5F60718293A4B5 /* PolarisTileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */; };
+		7A1B2C3D4E5F60718293A4B7 /* PolarisTileServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		BF3891B60B8448B7B274AE55 /* PolarisMapKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8BAE8712525453CAFB56E92 /* PolarisMapKit.swift */; };
 		C7BF509CF6DCEB99EE54D734 /* libPods-PolarisMaps.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CD204D124A01011F5E3A87AB /* libPods-PolarisMaps.a */; };
@@ -26,6 +28,8 @@
 /* Begin PBXFileReference section */
 		0723003A8E134284B1ED9178 /* SceneDelegate.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = SceneDelegate.swift; path = PolarisMaps/SceneDelegate.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* PolarisMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PolarisMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisTileServer.swift; path = PolarisMaps/PolarisTileServer.swift; sourceTree = "<group>"; };
+		9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisTileServer.m; path = PolarisMaps/PolarisTileServer.m; sourceTree = "<group>"; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = PolarisMaps/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = PolarisMaps/Info.plist; sourceTree = "<group>"; };
 		3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -71,6 +75,8 @@
 				50CDF40BACBB47688A156721 /* PolarisValhalla.m */,
 				F8BAE8712525453CAFB56E92 /* PolarisMapKit.swift */,
 				F2BC011838D044099F21DB03 /* PolarisMapKit.m */,
+				9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */,
+				9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */,
 				3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */,
 				0723003A8E134284B1ED9178 /* SceneDelegate.swift */,
 			);
@@ -409,6 +415,8 @@
 				108BD7555BD0469A9E414660 /* PolarisValhalla.m in Sources */,
 				BF3891B60B8448B7B274AE55 /* PolarisMapKit.swift in Sources */,
 				46E7E3615A6344C3A2DBA2AD /* PolarisMapKit.m in Sources */,
+				7A1B2C3D4E5F60718293A4B5 /* PolarisTileServer.swift in Sources */,
+				7A1B2C3D4E5F60718293A4B7 /* PolarisTileServer.m in Sources */,
 				251037C88B0DD2D3BACA85F4 /* ExpoModulesProvider.swift in Sources */,
 				E0E33A224CD74ED7B573E34D /* SceneDelegate.swift in Sources */,
 			);

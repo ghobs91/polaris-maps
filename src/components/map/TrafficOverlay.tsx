@@ -1,7 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { useMapStore } from '../../stores/mapStore';
+import { useTrafficStore } from '../../stores/trafficStore';
 import { TOMTOM_FLOW_TILES_BASE_URL } from '../../constants/config';
+import { getTrafficTileUrlTemplate } from '../../services/traffic/trafficTileService';
 
 /**
  * Resolve the TomTom API key at call time rather than at module import.
@@ -22,14 +24,44 @@ interface TrafficOverlayProps {
 
 export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) {
   const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
+  const tileSeedVersion = useTrafficStore((s) => s.trafficTileSeedVersion);
+  const [localTemplate, setLocalTemplate] = useState<string | null>(null);
+
+  // Resolve the local tile server URL template once the native module is up.
+  useEffect(() => {
+    let cancelled = false;
+    const template = getTrafficTileUrlTemplate();
+    if (template) {
+      setLocalTemplate(template);
+      return;
+    }
+    // The tile service may still be starting; poll briefly for it.
+    const timer = setInterval(() => {
+      const t = getTrafficTileUrlTemplate();
+      if (t) {
+        clearInterval(timer);
+        if (!cancelled) setLocalTemplate(t);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const apiKey = getTomtomApiKey();
 
   const tileUrl = useMemo(() => {
+    // Prefer the local P2P/cache-backed tile server when it's running;
+    // the seed version cache-busts so MapLibre re-requests tiles after new
+    // ones have been seeded into the disk cache.
+    if (localTemplate) {
+      return `${localTemplate}?v=${tileSeedVersion}`;
+    }
     if (!apiKey) return '';
     const encodedKey = encodeURIComponent(apiKey);
     return `${TOMTOM_FLOW_TILES_BASE_URL}/{z}/{x}/{y}.png?key=${encodedKey}&tileSize=256&thickness=3`;
-  }, [apiKey]);
+  }, [apiKey, localTemplate, tileSeedVersion]);
 
   if (!apiKey) {
     console.warn(
@@ -40,10 +72,13 @@ export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) 
 
   const opacity = suppressRaster || !trafficLayerVisible ? 0 : 0.7;
 
-  const keyPreview = apiKey.length >= 6 ? apiKey.slice(0, 6) + '...' : '(empty)';
-  console.log(
-    `[TrafficOverlay] visible=${trafficLayerVisible} suppress=${suppressRaster} opacity=${opacity} key=${keyPreview} url=${tileUrl.slice(0, 80)}...`,
-  );
+  if (__DEV__) {
+    const keyPreview = apiKey.length >= 6 ? apiKey.slice(0, 6) + '...' : '(empty)';
+    console.log(
+      `[TrafficOverlay] visible=${trafficLayerVisible} suppress=${suppressRaster} opacity=${opacity} ` +
+        `localServer=${localTemplate ? 'yes' : 'no'} key=${keyPreview}`,
+    );
+  }
 
   return (
     <MapLibreGL.RasterSource

@@ -46,7 +46,7 @@ export type IncidentType =
 
 // --- New types for traffic flow overlay & ETA (feature 002) ---
 
-export type TrafficSource = 'tomtom' | 'here' | 'p2p';
+export type TrafficSource = 'tomtom' | 'here' | 'p2p' | 'history';
 
 export interface NormalizedTrafficSegment {
   id: string;

@@ -1,10 +1,16 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo } from 'react';
-import { InteractionManager } from 'react-native';
+import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { ConnectivityBanner } from '@/components/common';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
+import {
+  initTrafficP2P,
+  disposeTrafficP2P,
+  suspendTrafficP2P,
+  resumeTrafficP2P,
+} from '@/services/traffic/trafficFlowService';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 
 function RootLayoutInner() {
@@ -21,6 +27,29 @@ function RootLayoutInner() {
       initCarPlay();
     });
     return () => task.cancel();
+  }, []);
+
+  useEffect(() => {
+    // Start the P2P traffic mesh (Hyperswarm worklet + Nostr fallback) after
+    // initial interactions so the map's first paint isn't delayed.
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) void initTrafficP2P().catch(() => {});
+    });
+
+    // Suspend/resume the mesh with the app lifecycle to save battery.
+    const onAppStateChange = (state: AppStateStatus) => {
+      if (state === 'active') resumeTrafficP2P();
+      else if (state === 'background') suspendTrafficP2P();
+    };
+    const sub = AppState.addEventListener('change', onAppStateChange);
+
+    return () => {
+      cancelled = true;
+      task.cancel();
+      sub.remove();
+      disposeTrafficP2P();
+    };
   }, []);
 
   // Theme-aware header chrome so the nav bar matches dark/light Settings.

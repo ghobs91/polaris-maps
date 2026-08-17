@@ -15,7 +15,10 @@
 
 import RPC from 'bare-rpc';
 import Hyperswarm from 'hyperswarm';
-import { sha256 } from '@noble/hashes/sha256';
+// Import the CJS build directly (pure JS, no node:crypto). The package's
+// exports map routes bare-pack's ESM resolution to esm/cryptoNode.js which
+// imports node builtins that don't exist in the Bare runtime.
+import { sha256 } from './node_modules/@noble/hashes/sha256.js';
 import b4a from 'b4a';
 import goodbye from 'graceful-goodbye';
 
@@ -25,9 +28,17 @@ const CMD_JOIN_TOPIC = 0;
 const CMD_LEAVE_TOPIC = 1;
 const CMD_PUBLISH_PROBE = 2;
 const CMD_GET_STATUS = 3;
+const CMD_REQUEST_CONDITIONS = 4; // RN → worklet: broadcast condition request
+const CMD_SEND_CONDITION_RESPONSE = 5; // RN → worklet: reply to a peer
+const CMD_REQUEST_TILE = 6; // RN → worklet: broadcast tile request
+const CMD_SEND_TILE_RESPONSE = 7; // RN → worklet: reply to a peer with a tile
 const CMD_INCOMING_PROBE = 10;
 const CMD_PEER_COUNT = 11;
 const CMD_AGGREGATED_UPDATE = 12;
+const CMD_INCOMING_CONDITION_REQUEST = 13; // worklet → RN
+const CMD_INCOMING_CONDITION_RESPONSE = 14; // worklet → RN
+const CMD_INCOMING_TILE_REQUEST = 15; // worklet → RN
+const CMD_INCOMING_TILE_RESPONSE = 16; // worklet → RN
 const CMD_SUSPEND = 20;
 const CMD_RESUME = 21;
 
@@ -47,7 +58,9 @@ const AGGREGATE_BROADCAST_INTERVAL_MS = 3_000;
 
 let swarm = null;
 const joinedTopics = new Map(); // geohash4 → { discovery, connections: Set }
-const peerProtocols = new Map(); // connection → channel
+const peerProtocols = new Map(); // connection → { info, connId }
+const connById = new Map(); // connId → connection
+let nextConnId = 1;
 
 // Probe aggregation (per-segment rolling window)
 const segmentProbes = new Map(); // segmentId → [{ speedMph, timestamp }]
@@ -78,6 +91,26 @@ function handleRequest(req) {
       case CMD_PUBLISH_PROBE: {
         const probeBytes = req.data;
         broadcastProbe(probeBytes);
+        req.reply(b4a.from('ok'));
+        break;
+      }
+      case CMD_REQUEST_CONDITIONS: {
+        broadcastConditionRequest(req.data);
+        req.reply(b4a.from('ok'));
+        break;
+      }
+      case CMD_SEND_CONDITION_RESPONSE: {
+        handleSendConditionResponse(req.data);
+        req.reply(b4a.from('ok'));
+        break;
+      }
+      case CMD_REQUEST_TILE: {
+        broadcastTileRequest(req.data);
+        req.reply(b4a.from('ok'));
+        break;
+      }
+      case CMD_SEND_TILE_RESPONSE: {
+        handleSendTileResponse(req.data);
         req.reply(b4a.from('ok'));
         break;
       }
@@ -159,24 +192,60 @@ function leaveGeohashTopic(geohash4) {
 // ── Per-connection protocol ─────────────────────────────────────────
 
 function setupPeerProtocol(conn, info) {
-  // Use the connection directly for probe exchange.
-  // Each message is length-prefixed by the stream.
+  const connId = nextConnId++;
+  connById.set(connId, conn);
 
   conn.on('data', (data) => {
-    handleIncomingProbe(data, conn);
+    handleConnectionData(data, conn, connId);
   });
 
   conn.on('close', () => {
     peerProtocols.delete(conn);
+    connById.delete(connId);
     broadcastPeerCount();
   });
 
   conn.on('error', () => {
     peerProtocols.delete(conn);
+    connById.delete(connId);
   });
 
-  peerProtocols.set(conn, { info });
+  peerProtocols.set(conn, { info, connId });
   broadcastPeerCount();
+}
+
+/**
+ * Dispatch an inbound peer message by envelope type:
+ *   - `t: 'cr'`  → condition request: forward to RN, RN answers via RPC
+ *   - `t: 'cs'`  → condition response: forward to RN
+ *   - otherwise  → legacy traffic probe (v1 format)
+ */
+function handleConnectionData(data, conn, connId) {
+  let msg;
+  try {
+    msg = JSON.parse(b4a.toString(data));
+  } catch {
+    return; // Malformed — skip
+  }
+
+  if (msg && msg.t === 'cr') {
+    notifyConditionRequest(msg, connId);
+    return;
+  }
+  if (msg && msg.t === 'cs') {
+    notifyConditionResponse(msg);
+    return;
+  }
+  if (msg && msg.t === 'tr') {
+    notifyTileRequest(msg, connId);
+    return;
+  }
+  if (msg && msg.t === 'ts') {
+    notifyTileResponse(msg);
+    return;
+  }
+
+  handleIncomingProbe(data, conn);
 }
 
 // ── Probe broadcasting ──────────────────────────────────────────────
@@ -193,6 +262,82 @@ function broadcastProbe(probeBytes) {
 
   // Also ingest locally
   handleIncomingProbe(probeBytes, null);
+}
+
+// ── Condition request/response relaying ─────────────────────────────
+
+/** Broadcast a condition request (raw JSON from RN) to every peer. */
+function broadcastConditionRequest(reqBytes) {
+  for (const conn of peerProtocols.keys()) {
+    try {
+      conn.write(reqBytes);
+    } catch {
+      // Connection may have closed
+    }
+  }
+}
+
+/** Broadcast a tile request (raw JSON from RN) to every peer. */
+function broadcastTileRequest(reqBytes) {
+  for (const conn of peerProtocols.keys()) {
+    try {
+      conn.write(reqBytes);
+    } catch {
+      // Connection may have closed
+    }
+  }
+}
+
+/**
+ * RN → worklet: send a condition response back to one peer.
+ * Data is `{ connId, requestId, entries }`.
+ */
+function handleSendConditionResponse(data) {
+  let parsed;
+  try {
+    parsed = JSON.parse(b4a.toString(data));
+  } catch {
+    return;
+  }
+  const conn = connById.get(parsed.connId);
+  if (!conn) return;
+
+  const msg = {
+    t: 'cs',
+    id: parsed.requestId,
+    e: parsed.entries,
+  };
+  try {
+    conn.write(b4a.from(JSON.stringify(msg)));
+  } catch {
+    // Connection may have closed
+  }
+}
+
+/**
+ * RN → worklet: send a tile response back to one peer.
+ * Data is `{ connId, requestId, tile: { z, x, y, b64 } }`.
+ */
+function handleSendTileResponse(data) {
+  let parsed;
+  try {
+    parsed = JSON.parse(b4a.toString(data));
+  } catch {
+    return;
+  }
+  const conn = connById.get(parsed.connId);
+  if (!conn) return;
+
+  const msg = {
+    t: 'ts',
+    id: parsed.requestId,
+    tl: parsed.tile,
+  };
+  try {
+    conn.write(b4a.from(JSON.stringify(msg)));
+  } catch {
+    // Connection may have closed
+  }
 }
 
 // ── Probe ingestion & aggregation ───────────────────────────────────
@@ -296,6 +441,76 @@ function notifyProbeReceived(probe) {
   }
 }
 
+function notifyConditionRequest(msg, connId) {
+  try {
+    const req = rpc.request(CMD_INCOMING_CONDITION_REQUEST);
+    req.send(
+      b4a.from(
+        JSON.stringify({
+          connId,
+          id: msg.id || '',
+          cells: msg.c || [],
+          bucket: { dayOfWeek: msg.d ?? 0, halfHour: msg.h ?? 0 },
+          maxAgeSec: msg.a ?? 900,
+        }),
+      ),
+    );
+  } catch {
+    // RPC may not be ready
+  }
+}
+
+function notifyConditionResponse(msg) {
+  try {
+    const req = rpc.request(CMD_INCOMING_CONDITION_RESPONSE);
+    req.send(
+      b4a.from(
+        JSON.stringify({
+          id: msg.id || '',
+          entries: msg.e || [],
+        }),
+      ),
+    );
+  } catch {
+    // RPC may not be ready
+  }
+}
+
+function notifyTileRequest(msg, connId) {
+  try {
+    const req = rpc.request(CMD_INCOMING_TILE_REQUEST);
+    req.send(
+      b4a.from(
+        JSON.stringify({
+          connId,
+          id: msg.id || '',
+          z: msg.z ?? 0,
+          x: msg.x ?? 0,
+          y: msg.y ?? 0,
+        }),
+      ),
+    );
+  } catch {
+    // RPC may not be ready
+  }
+}
+
+function notifyTileResponse(msg) {
+  try {
+    const req = rpc.request(CMD_INCOMING_TILE_RESPONSE);
+    req.send(
+      b4a.from(
+        JSON.stringify({
+          id: msg.id || '',
+          tile: msg.tl || null,
+        }),
+      ),
+    );
+  } catch {
+    // RPC may not be ready
+  }
+}
+
 function broadcastPeerCount() {
   try {
     const count = swarm ? swarm.connections.size : 0;
@@ -326,9 +541,17 @@ export {
   CMD_LEAVE_TOPIC,
   CMD_PUBLISH_PROBE,
   CMD_GET_STATUS,
+  CMD_REQUEST_CONDITIONS,
+  CMD_SEND_CONDITION_RESPONSE,
+  CMD_REQUEST_TILE,
+  CMD_SEND_TILE_RESPONSE,
   CMD_INCOMING_PROBE,
   CMD_PEER_COUNT,
   CMD_AGGREGATED_UPDATE,
+  CMD_INCOMING_CONDITION_REQUEST,
+  CMD_INCOMING_CONDITION_RESPONSE,
+  CMD_INCOMING_TILE_REQUEST,
+  CMD_INCOMING_TILE_RESPONSE,
   CMD_SUSPEND,
   CMD_RESUME,
   encodeProbe,

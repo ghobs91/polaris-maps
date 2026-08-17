@@ -49,6 +49,10 @@ ios/.verify-carplay-derived/
 .env.*
 !.env.example
 
+# Traffic swarm worklet (backend/) — local npm install for bundle rebuilds.
+# The built bundle (traffic-swarm.bundle.mjs) IS committed; its deps are not.
+backend/node_modules/
+
 # Logs
 *.log
 npm-debug.log*

@@ -50,13 +50,23 @@ import {
   CMD_LEAVE_TOPIC,
   CMD_PUBLISH_PROBE,
   CMD_GET_STATUS,
+  CMD_REQUEST_CONDITIONS,
+  CMD_SEND_CONDITION_RESPONSE,
+  CMD_REQUEST_TILE,
+  CMD_SEND_TILE_RESPONSE,
   CMD_INCOMING_PROBE,
   CMD_PEER_COUNT,
   CMD_AGGREGATED_UPDATE,
+  CMD_INCOMING_CONDITION_REQUEST,
+  CMD_INCOMING_CONDITION_RESPONSE,
+  CMD_INCOMING_TILE_REQUEST,
+  CMD_INCOMING_TILE_RESPONSE,
   CMD_SUSPEND,
   CMD_RESUME,
 } from './rpcCommands';
 import type { AggregatedTrafficState, TrafficProbe } from '../../models/traffic';
+import type { WireConditionEntry } from '../../models/trafficHistory';
+import type { WireTilePayload } from '../../models/trafficTile';
 
 // The bundle is produced by `npx bare-pack --target ios --target android --linked`
 let trafficBundle: string | null = null;
@@ -71,6 +81,22 @@ try {
 type ProbeHandler = (probe: TrafficProbe) => void;
 type PeerCountHandler = (count: number) => void;
 type AggregatedHandler = (states: AggregatedTrafficState[]) => void;
+type ConditionRequestHandler = (req: {
+  connId: number;
+  id: string;
+  cells: string[];
+  bucket: { dayOfWeek: number; halfHour: number };
+  maxAgeSec: number;
+}) => void;
+type ConditionResponseHandler = (res: { id: string; entries: WireConditionEntry[] }) => void;
+type TileRequestHandler = (req: {
+  connId: number;
+  id: string;
+  z: number;
+  x: number;
+  y: number;
+}) => void;
+type TileResponseHandler = (res: { id: string; tile: WireTilePayload | null }) => void;
 
 let worklet: { start(entry: string, bundle: string, args: string[]): void; IPC: unknown } | null =
   null;
@@ -80,6 +106,10 @@ let started = false;
 let probeHandlers: ProbeHandler[] = [];
 let peerCountHandlers: PeerCountHandler[] = [];
 let aggregatedHandlers: AggregatedHandler[] = [];
+let conditionRequestHandlers: ConditionRequestHandler[] = [];
+let conditionResponseHandlers: ConditionResponseHandler[] = [];
+let tileRequestHandlers: TileRequestHandler[] = [];
+let tileResponseHandlers: TileResponseHandler[] = [];
 
 // ── Lifecycle ───────────────────────────────────────────────────────
 
@@ -129,6 +159,42 @@ function handleWorkletRequest(req: RpcRequest): void {
       }
       break;
     }
+    case CMD_INCOMING_CONDITION_REQUEST: {
+      try {
+        const req = JSON.parse(text);
+        for (const h of conditionRequestHandlers) h(req);
+      } catch {
+        /* malformed */
+      }
+      break;
+    }
+    case CMD_INCOMING_CONDITION_RESPONSE: {
+      try {
+        const res = JSON.parse(text);
+        for (const h of conditionResponseHandlers) h(res);
+      } catch {
+        /* malformed */
+      }
+      break;
+    }
+    case CMD_INCOMING_TILE_REQUEST: {
+      try {
+        const req = JSON.parse(text);
+        for (const h of tileRequestHandlers) h(req);
+      } catch {
+        /* malformed */
+      }
+      break;
+    }
+    case CMD_INCOMING_TILE_RESPONSE: {
+      try {
+        const res = JSON.parse(text);
+        for (const h of tileResponseHandlers) h(res);
+      } catch {
+        /* malformed */
+      }
+      break;
+    }
   }
 }
 
@@ -144,6 +210,10 @@ export function disposeHyperswarmBridge(): void {
   probeHandlers = [];
   peerCountHandlers = [];
   aggregatedHandlers = [];
+  conditionRequestHandlers = [];
+  conditionResponseHandlers = [];
+  tileRequestHandlers = [];
+  tileResponseHandlers = [];
 }
 
 // ── Commands → Worklet ──────────────────────────────────────────────
@@ -200,6 +270,69 @@ export function resume(): void {
   sendCommand(CMD_RESUME, '');
 }
 
+// ── Traffic condition exchange ───────────────────────────────────────
+
+/**
+ * Broadcast a traffic condition request to all connected peers.
+ * Serialized in the worklet's compact envelope format:
+ * `{ t:'cr', id, c:[cells], d:dayOfWeek, h:halfHour, a:maxAgeSec }`
+ */
+export function requestConditions(req: {
+  id: string;
+  cells: string[];
+  bucket: { dayOfWeek: number; halfHour: number };
+  maxAgeSec: number;
+}): void {
+  sendCommand(
+    CMD_REQUEST_CONDITIONS,
+    JSON.stringify({
+      t: 'cr',
+      id: req.id,
+      c: req.cells,
+      d: req.bucket.dayOfWeek,
+      h: req.bucket.halfHour,
+      a: req.maxAgeSec,
+    }),
+  );
+}
+
+/**
+ * Send condition entries back to a specific peer connection.
+ * `connId` comes from the forwarded {@link onConditionRequest} event.
+ */
+export function sendConditionResponse(
+  connId: number,
+  requestId: string,
+  entries: WireConditionEntry[],
+): void {
+  sendCommand(CMD_SEND_CONDITION_RESPONSE, JSON.stringify({ connId, requestId, entries }));
+}
+
+// ── Traffic tile exchange ────────────────────────────────────────────
+
+/**
+ * Broadcast a traffic tile request to all connected peers.
+ * Serialized in the worklet's compact envelope format: `{ t:'tr', id, z, x, y }`
+ */
+export function requestTile(req: { id: string; z: number; x: number; y: number }): void {
+  sendCommand(
+    CMD_REQUEST_TILE,
+    JSON.stringify({ t: 'tr', id: req.id, z: req.z, x: req.x, y: req.y }),
+  );
+}
+
+/**
+ * Send a traffic tile back to a specific peer connection.
+ * `connId` comes from the forwarded {@link onTileRequest} event.
+ */
+export function sendTileResponse(
+  connId: number,
+  requestId: string,
+  tile: WireTilePayload | null,
+): void {
+  sendCommand(CMD_SEND_TILE_RESPONSE, JSON.stringify({ connId, requestId, tile }));
+}
+
 // ── Event handlers ──────────────────────────────────────────────────
 
 export function onProbe(handler: ProbeHandler): () => void {
@@ -220,6 +353,38 @@ export function onAggregatedUpdate(handler: AggregatedHandler): () => void {
   aggregatedHandlers.push(handler);
   return () => {
     aggregatedHandlers = aggregatedHandlers.filter((h) => h !== handler);
+  };
+}
+
+/** A peer asked for traffic conditions; respond via sendConditionResponse. */
+export function onConditionRequest(handler: ConditionRequestHandler): () => void {
+  conditionRequestHandlers.push(handler);
+  return () => {
+    conditionRequestHandlers = conditionRequestHandlers.filter((h) => h !== handler);
+  };
+}
+
+/** A peer responded to one of our condition requests. */
+export function onConditionResponse(handler: ConditionResponseHandler): () => void {
+  conditionResponseHandlers.push(handler);
+  return () => {
+    conditionResponseHandlers = conditionResponseHandlers.filter((h) => h !== handler);
+  };
+}
+
+/** A peer asked for a traffic tile; respond via sendTileResponse. */
+export function onTileRequest(handler: TileRequestHandler): () => void {
+  tileRequestHandlers.push(handler);
+  return () => {
+    tileRequestHandlers = tileRequestHandlers.filter((h) => h !== handler);
+  };
+}
+
+/** A peer responded to one of our tile requests. */
+export function onTileResponse(handler: TileResponseHandler): () => void {
+  tileResponseHandlers.push(handler);
+  return () => {
+    tileResponseHandlers = tileResponseHandlers.filter((h) => h !== handler);
   };
 }
 

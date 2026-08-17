@@ -1,0 +1,13 @@
+{
+  "name": "polaris-traffic-swarm-backend",
+  "private": true,
+  "type": "module",
+  "description": "Bare worklet for the Polaris Maps P2P traffic mesh. Built with bare-pack; dependencies live here so bare-pack's node-style resolver can traverse them (pnpm's symlink layout is not supported).",
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "b4a": "1.6.7",
+    "bare-rpc": "1.2.0",
+    "graceful-goodbye": "1.3.0",
+    "hyperswarm": "4.17.0"
+  }
+}
