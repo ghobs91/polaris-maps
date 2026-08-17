@@ -37,13 +37,14 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
   // Build traffic-colored GeoJSON from store segments (reactive)
   const trafficGeoJSON: TrafficFeatureCollection | null = useMemo(() => {
     if (normalizedSegments.length === 0) {
-      console.log('[TrafficRouteLayer] no segments yet');
+      if (__DEV__) console.log('[TrafficRouteLayer] no segments yet');
       return null;
     }
     const result = buildRouteTrafficGeoJSON(coordinates, normalizedSegments);
-    console.log(
-      `[TrafficRouteLayer] ${normalizedSegments.length} segments → ${result.features.length} features; 1st color: ${result.features[0]?.properties.color}`,
-    );
+    if (__DEV__)
+      console.log(
+        `[TrafficRouteLayer] ${normalizedSegments.length} segments → ${result.features.length} features; 1st color: ${result.features[0]?.properties.color}`,
+      );
     return result.features.length > 0 ? result : null;
   }, [coordinates, normalizedSegments]);
 

@@ -237,23 +237,20 @@ const tileCache = new Map<string, DecodedTile>();
 async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<DecodedTile | null> {
   const key = `${z}/${x}/${y}`;
   const cached = tileCache.get(key);
-  if (cached) {
-    console.log(`[TileSampler] tile ${key} cache hit`);
-    return cached;
-  }
+  if (cached) return cached;
 
   const url = `${TOMTOM_FLOW_TILES_BASE_URL}/${z}/${x}/${y}.png?key=${encodeURIComponent(tomtomApiKey)}&tileSize=256&thickness=3`;
   const redactedUrl = url.replace(/key=[^&]+/, 'key=REDACTED');
 
   try {
-    console.log(`[TileSampler] fetching tile ${key}: ${redactedUrl}`);
+    if (__DEV__) console.log(`[TileSampler] fetching tile ${key}: ${redactedUrl}`);
     const res = await fetch(url);
     if (!res.ok) {
       console.warn(`[TileSampler] tile ${key} HTTP ${res.status} for ${redactedUrl}`);
       return null;
     }
     const buffer = await res.arrayBuffer();
-    console.log(`[TileSampler] tile ${key} fetched ${buffer.byteLength} bytes`);
+    if (__DEV__) console.log(`[TileSampler] tile ${key} fetched ${buffer.byteLength} bytes`);
     let decoded: DecodedTile | null = null;
     try {
       decoded = decodePng(buffer);
@@ -267,7 +264,8 @@ async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<Deco
       );
       return null;
     }
-    console.log(`[TileSampler] tile ${key} decoded ${decoded.width}x${decoded.height}`);
+    if (__DEV__)
+      console.log(`[TileSampler] tile ${key} decoded ${decoded.width}x${decoded.height}`);
     tileCache.set(key, decoded);
     return decoded;
   } catch (err) {
@@ -372,10 +370,12 @@ export async function sampleRouteTileColors(
 
   await Promise.all(tilePromises);
 
-  const ratios = segments.map((s) => s.congestionRatio.toFixed(2));
-  console.log(
-    `[TileSampler] ${routeCoords.length} route coords → ${sampled.length} sampled points → ${byTile.size} tiles → ${segments.length} colored segments; ratios: ${ratios.slice(0, 20).join(', ')}`,
-  );
+  if (__DEV__) {
+    const ratios = segments.map((s) => s.congestionRatio.toFixed(2));
+    console.log(
+      `[TileSampler] ${routeCoords.length} route coords → ${sampled.length} sampled points → ${byTile.size} tiles → ${segments.length} colored segments; ratios: ${ratios.slice(0, 20).join(', ')}`,
+    );
+  }
 
   return segments;
 }
