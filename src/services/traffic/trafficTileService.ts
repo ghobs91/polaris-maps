@@ -17,11 +17,7 @@ import {
   onTileResponse as bridgeOnTileResponse,
   isStarted as isSwarmStarted,
 } from './hyperswarmBridge';
-import {
-  startTileServer,
-  addTileSource,
-  getTileServerBaseUrl,
-} from '../../native/tileServer';
+import { startTileServer, addTileSource, getTileServerBaseUrl } from '../../native/tileServer';
 
 /**
  * Traffic tile manager.
@@ -46,7 +42,10 @@ let serverStarted = false;
 let listenerWired = false;
 
 // In-flight bookkeeping
-const pendingQueries = new Map<string, { resolve: (b64: string | null) => void; timer: ReturnType<typeof setTimeout> }>();
+const pendingQueries = new Map<
+  string,
+  { resolve: (b64: string | null) => void; timer: ReturnType<typeof setTimeout> }
+>();
 const inflightSeeds = new Set<string>();
 let requestCounter = 0;
 
@@ -138,7 +137,10 @@ function nextRequestId(): string {
 }
 
 /** Ask connected peers for a tile. Resolves with base64 PNG or null. */
-function queryPeersForTile(key: TileKey, timeoutMs: number = TILE_QUERY_TIMEOUT_MS): Promise<string | null> {
+function queryPeersForTile(
+  key: TileKey,
+  timeoutMs: number = TILE_QUERY_TIMEOUT_MS,
+): Promise<string | null> {
   if (!isSwarmStarted()) return Promise.resolve(null);
 
   return new Promise((resolve) => {

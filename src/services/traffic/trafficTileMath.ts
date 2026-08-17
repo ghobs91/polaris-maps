@@ -26,8 +26,7 @@ export function tilesForViewport(
   const n = Math.pow(2, z);
   const centerX = ((centerLng + 180) / 360) * n;
   const latRad = (centerLat * Math.PI) / 180;
-  const centerY =
-    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+  const centerY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
 
   // Visible span in tile units: screen pixels → 256px tiles.
   const tilesX = Math.ceil(screenWidth / 256) + 1;
