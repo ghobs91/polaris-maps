@@ -34,7 +34,9 @@ class PolarisTileServer: NSObject {
     let params = NWParameters.tcp
     params.allowLocalEndpointReuse = true
     if requestedPort > 0 {
-      params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: requestedPort)
+      // NWEndpoint.Port wraps UInt16 — use the raw-value initializer.
+      let port = NWEndpoint.Port(rawValue: requestedPort)
+      params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: port ?? .any)
     } else {
       // Ephemeral port, loopback only
       params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
