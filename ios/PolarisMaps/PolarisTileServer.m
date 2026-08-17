@@ -20,6 +20,6 @@ RCT_EXTERN_METHOD(listSources:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(stop:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
-RCT_EXTERN_BLOCKING_SYNCHRONOUS_METHOD(getBaseUrl)
+RCT_EXTERN__BLOCKING_SYNCHRONOUS_METHOD(getBaseUrl)
 
 @end
