@@ -23,6 +23,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
+import { PlaceDetailEmbed } from './PlaceDetailEmbed';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
@@ -969,6 +970,9 @@ export function POIInfoCard() {
                   );
                 })}
             </GlassView>
+
+            {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
+            <PlaceDetailEmbed poi={poi} />
 
             {(parsed.facebook || parsed.instagram || parsed.twitter) && (
               <View style={styles.socialRow}>

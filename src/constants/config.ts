@@ -37,6 +37,32 @@ export const hereApiKey: string = process.env.EXPO_PUBLIC_HERE_API_KEY ?? '';
 /** Apple MapKit JS token — set EXPO_PUBLIC_APPLE_MAPKIT_TOKEN in .env */
 export const appleMapkitToken: string = process.env.EXPO_PUBLIC_APPLE_MAPKIT_TOKEN ?? '';
 
+/**
+ * URL of the hosted MapKit JS PlaceDetail page that renders Apple's place card
+ * (photos & reviews) for inline embedding in the POI card.
+ *
+ * Set EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL in .env to the deployed location of
+ * netlify-deploy/place-detail.html, e.g.
+ * `https://polaris-maps-bsky-auth.netlify.app/place-detail.html`.
+ */
+export const mapkitPlaceDetailUrl: string = process.env.EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL ?? '';
+
+/**
+ * MapKit JS token for the inline PlaceDetail embed.
+ *
+ * This is a portal-issued token, not the Server API JWT:
+ * developer.apple.com/account → Certificates, IDs & Profiles → Services →
+ * Maps → Configure → Tokens → + → Token Type: MapKit JS, Restriction Type:
+ * Domain, Websites: polaris-maps-bsky-auth.netlify.app.
+ *
+ * (A self-signed JWT also works if it carries `scope: "mapkit_js"` and an
+ * `origin` claim — scripts/generate-mapkit-token.mjs doesn't add those, so
+ * the Server API token can't be reused for this.)
+ *
+ * Set EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN in .env.
+ */
+export const mapkitJsEmbedToken: string = process.env.EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN ?? '';
+
 /** Debounce delay (ms) for viewport-triggered traffic fetches. */
 export const TRAFFIC_FETCH_DEBOUNCE_MS = 800;
 

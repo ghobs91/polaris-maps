@@ -1,0 +1,296 @@
+<!doctype html>
+<!--
+  Polaris Maps — MapKit JS PlaceDetail embed page.
+
+  Renders Apple's interactive place card (photos, reviews, hours, etc.) into a
+  bare, transparent page that the app embeds inline in the POI card via a
+  React Native WebView.
+
+  Query parameters (all optional, provided by the app):
+    placeId  Apple Place ID — preferred: deterministic match (from the
+             `apple:place_id` OSM tag captured by mapkitFetcher.ts).
+    name     Place name — fallback lookup key when no Place ID is available.
+    lat/lng  Coordinates — fallback search centre and proximity check.
+    theme    Color scheme: "light" | "dark" | "adaptive" (default: adaptive).
+    lang     BCP-47 language tag for the card (default: browser locale).
+
+  Authorization:
+    The MapKit JS token is passed in the URL fragment (#token=…) so it is never
+    sent to the server or written to access logs. Create it in the Apple
+    Developer portal: Certificates, IDs & Profiles → Services → Maps →
+    Configure → Tokens → + → Token Type: MapKit JS, Restriction Type: Domain,
+    Websites: polaris-maps-bsky-auth.netlify.app. Then set it as
+    EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN in the app's .env.
+
+  Bundling:
+    We load mapkit.core.js (NOT mapkit.js). The full bundle doesn't implement
+    mapkit.load() and doesn't include newer features; the core bundle loads
+    libraries on demand. The libraries to load are discovered at runtime via
+    mapkit.Libraries so we always get the set that includes PlaceDetail.
+
+  Height handshake:
+    The page measures the card with a ResizeObserver and posts
+    {type:"height", height} via window.ReactNativeWebView.postMessage so the
+    app can size the inline WebView to the card's intrinsic height.
+
+  Attribution:
+    MapKit JS terms require an Apple attribution link on any page using the
+    SDK, even with the map hidden. The tiny "Legal" link in the footer
+    satisfies this.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>Place</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+        -webkit-text-size-adjust: 100%;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial,
+          sans-serif;
+      }
+      html.dark {
+        color-scheme: dark;
+      }
+      html.light {
+        color-scheme: light;
+      }
+      /* Give Apple's card a box to render into; it reports its own height. */
+      #card {
+        width: 100%;
+        min-height: 160px;
+      }
+      #legal {
+        text-align: center;
+        padding: 8px 0 4px;
+      }
+      #legal a {
+        font-size: 11px;
+        color: #8e8e93;
+        text-decoration: none;
+      }
+      #debug {
+        padding: 12px;
+        font-size: 12px;
+        color: #ff6b6b;
+        white-space: pre-wrap;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card"></div>
+    <div id="debug"></div>
+    <div id="legal"><a href="https://gspe21-ssl.ls.apple.com/html/attribution.html">Legal</a></div>
+
+    <script src="https://cdn.apple-mapkit.com/mk/6.x.x/mapkit.core.js" crossorigin></script>
+    <script>
+      (function () {
+        var params = new URLSearchParams(window.location.search);
+        var placeId = params.get('placeId');
+        var name = params.get('name');
+        var lat = params.get('lat');
+        var lng = params.get('lng');
+        var theme = params.get('theme') || 'adaptive';
+        var lang = params.get('lang');
+        // Token travels in the fragment — never sent to the server.
+        var token = window.location.hash.replace(/^#token=/, '');
+
+        var isRN = typeof window.ReactNativeWebView !== 'undefined';
+
+        function post(message) {
+          if (isRN) {
+            window.ReactNativeWebView.postMessage(JSON.stringify(message));
+          }
+        }
+
+        function log(step, extra) {
+          var msg = '[place-detail] ' + step + (extra ? ' ' + extra : '');
+          post({ type: 'log', message: msg });
+        }
+
+        function fail(reason) {
+          post({ type: 'error', message: String(reason) });
+          var debugEl = document.getElementById('debug');
+          if (debugEl) {
+            debugEl.style.display = 'block';
+            debugEl.textContent = 'Place card unavailable: ' + reason;
+          }
+        }
+
+        if (theme === 'dark' || theme === 'light') {
+          document.documentElement.className = theme;
+        }
+
+        log('page-loaded', 'isRN=' + isRN + ' placeId=' + (placeId ? 'yes' : 'no'));
+
+        if (typeof mapkit === 'undefined') {
+          fail('mapkit-script-not-loaded');
+          return;
+        }
+
+        if (!token) {
+          fail('missing-token');
+          return;
+        }
+        if (!placeId && !(name && lat && lng)) {
+          fail('missing-place');
+          return;
+        }
+
+        // Watchdog: if we can't produce a card height within 25s, give up
+        // instead of spinning forever.
+        window.setTimeout(function () {
+          var cardEl = document.getElementById('card');
+          var h = cardEl ? Math.ceil(cardEl.getBoundingClientRect().height) : 0;
+          if (h <= 160) {
+            fail('timeout-no-content');
+          }
+        }, 25000);
+
+        mapkit.init({
+          authorizationCallback: function (done) {
+            log('authorization-callback');
+            done(token);
+          },
+          language: lang || undefined,
+        });
+
+        // v6: mapkit is an EventTarget; surface init/load failures.
+        if (typeof mapkit.addEventListener === 'function') {
+          mapkit.addEventListener('error', function (ev) {
+            log('init-error-event', JSON.stringify(ev && ev.detail ? ev.detail : ev));
+          });
+          mapkit.addEventListener('load-error', function (ev) {
+            log('load-error-event', JSON.stringify(ev && ev.detail ? ev.detail : ev));
+          });
+        }
+
+        // Discover the available libraries at runtime (core bundle only).
+        var libraries = null;
+        try {
+          if (mapkit.Libraries && mapkit.Libraries.length) {
+            libraries = mapkit.Libraries.slice();
+          }
+        } catch (err) {
+          log('libraries-getter-failed', String(err));
+        }
+        if (!libraries) {
+          // Fallback: the documented v6 library set.
+          libraries = [
+            'services',
+            'full-map',
+            'map',
+            'overlays',
+            'annotations',
+            'geojson',
+            'user-location',
+            'look-around',
+          ];
+        }
+        log('libraries-to-load', libraries.join(','));
+
+        async function resolvePlace() {
+          // 1. Preferred: deterministic lookup by Apple Place ID.
+          if (placeId && typeof mapkit.PlaceLookup === 'function') {
+            try {
+              log('place-lookup-start', placeId);
+              var lookup = new mapkit.PlaceLookup();
+              var p = await lookup.getPlace(placeId);
+              log('place-lookup-ok');
+              return p;
+            } catch (err) {
+              log('place-lookup-failed', String(err));
+            }
+          }
+
+          // 2. Fallback: name search anchored at the POI coordinates.
+          if (name && lat && lng) {
+            try {
+              log('search-start', name);
+              var search = new mapkit.Search();
+              var response = await search.search(name, {
+                coordinate: { latitude: parseFloat(lat), longitude: parseFloat(lng) },
+                language: lang || undefined,
+              });
+              if (response.places && response.places.length > 0) {
+                log('search-ok');
+                return response.places[0];
+              }
+              log('search-empty');
+            } catch (err) {
+              log('search-failed', String(err));
+            }
+          }
+
+          return null;
+        }
+
+        mapkit
+          .load(libraries)
+          .then(function () {
+            log('mapkit-load-ok');
+            return resolvePlace();
+          })
+          .then(function (place) {
+            if (!place) {
+              fail('no-match');
+              return;
+            }
+
+            log('creating-place-detail');
+            var detail = new mapkit.PlaceDetail(document.getElementById('card'), place, {
+              displaysMap: false,
+              colorScheme: theme === 'light' ? 'light' : theme === 'dark' ? 'dark' : 'adaptive',
+            });
+
+            var cardEl = detail.element || document.getElementById('card');
+            var reportedHeight = 0;
+
+            function reportHeight() {
+              // Measure the card itself and the whole page as a fallback.
+              var h = Math.max(
+                Math.ceil(cardEl.getBoundingClientRect().height),
+                Math.ceil(document.body.getBoundingClientRect().height),
+              );
+              if (h > 0 && Math.abs(h - reportedHeight) > 1) {
+                reportedHeight = h;
+                post({ type: 'height', height: h });
+              }
+            }
+
+            log('place-detail-created', 'hasElement=' + !!detail.element);
+
+            if (typeof ResizeObserver !== 'undefined') {
+              new ResizeObserver(reportHeight).observe(cardEl);
+              if (document.body) {
+                new ResizeObserver(reportHeight).observe(document.body);
+              }
+            } else {
+              window.setInterval(reportHeight, 250);
+            }
+            // First paint may precede content load (photos/reviews are async).
+            reportHeight();
+            window.setTimeout(reportHeight, 750);
+            window.setTimeout(reportHeight, 2000);
+            window.setTimeout(reportHeight, 5000);
+
+            post({ type: 'ready' });
+          })
+          .catch(function (err) {
+            log('fatal-error', String(err && err.message ? err.message : err));
+            fail(err && err.message ? err.message : 'init-failed');
+          });
+      })();
+    </script>
+  </body>
+</html>
