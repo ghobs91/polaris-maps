@@ -19,17 +19,13 @@
 		C7BF509CF6DCEB99EE54D734 /* libPods-PolarisMaps.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CD204D124A01011F5E3A87AB /* libPods-PolarisMaps.a */; };
 		C8E527243021E11200BD26C2 /* Valhalla in Frameworks */ = {isa = PBXBuildFile; productRef = 76F2133035B6B2C740D34F2F /* Valhalla */; };
 		C8E527253021E11200BD26C2 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 838A88DACD4E7CCF27A7DDD9 /* MapLibre */; };
-		E0E33A224CD74ED7B573E34D /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0723003A8E134284B1ED9178 /* SceneDelegate.swift */; };
 		EABDB6B50692C76B52E3C947 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F4EDE64A52B5496F8063BA93 /* PolarisValhalla.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49A191FD963F4EDAB1DF3E46 /* PolarisValhalla.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0723003A8E134284B1ED9178 /* SceneDelegate.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = SceneDelegate.swift; path = PolarisMaps/SceneDelegate.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* PolarisMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PolarisMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisTileServer.swift; path = PolarisMaps/PolarisTileServer.swift; sourceTree = "<group>"; };
-		9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisTileServer.m; path = PolarisMaps/PolarisTileServer.m; sourceTree = "<group>"; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = PolarisMaps/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = PolarisMaps/Info.plist; sourceTree = "<group>"; };
 		3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -37,6 +33,8 @@
 		50CDF40BACBB47688A156721 /* PolarisValhalla.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisValhalla.m; path = PolarisMaps/PolarisValhalla.m; sourceTree = "<group>"; };
 		6C8746B7B7646DAD423CABAE /* Pods-PolarisMaps.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.release.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig"; sourceTree = "<group>"; };
 		7B6C823B929822DC91B94F3B /* Pods-PolarisMaps.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.debug.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.debug.xcconfig"; sourceTree = "<group>"; };
+		9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisTileServer.swift; path = PolarisMaps/PolarisTileServer.swift; sourceTree = "<group>"; };
+		9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisTileServer.m; path = PolarisMaps/PolarisTileServer.m; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = PolarisMaps/SplashScreen.storyboard; sourceTree = "<group>"; };
 		B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PolarisMaps/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -78,7 +76,6 @@
 				9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */,
 				9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */,
 				3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */,
-				0723003A8E134284B1ED9178 /* SceneDelegate.swift */,
 			);
 			name = PolarisMaps;
 			sourceTree = "<group>";
@@ -418,7 +415,6 @@
 				7A1B2C3D4E5F60718293A4B5 /* PolarisTileServer.swift in Sources */,
 				7A1B2C3D4E5F60718293A4B7 /* PolarisTileServer.m in Sources */,
 				251037C88B0DD2D3BACA85F4 /* ExpoModulesProvider.swift in Sources */,
-				E0E33A224CD74ED7B573E34D /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
