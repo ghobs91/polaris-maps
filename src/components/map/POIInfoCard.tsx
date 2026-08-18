@@ -310,9 +310,10 @@ interface ActionPillProps {
   onPress: () => void;
   color: string;
   fillColor: string;
+  borderColor: string;
 }
 
-function ActionPill({ icon, label, onPress, color, fillColor }: ActionPillProps) {
+function ActionPill({ icon, label, onPress, color, fillColor, borderColor }: ActionPillProps) {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -320,7 +321,7 @@ function ActionPill({ icon, label, onPress, color, fillColor }: ActionPillProps)
       accessibilityLabel={label}
       accessibilityRole="button"
     >
-      <GlassView material="regular" isInteractive style={[pillStyles.pill, { backgroundColor: fillColor }]}>
+      <View style={[pillStyles.pill, { backgroundColor: fillColor, borderColor }]}>
         <Ionicons
           name={icon}
           size={20}
@@ -335,7 +336,7 @@ function ActionPill({ icon, label, onPress, color, fillColor }: ActionPillProps)
         >
           {label}
         </Text>
-      </GlassView>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -346,12 +347,12 @@ const pillStyles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: borderRadius.lg,
     borderCurve: 'continuous',
+    borderWidth: 1.5,
     paddingVertical: 10,
     paddingHorizontal: 14,
     gap: 4,
     minWidth: 68,
     flex: 1,
-    overflow: 'hidden',
   },
   label: {
     fontSize: 11,
@@ -532,8 +533,10 @@ export function POIInfoCard() {
   const subtextColor = colors.textSecondary;
   const borderColor = colors.border;
   const primary = colors.primary;
-  // Pill button background — semi-transparent surface for contrast against card glass
-  const pillFill = isDark ? 'rgba(44,44,46,0.65)' : 'rgba(235,235,240,0.7)';
+  // Action pill surface — mirrors the TransportModeSelector chips (soft tinted
+  // fill + hairline border) instead of liquid glass.
+  const pillFill = isDark ? 'rgba(50,50,70,0.5)' : 'rgba(230,230,240,0.8)';
+  const pillBorder = isDark ? 'rgba(122,122,140,0.35)' : 'rgba(60,60,67,0.15)';
 
   const handlePhone = useCallback(() => {
     if (parsed?.phone) Linking.openURL(`tel:${parsed.phone.replace(/\s+/g, '')}`);
@@ -637,7 +640,10 @@ export function POIInfoCard() {
         {poi && parsed && category && (
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: spacing.xxl + insets.bottom }]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: spacing.xxl + insets.bottom },
+            ]}
             showsVerticalScrollIndicator={false}
             scrollEnabled
             onScrollBeginDrag={() => {
@@ -714,12 +720,27 @@ export function POIInfoCard() {
                 onPress={handleDirections}
                 color={primary}
                 fillColor={pillFill}
+                borderColor={pillBorder}
               />
               {parsed.phone && (
-                <ActionPill icon="call" label="Call" onPress={handlePhone} color={primary} fillColor={pillFill} />
+                <ActionPill
+                  icon="call"
+                  label="Call"
+                  onPress={handlePhone}
+                  color={primary}
+                  fillColor={pillFill}
+                  borderColor={pillBorder}
+                />
               )}
               {parsed.website && (
-                <ActionPill icon="globe" label="Website" onPress={handleWebsite} color={primary} fillColor={pillFill} />
+                <ActionPill
+                  icon="globe"
+                  label="Website"
+                  onPress={handleWebsite}
+                  color={primary}
+                  fillColor={pillFill}
+                  borderColor={pillBorder}
+                />
               )}
               {parsed.menuUrl && (
                 <ActionPill
@@ -728,10 +749,18 @@ export function POIInfoCard() {
                   onPress={handleMenu}
                   color={primary}
                   fillColor={pillFill}
+                  borderColor={pillBorder}
                 />
               )}
               {parsed.email && (
-                <ActionPill icon="mail" label="Email" onPress={handleEmail} color={primary} fillColor={pillFill} />
+                <ActionPill
+                  icon="mail"
+                  label="Email"
+                  onPress={handleEmail}
+                  color={primary}
+                  fillColor={pillFill}
+                  borderColor={pillBorder}
+                />
               )}
               <ActionPill
                 icon="bookmark-outline"
@@ -739,6 +768,7 @@ export function POIInfoCard() {
                 onPress={() => setShowSaveSheet(true)}
                 color={primary}
                 fillColor={pillFill}
+                borderColor={pillBorder}
               />
               <ActionPill
                 icon="share-outline"
@@ -746,6 +776,7 @@ export function POIInfoCard() {
                 onPress={handleShare}
                 color={primary}
                 fillColor={pillFill}
+                borderColor={pillBorder}
               />
             </View>
 
@@ -938,6 +969,7 @@ export function POIInfoCard() {
                   );
                 })}
             </GlassView>
+
             {(parsed.facebook || parsed.instagram || parsed.twitter) && (
               <View style={styles.socialRow}>
                 {parsed.facebook && (
