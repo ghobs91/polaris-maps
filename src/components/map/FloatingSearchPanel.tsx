@@ -97,6 +97,34 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   return { entry, rank: r.score, poi: r.poi };
 }
 
+/**
+ * Convert a GeocodingEntry (e.g. a geocoded address) into the OsmPoi shape
+ * the place card expects, so tapping a plain address result opens the full
+ * place card instead of jumping straight to the directions panel.
+ */
+function geocodingEntryToOsmPoi(entry: GeocodingEntry): OsmPoi {
+  return {
+    // Negative ID space so the card's "Update Place Info" (OSM edit)
+    // affordance is not offered for a plain geocoded address.
+    id: -Math.max(1, Math.abs(entry.id)),
+    lat: entry.lat,
+    lng: entry.lng,
+    name: entry.text,
+    type: 'place',
+    subtype: 'address',
+    tags: {
+      'polaris:source': 'geocode',
+      'addr:full': entry.text,
+      ...(entry.street ? { 'addr:street': entry.street } : {}),
+      ...(entry.housenumber ? { 'addr:housenumber': entry.housenumber } : {}),
+      ...(entry.city ? { 'addr:city': entry.city } : {}),
+      ...(entry.state ? { 'addr:state': entry.state } : {}),
+      ...(entry.postcode ? { 'addr:postcode': entry.postcode } : {}),
+      ...(entry.country ? { 'addr:country': entry.country } : {}),
+    },
+  };
+}
+
 // ─────────────────────────────────────────────
 // Open Charge Map → OsmPoi conversion helpers
 // ─────────────────────────────────────────────
@@ -858,48 +886,42 @@ export function FloatingSearchPanel({
       const displayedResults = [...stationResults, ...filteredApple, ...filteredUnified];
       const mapPois: OsmPoi[] = displayedResults
         .filter((result) => result.entry.type !== 'station')
-        .map((result) =>
-          result.poi ?? {
-            id: result.entry.id,
-            lat: result.entry.lat,
-            lng: result.entry.lng,
-            name: result.entry.text,
-            type: 'amenity',
-            subtype: 'place',
-            tags: {
-              ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
-              ...(result.entry.housenumber ? { 'addr:housenumber': result.entry.housenumber } : {}),
-              ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
-              ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
-              ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
-              ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
+        .map(
+          (result) =>
+            result.poi ?? {
+              id: result.entry.id,
+              lat: result.entry.lat,
+              lng: result.entry.lng,
+              name: result.entry.text,
+              type: 'amenity',
+              subtype: 'place',
+              tags: {
+                ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
+                ...(result.entry.housenumber
+                  ? { 'addr:housenumber': result.entry.housenumber }
+                  : {}),
+                ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
+                ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
+                ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
+                ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
+              },
             },
-          },
         );
-
-      // Only show map markers for results within ~20 km of the search anchor.
-      // This prevents far-away results (e.g. Manhattan locations when the user
-      // is in another region) from pilling up on the map and hijacking the
-      // camera fit bounds.
-      const MAX_NEARBY_DEG = 0.18;
-      const isNearby = (p: OsmPoi) =>
-        Math.abs(p.lat - vp.lat) < MAX_NEARBY_DEG && Math.abs(p.lng - vp.lng) < MAX_NEARBY_DEG;
-      const nearbyMapPois = mapPois.filter(isNearby);
 
       if (searchGenRef.current !== gen) return;
       setResults(displayedResults);
 
-      if (nearbyMapPois.length > 0) {
-        useOsmPoiStore.getState().setCategorySearch([], nearbyMapPois, false);
+      if (mapPois.length > 0) {
+        // Label the closest matches on the map and zoom the camera out to
+        // frame them, matching Apple/Google Maps search behaviour. A small
+        // subset is fitted (selectSearchFitPois) so one distant outlier
+        // can't hijack the camera.
+        const fitPois = selectSearchFitPois(mapPois);
+        useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
 
-        const fitPois = selectSearchFitPois(nearbyMapPois);
         const fitBounds = boundsForPois(fitPois);
-
         if (fitBounds) {
           useOsmPoiStore.getState().setZoomAndBounds(vp.zoom, fitBounds);
-        }
-
-        if (fitPois.length >= 2 && fitBounds) {
           useMapStore
             .getState()
             .setFitBounds(
@@ -907,10 +929,6 @@ export function FloatingSearchPanel({
               'search',
             );
         }
-      } else if (mapPois.length > 0) {
-        // Results exist but none are nearby — clear map markers to avoid
-        // polluting the map with distant POI pills, but keep the list results.
-        useOsmPoiStore.getState().clearCategorySearch();
       } else {
         useOsmPoiStore.getState().clearCategorySearch();
       }
@@ -1072,7 +1090,7 @@ export function FloatingSearchPanel({
         );
         return;
       }
-      // Normal search selection — show location detail view
+      // Normal search selection — show the place card for the selected result
       addSearchHistory(result);
       setHistory(getSearchHistory());
       Keyboard.dismiss();
@@ -1110,18 +1128,15 @@ export function FloatingSearchPanel({
 
       navigateToResult(result);
 
-      if (result.poi) {
-        // Rich POI result — open the full place card instead of the directions panel
-        useOsmPoiStore.getState().setSelectedPoi(result.poi);
-        setSelectedResult(null);
-        setMode('idle');
-      } else {
-        // Simple address/geocode result — show directions panel
-        setSelectedResult(result);
-        setRouteError(null);
-        clearRoutePreview();
-        setMode('location');
-      }
+      // Always open the place card for a selected result. Directions are only
+      // shown when the user taps the card's own Directions action (which sets
+      // pendingDirectionsTarget and triggers performDirections below).
+      const poi = result.poi ?? geocodingEntryToOsmPoi(result.entry);
+      useOsmPoiStore.getState().setSelectedPoi(poi);
+      setSelectedResult(null);
+      setRouteError(null);
+      clearRoutePreview();
+      setMode('idle');
     },
     [mode, dismissSearch, navigateToResult, clearRoutePreview],
   );
@@ -1689,7 +1704,11 @@ export function FloatingSearchPanel({
       clearRoutePreview();
       setMode('location');
     } else {
+      // No address set yet — enter set-home search mode so the selected
+      // result is saved as the Home address.
+      setMode('setting-home');
       setQuery('');
+      setResults([]);
       setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [homeEntry, navigateToResult, clearRoutePreview]);
@@ -1702,7 +1721,11 @@ export function FloatingSearchPanel({
       clearRoutePreview();
       setMode('location');
     } else {
+      // No address set yet — enter set-work search mode so the selected
+      // result is saved as the Work address.
+      setMode('setting-work');
       setQuery('');
+      setResults([]);
       setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [workEntry, navigateToResult, clearRoutePreview]);
@@ -2493,7 +2516,7 @@ export function FloatingSearchPanel({
                   data={
                     showHistory
                       ? history
-                      : categorySearchResults?.length
+                      : activeCategory && categorySearchResults?.length
                         ? categorySearchResults.map((poi) => ({
                             entry: {
                               id: poi.id,
