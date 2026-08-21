@@ -39,6 +39,26 @@ platform :ios do
     UI.success("Build number set to #{build_number}")
   end
 
+  # Fail loudly when the MapKit JS embed config is missing from .env.
+  # The POI card's Apple "Photos & Reviews" embed silently disappears when
+  # these EXPO_PUBLIC_* vars are not inlined at bundle time (the Xcode build
+  # phase runs `expo export:embed`, which loads .env from the repo root).
+  private_lane :ensure_app_env do
+    env_file = File.expand_path("../.env", __dir__)
+    unless File.file?(env_file)
+      UI.user_error!(".env not found at #{env_file} — copy .env.example and fill it in before building")
+    end
+    contents = File.read(env_file)
+    %w[
+      EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN
+      EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL
+    ].each do |var|
+      next if contents =~ /^#{Regexp.escape(var)}=.+$/
+      UI.user_error!("#{var} is missing or empty in .env — the POI card's Photos & Reviews embed will silently disappear in this build")
+    end
+    UI.success(".env contains the MapKit JS embed configuration")
+  end
+
   # ── Beta lane: Build & upload to TestFlight ─────────────────────
   #
   # Does NOT submit for App Review.
@@ -57,6 +77,8 @@ platform :ios do
         "APP_STORE_CONNECT_KEY_PATH",
       ],
     )
+
+    ensure_app_env
 
     # Quick validation before building
     UI.header("Step 1/7: Validating project")
@@ -151,6 +173,8 @@ platform :ios do
         "APP_STORE_CONNECT_KEY_PATH",
       ],
     )
+
+    ensure_app_env
 
     UI.important("⚠️  This lane uploads a release build to App Store Connect.")
     UI.important("    It will NOT submit for App Review automatically.")

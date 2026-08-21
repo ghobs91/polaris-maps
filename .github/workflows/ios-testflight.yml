@@ -10,6 +10,18 @@
 #   APP_STORE_CONNECT_KEY_ID       — App Store Connect API Key ID
 #   APP_STORE_CONNECT_ISSUER_ID    — App Store Connect API Issuer ID
 #   APP_STORE_CONNECT_PRIVATE_KEY  — Full contents of the .p8 private key file
+#   EXPO_PUBLIC_TOMTOM_API_KEY     — TomTom traffic API key
+#   EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN — MapKit JS token for the POI card embed
+#   EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL    — URL of the hosted place-detail page
+#
+# Optional EXPO_PUBLIC_* secrets (app features degrade gracefully without them,
+# but the embed ones above are REQUIRED — see "Write CI .env file"):
+#   EXPO_PUBLIC_HERE_API_KEY, EXPO_PUBLIC_APPLE_MAPKIT_TOKEN, EXPO_PUBLIC_MBTA_API_KEY,
+#   EXPO_PUBLIC_WMATA_API_KEY, EXPO_PUBLIC_MOBILITY_DB_API_KEY,
+#   EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN, EXPO_PUBLIC_OTP_BASE_URL,
+#   EXPO_PUBLIC_TRANSITOUS_BASE_URL, EXPO_PUBLIC_GEONAMES_DB_URL,
+#   EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL, EXPO_PUBLIC_REGION_CATALOG_URL,
+#   EXPO_PUBLIC_TOMTOM_PROXY_URL
 
 name: iOS TestFlight Build
 
@@ -71,11 +83,50 @@ jobs:
       # Write EXPO_PUBLIC_* env vars to .env so @expo/env inlines them
       # during Metro bundling (triggered by the Xcode build phase).
       # The .env file is gitignored; this creates it on the CI runner only.
+      #
+      # EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN and
+      # EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL are REQUIRED: without them the POI
+      # card's Apple "Photos & Reviews" embed silently disappears in the
+      # shipped build (buildPlaceDetailUrl returns null).
       - name: Write CI .env file
         run: |
-          echo "EXPO_PUBLIC_TOMTOM_API_KEY=$EXPO_PUBLIC_TOMTOM_API_KEY" > .env
+          {
+            echo "EXPO_PUBLIC_TOMTOM_API_KEY=$EXPO_PUBLIC_TOMTOM_API_KEY"
+            echo "EXPO_PUBLIC_TOMTOM_PROXY_URL=$EXPO_PUBLIC_TOMTOM_PROXY_URL"
+            echo "EXPO_PUBLIC_HERE_API_KEY=$EXPO_PUBLIC_HERE_API_KEY"
+            echo "EXPO_PUBLIC_APPLE_MAPKIT_TOKEN=$EXPO_PUBLIC_APPLE_MAPKIT_TOKEN"
+            echo "EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN=$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN"
+            echo "EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL=$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL"
+            echo "EXPO_PUBLIC_MBTA_API_KEY=$EXPO_PUBLIC_MBTA_API_KEY"
+            echo "EXPO_PUBLIC_WMATA_API_KEY=$EXPO_PUBLIC_WMATA_API_KEY"
+            echo "EXPO_PUBLIC_MOBILITY_DB_API_KEY=$EXPO_PUBLIC_MOBILITY_DB_API_KEY"
+            echo "EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN=$EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN"
+            echo "EXPO_PUBLIC_OTP_BASE_URL=$EXPO_PUBLIC_OTP_BASE_URL"
+            echo "EXPO_PUBLIC_TRANSITOUS_BASE_URL=$EXPO_PUBLIC_TRANSITOUS_BASE_URL"
+            echo "EXPO_PUBLIC_GEONAMES_DB_URL=$EXPO_PUBLIC_GEONAMES_DB_URL"
+            echo "EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL=$EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL"
+            echo "EXPO_PUBLIC_REGION_CATALOG_URL=$EXPO_PUBLIC_REGION_CATALOG_URL"
+          } > .env
+          if [ -z "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN" ] || [ -z "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL" ]; then
+            echo "::error::EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN and EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL are required secrets — add them in GitHub → Settings → Secrets and variables → Actions."
+            exit 1
+          fi
         env:
           EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
+          EXPO_PUBLIC_TOMTOM_PROXY_URL: ${{ secrets.EXPO_PUBLIC_TOMTOM_PROXY_URL }}
+          EXPO_PUBLIC_HERE_API_KEY: ${{ secrets.EXPO_PUBLIC_HERE_API_KEY }}
+          EXPO_PUBLIC_APPLE_MAPKIT_TOKEN: ${{ secrets.EXPO_PUBLIC_APPLE_MAPKIT_TOKEN }}
+          EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN: ${{ secrets.EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN }}
+          EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL: ${{ secrets.EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL }}
+          EXPO_PUBLIC_MBTA_API_KEY: ${{ secrets.EXPO_PUBLIC_MBTA_API_KEY }}
+          EXPO_PUBLIC_WMATA_API_KEY: ${{ secrets.EXPO_PUBLIC_WMATA_API_KEY }}
+          EXPO_PUBLIC_MOBILITY_DB_API_KEY: ${{ secrets.EXPO_PUBLIC_MOBILITY_DB_API_KEY }}
+          EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN: ${{ secrets.EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN }}
+          EXPO_PUBLIC_OTP_BASE_URL: ${{ secrets.EXPO_PUBLIC_OTP_BASE_URL }}
+          EXPO_PUBLIC_TRANSITOUS_BASE_URL: ${{ secrets.EXPO_PUBLIC_TRANSITOUS_BASE_URL }}
+          EXPO_PUBLIC_GEONAMES_DB_URL: ${{ secrets.EXPO_PUBLIC_GEONAMES_DB_URL }}
+          EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL: ${{ secrets.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL }}
+          EXPO_PUBLIC_REGION_CATALOG_URL: ${{ secrets.EXPO_PUBLIC_REGION_CATALOG_URL }}
 
       - name: Install CocoaPods
         run: |
@@ -118,6 +169,28 @@ jobs:
           APP_STORE_CONNECT_KEY_PATH: ${{ env.APP_STORE_CONNECT_KEY_PATH || '$HOME/.appstoreconnect/ci_key.p8' }}
           EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
         timeout-minutes: 45
+
+      # -------------------------------------------------------------------
+      # Regression guard: the POI card's Apple "Photos & Reviews" embed is
+      # silently hidden when EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL /
+      # EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN are not inlined into the bundle.
+      # Fail the pipeline if the shipped bundle lacks them.
+      # (If the hosted page path ever changes, update the place-detail.html
+      # pattern here too.)
+      # -------------------------------------------------------------------
+      - name: Verify MapKit embed config inlined into bundle
+        run: |
+          unzip -o -q build_derived_data/PolarisMaps.ipa 'Payload/PolarisMaps.app/main.jsbundle' -d /tmp/polaris-bundle-check
+          BUNDLE=/tmp/polaris-bundle-check/Payload/PolarisMaps.app/main.jsbundle
+          if ! grep -aq 'place-detail.html' "$BUNDLE"; then
+            echo "::error::Shipped bundle does not contain the MapKit place-detail URL (EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL was empty at build time)"
+            exit 1
+          fi
+          if ! grep -aq '#token=' "$BUNDLE"; then
+            echo "::error::Shipped bundle does not contain a MapKit JS embed token (EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN was empty at build time)"
+            exit 1
+          fi
+          echo "MapKit embed config present in shipped bundle"
 
       # -------------------------------------------------------------------
       # Cleanup
