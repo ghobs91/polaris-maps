@@ -151,9 +151,9 @@ All outbound actions (probes, edits, reviews) are queued in MMKV (capped at 500 
 
 | Layer      | Technology                                                 |
 | ---------- | ---------------------------------------------------------- |
-| Framework  | React Native 0.76.9 + Expo SDK 52 (bare workflow)          |
-| Language   | TypeScript 5.6.3 (strict)                                  |
-| Navigation | Expo Router 4 + React Navigation 7                         |
+| Framework  | React Native 0.86.0 + Expo SDK 57 (bare workflow)          |
+| Language   | TypeScript ~6.0.3 (strict)                                 |
+| Navigation | Expo Router (SDK 57) + React Navigation 7                  |
 | Maps       | MapLibre React Native 10 + OpenFreeMap tiles               |
 | State      | Zustand 5                                                  |
 | Storage    | expo-sqlite (FTS5) · react-native-mmkv · expo-secure-store |
@@ -163,7 +163,7 @@ All outbound actions (probes, edits, reviews) are queued in MMKV (capped at 500 
 | Routing    | Valhalla (online + offline graph tiles)                    |
 | Geocoding  | FTS5 local · Photon · Nominatim                            |
 | Transit    | OpenTripPlanner · MBTA V3 · Amtrak BTS                     |
-| Testing    | Jest 29 · @testing-library/react-native 12                 |
+| Testing    | Jest 29 · @testing-library/react-native 13                 |
 
 ---
 
