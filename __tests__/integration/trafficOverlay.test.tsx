@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
+import { View as MockView } from 'react-native';
 import { render } from '@testing-library/react-native';
 import { useMapStore } from '../../src/stores/mapStore';
 
@@ -32,17 +32,17 @@ jest.mock('@maplibre/maplibre-react-native', () => ({
     maxZoomLevel: number;
   }) => {
     return (
-      <View
+      <MockView
         testID="tomtom-traffic-source"
         accessibilityLabel={`src:${id} url:${tileUrlTemplates[0]} size:${tileSize} minz:${minZoomLevel} maxz:${maxZoomLevel}`}
       >
         {children}
-      </View>
+      </MockView>
     );
   },
   RasterLayer: ({ id, style }: { id: string; style: Record<string, unknown> }) => {
     return (
-      <View
+      <MockView
         testID="tomtom-traffic-layer"
         accessibilityLabel={`layer:${id} opacity:${style.rasterOpacity}`}
       />
