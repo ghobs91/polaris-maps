@@ -157,9 +157,7 @@ export function buildRouteTrafficGeoJSON(
       // Check distance to each coordinate point with bearing penalty
       for (const pt of seg.coordinates) {
         const d =
-          segBearing >= 0
-            ? penalizedDistSq(mid, pt, routeBearing, segBearing)
-            : distSq(mid, pt);
+          segBearing >= 0 ? penalizedDistSq(mid, pt, routeBearing, segBearing) : distSq(mid, pt);
         if (d < bestDistSq) {
           bestDistSq = d;
           bestRatio = seg.congestionRatio;
@@ -250,9 +248,7 @@ export function averageRouteTrafficColor(
 
       for (const pt of seg.coordinates) {
         const d =
-          segBearing >= 0
-            ? penalizedDistSq(mid, pt, routeBearing, segBearing)
-            : distSq(mid, pt);
+          segBearing >= 0 ? penalizedDistSq(mid, pt, routeBearing, segBearing) : distSq(mid, pt);
         if (d < bestDistSq) {
           bestDistSq = d;
           bestRatio = seg.congestionRatio;

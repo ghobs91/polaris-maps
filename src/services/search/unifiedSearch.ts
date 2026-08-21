@@ -179,8 +179,7 @@ export async function unifiedSearch(
       // toward the viewport center and return only nearby matches (e.g.
       // "Times Square Music" in Garden City instead of the actual Times
       // Square in Manhattan 40 km away).
-      const photonZoom =
-        parsed.brand || parsed.isNameSearch ? Math.min(zoom, 10) : zoom;
+      const photonZoom = parsed.brand || parsed.isNameSearch ? Math.min(zoom, 10) : zoom;
       return searchPhoton(parsed.originalQuery, lat, lng, photonZoom, limit, 'en', osmTagFilter);
     })(),
 
@@ -530,7 +529,7 @@ function deriveQueryContext(
       // Levittown, ~40 km away) are included in the fetch area.
       // Cap at 0.45° (~50 km) instead of the previous 0.22° (~24 km).
       viewportRadiusDeg: Math.min(Math.max(zoomRadiusDeg, 0.08), 0.45),
-      userRadiusDeg: parsed.wantsNearMe ? 0.14 : 0.10,
+      userRadiusDeg: parsed.wantsNearMe ? 0.14 : 0.1,
       viewportFetchLimit: 260,
       userFetchLimit: 120,
     };

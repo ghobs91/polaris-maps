@@ -352,15 +352,20 @@ export default function POIDetailScreen() {
                   />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.sectionBody}>{conn.type}</Text>
-                    <Text style={[styles.sectionBody, { color: colors.textSecondary, fontSize: 13 }]}>
-                      {speed}{fastBadge}
+                    <Text
+                      style={[styles.sectionBody, { color: colors.textSecondary, fontSize: 13 }]}
+                    >
+                      {speed}
+                      {fastBadge}
                     </Text>
                   </View>
                 </View>
               );
             })}
             {chargingData.operator && (
-              <Text style={[styles.sectionBody, { marginTop: spacing.xs, color: colors.textSecondary }]}>
+              <Text
+                style={[styles.sectionBody, { marginTop: spacing.xs, color: colors.textSecondary }]}
+              >
                 Operator: {chargingData.operator}
               </Text>
             )}

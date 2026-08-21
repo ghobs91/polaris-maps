@@ -1,6 +1,4 @@
-import {
-  tilesForViewport,
-} from '../../src/services/traffic/trafficTileMath';
+import { tilesForViewport } from '../../src/services/traffic/trafficTileMath';
 
 describe('tilesForViewport', () => {
   it('returns tiles around the map center at the rounded zoom', () => {
@@ -30,7 +28,7 @@ describe('tilesForViewport', () => {
     // The center tile must be closest to the computed center — check that
     // its coordinates match the Web Mercator projection of the center.
     const n = Math.pow(2, 12);
-    const cx = Math.floor((( -74.0 + 180) / 360) * n);
+    const cx = Math.floor(((-74.0 + 180) / 360) * n);
     const latRad = (40.7 * Math.PI) / 180;
     const cy = Math.floor(
       ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n,
