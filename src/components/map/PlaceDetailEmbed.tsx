@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -17,6 +17,11 @@ import { borderRadius, spacing, typography } from '../../constants/theme';
  *
  * The section silently disappears when the embed is not configured, when the
  * selected POI has no Apple lookup key, or when the page fails to load.
+ *
+ * Failures are rendered as a muted diagnostic line inside the section (rather
+ * than hiding it) so release/TestFlight builds expose WHY the embed failed:
+ * missing build config, page-reported errors, native WebView errors, and the
+ * page's own step log.
  */
 
 /** Placeholder height shown while the page loads and measures itself. */
@@ -24,6 +29,9 @@ const LOADING_HEIGHT = 180;
 /** Hard ceiling for the embed — Apple's card limits its own content. */
 const MAX_HEIGHT = 720;
 const MIN_HEIGHT = 60;
+
+/** How many page step-log messages to keep for diagnostics. */
+const MAX_PAGE_LOG_LINES = 6;
 
 interface Props {
   poi: OsmPoi;
@@ -40,11 +48,20 @@ export function PlaceDetailEmbed({ poi }: Props) {
 
   const [height, setHeight] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
+  const [failureReason, setFailureReason] = useState<string | null>(null);
+  const [pageLog, setPageLog] = useState<string[]>([]);
+
+  const fail = useCallback((reason: string) => {
+    setFailureReason(reason);
+    setFailed(true);
+  }, []);
 
   // Reset state when a different POI is selected.
   useEffect(() => {
     setHeight(null);
     setFailed(false);
+    setFailureReason(null);
+    setPageLog([]);
   }, [poi.id, url]);
 
   // Client-side watchdog: if the page never reports a height, stop spinning.
@@ -54,24 +71,57 @@ export function PlaceDetailEmbed({ poi }: Props) {
       if (__DEV__) {
         console.warn('[PlaceDetailEmbed] timed out waiting for page; hiding section');
       }
-      setFailed(true);
+      fail('Timed out waiting for the embed page to report its content height');
     }, 30000);
     return () => clearTimeout(timer);
-  }, [url, failed, height]);
+  }, [url, failed, height, fail]);
 
   const showPlaceholder = height === null && !failed;
 
-  // No hosted page configured, or a transient map-selection pin without an
-  // Apple identity — hide the whole section.
-  if (!url || isMapSelectionPoi(poi)) return null;
-  if (failed) return null;
+  // Transient map-selection pins have no Apple identity — hide the section.
+  if (isMapSelectionPoi(poi)) return null;
+
+  // The hosted page or token is missing from this build's config. Render the
+  // reason instead of hiding the section so misconfigured builds are obvious.
+  if (!url) {
+    return (
+      <View style={styles.section} testID="place-detail-section">
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Photos & Reviews</Text>
+        <Text
+          style={[styles.diagText, { color: colors.textSecondary }]}
+          testID="place-detail-error"
+        >
+          Unavailable: embed not configured in this build.
+        </Text>
+      </View>
+    );
+  }
+
+  if (failed) {
+    return (
+      <View style={styles.section} testID="place-detail-section">
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Photos & Reviews</Text>
+        <Text
+          style={[styles.diagText, { color: colors.textSecondary }]}
+          testID="place-detail-error"
+        >
+          {`Unavailable: ${failureReason ?? 'unknown error'}`}
+        </Text>
+        {pageLog.length > 0 && (
+          <Text style={[styles.diagLog, { color: colors.textSecondary }]} testID="place-detail-log">
+            {pageLog.join('\n')}
+          </Text>
+        )}
+      </View>
+    );
+  }
 
   const clampedHeight = height
     ? Math.min(Math.max(height, MIN_HEIGHT), MAX_HEIGHT)
     : LOADING_HEIGHT;
 
   return (
-    <View style={styles.section}>
+    <View style={styles.section} testID="place-detail-section">
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Photos & Reviews</Text>
       <View
         style={[
@@ -111,14 +161,27 @@ export function PlaceDetailEmbed({ poi }: Props) {
               if (msg.type === 'height' && typeof msg.height === 'number') {
                 setHeight(msg.height);
               } else if (msg.type === 'error') {
-                setFailed(true);
+                fail(msg.message || 'The embed page reported an error');
+              } else if (msg.type === 'log' && typeof msg.message === 'string') {
+                setPageLog((prev) => [
+                  ...prev.slice(-(MAX_PAGE_LOG_LINES - 1)),
+                  msg.message as string,
+                ]);
               }
             } catch {
               // Ignore malformed messages from the page.
             }
           }}
-          onError={() => setFailed(true)}
-          onHttpError={() => setFailed(true)}
+          onError={(event) => {
+            const { domain, code, description } = event.nativeEvent;
+            fail(
+              `WebView error ${String(domain ?? '')}/${String(code ?? '')}: ${description ?? ''}`,
+            );
+          }}
+          onHttpError={(event) => {
+            const { statusCode, description } = event.nativeEvent;
+            fail(`HTTP ${statusCode}: ${description ?? ''}`);
+          }}
         />
         {showPlaceholder && (
           <View style={styles.placeholder} pointerEvents="none">
@@ -150,5 +213,15 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  diagText: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  diagLog: {
+    marginTop: spacing.xs,
+    fontSize: 10,
+    lineHeight: 14,
+    opacity: 0.75,
   },
 });
