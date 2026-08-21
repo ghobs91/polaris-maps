@@ -12,6 +12,19 @@ jest.mock('../../src/services/poi/placeDetailEmbed', () => ({
   buildPlaceDetailUrl: () => mockUrl,
 }));
 
+// The component reads these directly to explain WHY the embed is missing.
+let mockMapkitPlaceDetailUrl = 'https://example.com/place-detail.html';
+let mockMapkitJsEmbedToken = 'test-token';
+
+jest.mock('../../src/constants/config', () => ({
+  get mapkitPlaceDetailUrl() {
+    return mockMapkitPlaceDetailUrl;
+  },
+  get mapkitJsEmbedToken() {
+    return mockMapkitJsEmbedToken;
+  },
+}));
+
 jest.mock('../../src/services/poi/mapSelectionPoi', () => ({
   isMapSelectionPoi: (poi: { tags?: Record<string, string> }) =>
     poi.tags?.['polaris:selection_kind'] === 'map_long_press',
@@ -76,6 +89,8 @@ function fireHttpError(statusCode: number, description: string) {
 describe('PlaceDetailEmbed', () => {
   beforeEach(() => {
     mockUrl = 'https://example.com/place-detail.html';
+    mockMapkitPlaceDetailUrl = 'https://example.com/place-detail.html';
+    mockMapkitJsEmbedToken = 'test-token';
     mockWebViewProps = null;
   });
 
@@ -89,11 +104,38 @@ describe('PlaceDetailEmbed', () => {
 
   it('renders a visible not-configured message when the embed URL is missing', () => {
     mockUrl = null;
+    mockMapkitPlaceDetailUrl = '';
+    mockMapkitJsEmbedToken = '';
 
     const { getByTestId } = render(<PlaceDetailEmbed poi={basePoi} />);
 
     const error = getByTestId('place-detail-error');
     expect(error.props.children).toContain('embed not configured in this build');
+    expect(error.props.children).toContain('missing hosted page URL and MapKit JS token');
+  });
+
+  it('names only the hosted page URL when the token is present', () => {
+    mockUrl = null;
+    mockMapkitPlaceDetailUrl = '';
+    mockMapkitJsEmbedToken = 'test-token';
+
+    const { getByTestId } = render(<PlaceDetailEmbed poi={basePoi} />);
+
+    const error = getByTestId('place-detail-error');
+    expect(error.props.children).toContain('missing hosted page URL');
+    expect(error.props.children).not.toContain('MapKit JS token');
+  });
+
+  it('names only the MapKit JS token when the URL is present', () => {
+    mockUrl = null;
+    mockMapkitPlaceDetailUrl = 'https://example.com/place-detail.html';
+    mockMapkitJsEmbedToken = '';
+
+    const { getByTestId } = render(<PlaceDetailEmbed poi={basePoi} />);
+
+    const error = getByTestId('place-detail-error');
+    expect(error.props.children).toContain('missing MapKit JS token');
+    expect(error.props.children).not.toContain('hosted page URL');
   });
 
   it('renders nothing for transient map-selection POIs', () => {

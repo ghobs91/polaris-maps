@@ -90,13 +90,18 @@ jobs:
       # shipped build (buildPlaceDetailUrl returns null).
       - name: Write CI .env file
         run: |
+          # Trim stray whitespace/newlines that would survive a `-z` check
+          # but parse as empty (or corrupt) values in the dotenv file.
+          trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          EMBED_TOKEN=$(trim "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN")
+          PLACE_DETAIL_URL=$(trim "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL")
           {
             echo "EXPO_PUBLIC_TOMTOM_API_KEY=$EXPO_PUBLIC_TOMTOM_API_KEY"
             echo "EXPO_PUBLIC_TOMTOM_PROXY_URL=$EXPO_PUBLIC_TOMTOM_PROXY_URL"
             echo "EXPO_PUBLIC_HERE_API_KEY=$EXPO_PUBLIC_HERE_API_KEY"
             echo "EXPO_PUBLIC_APPLE_MAPKIT_TOKEN=$EXPO_PUBLIC_APPLE_MAPKIT_TOKEN"
-            echo "EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN=$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN"
-            echo "EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL=$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL"
+            echo "EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN=$EMBED_TOKEN"
+            echo "EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL=$PLACE_DETAIL_URL"
             echo "EXPO_PUBLIC_MBTA_API_KEY=$EXPO_PUBLIC_MBTA_API_KEY"
             echo "EXPO_PUBLIC_WMATA_API_KEY=$EXPO_PUBLIC_WMATA_API_KEY"
             echo "EXPO_PUBLIC_MOBILITY_DB_API_KEY=$EXPO_PUBLIC_MOBILITY_DB_API_KEY"
@@ -107,10 +112,30 @@ jobs:
             echo "EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL=$EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL"
             echo "EXPO_PUBLIC_REGION_CATALOG_URL=$EXPO_PUBLIC_REGION_CATALOG_URL"
           } > .env
-          if [ -z "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN" ] || [ -z "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL" ]; then
+          # Strict validation — a whitespace-only secret passes `-z` but
+          # parses to an empty value, which silently disables the embed.
+          if [ -z "$EMBED_TOKEN" ] || [ -z "$PLACE_DETAIL_URL" ]; then
             echo "::error::EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN and EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL are required secrets — add them in GitHub → Settings → Secrets and variables → Actions."
             exit 1
           fi
+          case "$PLACE_DETAIL_URL" in
+            https://*) ;;
+            *)
+              echo "::error::EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL must start with https://"
+              exit 1
+              ;;
+          esac
+          case "$EMBED_TOKEN" in
+            *[!A-Za-z0-9._-]*)
+              echo "::error::EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN contains invalid characters (expected a base64url JWT)"
+              exit 1
+              ;;
+          esac
+          if [ "${#EMBED_TOKEN}" -lt 20 ]; then
+            echo "::error::EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN is too short (${#EMBED_TOKEN} chars)"
+            exit 1
+          fi
+          echo "::notice::.env written — embed URL length ${#PLACE_DETAIL_URL}, embed token length ${#EMBED_TOKEN}"
         env:
           EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
           EXPO_PUBLIC_TOMTOM_PROXY_URL: ${{ secrets.EXPO_PUBLIC_TOMTOM_PROXY_URL }}
@@ -174,23 +199,45 @@ jobs:
       # Regression guard: the POI card's Apple "Photos & Reviews" embed is
       # silently hidden when EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL /
       # EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN are not inlined into the bundle.
-      # Fail the pipeline if the shipped bundle lacks them.
-      # (If the hosted page path ever changes, update the place-detail.html
-      # pattern here too.)
+      #
+      # Exact-value checks: the bundle must contain the SAME URL and token the
+      # CI .env provided. A bare '#token=' grep would be vacuous — that string
+      # literal exists in the app source regardless of config.
       # -------------------------------------------------------------------
       - name: Verify MapKit embed config inlined into bundle
         run: |
           unzip -o -q build_derived_data/PolarisMaps.ipa 'Payload/PolarisMaps.app/main.jsbundle' -d /tmp/polaris-bundle-check
           BUNDLE=/tmp/polaris-bundle-check/Payload/PolarisMaps.app/main.jsbundle
-          if ! grep -aq 'place-detail.html' "$BUNDLE"; then
-            echo "::error::Shipped bundle does not contain the MapKit place-detail URL (EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL was empty at build time)"
+          trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          if ! grep -aFq "$(trim "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL")" "$BUNDLE"; then
+            echo "::error::Shipped bundle does not contain the MapKit place-detail URL (not inlined at build time)"
             exit 1
           fi
-          if ! grep -aq '#token=' "$BUNDLE"; then
-            echo "::error::Shipped bundle does not contain a MapKit JS embed token (EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN was empty at build time)"
+          if ! grep -aFq "$(trim "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN")" "$BUNDLE"; then
+            echo "::error::Shipped bundle does not contain the MapKit JS embed token (not inlined at build time)"
             exit 1
           fi
           echo "MapKit embed config present in shipped bundle"
+        env:
+          EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL: ${{ secrets.EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL }}
+          EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN: ${{ secrets.EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN }}
+
+      # Keep the shipped bundle as a run artifact so it can be inspected
+      # after the fact without a device or another build.
+      - name: Prepare bundle artifact
+        if: always()
+        run: |
+          if [ -f build_derived_data/PolarisMaps.ipa ]; then
+            unzip -o -q build_derived_data/PolarisMaps.ipa 'Payload/PolarisMaps.app/main.jsbundle' -d /tmp/polaris-bundle-artifact
+          fi
+
+      - name: Upload main.jsbundle for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-main-jsbundle
+          path: /tmp/polaris-bundle-artifact/Payload/PolarisMaps.app/main.jsbundle
+          if-no-files-found: ignore
 
       # -------------------------------------------------------------------
       # Cleanup

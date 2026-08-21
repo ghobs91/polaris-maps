@@ -4,6 +4,7 @@ import { WebView } from 'react-native-webview';
 import { useTheme } from '../../contexts/ThemeContext';
 import { buildPlaceDetailUrl } from '../../services/poi/placeDetailEmbed';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
+import { mapkitJsEmbedToken, mapkitPlaceDetailUrl } from '../../constants/config';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { borderRadius, spacing, typography } from '../../constants/theme';
 
@@ -82,8 +83,16 @@ export function PlaceDetailEmbed({ poi }: Props) {
   if (isMapSelectionPoi(poi)) return null;
 
   // The hosted page or token is missing from this build's config. Render the
-  // reason instead of hiding the section so misconfigured builds are obvious.
+  // reason (including WHICH value is missing) instead of hiding the section so
+  // misconfigured builds are obvious.
   if (!url) {
+    const missing: string[] = [];
+    if (!mapkitPlaceDetailUrl) missing.push('hosted page URL');
+    if (!mapkitJsEmbedToken) missing.push('MapKit JS token');
+    const reason =
+      missing.length > 0
+        ? `embed not configured in this build (missing ${missing.join(' and ')})`
+        : 'embed not configured in this build';
     return (
       <View style={styles.section} testID="place-detail-section">
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Photos & Reviews</Text>
@@ -91,7 +100,7 @@ export function PlaceDetailEmbed({ poi }: Props) {
           style={[styles.diagText, { color: colors.textSecondary }]}
           testID="place-detail-error"
         >
-          Unavailable: embed not configured in this build.
+          {`Unavailable: ${reason}.`}
         </Text>
       </View>
     );
