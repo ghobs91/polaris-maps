@@ -135,6 +135,11 @@ jobs:
             echo "::error::EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN is too short (${#EMBED_TOKEN} chars)"
             exit 1
           fi
+          # Also export into the step environment so the xcodebuild bundle
+          # phase inlines them from process.env even if .env file loading
+          # misbehaves on the runner (@expo/env prefers process.env).
+          echo "EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL=$PLACE_DETAIL_URL" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN=$EMBED_TOKEN" >> "$GITHUB_ENV"
           echo "::notice::.env written — embed URL length ${#PLACE_DETAIL_URL}, embed token length ${#EMBED_TOKEN}"
         env:
           EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
@@ -152,6 +157,26 @@ jobs:
           EXPO_PUBLIC_GEONAMES_DB_URL: ${{ secrets.EXPO_PUBLIC_GEONAMES_DB_URL }}
           EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL: ${{ secrets.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL }}
           EXPO_PUBLIC_REGION_CATALOG_URL: ${{ secrets.EXPO_PUBLIC_REGION_CATALOG_URL }}
+
+      # Canary: bundle the app JS directly (fast, before the 10+ minute native
+      # build) and verify the embed values are inlined. Splits "env not
+      # inlined at all" from "not inlined inside the xcodebuild phase".
+      - name: Canary-check env inlining
+        run: |
+          npx expo export:embed --entry-file index.js --platform ios --dev false \
+            --bundle-output /tmp/polaris-canary.jsbundle --assets-dest /tmp/polaris-canary-assets
+          if ! grep -aFq "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL" /tmp/polaris-canary.jsbundle; then
+            echo "::error::Canary bundle lacks the MapKit place-detail URL — env not inlined by expo export:embed"
+            exit 1
+          fi
+          if ! grep -aFq "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN" /tmp/polaris-canary.jsbundle; then
+            echo "::error::Canary bundle lacks the MapKit JS embed token — env not inlined by expo export:embed"
+            exit 1
+          fi
+          echo "Canary bundle contains the MapKit embed config"
+        env:
+          EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL: ${{ secrets.EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL }}
+          EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN: ${{ secrets.EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN }}
 
       - name: Install CocoaPods
         run: |
@@ -209,11 +234,19 @@ jobs:
           unzip -o -q build_derived_data/PolarisMaps.ipa 'Payload/PolarisMaps.app/main.jsbundle' -d /tmp/polaris-bundle-check
           BUNDLE=/tmp/polaris-bundle-check/Payload/PolarisMaps.app/main.jsbundle
           trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
-          if ! grep -aFq "$(trim "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL")" "$BUNDLE"; then
+          URL_OK=0
+          TOKEN_OK=0
+          if grep -aFq "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL" "$BUNDLE" || grep -aFq "$(trim "$EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL")" "$BUNDLE"; then
+            URL_OK=1
+          fi
+          if grep -aFq "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN" "$BUNDLE" || grep -aFq "$(trim "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN")" "$BUNDLE"; then
+            TOKEN_OK=1
+          fi
+          if [ "$URL_OK" -ne 1 ]; then
             echo "::error::Shipped bundle does not contain the MapKit place-detail URL (not inlined at build time)"
             exit 1
           fi
-          if ! grep -aFq "$(trim "$EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN")" "$BUNDLE"; then
+          if [ "$TOKEN_OK" -ne 1 ]; then
             echo "::error::Shipped bundle does not contain the MapKit JS embed token (not inlined at build time)"
             exit 1
           fi
