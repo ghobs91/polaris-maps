@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -36,9 +36,13 @@ const MAX_PAGE_LOG_LINES = 6;
 
 interface Props {
   poi: OsmPoi;
+  /** Called once when the embed page reports its content height (loaded successfully). */
+  onLoaded?: () => void;
+  /** Called when the embed fails (page error, HTTP error, or timeout). */
+  onFailed?: () => void;
 }
 
-export function PlaceDetailEmbed({ poi }: Props) {
+export function PlaceDetailEmbed({ poi, onLoaded, onFailed }: Props) {
   const { isDark, colors } = useTheme();
   const theme = isDark ? 'dark' : 'light';
 
@@ -51,10 +55,19 @@ export function PlaceDetailEmbed({ poi }: Props) {
   const [failed, setFailed] = useState(false);
   const [failureReason, setFailureReason] = useState<string | null>(null);
   const [pageLog, setPageLog] = useState<string[]>([]);
+  const notifiedLoadedRef = useRef(false);
+
+  // Keep the latest callbacks in refs so the stable `fail` callback below never
+  // triggers effect churn when the parent passes fresh inline functions.
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
+  const onFailedRef = useRef(onFailed);
+  onFailedRef.current = onFailed;
 
   const fail = useCallback((reason: string) => {
     setFailureReason(reason);
     setFailed(true);
+    onFailedRef.current?.();
   }, []);
 
   // Reset state when a different POI is selected.
@@ -63,6 +76,7 @@ export function PlaceDetailEmbed({ poi }: Props) {
     setFailed(false);
     setFailureReason(null);
     setPageLog([]);
+    notifiedLoadedRef.current = false;
   }, [poi.id, url]);
 
   // Client-side watchdog: if the page never reports a height, stop spinning.
@@ -169,6 +183,10 @@ export function PlaceDetailEmbed({ poi }: Props) {
               }
               if (msg.type === 'height' && typeof msg.height === 'number') {
                 setHeight(msg.height);
+                if (!notifiedLoadedRef.current) {
+                  notifiedLoadedRef.current = true;
+                  onLoadedRef.current?.();
+                }
               } else if (msg.type === 'error') {
                 fail(msg.message || 'The embed page reported an error');
               } else if (msg.type === 'log' && typeof msg.message === 'string') {

@@ -24,6 +24,7 @@ import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { PlaceDetailEmbed } from './PlaceDetailEmbed';
+import { buildPlaceDetailUrl } from '../../services/poi/placeDetailEmbed';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
@@ -37,6 +38,12 @@ const SCREEN_H = Dimensions.get('window').height;
 // Two snap points: peek (55%) and expanded (85%)
 const PEEK_H = SCREEN_H * 0.55;
 const FULL_H = SCREEN_H * 0.85;
+// Height of the card hidden below the screen edge in peek (non-expanded) mode.
+const PEEK_OFFSET = FULL_H - PEEK_H;
+
+// Tri-state resolution of the MapKit embed: pending (still loading), embedded
+// (showing Apple's card), or hidden (embed unavailable — show full OSM fields).
+type EmbedState = 'pending' | 'embedded' | 'hidden';
 
 // ---------------------------------------------------------------------------
 // Tag parsing helpers
@@ -353,7 +360,6 @@ const pillStyles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 4,
     minWidth: 68,
-    flex: 1,
   },
   label: {
     fontSize: 11,
@@ -375,6 +381,13 @@ export function POIInfoCard() {
   const [showSaveSheet, setShowSaveSheet] = useState(false);
   // Track whether the Clearbit logo failed to load (e.g. 404 for unknown brands)
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  // Resolution state of the MapKit "Photos & Reviews" embed. The card stays in
+  // a loading state until the embed's fate is known so OSM fields don't flash
+  // in and then disappear.
+  const [embedState, setEmbedState] = useState<EmbedState>('pending');
+  // Reactive expanded flag (mirrors expandedRef) so the ScrollView's bottom
+  // padding can compensate for the portion of the card hidden in peek mode.
+  const [expanded, setExpanded] = useState(false);
   // Use a ref so PanResponder closures always read the latest value
   const expandedRef = useRef(false);
   // EV charging station data from Open Charge Map
@@ -409,6 +422,7 @@ export function POIInfoCard() {
 
   const setExpandedBoth = useCallback((next: boolean) => {
     expandedRef.current = next;
+    setExpanded(next);
   }, []);
 
   // Slide in/out when POI selection changes
@@ -456,10 +470,19 @@ export function POIInfoCard() {
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
 
+  // Whether the embed can never appear for this POI (transient map-selection
+  // pin, or the hosted MapKit page/token is unconfigured). Used to skip the
+  // loading state and go straight to full OSM fields.
+  const embedHiddenImmediately = useMemo(
+    () => (poi ? isMapSelectionPoi(poi) || !buildPlaceDetailUrl(poi, 'adaptive') : true),
+    [poi],
+  );
+
   // Reset logo error state when POI changes
   useEffect(() => {
     setLogoLoadFailed(false);
-  }, [poi?.id]);
+    setEmbedState(embedHiddenImmediately ? 'hidden' : 'pending');
+  }, [embedHiddenImmediately]);
 
   // Trigger Apple Maps enrichment when a POI is selected
   useEffect(() => {
@@ -534,10 +557,14 @@ export function POIInfoCard() {
   const subtextColor = colors.textSecondary;
   const borderColor = colors.border;
   const primary = colors.primary;
-  // Action pill surface — mirrors the TransportModeSelector chips (soft tinted
-  // fill + hairline border) instead of liquid glass.
-  const pillFill = isDark ? 'rgba(50,50,70,0.5)' : 'rgba(230,230,240,0.8)';
-  const pillBorder = isDark ? 'rgba(122,122,140,0.35)' : 'rgba(60,60,67,0.15)';
+  // Action pill colors — Apple Maps-style: the primary "Directions" pill is a
+  // filled tint with white content; the rest are soft tinted surfaces with
+  // tinted icon/label (mirrors the TransportModeSelector chips).
+  const pillPrimaryFill = primary;
+  const pillPrimaryContent = colors.white;
+  const pillSecondaryFill = isDark ? 'rgba(64,156,255,0.22)' : 'rgba(0,122,255,0.12)';
+  const pillSecondaryContent = isDark ? colors.primaryLight : primary;
+  const pillSecondaryBorder = isDark ? 'rgba(64,156,255,0.35)' : 'rgba(0,122,255,0.25)';
 
   const handlePhone = useCallback(() => {
     if (parsed?.phone) Linking.openURL(`tel:${parsed.phone.replace(/\s+/g, '')}`);
@@ -604,6 +631,149 @@ export function POIInfoCard() {
       );
   }, [parsed?.instagram]);
 
+  // Info rows. When the MapKit embed is showing, rows it already displays
+  // (address, hours, phone, website, email) are dropped as redundant; the
+  // section is skipped entirely if nothing remains.
+  type InfoRowData = {
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    label: string;
+    onPress?: () => void;
+    iconColor?: string;
+  };
+  const rawInfoRows: Array<InfoRowData | '' | false | null | undefined> = parsed
+    ? [
+        parsed.address &&
+          embedState === 'hidden' && {
+            icon: 'location-outline' as const,
+            label: parsed.address,
+          },
+        parsed.hours &&
+          embedState === 'hidden' && {
+            icon: 'time-outline' as const,
+            label: parsed.hours,
+          },
+        parsed.phone &&
+          embedState === 'hidden' && {
+            icon: 'call-outline' as const,
+            label: parsed.phone,
+            onPress: handlePhone,
+            iconColor: primary,
+          },
+        parsed.website &&
+          embedState === 'hidden' && {
+            icon: 'globe-outline' as const,
+            label: new URL(
+              parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`,
+            ).hostname.replace(/^www\./, ''),
+            onPress: handleWebsite,
+            iconColor: primary,
+          },
+        parsed.email &&
+          embedState === 'hidden' && {
+            icon: 'mail-outline' as const,
+            label: parsed.email,
+            onPress: handleEmail,
+            iconColor: primary,
+          },
+        parsed.wheelchair === 'yes' && {
+          icon: 'accessibility-outline' as const,
+          label: 'Wheelchair accessible',
+          iconColor: colors.success,
+        },
+        parsed.wheelchair === 'limited' && {
+          icon: 'accessibility-outline' as const,
+          label: 'Limited wheelchair access',
+        },
+        parsed.wheelchair === 'no' && {
+          icon: 'accessibility-outline' as const,
+          label: 'Not wheelchair accessible',
+          iconColor: colors.error,
+        },
+        parsed.wifi && {
+          icon: 'wifi-outline' as const,
+          label: parsed.wifi,
+          iconColor: colors.success,
+        },
+        parsed.outdoorSeating && {
+          icon: 'sunny-outline' as const,
+          label: 'Outdoor seating',
+        },
+        parsed.indoorSeating && {
+          icon: 'home-outline' as const,
+          label: 'Indoor seating',
+        },
+        parsed.takeaway && {
+          icon: 'bag-outline' as const,
+          label: parsed.takeaway,
+        },
+        parsed.delivery && {
+          icon: 'bicycle-outline' as const,
+          label: parsed.delivery,
+          iconColor: colors.success,
+        },
+        parsed.reservation && {
+          icon: 'calendar-outline' as const,
+          label: parsed.reservation,
+        },
+        parsed.smoking && {
+          icon: 'ban-outline' as const,
+          label: parsed.smoking,
+        },
+        parsed.fee && {
+          icon: 'pricetag-outline' as const,
+          label: parsed.fee,
+        },
+        parsed.level && {
+          icon: 'layers-outline' as const,
+          label: parsed.level,
+        },
+        parsed.capacity && {
+          icon: 'people-outline' as const,
+          label: parsed.capacity,
+        },
+        parsed.payment && {
+          icon: 'card-outline' as const,
+          label: parsed.payment,
+        },
+        parsed.diet && {
+          icon: 'leaf-outline' as const,
+          label: parsed.diet,
+          iconColor: colors.success,
+        },
+        // EV Charging information from Open Charge Map
+        // Show each connector with its charging speed (power in kW)
+        ...(chargingData?.connections?.length
+          ? chargingData.connections.map((conn: ChargingConnection) => {
+              const speed = conn.powerKW ? ` · ${conn.powerKW} kW` : '';
+              const fastBadge = conn.isFastCharge ? ' ⚡' : '';
+              return {
+                icon: (conn.isFastCharge ? 'flash' : 'flash-outline') as InfoRowData['icon'],
+                label: `${conn.type}${speed}${fastBadge}`,
+                iconColor: conn.isFastCharge ? colors.success : undefined,
+              };
+            })
+          : []),
+        chargingData?.pricing && {
+          icon: 'pricetag-outline' as const,
+          label: chargingData.pricing,
+        },
+        chargingData?.accessType === 'public' && {
+          icon: 'people-outline' as const,
+          label: 'Public access',
+        },
+        chargingData?.accessType === 'members_only' && {
+          icon: 'lock-closed-outline' as const,
+          label: 'Members only',
+          iconColor: colors.warning,
+        },
+        chargingData?.operator && {
+          icon: 'business-outline' as const,
+          label: `Operator: ${chargingData.operator}`,
+        },
+      ]
+    : [];
+  const infoRows = rawInfoRows.filter((row): row is InfoRowData => !!row);
+
   return (
     <Animated.View
       style={[
@@ -643,7 +813,13 @@ export function POIInfoCard() {
             style={styles.scroll}
             contentContainerStyle={[
               styles.scrollContent,
-              { paddingBottom: spacing.xxl + insets.bottom },
+              {
+                // In peek mode the card's lower portion sits below the screen
+                // edge; add that hidden amount as bottom padding so the last
+                // content stays reachable. Expanded mode only needs breathing
+                // room.
+                paddingBottom: spacing.xxl + insets.bottom + (expanded ? 0 : PEEK_OFFSET),
+              },
             ]}
             showsVerticalScrollIndicator={false}
             scrollEnabled
@@ -675,62 +851,70 @@ export function POIInfoCard() {
               />
             )}
 
-            {/* ── Header ────────────────────────────────────────────────── */}
-            <View style={styles.header}>
-              {enrichedData?.logoUrl && !logoLoadFailed ? (
-                <Image
-                  source={{ uri: enrichedData.logoUrl }}
-                  style={styles.brandLogo}
-                  resizeMode="contain"
-                  onError={() => setLogoLoadFailed(true)}
-                />
-              ) : (
-                <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
-                  <Ionicons name={category.icon} size={22} color="#FFFFFF" />
-                </View>
-              )}
-              <View style={styles.headerText}>
-                <Text
-                  style={[styles.name, { color: textColor }]}
-                  numberOfLines={2}
-                  accessibilityRole="header"
-                  accessibilityLabel={poi.name}
-                >
-                  {poi.name}
-                </Text>
-                <Text style={[styles.categoryLabel, { color: subtextColor }]}>
-                  {enrichedData?.poiCategory
-                    ? formatPoiCategory(enrichedData.poiCategory)
-                    : capitalise(poi.subtype)}
-                  {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
-                  {parsed.stars ? ` · ${parsed.stars}` : ''}
-                </Text>
-                {(parsed.brand ?? parsed.operator) && (
-                  <Text style={[styles.operatorLabel, { color: subtextColor }]}>
-                    {parsed.brand ?? parsed.operator}
-                  </Text>
+            {/* ── Header (hidden when the MapKit embed loads — it shows
+                  name, category and brand itself) ───────────────────────── */}
+            {embedState === 'hidden' && (
+              <View style={styles.header}>
+                {enrichedData?.logoUrl && !logoLoadFailed ? (
+                  <Image
+                    source={{ uri: enrichedData.logoUrl }}
+                    style={styles.brandLogo}
+                    resizeMode="contain"
+                    onError={() => setLogoLoadFailed(true)}
+                  />
+                ) : (
+                  <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
+                    <Ionicons name={category.icon} size={22} color="#FFFFFF" />
+                  </View>
                 )}
+                <View style={styles.headerText}>
+                  <Text
+                    style={[styles.name, { color: textColor }]}
+                    numberOfLines={2}
+                    accessibilityRole="header"
+                    accessibilityLabel={poi.name}
+                  >
+                    {poi.name}
+                  </Text>
+                  <Text style={[styles.categoryLabel, { color: subtextColor }]}>
+                    {enrichedData?.poiCategory
+                      ? formatPoiCategory(enrichedData.poiCategory)
+                      : capitalise(poi.subtype)}
+                    {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
+                    {parsed.stars ? ` · ${parsed.stars}` : ''}
+                  </Text>
+                  {(parsed.brand ?? parsed.operator) && (
+                    <Text style={[styles.operatorLabel, { color: subtextColor }]}>
+                      {parsed.brand ?? parsed.operator}
+                    </Text>
+                  )}
+                </View>
               </View>
-            </View>
+            )}
 
             {/* ── Action pill buttons ────────────────────────────────────── */}
-            <View style={styles.actions}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.actions}
+              style={styles.actionsWrap}
+            >
               <ActionPill
                 icon="navigate"
                 label="Directions"
                 onPress={handleDirections}
-                color={primary}
-                fillColor={pillFill}
-                borderColor={pillBorder}
+                color={pillPrimaryContent}
+                fillColor={pillPrimaryFill}
+                borderColor={pillPrimaryFill}
               />
               {parsed.phone && (
                 <ActionPill
                   icon="call"
                   label="Call"
                   onPress={handlePhone}
-                  color={primary}
-                  fillColor={pillFill}
-                  borderColor={pillBorder}
+                  color={pillSecondaryContent}
+                  fillColor={pillSecondaryFill}
+                  borderColor={pillSecondaryBorder}
                 />
               )}
               {parsed.website && (
@@ -738,9 +922,9 @@ export function POIInfoCard() {
                   icon="globe"
                   label="Website"
                   onPress={handleWebsite}
-                  color={primary}
-                  fillColor={pillFill}
-                  borderColor={pillBorder}
+                  color={pillSecondaryContent}
+                  fillColor={pillSecondaryFill}
+                  borderColor={pillSecondaryBorder}
                 />
               )}
               {parsed.menuUrl && (
@@ -748,9 +932,9 @@ export function POIInfoCard() {
                   icon="restaurant-outline"
                   label="Menu"
                   onPress={handleMenu}
-                  color={primary}
-                  fillColor={pillFill}
-                  borderColor={pillBorder}
+                  color={pillSecondaryContent}
+                  fillColor={pillSecondaryFill}
+                  borderColor={pillSecondaryBorder}
                 />
               )}
               {parsed.email && (
@@ -758,28 +942,35 @@ export function POIInfoCard() {
                   icon="mail"
                   label="Email"
                   onPress={handleEmail}
-                  color={primary}
-                  fillColor={pillFill}
-                  borderColor={pillBorder}
+                  color={pillSecondaryContent}
+                  fillColor={pillSecondaryFill}
+                  borderColor={pillSecondaryBorder}
                 />
               )}
               <ActionPill
                 icon="bookmark-outline"
                 label="Save"
                 onPress={() => setShowSaveSheet(true)}
-                color={primary}
-                fillColor={pillFill}
-                borderColor={pillBorder}
+                color={pillSecondaryContent}
+                fillColor={pillSecondaryFill}
+                borderColor={pillSecondaryBorder}
               />
               <ActionPill
                 icon="share-outline"
                 label="Share"
                 onPress={handleShare}
-                color={primary}
-                fillColor={pillFill}
-                borderColor={pillBorder}
+                color={pillSecondaryContent}
+                fillColor={pillSecondaryFill}
+                borderColor={pillSecondaryBorder}
               />
-            </View>
+            </ScrollView>
+
+            {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
+            <PlaceDetailEmbed
+              poi={poi}
+              onLoaded={() => setEmbedState('embedded')}
+              onFailed={() => setEmbedState((prev) => (prev === 'pending' ? 'hidden' : prev))}
+            />
 
             <RNModal
               visible={showSaveSheet}
@@ -810,169 +1001,32 @@ export function POIInfoCard() {
             )}
 
             {/* ── Info rows ─────────────────────────────────────────────── */}
-            <GlassView
-              material="regular"
-              style={[
-                styles.section,
-                {
-                  borderRadius: borderRadius.lg,
-                  overflow: 'hidden',
-                },
-              ]}
-            >
-              {[
-                parsed.address && {
-                  icon: 'location-outline' as const,
-                  label: parsed.address,
-                },
-                parsed.hours && {
-                  icon: 'time-outline' as const,
-                  label: parsed.hours,
-                },
-                parsed.phone && {
-                  icon: 'call-outline' as const,
-                  label: parsed.phone,
-                  onPress: handlePhone,
-                  iconColor: primary,
-                },
-                parsed.website && {
-                  icon: 'globe-outline' as const,
-                  label: new URL(
-                    parsed.website.startsWith('http')
-                      ? parsed.website
-                      : `https://${parsed.website}`,
-                  ).hostname.replace(/^www\./, ''),
-                  onPress: handleWebsite,
-                  iconColor: primary,
-                },
-                parsed.email && {
-                  icon: 'mail-outline' as const,
-                  label: parsed.email,
-                  onPress: handleEmail,
-                  iconColor: primary,
-                },
-                parsed.wheelchair === 'yes' && {
-                  icon: 'accessibility-outline' as const,
-                  label: 'Wheelchair accessible',
-                  iconColor: colors.success,
-                },
-                parsed.wheelchair === 'limited' && {
-                  icon: 'accessibility-outline' as const,
-                  label: 'Limited wheelchair access',
-                },
-                parsed.wheelchair === 'no' && {
-                  icon: 'accessibility-outline' as const,
-                  label: 'Not wheelchair accessible',
-                  iconColor: colors.error,
-                },
-                parsed.wifi && {
-                  icon: 'wifi-outline' as const,
-                  label: parsed.wifi,
-                  iconColor: colors.success,
-                },
-                parsed.outdoorSeating && {
-                  icon: 'sunny-outline' as const,
-                  label: 'Outdoor seating',
-                },
-                parsed.indoorSeating && {
-                  icon: 'home-outline' as const,
-                  label: 'Indoor seating',
-                },
-                parsed.takeaway && {
-                  icon: 'bag-outline' as const,
-                  label: parsed.takeaway,
-                },
-                parsed.delivery && {
-                  icon: 'bicycle-outline' as const,
-                  label: parsed.delivery,
-                  iconColor: colors.success,
-                },
-                parsed.reservation && {
-                  icon: 'calendar-outline' as const,
-                  label: parsed.reservation,
-                },
-                parsed.smoking && {
-                  icon: 'ban-outline' as const,
-                  label: parsed.smoking,
-                },
-                parsed.fee && {
-                  icon: 'pricetag-outline' as const,
-                  label: parsed.fee,
-                },
-                parsed.level && {
-                  icon: 'layers-outline' as const,
-                  label: parsed.level,
-                },
-                parsed.capacity && {
-                  icon: 'people-outline' as const,
-                  label: parsed.capacity,
-                },
-                parsed.payment && {
-                  icon: 'card-outline' as const,
-                  label: parsed.payment,
-                },
-                parsed.diet && {
-                  icon: 'leaf-outline' as const,
-                  label: parsed.diet,
-                  iconColor: colors.success,
-                },
-                // EV Charging information from Open Charge Map
-                // Show each connector with its charging speed (power in kW)
-                ...(chargingData?.connections?.length
-                  ? chargingData.connections.map((conn: ChargingConnection) => {
-                      const speed = conn.powerKW ? ` · ${conn.powerKW} kW` : '';
-                      const fastBadge = conn.isFastCharge ? ' ⚡' : '';
-                      return {
-                        icon: conn.isFastCharge ? 'flash' : 'flash-outline',
-                        label: `${conn.type}${speed}${fastBadge}`,
-                        iconColor: conn.isFastCharge ? colors.success : undefined,
-                      };
-                    })
-                  : []),
-                chargingData?.pricing && {
-                  icon: 'pricetag-outline' as const,
-                  label: chargingData.pricing,
-                },
-                chargingData?.accessType === 'public' && {
-                  icon: 'people-outline' as const,
-                  label: 'Public access',
-                },
-                chargingData?.accessType === 'members_only' && {
-                  icon: 'lock-closed-outline' as const,
-                  label: 'Members only',
-                  iconColor: colors.warning,
-                },
-                chargingData?.operator && {
-                  icon: 'business-outline' as const,
-                  label: `Operator: ${chargingData.operator}`,
-                },
-              ]
-                .filter(Boolean)
-                .map((row, i, arr) => {
-                  const r = row as {
-                    icon: React.ComponentProps<typeof Ionicons>['name'];
-                    label: string;
-                    onPress?: () => void;
-                    iconColor?: string;
-                  };
-                  return (
-                    <InfoRow
-                      key={i}
-                      icon={r.icon}
-                      label={r.label}
-                      onPress={r.onPress}
-                      iconColor={r.iconColor}
-                      textColor={textColor}
-                      subtextColor={subtextColor}
-                      borderColor={borderColor}
-                      isLast={i === arr.length - 1}
-                    />
-                  );
-                })}
-            </GlassView>
-
-            {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
-            <PlaceDetailEmbed poi={poi} />
+            {infoRows.length > 0 && (
+              <GlassView
+                material="regular"
+                style={[
+                  styles.section,
+                  {
+                    borderRadius: borderRadius.lg,
+                    overflow: 'hidden',
+                  },
+                ]}
+              >
+                {infoRows.map((row, i) => (
+                  <InfoRow
+                    key={i}
+                    icon={row.icon}
+                    label={row.label}
+                    onPress={row.onPress}
+                    iconColor={row.iconColor}
+                    textColor={textColor}
+                    subtextColor={subtextColor}
+                    borderColor={borderColor}
+                    isLast={i === infoRows.length - 1}
+                  />
+                ))}
+              </GlassView>
+            )}
 
             {(parsed.facebook || parsed.instagram || parsed.twitter) && (
               <View style={styles.socialRow}>
@@ -1177,11 +1231,13 @@ const styles = StyleSheet.create({
   operatorLabel: {
     ...typography.caption,
   },
+  actionsWrap: {
+    marginBottom: spacing.md,
+  },
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
   },
   section: {
     marginHorizontal: spacing.md,
