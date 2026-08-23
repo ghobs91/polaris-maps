@@ -46,6 +46,8 @@ const POI_MIN_ZOOM = 14;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
 const POI_ZOOM_REUSE_THRESHOLD = 0.35;
+const NAVIGATION_CAMERA_PITCH = 60;
+const NAVIGATION_CAMERA_TOP_PADDING = 0.5;
 
 /** ~30 m threshold for considering two POIs as duplicates. */
 const DEDUP_THRESHOLD_DEG = 0.0003;
@@ -206,7 +208,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   // In navigation mode, follow navPosition with tilt + heading.
   // paddingTop shifts the focal point downward in screen space so the marker
-  // sits in the lower third, showing more of the route ahead (Apple/Google Maps style).
+  // sits low in the viewport, showing more of the route ahead (Google Maps style).
   // followCamera is in the dep array so pressing re-center triggers immediately.
   useEffect(() => {
     if (!navigationMode || !navPosition || !cameraRef.current) return;
@@ -216,9 +218,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       centerCoordinate: navPosition,
       zoomLevel: 17,
       heading: navBearing,
-      pitch: 55,
+      pitch: NAVIGATION_CAMERA_PITCH,
       padding: {
-        paddingTop: screenHeight * 0.4,
+        paddingTop: screenHeight * NAVIGATION_CAMERA_TOP_PADDING,
         paddingBottom: 0,
         paddingLeft: 0,
         paddingRight: 0,
@@ -672,10 +674,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 id="navPuckCircleLayer"
                 style={
                   {
-                    circleRadius: 26,
-                    circleColor: 'rgba(255, 255, 255, 0.65)',
-                    circleStrokeWidth: 3.5,
-                    circleStrokeColor: PUCK_BLUE,
+                    circleRadius: 36,
+                    circleColor: 'rgba(0, 145, 214, 0.38)',
+                    circleStrokeWidth: 2.5,
+                    circleStrokeColor: '#65D8FF',
                     circleOpacity: 1,
                   } as any
                 }
@@ -688,7 +690,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 id="navPuckShadowFill"
                 style={
                   {
-                    fillColor: 'rgba(74, 140, 255, 0.16)',
+                    fillColor: 'rgba(26, 39, 61, 0.42)',
                   } as any
                 }
               />
@@ -700,7 +702,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 id="navPuckArrowBodyFill"
                 style={
                   {
-                    fillColor: 'rgba(74, 140, 255, 0.35)',
+                    fillColor: '#A9B8CC',
                   } as any
                 }
               />
@@ -711,7 +713,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 id="navPuckArrowTopFill"
                 style={
                   {
-                    fillColor: '#FFFFFF',
+                    fillColor: '#F8F7FF',
                   } as any
                 }
               />
@@ -768,17 +770,16 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   );
 });
 
-const PUCK_BLUE = '#4A8CFF';
-
 // Screen-pixel sizes for the nav puck arrow.  They are converted to meters at
 // the current zoom/latitude so the arrow stays proportionate to the fixed-pixel
 // CircleLayer background.
-const ARROW_FORWARD_PX = 18;
-const ARROW_BACK_PX = 2;
-const ARROW_HALF_WIDTH_PX = 5.5;
-const BODY_SHIFT_PX = 3;
-const SHADOW_SHIFT_PX = 5;
-const SHADOW_SCALE = 1.15;
+const ARROW_FORWARD_PX = 31;
+const ARROW_BACK_PX = 18;
+const ARROW_HALF_WIDTH_PX = 13.5;
+const BODY_SHIFT_PX = 5;
+const BODY_SCALE = 1.04;
+const SHADOW_SHIFT_PX = 8;
+const SHADOW_SCALE = 1.1;
 
 /**
  * Convert a screen-pixel dimension to ground meters at the given zoom/latitude.
@@ -804,30 +805,46 @@ function buildArrowRing(
 ): [number, number][] {
   const m = getMetersPerDegree(centerLat);
 
-  const forwardM = pxToMeters(ARROW_FORWARD_PX * scale, centerLat, zoom);
-  const backM = pxToMeters(ARROW_BACK_PX * scale, centerLat, zoom);
-  const halfWidthM = pxToMeters(ARROW_HALF_WIDTH_PX * scale, centerLat, zoom);
-
   const rad = (bearing * Math.PI) / 180;
   const perpRad = rad + Math.PI / 2;
-
-  const tipLng = centerLng + (forwardM * Math.sin(rad)) / m.lng;
-  const tipLat = centerLat + (forwardM * Math.cos(rad)) / m.lat;
-
-  const baseCenterLng = centerLng - (backM * Math.sin(rad)) / m.lng;
-  const baseCenterLat = centerLat - (backM * Math.cos(rad)) / m.lat;
-
-  const leftLng = baseCenterLng + (halfWidthM * Math.sin(perpRad)) / m.lng;
-  const leftLat = baseCenterLat + (halfWidthM * Math.cos(perpRad)) / m.lat;
-  const rightLng = baseCenterLng - (halfWidthM * Math.sin(perpRad)) / m.lng;
-  const rightLat = baseCenterLat - (halfWidthM * Math.cos(perpRad)) / m.lat;
-
-  return [
-    [tipLng, tipLat],
-    [leftLng, leftLat],
-    [rightLng, rightLat],
-    [tipLng, tipLat],
+  const arrowPoints: Array<[number, number]> = [
+    [ARROW_FORWARD_PX, 0],
+    [ARROW_FORWARD_PX - 2, 2.2],
+    [ARROW_FORWARD_PX - 6, 4.5],
+    [18, 8.5],
+    [10, ARROW_HALF_WIDTH_PX - 1.5],
+    [5, ARROW_HALF_WIDTH_PX],
+    [1, ARROW_HALF_WIDTH_PX - 0.1],
+    [-3, ARROW_HALF_WIDTH_PX - 1.5],
+    [-6, 9.5],
+    [-10, 6],
+    [-13, 4],
+    [-ARROW_BACK_PX + 2, 3],
+    [-ARROW_BACK_PX, 0],
+    [-ARROW_BACK_PX + 2, -3],
+    [-13, -4],
+    [-10, -6],
+    [-6, -9.5],
+    [-3, -ARROW_HALF_WIDTH_PX + 1.5],
+    [1, -ARROW_HALF_WIDTH_PX + 0.1],
+    [5, -ARROW_HALF_WIDTH_PX],
+    [10, -ARROW_HALF_WIDTH_PX + 1.5],
+    [18, -8.5],
+    [ARROW_FORWARD_PX - 6, -4.5],
+    [ARROW_FORWARD_PX - 2, -2.2],
   ];
+
+  const ring = arrowPoints.map(([forwardPx, lateralPx]) => {
+    const forwardM = pxToMeters(forwardPx * scale, centerLat, zoom);
+    const lateralM = pxToMeters(lateralPx * scale, centerLat, zoom);
+    return [
+      centerLng + (forwardM * Math.sin(rad) + lateralM * Math.sin(perpRad)) / m.lng,
+      centerLat + (forwardM * Math.cos(rad) + lateralM * Math.cos(perpRad)) / m.lat,
+    ] as [number, number];
+  });
+
+  // Close the ring explicitly for native MapLibre renderers.
+  return [...ring, ring[0]];
 }
 
 /**
@@ -883,7 +900,7 @@ function buildNavPuckArrowBodyGeoJSON(
   const rad = (bearing * Math.PI) / 180;
   const bodyCenterLng = lng - (bodyShiftM * Math.sin(rad)) / m.lng;
   const bodyCenterLat = lat - (bodyShiftM * Math.cos(rad)) / m.lat;
-  const bodyRing = buildArrowRing(bodyCenterLng, bodyCenterLat, bearing, zoom, 1);
+  const bodyRing = buildArrowRing(bodyCenterLng, bodyCenterLat, bearing, zoom, BODY_SCALE);
 
   return {
     type: 'Feature',
