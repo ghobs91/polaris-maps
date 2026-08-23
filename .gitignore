@@ -77,6 +77,11 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 
+# Local tooling caches
+.serena/
+__pycache__/
+*.pyc
+
 # Fastlane
 fastlane/report.xml
 fastlane/Preview.html
