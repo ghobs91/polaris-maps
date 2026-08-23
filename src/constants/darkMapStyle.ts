@@ -4,7 +4,7 @@
  * Characteristics:
  *   - Deep blue-gray land (#1C1C2E) — closer to Apple Maps' dark mode
  *   - Vibrant deep blue water (#2A4B6F)
- *   - Amber/gold highways (trunk/motorway) — Apple Maps signature
+ *   - Neutral gray highways (trunk/motorway) with stronger visual hierarchy
  *   - Blue-gray local roads that recede into the background
  *   - Rich, saturated green parks and grass
  *   - Bright white labels with dark halos for readability
@@ -498,7 +498,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'trunk']],
       paint: {
-        'line-color': '#C89F3D',
+        'line-color': '#54545E',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 14, 3, 18, 12],
         'line-dasharray': [3, 3],
       },
@@ -510,7 +510,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'motorway']],
       paint: {
-        'line-color': '#C89F3D',
+        'line-color': '#5B5B64',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 14, 4, 18, 14],
         'line-dasharray': [3, 3],
       },
@@ -647,7 +647,7 @@ const style = {
       minzoom: 5,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#B29C6C',
+        'line-color': '#62626A',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.3, 10, 1.5, 14, 3.5, 18, 13],
       },
     },
@@ -660,7 +660,7 @@ const style = {
       minzoom: 4,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#C4AA73',
+        'line-color': '#6A6A72',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 8, 1, 14, 4, 18, 16],
       },
     },
@@ -745,9 +745,9 @@ const style = {
           'match',
           ['get', 'class'],
           'motorway',
-          '#C4AA73',
+          '#6A6A72',
           'trunk',
-          '#B29C6C',
+          '#62626A',
           'primary',
           '#8A8A8E',
           'secondary',
@@ -883,7 +883,7 @@ const style = {
         'text-max-angle': 30,
       },
       paint: {
-        'text-color': '#D8CBA4',
+        'text-color': '#D0D0D4',
         'text-halo-color': '#1C1C2E',
         'text-halo-width': 1.5,
       },

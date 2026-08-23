@@ -7,6 +7,7 @@
  */
 
 import { DARK_MAP_STYLE_JSON } from '../../src/constants/darkMapStyle';
+import { LIGHT_MAP_STYLE_JSON } from '../../src/constants/lightMapStyle';
 import { SATELLITE_STYLE_JSON } from '../../src/constants/satelliteStyle';
 
 /** Parse a hex color (#RRGGBB) to relative luminance (0-1). */
@@ -23,6 +24,11 @@ function contrastRatio(l1: number, l2: number): number {
   const lighter = Math.max(l1, l2);
   const darker = Math.min(l1, l2);
   return (lighter + 0.05) / (darker + 0.05);
+}
+
+function colorSpread(hex: string): number {
+  const channels = [1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16));
+  return Math.max(...channels) - Math.min(...channels);
 }
 
 describe('darkMapStyle', () => {
@@ -94,6 +100,34 @@ describe('darkMapStyle', () => {
     const labelColor = primaryLabel.paint['text-color'];
     const ratio = contrastRatio(hexToLuminance(labelColor), bgLum);
     expect(ratio).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('highway palette', () => {
+  const darkStyle = JSON.parse(DARK_MAP_STYLE_JSON);
+  const lightStyle = JSON.parse(LIGHT_MAP_STYLE_JSON);
+
+  it('uses gray highway fills in both themes', () => {
+    for (const style of [darkStyle, lightStyle]) {
+      const motorway = style.layers.find((l: any) => l.id === 'road-motorway');
+      const trunk = style.layers.find((l: any) => l.id === 'road-trunk');
+
+      expect(motorway.paint['line-color']).not.toMatch(/F2B322|C4AA73/);
+      expect(trunk.paint['line-color']).not.toMatch(/F2B322|B29C6C/);
+      expect(colorSpread(motorway.paint['line-color'])).toBeLessThanOrEqual(16);
+      expect(colorSpread(trunk.paint['line-color'])).toBeLessThanOrEqual(16);
+    }
+  });
+
+  it('keeps highways darker than primary roads', () => {
+    for (const style of [darkStyle, lightStyle]) {
+      const motorway = style.layers.find((l: any) => l.id === 'road-motorway');
+      const primary = style.layers.find((l: any) => l.id === 'road-primary');
+
+      expect(hexToLuminance(motorway.paint['line-color'])).toBeLessThan(
+        hexToLuminance(primary.paint['line-color']),
+      );
+    }
   });
 });
 

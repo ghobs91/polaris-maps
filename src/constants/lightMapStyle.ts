@@ -4,7 +4,7 @@
  * Characteristics:
  *   - Warm cream background (#F2EFE9) — closer to Apple Maps' light land tone
  *   - Vibrant light blue water (#A1C6F0)
- *   - Amber highways (trunk/motorway) — Apple Maps signature
+ *   - Neutral gray highways (trunk/motorway) with stronger visual hierarchy
  *   - Bright white local roads with warm casings
  *   - Rich, saturated green parks and grass
  *   - Dark labels with light halos for readability on light background
@@ -497,7 +497,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'trunk']],
       paint: {
-        'line-color': '#E8D8A8',
+        'line-color': '#A8A9AF',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 14, 3, 18, 12],
         'line-dasharray': [3, 3],
       },
@@ -509,7 +509,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'motorway']],
       paint: {
-        'line-color': '#F0E0B0',
+        'line-color': '#9A9BA2',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 14, 4, 18, 14],
         'line-dasharray': [3, 3],
       },
@@ -646,7 +646,7 @@ const style = {
       minzoom: 5,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#F2B322',
+        'line-color': '#85868D',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.3, 10, 1.5, 14, 3.5, 18, 13],
       },
     },
@@ -659,7 +659,7 @@ const style = {
       minzoom: 4,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#F2B322',
+        'line-color': '#73747C',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 8, 1, 14, 4, 18, 16],
       },
     },
@@ -784,7 +784,7 @@ const style = {
       filter: ['all', ['==', 'brunnel', 'bridge'], ['==', 'class', 'trunk']],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#F2B322',
+        'line-color': '#85868D',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 14, 3.5, 18, 12],
       },
     },
@@ -796,7 +796,7 @@ const style = {
       filter: ['all', ['==', 'brunnel', 'bridge'], ['==', 'class', 'motorway']],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#F2B322',
+        'line-color': '#73747C',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 14, 4, 18, 14],
       },
     },
@@ -920,7 +920,7 @@ const style = {
         'text-max-width': 8,
       },
       paint: {
-        'text-color': '#2A2A26',
+        'text-color': '#34353B',
         'text-halo-color': '#F2EFE9',
         'text-halo-width': 1.5,
       },
