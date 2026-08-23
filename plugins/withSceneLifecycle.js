@@ -1,4 +1,4 @@
-const { withDangerousMod } = require('expo/config-plugins');
+const { withDangerousMod, withInfoPlist } = require('expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -25,13 +25,19 @@ function copyAppDelegate() {
 }
 
 /**
- * Pins the legacy window-based AppDelegate (React root created directly in
- * `didFinishLaunchingWithOptions`).
+ * Pins the scene-based AppDelegate required by the iOS 27 SDK.
  *
- * NOTE: the UIScene-based lifecycle (SceneDelegate + UIApplicationSceneManifest,
- * introduced in ce0cc18) was reverted because UIKit never connected the scene
- * delegate — the app launched to a black screen with no window and no React
- * runtime. The scene wiring is intentionally not re-added here.
+ * NOTE: iOS 27 asserts at launch unless the app adopts the UIScene lifecycle
+ * ("Application failed to launch: UIScene life cycle is required for apps
+ * built with this SDK"). The AppDelegate in plugins/native creates the React
+ * native factory in `didFinishLaunchingWithOptions` and declares the
+ * `SceneDelegate` (same file) that creates the window and starts React from
+ * `scene(_:willConnectTo:options:)`.
+ *
+ * A previous scene-based attempt (ce0cc18) was reverted to a legacy
+ * window-based AppDelegate because UIKit never connected the scene delegate
+ * (black screen). That wiring failed because no `UIApplicationSceneManifest`
+ * was added to Info.plist — this plugin now adds it via `withInfoPlist`.
  */
 function withSceneLifecycle(config) {
   config = withDangerousMod(config, [
@@ -41,6 +47,20 @@ function withSceneLifecycle(config) {
       return cfg;
     },
   ]);
+
+  config = withInfoPlist(config, (cfg) => {
+    cfg.modResults.UIApplicationSceneManifest = {
+      UIApplicationSupportsMultipleScenes: false,
+      UISceneConfigurations: {
+        UIWindowSceneSessionRoleApplication: [
+          {
+            UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
+          },
+        ],
+      },
+    };
+    return cfg;
+  });
 
   return config;
 }
