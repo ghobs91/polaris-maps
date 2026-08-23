@@ -8,7 +8,6 @@ interface CloudStoreModule {
   write(filename: string, data: string): Promise<boolean>;
   read(filename: string): Promise<string | null>;
   remove(filename: string): Promise<boolean>;
-  pickDocument(): Promise<{ content: string; name: string } | null>;
 }
 
 const CloudStore: CloudStoreModule | null =
