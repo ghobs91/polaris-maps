@@ -163,6 +163,10 @@
             done(token);
           },
           language: lang || undefined,
+          // Hide the Apple Maps logo / "Open in Apple Maps" pill at the bottom
+          // of the card; the Legal attribution link below satisfies MapKit JS
+          // attribution terms.
+          _showMapsLogo: false,
         });
 
         // v6: mapkit is an EventTarget; surface init/load failures.
