@@ -145,7 +145,6 @@ export function PlaceDetailEmbed({ poi, onLoaded, onFailed }: Props) {
 
   return (
     <View style={styles.section} testID="place-detail-section">
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>Photos & Reviews</Text>
       <View
         style={[
           styles.webviewWrap,

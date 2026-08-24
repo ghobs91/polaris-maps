@@ -359,7 +359,7 @@ const pillStyles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     gap: 4,
-    minWidth: 68,
+    flex: 1,
   },
   label: {
     fontSize: 11,
@@ -786,8 +786,19 @@ export function POIInfoCard() {
       ]}
     >
       <GlassView material="regular" style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
-        {/* Drag handle + close — attach PanResponder here so it doesn't conflict with scroll */}
+        {/* Drag handle + share/close — attach PanResponder here so it doesn't conflict with scroll */}
         <View {...pan.panHandlers} style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.shareBtn}
+            onPress={handleShare}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Share place"
+            accessibilityRole="button"
+          >
+            <GlassView material="clear" isInteractive style={styles.closeCircle}>
+              <Ionicons name="share-outline" size={16} color={subtextColor} />
+            </GlassView>
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={toggleExpanded}
             style={styles.handleWrap}
@@ -893,12 +904,7 @@ export function POIInfoCard() {
             )}
 
             {/* ── Action pill buttons ────────────────────────────────────── */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.actions}
-              style={styles.actionsWrap}
-            >
+            <View style={styles.actions}>
               <ActionPill
                 icon="navigate"
                 label="Directions"
@@ -955,15 +961,7 @@ export function POIInfoCard() {
                 fillColor={pillSecondaryFill}
                 borderColor={pillSecondaryBorder}
               />
-              <ActionPill
-                icon="share-outline"
-                label="Share"
-                onPress={handleShare}
-                color={pillSecondaryContent}
-                fillColor={pillSecondaryFill}
-                borderColor={pillSecondaryBorder}
-              />
-            </ScrollView>
+            </View>
 
             {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
             <PlaceDetailEmbed
@@ -1168,6 +1166,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: spacing.md,
   },
+  shareBtn: {
+    position: 'absolute',
+    left: spacing.md,
+  },
   closeCircle: {
     width: 28,
     height: 28,
@@ -1231,13 +1233,11 @@ const styles = StyleSheet.create({
   operatorLabel: {
     ...typography.caption,
   },
-  actionsWrap: {
-    marginBottom: spacing.md,
-  },
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
   },
   section: {
     marginHorizontal: spacing.md,
