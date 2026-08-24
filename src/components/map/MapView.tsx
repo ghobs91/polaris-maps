@@ -684,25 +684,25 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               />
             </MapLibreGL.ShapeSource>
 
-            {/* Cast shadow on the map behind the puck. */}
+            {/* Cast shadow on the disc behind the puck. */}
             <MapLibreGL.ShapeSource id="navPuckShadow" shape={navPuckShapes.shadow}>
               <MapLibreGL.FillLayer
                 id="navPuckShadowFill"
                 style={
                   {
-                    fillColor: 'rgba(26, 39, 61, 0.42)',
+                    fillColor: ['get', 'fillColor'],
                   } as any
                 }
               />
             </MapLibreGL.ShapeSource>
 
-            {/* 3D arrow: light-blue body shifted back, white top face on front. */}
+            {/* 3D arrow: soft light-gray body shifted back, bright white top face. */}
             <MapLibreGL.ShapeSource id="navPuckArrowBody" shape={navPuckShapes.arrowBody}>
               <MapLibreGL.FillLayer
                 id="navPuckArrowBodyFill"
                 style={
                   {
-                    fillColor: '#A9B8CC',
+                    fillColor: '#C7D0DB',
                   } as any
                 }
               />
@@ -713,7 +713,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 id="navPuckArrowTopFill"
                 style={
                   {
-                    fillColor: '#F8F7FF',
+                    fillColor: '#FFFFFF',
                   } as any
                 }
               />
@@ -772,14 +772,19 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
 // Screen-pixel sizes for the nav puck arrow.  They are converted to meters at
 // the current zoom/latitude so the arrow stays proportionate to the fixed-pixel
-// CircleLayer background.
-const ARROW_FORWARD_PX = 31;
-const ARROW_BACK_PX = 18;
-const ARROW_HALF_WIDTH_PX = 13.5;
-const BODY_SHIFT_PX = 5;
-const BODY_SCALE = 1.04;
-const SHADOW_SHIFT_PX = 8;
-const SHADOW_SCALE = 1.1;
+// CircleLayer background.  The disc is 36px in radius; the arrow spans ~51% of
+// its diameter (37px long, 28px wide) and is biased slightly forward so the
+// extruded body's backward shift doesn't make it sit low in the disc.
+const ARROW_TIP_PX = 20;
+const ARROW_BASE_PX = -17;
+const ARROW_HALF_WIDTH_PX = 14;
+const ARROW_NOTCH_PX = -10.5;
+const ARROW_TIP_RADIUS_PX = 7;
+const ARROW_BASE_RADIUS_PX = 5.5;
+const ARROW_NOTCH_RADIUS_PX = 3.5;
+const BODY_SHIFT_PX = 3.5;
+const BODY_SCALE = 1.06;
+const SHADOW_SHIFT_PX = 4;
 
 /**
  * Convert a screen-pixel dimension to ground meters at the given zoom/latitude.
@@ -807,34 +812,23 @@ function buildArrowRing(
 
   const rad = (bearing * Math.PI) / 180;
   const perpRad = rad + Math.PI / 2;
+  // Chunky GPS-cursor arrow: isosceles triangle with a shallow concave V-notch
+  // cut into the base, every corner heavily rounded for a pillowy look.
   const arrowPoints: Array<[number, number]> = [
-    [ARROW_FORWARD_PX, 0],
-    [ARROW_FORWARD_PX - 2, 2.2],
-    [ARROW_FORWARD_PX - 6, 4.5],
-    [18, 8.5],
-    [10, ARROW_HALF_WIDTH_PX - 1.5],
-    [5, ARROW_HALF_WIDTH_PX],
-    [1, ARROW_HALF_WIDTH_PX - 0.1],
-    [-3, ARROW_HALF_WIDTH_PX - 1.5],
-    [-6, 9.5],
-    [-10, 6],
-    [-13, 4],
-    [-ARROW_BACK_PX + 2, 3],
-    [-ARROW_BACK_PX, 0],
-    [-ARROW_BACK_PX + 2, -3],
-    [-13, -4],
-    [-10, -6],
-    [-6, -9.5],
-    [-3, -ARROW_HALF_WIDTH_PX + 1.5],
-    [1, -ARROW_HALF_WIDTH_PX + 0.1],
-    [5, -ARROW_HALF_WIDTH_PX],
-    [10, -ARROW_HALF_WIDTH_PX + 1.5],
-    [18, -8.5],
-    [ARROW_FORWARD_PX - 6, -4.5],
-    [ARROW_FORWARD_PX - 2, -2.2],
+    [ARROW_TIP_PX, 0],
+    [ARROW_BASE_PX, ARROW_HALF_WIDTH_PX],
+    [ARROW_NOTCH_PX, 0],
+    [ARROW_BASE_PX, -ARROW_HALF_WIDTH_PX],
   ];
+  const cornerRadii = [
+    ARROW_TIP_RADIUS_PX,
+    ARROW_BASE_RADIUS_PX,
+    ARROW_NOTCH_RADIUS_PX,
+    ARROW_BASE_RADIUS_PX,
+  ];
+  const roundedPoints = roundedPolygonRing(arrowPoints, cornerRadii);
 
-  const ring = arrowPoints.map(([forwardPx, lateralPx]) => {
+  const ring = roundedPoints.map(([forwardPx, lateralPx]) => {
     const forwardM = pxToMeters(forwardPx * scale, centerLat, zoom);
     const lateralM = pxToMeters(lateralPx * scale, centerLat, zoom);
     return [
@@ -848,7 +842,70 @@ function buildArrowRing(
 }
 
 /**
- * Build a soft shadow polygon cast behind the navigation puck.
+ * Round each corner of a polygon with a quadratic Bezier fillet.  Works for
+ * convex corners (tip, base) and concave ones (the tail notch) alike.
+ */
+function roundedPolygonRing(
+  points: Array<[number, number]>,
+  radii: number[],
+  samplesPerCorner = 6,
+): Array<[number, number]> {
+  const ring: Array<[number, number]> = [];
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const [prevX, prevY] = points[(i - 1 + n) % n];
+    const [curX, curY] = points[i];
+    const [nextX, nextY] = points[(i + 1) % n];
+    const prevDist = Math.hypot(prevX - curX, prevY - curY);
+    const nextDist = Math.hypot(nextX - curX, nextY - curY);
+    const r = Math.min(radii[i], prevDist / 2, nextDist / 2);
+    const p0x = curX + ((prevX - curX) / prevDist) * r;
+    const p0y = curY + ((prevY - curY) / prevDist) * r;
+    const p1x = curX + ((nextX - curX) / nextDist) * r;
+    const p1y = curY + ((nextY - curY) / nextDist) * r;
+    for (let s = 0; s <= samplesPerCorner; s++) {
+      const t = s / samplesPerCorner;
+      const mt = 1 - t;
+      ring.push([
+        mt * mt * p0x + 2 * mt * t * curX + t * t * p1x,
+        mt * mt * p0y + 2 * mt * t * curY + t * t * p1y,
+      ]);
+    }
+  }
+  return ring;
+}
+
+function buildEllipseRing(
+  centerLng: number,
+  centerLat: number,
+  bearing: number,
+  zoom: number,
+  forwardSemiPx: number,
+  lateralSemiPx: number,
+): [number, number][] {
+  const m = getMetersPerDegree(centerLat);
+  const rad = (bearing * Math.PI) / 180;
+  const perpRad = rad + Math.PI / 2;
+  const steps = 32;
+  const ring: [number, number][] = [];
+  for (let i = 0; i < steps; i++) {
+    const theta = (i / steps) * 2 * Math.PI;
+    const forwardPx = forwardSemiPx * Math.cos(theta);
+    const lateralPx = lateralSemiPx * Math.sin(theta);
+    const forwardM = pxToMeters(forwardPx, centerLat, zoom);
+    const lateralM = pxToMeters(lateralPx, centerLat, zoom);
+    ring.push([
+      centerLng + (forwardM * Math.sin(rad) + lateralM * Math.sin(perpRad)) / m.lng,
+      centerLat + (forwardM * Math.cos(rad) + lateralM * Math.cos(perpRad)) / m.lat,
+    ]);
+  }
+  ring.push(ring[0]);
+  return ring;
+}
+
+/**
+ * Build a soft, diffuse elliptical shadow cast onto the disc below the arrow.
+ * Two nested ellipses at decreasing opacity fake a gaussian falloff.
  */
 function buildNavPuckShadowGeoJSON(
   position: [number, number],
@@ -856,9 +913,12 @@ function buildNavPuckShadowGeoJSON(
   lat: number,
   zoom: number,
 ): {
-  type: 'Feature';
-  properties: Record<string, never>;
-  geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+  type: 'FeatureCollection';
+  features: Array<{
+    type: 'Feature';
+    properties: { fillColor: string };
+    geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+  }>;
 } {
   const [lng] = position;
   const m = getMetersPerDegree(lat);
@@ -868,17 +928,35 @@ function buildNavPuckShadowGeoJSON(
   const shadowCenterLng = lng - (shadowShiftM * Math.sin(rad)) / m.lng;
   const shadowCenterLat = lat - (shadowShiftM * Math.cos(rad)) / m.lat;
 
-  const ring = buildArrowRing(shadowCenterLng, shadowCenterLat, bearing, zoom, SHADOW_SCALE);
+  const ellipseFeature = (forwardSemiPx: number, lateralSemiPx: number, fillColor: string) => ({
+    type: 'Feature' as const,
+    properties: { fillColor },
+    geometry: {
+      type: 'Polygon' as const,
+      coordinates: [
+        buildEllipseRing(
+          shadowCenterLng,
+          shadowCenterLat,
+          bearing,
+          zoom,
+          forwardSemiPx,
+          lateralSemiPx,
+        ),
+      ] as [[number, number][]],
+    },
+  });
 
   return {
-    type: 'Feature',
-    properties: {},
-    geometry: { type: 'Polygon', coordinates: [ring] },
+    type: 'FeatureCollection',
+    features: [
+      ellipseFeature(22, 17, 'rgba(26, 39, 61, 0.14)'),
+      ellipseFeature(17, 13, 'rgba(26, 39, 61, 0.2)'),
+    ],
   };
 }
 
 /**
- * Build the light-blue body polygon of the 3D nav puck arrow.  It is the same
+ * Build the soft light-gray body polygon of the 3D nav puck arrow.  It is the same
  * shape as the top face but shifted slightly backward so it peeks out as the
  * side/back faces.  Map-plane coordinates keep it tilted with the map, and
  * pxToMeters keeps the screen size constant as the user zooms.
