@@ -341,4 +341,52 @@ describe('fetchTransitLines Amtrak BTS supplement', () => {
     // Amtrak fetcher was also called in parallel
     expect(mockFetchAmtrakRoutes).toHaveBeenCalledTimes(1);
   }, 15_000);
+
+  it('snaps stops in a dense-metro response without hanging on far-away stop nodes', async () => {
+    // Regression: relationToLine used to project EVERY stop node in the
+    // Overpass response against EVERY relation segment — O(stops × segments)
+    // per relation.  A NYC-scale tile (thousands of stop nodes × large
+    // geometries) hung the JS thread for minutes.
+    mockFindEndpointForCoords.mockReturnValue(null);
+    mockFetchAmtrakRoutes.mockResolvedValueOnce([]);
+
+    // One relation with a 2,000-point geometry
+    const geometry = Array.from({ length: 2000 }, (_, i) => ({
+      lat: 41.85 + (i / 1999) * 0.01,
+      lon: -87.64 + (i / 1999) * 0.02,
+    }));
+
+    // 50,000 standalone stop nodes scattered far outside the relation's bbox
+    const farStops = Array.from({ length: 50_000 }, (_, i) => ({
+      type: 'node' as const,
+      id: 300_000 + i,
+      lat: 30 + ((i * 7919) % 2000) / 100, // 30–50
+      lon: -120 + ((i * 104729) % 5000) / 100, // -120 to -70
+      tags: { name: `Far Stop ${i}`, railway: 'station' },
+    }));
+
+    const mockOverpass = jest.mocked(overpassFetch);
+    mockOverpass.mockResolvedValueOnce({
+      elements: [
+        {
+          type: 'relation',
+          id: 555001,
+          tags: { route: 'subway', ref: 'X', name: 'Test Line' },
+          members: [{ type: 'way', ref: 1, role: '', geometry }],
+        },
+        // A stop right on the line — must snap
+        { type: 'node', id: 400001, lat: 41.855, lon: -87.63, tags: { name: 'Near Stop' } },
+        ...farStops,
+      ],
+    });
+    mockOverpass.mockResolvedValue({ elements: [] });
+
+    const result = await fetchTransitLines(41.85, -87.65, 41.87, -87.61);
+
+    const line = result.find((l) => l.ref === 'X');
+    expect(line).toBeDefined();
+    // Near stop snapped; far stops never enter the relation's stop list
+    expect(line!.stops.some((s) => s.name === 'Near Stop')).toBe(true);
+    expect(line!.stops.some((s) => s.name.startsWith('Far Stop'))).toBe(false);
+  }, 10_000);
 });

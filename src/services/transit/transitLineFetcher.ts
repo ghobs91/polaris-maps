@@ -250,6 +250,26 @@ function relationToLine(
 
   if (segments.length === 0) return null;
 
+  // Bounding box of the relation's geometry, padded by the snap threshold.
+  // Stops outside it can never be within SNAP_THRESHOLD_DEG of the polyline,
+  // so they are skipped before projecting.  Projecting every stop node in a
+  // dense-metro tile against every relation is O(stops × segments) per
+  // relation — enough to hang the JS thread for minutes on large cities.
+  let bboxMinLat = Infinity;
+  let bboxMaxLat = -Infinity;
+  let bboxMinLng = Infinity;
+  let bboxMaxLng = -Infinity;
+  for (const seg of segments) {
+    for (const [lng, lat] of seg) {
+      if (lat < bboxMinLat) bboxMinLat = lat;
+      if (lat > bboxMaxLat) bboxMaxLat = lat;
+      if (lng < bboxMinLng) bboxMinLng = lng;
+      if (lng > bboxMaxLng) bboxMaxLng = lng;
+    }
+  }
+  const snapPadLat = SNAP_THRESHOLD_DEG * 2;
+  const snapPadLng = SNAP_THRESHOLD_DEG * 2;
+
   // Snap standalone stop nodes (railway=stop/station) near the route geometry.
   // This catches stops not listed as relation members (common in LIRR and others).
   const snappedStops: Array<{ name: string; lat: number; lon: number; id: number; along: number }> =
@@ -270,6 +290,14 @@ function relationToLine(
   // Then, snap standalone stop nodes that are near the route
   for (const [nodeId, node] of stopNodes) {
     if (memberStopIds.has(nodeId)) continue; // already a member
+    if (
+      node.lat < bboxMinLat - snapPadLat ||
+      node.lat > bboxMaxLat + snapPadLat ||
+      node.lon < bboxMinLng - snapPadLng ||
+      node.lon > bboxMaxLng + snapPadLng
+    ) {
+      continue; // too far from this relation's geometry to ever snap
+    }
     const proj = projectOntoSegments(node.lat, node.lon, segments);
     if (proj && proj.dist < SNAP_THRESHOLD_DEG) {
       snappedStops.push({
