@@ -12,18 +12,18 @@
 		251037C88B0DD2D3BACA85F4 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		46E7E3615A6344C3A2DBA2AD /* PolarisMapKit.m in Sources */ = {isa = PBXBuildFile; fileRef = F2BC011838D044099F21DB03 /* PolarisMapKit.m */; };
+		798B29C6D800420097AEC665 /* PolarisCloudStore.m in Sources */ = {isa = PBXBuildFile; fileRef = F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */; };
 		7A1B2C3D4E5F60718293A4B5 /* PolarisTileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */; };
 		7A1B2C3D4E5F60718293A4B7 /* PolarisTileServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		BF3891B60B8448B7B274AE55 /* PolarisMapKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8BAE8712525453CAFB56E92 /* PolarisMapKit.swift */; };
+		C218887D19024D78AC887B1F /* PolarisCloudStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */; };
 		C7BF509CF6DCEB99EE54D734 /* libPods-PolarisMaps.a in Frameworks */ = {isa = PBXBuildFile; fileRef = CD204D124A01011F5E3A87AB /* libPods-PolarisMaps.a */; };
 		C8E527243021E11200BD26C2 /* Valhalla in Frameworks */ = {isa = PBXBuildFile; productRef = 76F2133035B6B2C740D34F2F /* Valhalla */; };
 		C8E527253021E11200BD26C2 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = 838A88DACD4E7CCF27A7DDD9 /* MapLibre */; };
 		EABDB6B50692C76B52E3C947 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F4EDE64A52B5496F8063BA93 /* PolarisValhalla.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49A191FD963F4EDAB1DF3E46 /* PolarisValhalla.swift */; };
-		C218887D19024D78AC887B1F /* PolarisCloudStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */; };
-		798B29C6D800420097AEC665 /* PolarisCloudStore.m in Sources */ = {isa = PBXBuildFile; fileRef = F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +37,7 @@
 		7B6C823B929822DC91B94F3B /* Pods-PolarisMaps.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.debug.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.debug.xcconfig"; sourceTree = "<group>"; };
 		9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisTileServer.swift; path = PolarisMaps/PolarisTileServer.swift; sourceTree = "<group>"; };
 		9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisTileServer.m; path = PolarisMaps/PolarisTileServer.m; sourceTree = "<group>"; };
+		A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisCloudStore.swift; path = PolarisMaps/PolarisCloudStore.swift; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = PolarisMaps/SplashScreen.storyboard; sourceTree = "<group>"; };
 		B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PolarisMaps/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
@@ -46,8 +47,7 @@
 		F11748442D0722820044C1D9 /* PolarisMaps-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "PolarisMaps-Bridging-Header.h"; path = "PolarisMaps/PolarisMaps-Bridging-Header.h"; sourceTree = "<group>"; };
 		F2BC011838D044099F21DB03 /* PolarisMapKit.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisMapKit.m; path = PolarisMaps/PolarisMapKit.m; sourceTree = "<group>"; };
 		F8BAE8712525453CAFB56E92 /* PolarisMapKit.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisMapKit.swift; path = PolarisMaps/PolarisMapKit.swift; sourceTree = "<group>"; };
-		A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */ = {isa = PBXFileReference; name = "PolarisCloudStore.swift"; path = "PolarisMaps/PolarisCloudStore.swift"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.swift; explicitFileType = undefined; includeInIndex = 0; };
-		F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */ = {isa = PBXFileReference; name = "PolarisCloudStore.m"; path = "PolarisMaps/PolarisCloudStore.m"; sourceTree = "<group>"; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; explicitFileType = undefined; includeInIndex = 0; };
+		F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisCloudStore.m; path = PolarisMaps/PolarisCloudStore.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
