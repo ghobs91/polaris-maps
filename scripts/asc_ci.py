@@ -104,14 +104,22 @@ def list_things():
         json.dump(data, f)
 
 
-def trigger(workflow_name: str):
+def trigger(workflow_name: str, product_name: str | None = None):
     data = api("/ciProducts")
     products = data.get("data", [])
     if not products:
         print("No ciProducts found")
         sys.exit(1)
     product = products[0]
+    if product_name:
+        matches = [p for p in products if product_name.lower() in p["attributes"].get("name", "").lower()]
+        if not matches:
+            available = ", ".join(p["attributes"].get("name", "") for p in products)
+            print(f"No ciProduct matching '{product_name}' (available: {available})")
+            sys.exit(1)
+        product = matches[0]
     pid = product["id"]
+    print(f"Product: {product['attributes'].get('name')} ({pid})")
     workflows = api(f"/ciProducts/{pid}/workflows").get("data", [])
     if not workflows:
         print("No workflows found")
@@ -232,7 +240,10 @@ if __name__ == "__main__":
     if cmd == "list":
         list_things()
     elif cmd == "trigger":
-        trigger(sys.argv[2] if len(sys.argv) > 2 else "send to testflight")
+        trigger(
+            sys.argv[2] if len(sys.argv) > 2 else "send to testflight",
+            sys.argv[3] if len(sys.argv) > 3 else None,
+        )
     elif cmd == "status":
         status()
     elif cmd == "watch":
