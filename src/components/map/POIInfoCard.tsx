@@ -786,37 +786,39 @@ export function POIInfoCard() {
       ]}
     >
       <GlassView material="regular" style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
-        {/* Drag handle + share/close — attach PanResponder here so it doesn't conflict with scroll */}
-        <View {...pan.panHandlers} style={styles.topBar}>
-          <TouchableOpacity
-            style={styles.shareBtn}
-            onPress={handleShare}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityLabel="Share place"
-            accessibilityRole="button"
-          >
-            <GlassView material="clear" isInteractive style={styles.closeCircle}>
-              <Ionicons name="share-outline" size={16} color={subtextColor} />
-            </GlassView>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={toggleExpanded}
-            style={styles.handleWrap}
-            hitSlop={{ top: 16, bottom: 16, left: 80, right: 80 }}
-          >
-            <View style={[styles.handle, { backgroundColor: borderColor }]} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.closeBtn}
-            onPress={() => setSelectedPoi(null)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityLabel="Close place details"
-            accessibilityRole="button"
-          >
-            <GlassView material="clear" isInteractive style={styles.closeCircle}>
-              <Ionicons name="close" size={16} color={subtextColor} />
-            </GlassView>
-          </TouchableOpacity>
+        {/* Grabber + share/close — attach PanResponder here so it doesn't conflict with scroll */}
+        <View {...pan.panHandlers}>
+          <View style={styles.topBar}>
+            <TouchableOpacity
+              onPress={toggleExpanded}
+              style={styles.handleWrap}
+              hitSlop={{ top: 16, bottom: 16, left: 80, right: 80 }}
+            >
+              <View style={[styles.handle, { backgroundColor: borderColor }]} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              onPress={handleShare}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Share place"
+              accessibilityRole="button"
+            >
+              <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                <Ionicons name="share-outline" size={18} color={subtextColor} />
+              </GlassView>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setSelectedPoi(null)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Close place details"
+              accessibilityRole="button"
+            >
+              <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                <Ionicons name="close" size={18} color={subtextColor} />
+              </GlassView>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {poi && parsed && category && (
@@ -1152,6 +1154,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     minHeight: 40,
   },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xs,
+  },
   handleWrap: {
     flex: 1,
     alignItems: 'center',
@@ -1162,17 +1171,9 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     borderCurve: 'continuous',
   },
-  closeBtn: {
-    position: 'absolute',
-    right: spacing.md,
-  },
-  shareBtn: {
-    position: 'absolute',
-    left: spacing.md,
-  },
   closeCircle: {
-    width: 28,
-    height: 28,
+    width: 36,
+    height: 36,
     borderRadius: 999,
     borderCurve: 'continuous',
     alignItems: 'center',

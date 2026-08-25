@@ -33,7 +33,7 @@ function colorSpread(hex: string): number {
 
 describe('darkMapStyle', () => {
   const style = JSON.parse(DARK_MAP_STYLE_JSON);
-  const bgColor = '#1C1C2E';
+  const bgColor = '#1A2A32';
   const bgLum = hexToLuminance(bgColor);
 
   it('should parse as valid JSON with version 8', () => {
@@ -107,15 +107,15 @@ describe('highway palette', () => {
   const darkStyle = JSON.parse(DARK_MAP_STYLE_JSON);
   const lightStyle = JSON.parse(LIGHT_MAP_STYLE_JSON);
 
-  it('uses gray highway fills in both themes', () => {
+  it('uses muted blue-gray highway fills in both themes', () => {
     for (const style of [darkStyle, lightStyle]) {
       const motorway = style.layers.find((l: any) => l.id === 'road-motorway');
       const trunk = style.layers.find((l: any) => l.id === 'road-trunk');
 
       expect(motorway.paint['line-color']).not.toMatch(/F2B322|C4AA73/);
       expect(trunk.paint['line-color']).not.toMatch(/F2B322|B29C6C/);
-      expect(colorSpread(motorway.paint['line-color'])).toBeLessThanOrEqual(16);
-      expect(colorSpread(trunk.paint['line-color'])).toBeLessThanOrEqual(16);
+      expect(colorSpread(motorway.paint['line-color'])).toBeLessThanOrEqual(48);
+      expect(colorSpread(trunk.paint['line-color'])).toBeLessThanOrEqual(48);
     }
   });
 

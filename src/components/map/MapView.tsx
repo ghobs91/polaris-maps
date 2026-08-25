@@ -773,8 +773,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 // Screen-pixel sizes for the nav puck arrow.  They are converted to meters at
 // the current zoom/latitude so the arrow stays proportionate to the fixed-pixel
 // CircleLayer background.  The disc is 36px in radius; the arrow spans ~51% of
-// its diameter (37px long, 28px wide) and is biased slightly forward so the
-// extruded body's backward shift doesn't make it sit low in the disc.
+// its diameter (37px long, 28px wide) and is shifted back so its visual mass
+// sits centered in the halo disc.
 const ARROW_TIP_PX = 20;
 const ARROW_BASE_PX = -17;
 const ARROW_HALF_WIDTH_PX = 14;
@@ -782,6 +782,7 @@ const ARROW_NOTCH_PX = -10.5;
 const ARROW_TIP_RADIUS_PX = 7;
 const ARROW_BASE_RADIUS_PX = 5.5;
 const ARROW_NOTCH_RADIUS_PX = 3.5;
+const ARROW_CENTERING_PX = 3;
 const BODY_SHIFT_PX = 3.5;
 const BODY_SCALE = 1.06;
 const SHADOW_SHIFT_PX = 4;
@@ -829,7 +830,7 @@ function buildArrowRing(
   const roundedPoints = roundedPolygonRing(arrowPoints, cornerRadii);
 
   const ring = roundedPoints.map(([forwardPx, lateralPx]) => {
-    const forwardM = pxToMeters(forwardPx * scale, centerLat, zoom);
+    const forwardM = pxToMeters((forwardPx - ARROW_CENTERING_PX) * scale, centerLat, zoom);
     const lateralM = pxToMeters(lateralPx * scale, centerLat, zoom);
     return [
       centerLng + (forwardM * Math.sin(rad) + lateralM * Math.sin(perpRad)) / m.lng,
