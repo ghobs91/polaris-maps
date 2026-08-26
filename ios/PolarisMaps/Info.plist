@@ -4,21 +4,6 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-		<key>UISceneConfigurations</key>
-		<dict>
-			<key>UIWindowSceneSessionRoleApplication</key>
-			<array>
-				<dict>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
-				</dict>
-			</array>
-		</dict>
-	</dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -64,12 +49,12 @@
 	<string>Polaris Maps uses the camera to capture street-level imagery.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Polaris Maps uses the local network to connect to the development server during testing.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Polaris Maps uses your location in the background to contribute anonymous traffic data.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your location</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Polaris Maps uses the local network to connect to the development server during testing.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Polaris Maps needs your location to show your position on the map and provide navigation directions.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -86,6 +71,28 @@
 	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -108,6 +115,8 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UISupportsCarPlay</key>
+	<true/>
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>

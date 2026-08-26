@@ -32,7 +32,15 @@ class AppDelegate: ExpoAppDelegate {
     options: UIScene.ConnectionOptions
   ) -> UISceneConfiguration {
     let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
-    configuration.delegateClass = SceneDelegate.self
+
+    // Route CarPlay template application scenes to their own delegate; all
+    // other roles (the phone UI) keep the React-hosting SceneDelegate.
+    if connectingSceneSession.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" {
+      configuration.delegateClass = CarPlaySceneDelegate.self
+    } else {
+      configuration.delegateClass = SceneDelegate.self
+    }
+
     return configuration
   }
 

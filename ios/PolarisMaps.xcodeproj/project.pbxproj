@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00E2165128204D189D821A6E /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81BC51C5C667473C94D28910 /* CarPlaySceneDelegate.swift */; };
 		108BD7555BD0469A9E414660 /* PolarisValhalla.m in Sources */ = {isa = PBXBuildFile; fileRef = 50CDF40BACBB47688A156721 /* PolarisValhalla.m */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		251037C88B0DD2D3BACA85F4 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */; };
@@ -15,6 +16,8 @@
 		798B29C6D800420097AEC665 /* PolarisCloudStore.m in Sources */ = {isa = PBXBuildFile; fileRef = F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */; };
 		7A1B2C3D4E5F60718293A4B5 /* PolarisTileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */; };
 		7A1B2C3D4E5F60718293A4B7 /* PolarisTileServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */; };
+		89DE569169794743B4107EDC /* PolarisCarPlay-Bridging.m in Sources */ = {isa = PBXBuildFile; fileRef = AA6FC0D57BA542408502D402 /* PolarisCarPlay-Bridging.m */; };
+		A8738780907C4ACBA0B11839 /* PolarisCarPlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA763B5FDB8454DABC656F3 /* PolarisCarPlay.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		BF3891B60B8448B7B274AE55 /* PolarisMapKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8BAE8712525453CAFB56E92 /* PolarisMapKit.swift */; };
 		C218887D19024D78AC887B1F /* PolarisCloudStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */; };
@@ -24,21 +27,26 @@
 		EABDB6B50692C76B52E3C947 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F4EDE64A52B5496F8063BA93 /* PolarisValhalla.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49A191FD963F4EDAB1DF3E46 /* PolarisValhalla.swift */; };
+		F99902B155154B2CBFCC7BCC /* PolarisCarPlayMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20C1F7F547D543FCAFB897F2 /* PolarisCarPlayMapView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* PolarisMaps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PolarisMaps.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = PolarisMaps/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = PolarisMaps/Info.plist; sourceTree = "<group>"; };
+		20C1F7F547D543FCAFB897F2 /* PolarisCarPlayMapView.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisCarPlayMapView.swift; path = PolarisMaps/PolarisCarPlayMapView.swift; sourceTree = "<group>"; };
 		3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; name = PrivacyInfo.xcprivacy; path = PolarisMaps/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		49A191FD963F4EDAB1DF3E46 /* PolarisValhalla.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisValhalla.swift; path = PolarisMaps/PolarisValhalla.swift; sourceTree = "<group>"; };
 		50CDF40BACBB47688A156721 /* PolarisValhalla.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisValhalla.m; path = PolarisMaps/PolarisValhalla.m; sourceTree = "<group>"; };
 		6C8746B7B7646DAD423CABAE /* Pods-PolarisMaps.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.release.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.release.xcconfig"; sourceTree = "<group>"; };
 		7B6C823B929822DC91B94F3B /* Pods-PolarisMaps.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PolarisMaps.debug.xcconfig"; path = "Target Support Files/Pods-PolarisMaps/Pods-PolarisMaps.debug.xcconfig"; sourceTree = "<group>"; };
+		7DA763B5FDB8454DABC656F3 /* PolarisCarPlay.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisCarPlay.swift; path = PolarisMaps/PolarisCarPlay.swift; sourceTree = "<group>"; };
+		81BC51C5C667473C94D28910 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = CarPlaySceneDelegate.swift; path = PolarisMaps/CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 		9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisTileServer.swift; path = PolarisMaps/PolarisTileServer.swift; sourceTree = "<group>"; };
 		9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = PolarisTileServer.m; path = PolarisMaps/PolarisTileServer.m; sourceTree = "<group>"; };
 		A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = PolarisCloudStore.swift; path = PolarisMaps/PolarisCloudStore.swift; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = PolarisMaps/SplashScreen.storyboard; sourceTree = "<group>"; };
+		AA6FC0D57BA542408502D402 /* PolarisCarPlay-Bridging.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = "PolarisCarPlay-Bridging.m"; path = "PolarisMaps/PolarisCarPlay-Bridging.m"; sourceTree = "<group>"; };
 		B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PolarisMaps/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		CD204D124A01011F5E3A87AB /* libPods-PolarisMaps.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PolarisMaps.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -82,6 +90,10 @@
 				3F75807B8FDCCC4527CA7482 /* PrivacyInfo.xcprivacy */,
 				A7C249A01B174863BEC8C7C5 /* PolarisCloudStore.swift */,
 				F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */,
+				7DA763B5FDB8454DABC656F3 /* PolarisCarPlay.swift */,
+				20C1F7F547D543FCAFB897F2 /* PolarisCarPlayMapView.swift */,
+				81BC51C5C667473C94D28910 /* CarPlaySceneDelegate.swift */,
+				AA6FC0D57BA542408502D402 /* PolarisCarPlay-Bridging.m */,
 			);
 			name = PolarisMaps;
 			sourceTree = "<group>";
@@ -380,7 +392,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\n          echo \"Remove signature files (Xcode workaround)\";\n          rm -rf \"$CONFIGURATION_BUILD_DIR/MapLibre.xcframework-ios.signature\";\n        ";
+			shellScript = "\n          echo \"Remove signature files (Xcode workaround)\";\n          rm -rf \"$CONFIGURATION_BUILD_DIR/MapLibre.xcframework-ios.signature\";\n          rm -f \"$TARGET_BUILD_DIR/app-Simulated.xcent\";\n        ";
 		};
 		F2675C63FF2C4A364E8C54C2 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -393,7 +405,7 @@
 			inputPaths = (
 				"$(SRCROOT)/.xcode.env",
 				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/PolarisMaps/PolarisMaps.entitlements",
+				"$(SRCROOT)/PolarisMaps/PolarisMaps.Debug.entitlements",
 				"$(SRCROOT)/Pods/Target Support Files/Pods-PolarisMaps/expo-configure-project.sh",
 			);
 			name = "[Expo] Configure project";
@@ -423,6 +435,10 @@
 				251037C88B0DD2D3BACA85F4 /* ExpoModulesProvider.swift in Sources */,
 				C218887D19024D78AC887B1F /* PolarisCloudStore.swift in Sources */,
 				798B29C6D800420097AEC665 /* PolarisCloudStore.m in Sources */,
+				A8738780907C4ACBA0B11839 /* PolarisCarPlay.swift in Sources */,
+				F99902B155154B2CBFCC7BCC /* PolarisCarPlayMapView.swift in Sources */,
+				00E2165128204D189D821A6E /* CarPlaySceneDelegate.swift in Sources */,
+				89DE569169794743B4107EDC /* PolarisCarPlay-Bridging.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -435,7 +451,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
+				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.Debug.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = PolarisMaps/PolarisMaps.SimulatorCarPlay.entitlements;
 				CURRENT_PROJECT_VERSION = 49;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				ENABLE_BITCODE = NO;
@@ -476,6 +493,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = PolarisMaps/PolarisMaps.SimulatorCarPlay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 49;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
@@ -532,6 +550,8 @@
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.Debug.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = PolarisMaps/PolarisMaps.SimulatorCarPlay.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				COPY_PHASE_STRIP = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -604,6 +624,8 @@
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = PolarisMaps/PolarisMaps.SimulatorCarPlay.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
 				COPY_PHASE_STRIP = YES;
 				ENABLE_NS_ASSERTIONS = NO;
