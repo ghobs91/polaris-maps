@@ -140,6 +140,10 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreviewWaypoints: [],
       routePreviewTrafficEta: null,
     });
+
+    // Background-session coordination happens in
+    // backgroundSessionCoordinator (subscribes to this store), keeping the
+    // store free of native-module imports.
   },
 
   advanceLeg: () => {

@@ -11,8 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.polarismaps.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Polaris Maps needs your location to show your position on the map and provide navigation directions.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Polaris Maps uses your location in the background to contribute anonymous traffic data to the P2P network.",
+        "UIBackgroundModes": ["location", "audio"],
+        "NSLocationWhenInUseUsageDescription": "Polaris Maps needs your location to show your position on the map and provide turn-by-turn navigation directions.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Polaris Maps uses your location in the background to keep turn-by-turn guidance running while the app is closed or your screen is locked, and to contribute anonymous traffic data to the P2P network.",
         "NSCameraUsageDescription": "Polaris Maps uses the camera to capture street-level imagery for the community.",
         "NSPhotoLibraryUsageDescription": "Polaris Maps needs access to your photo library to save and share maps, routes, and locations.",
         "NSSpeechRecognitionUsageDescription": "Polaris Maps uses speech recognition to enable voice commands for hands-free navigation."
@@ -39,6 +40,7 @@
       "./plugins/withSceneLifecycle",
       "./plugins/withXcode16Fixes",
       "./plugins/withCloudStore",
+      "./plugins/withCarPlay",
       "./plugins/withValhalla",
       "@maplibre/maplibre-react-native",
       "expo-router",

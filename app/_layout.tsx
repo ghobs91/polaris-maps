@@ -5,6 +5,7 @@ import { AppState, InteractionManager, type AppStateStatus } from 'react-native'
 import { ConnectivityBanner } from '@/components/common';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
+import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
 import {
   initTrafficP2P,
   disposeTrafficP2P,
@@ -18,6 +19,9 @@ function RootLayoutInner() {
 
   useEffect(() => {
     useAtprotoAuthStore.getState().restore();
+    // Keep the iOS background navigation session in sync with navigation
+    // state (starts/stops it wherever navigation is triggered from).
+    initNavigationBackgroundSession();
   }, []);
 
   useEffect(() => {

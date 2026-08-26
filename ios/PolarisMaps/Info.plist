@@ -52,11 +52,11 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Polaris Maps uses the local network to connect to the development server during testing.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Polaris Maps uses your location in the background to contribute anonymous traffic data.</string>
+	<string>Polaris Maps uses your location in the background to keep turn-by-turn guidance running while the app is closed or your screen is locked, and to contribute anonymous traffic data to the P2P network.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your location</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Polaris Maps needs your location to show your position on the map and provide navigation directions.</string>
+	<string>Polaris Maps needs your location to show your position on the map and provide turn-by-turn navigation directions.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your microphone</string>
 	<key>NSMotionUsageDescription</key>
@@ -95,6 +95,11 @@
 	</dict>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+	</array>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
