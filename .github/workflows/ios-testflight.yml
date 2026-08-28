@@ -201,8 +201,11 @@ jobs:
       # Write App Store Connect API key from secret
       # -------------------------------------------------------------------
       - name: Write App Store Connect API key
-        if: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY != '' }}
         run: |
+          if [ -z "${APP_STORE_CONNECT_PRIVATE_KEY:-}" ]; then
+            echo "Skipping App Store Connect API key write (not set)" >&2
+            exit 0
+          fi
           mkdir -p ~/.appstoreconnect
           echo "$APP_STORE_CONNECT_PRIVATE_KEY" > ~/.appstoreconnect/ci_key.p8
           # Export the expanded absolute path so the Fastlane step doesn't
