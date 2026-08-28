@@ -4,5 +4,9 @@
   <dict>
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
     <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+    <key>com.apple.developer.carplay-maps</key>
+    <true/>
+    <key>com.apple.developer.carplay-navigation</key>
+    <true/>
   </dict>
 </plist>
