@@ -597,6 +597,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (!navigationMode || !navPosition) return null;
     const lat = navPosition[1];
     return {
+      halo: buildNavPuckHaloGeoJSON(navPosition, navBearing, lat, currentZoom),
       shadow: buildNavPuckShadowGeoJSON(navPosition, navBearing, lat, currentZoom),
       arrowBody: buildNavPuckArrowBodyGeoJSON(navPosition, navBearing, lat, currentZoom),
       arrowTop: buildNavPuckArrowTopGeoJSON(navPosition, navBearing, lat, currentZoom),
@@ -657,28 +658,28 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
 
         {/* Nav puck rendered as map layers so it tilts with the 3D map view.
-            The shadow, background circle and arrow each live in their own
-            ShapeSource so the CircleLayer only sees the Point feature (avoids
-            extra circles at the polygon's vertices/centroid). */}
+            The halo, shadow and arrow each live in their own ShapeSource so the
+            FillLayers only see the polygon features (avoids extra geometry from
+            mixed point/polygon features in one layer). */}
         {navigationMode && navPosition && navPuckShapes && (
           <>
-            <MapLibreGL.ShapeSource
-              id="navPuckCircle"
-              shape={{
-                type: 'Feature',
-                properties: {},
-                geometry: { type: 'Point', coordinates: navPosition },
-              }}
-            >
-              <MapLibreGL.CircleLayer
-                id="navPuckCircleLayer"
+            {/* Halo: map-plane ellipse so it foreshortens/rotates with the 3D map
+                 alongside the arrow (unlike a screen-space CircleLayer, which
+                 stays a flat disc). Drawn behind everything else. */}
+            <MapLibreGL.ShapeSource id="navPuckHalo" shape={navPuckShapes.halo}>
+              <MapLibreGL.FillLayer
+                id="navPuckHaloRim"
                 style={
                   {
-                    circleRadius: 36,
-                    circleColor: 'rgba(0, 145, 214, 0.38)',
-                    circleStrokeWidth: 2.5,
-                    circleStrokeColor: '#65D8FF',
-                    circleOpacity: 1,
+                    fillColor: '#65D8FF',
+                  } as any
+                }
+              />
+              <MapLibreGL.FillLayer
+                id="navPuckHaloFill"
+                style={
+                  {
+                    fillColor: 'rgba(0, 145, 214, 0.38)',
                   } as any
                 }
               />
@@ -953,6 +954,52 @@ function buildNavPuckShadowGeoJSON(
       ellipseFeature(22, 17, 'rgba(26, 39, 61, 0.14)'),
       ellipseFeature(17, 13, 'rgba(26, 39, 61, 0.2)'),
     ],
+  };
+}
+
+/**
+ * Build the map-plane halo ellipse behind the arrow.  It has equal forward and
+ * lateral semi-axes so it reads as a flat disc when the map is level, and it
+ * foreshortens/rotates with the arrow as the user pitches/bears the map —
+ * matching the arrow's own map-plane rendering.  Two nested ellipses recreate
+ * the translucent fill with the light-blue rim of the old CircleLayer.
+ */
+function buildNavPuckHaloGeoJSON(
+  position: [number, number],
+  bearing: number,
+  lat: number,
+  zoom: number,
+): {
+  type: 'FeatureCollection';
+  features: Array<{
+    type: 'Feature';
+    properties: { fillColor: string };
+    geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+  }>;
+} {
+  const [lng] = position;
+
+  const rim = {
+    type: 'Feature' as const,
+    properties: { fillColor: '#65D8FF' },
+    geometry: {
+      type: 'Polygon' as const,
+      coordinates: [buildEllipseRing(lng, lat, bearing, zoom, 36, 36)] as [[number, number][]],
+    },
+  };
+
+  const fill = {
+    type: 'Feature' as const,
+    properties: { fillColor: 'rgba(0, 145, 214, 0.38)' },
+    geometry: {
+      type: 'Polygon' as const,
+      coordinates: [buildEllipseRing(lng, lat, bearing, zoom, 34, 34)] as [[number, number][]],
+    },
+  };
+
+  return {
+    type: 'FeatureCollection',
+    features: [rim, fill],
   };
 }
 
