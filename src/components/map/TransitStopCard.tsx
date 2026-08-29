@@ -92,11 +92,12 @@ function isLightColor(hex: string): boolean {
 
 function DepartureRow({ departure }: { departure: Departure }) {
   const { colors } = useTheme();
-  const badgeBg =
+  const branchName = routeFullName(departure);
+  const branchBg =
     departure.color && /^[0-9A-Fa-f]{6}$/.test(departure.color)
       ? `#${departure.color}`
       : modeDefaultColor(departure.mode);
-  const badgeTextColor = isLightColor(badgeBg) ? '#000000' : '#FFFFFF';
+  const branchTextColor = isLightColor(branchBg) ? '#000000' : '#FFFFFF';
 
   const timeLabel = departure.isRealtime ? 'Live' : 'Scheduled';
   const departureTime = new Date(departure.realtimeTime ?? departure.scheduledTime);
@@ -104,12 +105,7 @@ function DepartureRow({ departure }: { departure: Departure }) {
 
   return (
     <View style={depStyles.row}>
-      <View style={depStyles.left}>
-        <View style={[depStyles.routeBadge, { backgroundColor: badgeBg }]}>
-          <Text style={[depStyles.routeBadgeText, { color: badgeTextColor }]} numberOfLines={1}>
-            {departure.routeName}
-          </Text>
-        </View>
+      <View style={depStyles.infoRow}>
         <View style={depStyles.info}>
           {departure.headsign ? (
             <Text style={[depStyles.headsign, { color: colors.text }]} numberOfLines={1}>
@@ -120,10 +116,17 @@ function DepartureRow({ departure }: { departure: Departure }) {
             {timeLabel} · {timeStr}
           </Text>
         </View>
+        <View style={depStyles.right}>
+          <Text style={[depStyles.minutes, { color: colors.text }]}>{departure.minutesAway}</Text>
+          <Text style={[depStyles.minLabel, { color: colors.textSecondary }]}>min</Text>
+        </View>
       </View>
-      <View style={depStyles.right}>
-        <Text style={[depStyles.minutes, { color: colors.text }]}>{departure.minutesAway}</Text>
-        <Text style={[depStyles.minLabel, { color: colors.textSecondary }]}>min</Text>
+      <View style={depStyles.pillRow}>
+        <View style={[depStyles.branchPill, { backgroundColor: branchBg }]}>
+          <Text style={[depStyles.branchPillText, { color: branchTextColor }]} numberOfLines={1}>
+            {branchName}
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -1286,6 +1289,35 @@ function routeBadgeLabel(r: { ref?: string; name?: string }): string {
   return ref || name || '?';
 }
 
+/**
+ * Derive the full branch/line name (e.g. "Babylon Branch",
+ * "Port Jefferson Branch") for a departure's route.  Prefers the route long
+ * name and keeps its Branch/Line suffix, stripping the network prefix when
+ * present.  Falls back to the short ref / route name.
+ */
+function routeFullName(route: Pick<Departure, 'routeName' | 'routeLongName'>): string {
+  const ref = (route.routeName ?? '').trim();
+  const longName = (route.routeLongName ?? '').trim();
+
+  if (longName) {
+    const match = longName.match(/[A-Z][\w\s/.-]*?(?:Branch|Line|Express|Local)\b/);
+    if (match) {
+      const full = match[0].trim();
+      const cleaned = full
+        .replace(/^Long Island Rail Road:\s*/i, '')
+        .replace(/^LIRR\s+/i, '')
+        .replace(/^Metro-North Railroad:\s*/i, '')
+        .replace(/^NJ Transit\s+/i, '')
+        .replace(/^MTA\s+/i, '')
+        .trim();
+      if (cleaned) return cleaned;
+    }
+  }
+
+  if (ref && ref.length <= 3 && /^[A-Z]{2,4}$/.test(ref)) return ref;
+  return ref || longName || '?';
+}
+
 // ── Styles ──────────────────────────────────────────────────────────
 
 const badgeStyles = StyleSheet.create({
@@ -1313,26 +1345,29 @@ const depStyles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(128,128,128,0.2)',
   },
-  left: {
+  infoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     flex: 1,
-  },
-  routeBadge: {
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    marginRight: 10,
-    flexShrink: 0,
-  },
-  routeBadgeText: {
-    fontSize: 13,
-    fontWeight: '800',
   },
   info: {
     flex: 1,
+  },
+  pillRow: {
+    marginTop: 8,
+  },
+  branchPill: {
+    alignSelf: 'flex-start',
+    height: 24,
+    minHeight: 24,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+  },
+  branchPillText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   headsign: {
     fontSize: 15,

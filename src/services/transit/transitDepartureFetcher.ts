@@ -113,10 +113,13 @@ function otp1StoptimesToDepartures(
       // Extract headsign: prefer stopHeadsign, fall back to pattern desc
       let headsign = t.stopHeadsign ?? '';
       if (!headsign && desc) {
-        // Pattern desc like "Port Jefferson Branch to Penn Station via Hicksville"
-        // Extract destination after "to "
-        const toMatch = desc.match(/\bto\s+(.+?)(?:\s+via\b|$)/i);
-        headsign = toMatch ? toMatch[1].trim() : desc;
+        // Pattern desc like "Babylon Branch to Babylon (LI:118) from Penn
+        // Station (LI:8) like trip LI_...". Extract only the destination, which
+        // sits after " to " and before the "(ref)". The old regex captured the
+        // whole remainder (origin, refs, trip id), leaking e.g. "Long Beach"
+        // (an origin for Penn-bound trains) into the displayed headsign.
+        const destMatch = desc.match(/ to (.+?)(?=\s*(?:\(|via|from\b|$))/i);
+        headsign = destMatch ? destMatch[1].trim() : desc;
       }
 
       departures.push({
