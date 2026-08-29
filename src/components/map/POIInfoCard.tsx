@@ -326,6 +326,7 @@ function ActionPill({ icon, label, onPress, color, fillColor, borderColor }: Act
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.75}
+      style={{ flex: 1 }}
       accessibilityLabel={label}
       accessibilityRole="button"
     >
