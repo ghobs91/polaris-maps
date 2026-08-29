@@ -123,17 +123,20 @@ export default function TransitTimeSelector() {
         </TouchableOpacity>
       )}
 
-      {/* Native time picker */}
+      {/* Native time picker — its own full-width row so the wide spinner
+          (iOS datetime) never clips against the panel edge. */}
       {showPicker && (
-        <DateTimePicker
-          value={selectedTime}
-          mode="datetime"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={handleTimeChange}
-          minimumDate={new Date()}
-          themeVariant={isDark ? 'dark' : 'light'}
-          textColor={colors.text}
-        />
+        <View style={styles.pickerRow}>
+          <DateTimePicker
+            value={selectedTime}
+            mode="datetime"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={handleTimeChange}
+            minimumDate={new Date()}
+            themeVariant={isDark ? 'dark' : 'light'}
+            textColor={colors.text}
+          />
+        </View>
       )}
     </View>
   );
@@ -143,9 +146,14 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     marginHorizontal: 16,
     marginBottom: 8,
     gap: 8,
+  },
+  pickerRow: {
+    width: '100%',
+    marginTop: 8,
   },
   toggleRow: {
     flexDirection: 'row',
