@@ -70,15 +70,21 @@ export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) 
     return null;
   }
 
-  const opacity = suppressRaster || !trafficLayerVisible ? 0 : 0.7;
+  // Only mount the raster source when it will actually be visible.  A hidden
+  // layer (opacity 0) still makes MapLibre fetch every tile, which spams
+  // failed-request errors when the API key is invalid/exhausted (and wastes
+  // bandwidth even when it isn't).
+  const showRaster = trafficLayerVisible && !suppressRaster;
 
   if (__DEV__) {
     const keyPreview = apiKey.length >= 6 ? apiKey.slice(0, 6) + '...' : '(empty)';
     console.log(
-      `[TrafficOverlay] visible=${trafficLayerVisible} suppress=${suppressRaster} opacity=${opacity} ` +
-        `localServer=${localTemplate ? 'yes' : 'no'} key=${keyPreview}`,
+      `[TrafficOverlay] visible=${trafficLayerVisible} suppress=${suppressRaster} ` +
+        `mounted=${showRaster} localServer=${localTemplate ? 'yes' : 'no'} key=${keyPreview}`,
     );
   }
+
+  if (!showRaster) return null;
 
   return (
     <MapLibreGL.RasterSource
@@ -91,7 +97,7 @@ export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) 
       <MapLibreGL.RasterLayer
         id="tomtom-traffic-layer"
         sourceID="tomtom-traffic"
-        style={{ rasterOpacity: opacity }}
+        style={{ rasterOpacity: 0.7 }}
       />
     </MapLibreGL.RasterSource>
   );
