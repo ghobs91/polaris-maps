@@ -340,6 +340,7 @@ function ActionPill({ icon, label, onPress, color, fillColor, borderColor }: Act
         />
         <Text
           style={[pillStyles.label, { color }]}
+          numberOfLines={1}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
         >
@@ -358,7 +359,7 @@ const pillStyles = StyleSheet.create({
     borderCurve: 'continuous',
     borderWidth: 1.5,
     paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     gap: 4,
     flex: 1,
   },
@@ -380,8 +381,6 @@ export function POIInfoCard() {
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
   const [showSaveSheet, setShowSaveSheet] = useState(false);
-  // Track whether the Clearbit logo failed to load (e.g. 404 for unknown brands)
-  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   // Resolution state of the MapKit "Photos & Reviews" embed. The card stays in
   // a loading state until the embed's fate is known so OSM fields don't flash
   // in and then disappear.
@@ -479,9 +478,8 @@ export function POIInfoCard() {
     [poi],
   );
 
-  // Reset logo error state when POI changes
+  // Reset embed state when POI changes
   useEffect(() => {
-    setLogoLoadFailed(false);
     setEmbedState(embedHiddenImmediately ? 'hidden' : 'pending');
   }, [embedHiddenImmediately]);
 
@@ -577,13 +575,6 @@ export function POIInfoCard() {
       Linking.openURL(url);
     }
   }, [parsed?.website]);
-
-  const handleMenu = useCallback(() => {
-    if (parsed?.menuUrl) {
-      const url = parsed.menuUrl.startsWith('http') ? parsed.menuUrl : `https://${parsed.menuUrl}`;
-      Linking.openURL(url);
-    }
-  }, [parsed?.menuUrl]);
 
   const handleEmail = useCallback(() => {
     if (parsed?.email) Linking.openURL(`mailto:${parsed.email}`);
@@ -787,7 +778,8 @@ export function POIInfoCard() {
       ]}
     >
       <GlassView material="regular" style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
-        {/* Grabber + share/close — attach PanResponder here so it doesn't conflict with scroll */}
+        {/* Grabber + share/close — attach PanResponder here so it doesn't conflict with scroll.
+            Name is centered between the corner circular buttons (Apple Maps-style). */}
         <View {...pan.panHandlers}>
           <View style={styles.topBar}>
             <TouchableOpacity
@@ -798,28 +790,53 @@ export function POIInfoCard() {
               <View style={[styles.handle, { backgroundColor: borderColor }]} />
             </TouchableOpacity>
           </View>
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              onPress={handleShare}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Share place"
-              accessibilityRole="button"
-            >
-              <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                <Ionicons name="share-outline" size={18} color={subtextColor} />
-              </GlassView>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setSelectedPoi(null)}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Close place details"
-              accessibilityRole="button"
-            >
-              <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                <Ionicons name="close" size={18} color={subtextColor} />
-              </GlassView>
-            </TouchableOpacity>
-          </View>
+          {poi && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                onPress={handleShare}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Share place"
+                accessibilityRole="button"
+              >
+                <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                  <Ionicons name="share-outline" size={18} color={subtextColor} />
+                </GlassView>
+              </TouchableOpacity>
+              {/* The MapKit embed already shows the name once it loads, so hide
+                  the app's title here to avoid a duplicate. */}
+              {embedState !== 'embedded' && (
+                <View style={styles.topTitle}>
+                  <Text
+                    style={[styles.name, { color: textColor }]}
+                    numberOfLines={1}
+                    accessibilityRole="header"
+                    accessibilityLabel={poi.name}
+                  >
+                    {poi.name}
+                  </Text>
+                  <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
+                    {category
+                      ? enrichedData?.poiCategory
+                        ? formatPoiCategory(enrichedData.poiCategory)
+                        : capitalise(poi.subtype)
+                      : capitalise(String(poi.type))}
+                    {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
+                    {parsed?.stars ? ` · ${parsed.stars}` : ''}
+                  </Text>
+                </View>
+              )}
+              <TouchableOpacity
+                onPress={() => setSelectedPoi(null)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Close place details"
+                accessibilityRole="button"
+              >
+                <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                  <Ionicons name="close" size={18} color={subtextColor} />
+                </GlassView>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {poi && parsed && category && (
@@ -865,47 +882,6 @@ export function POIInfoCard() {
               />
             )}
 
-            {/* ── Header (hidden when the MapKit embed loads — it shows
-                  name, category and brand itself) ───────────────────────── */}
-            {embedState === 'hidden' && (
-              <View style={styles.header}>
-                {enrichedData?.logoUrl && !logoLoadFailed ? (
-                  <Image
-                    source={{ uri: enrichedData.logoUrl }}
-                    style={styles.brandLogo}
-                    resizeMode="contain"
-                    onError={() => setLogoLoadFailed(true)}
-                  />
-                ) : (
-                  <View style={[styles.categoryCircle, { backgroundColor: category.color }]}>
-                    <Ionicons name={category.icon} size={22} color="#FFFFFF" />
-                  </View>
-                )}
-                <View style={styles.headerText}>
-                  <Text
-                    style={[styles.name, { color: textColor }]}
-                    numberOfLines={2}
-                    accessibilityRole="header"
-                    accessibilityLabel={poi.name}
-                  >
-                    {poi.name}
-                  </Text>
-                  <Text style={[styles.categoryLabel, { color: subtextColor }]}>
-                    {enrichedData?.poiCategory
-                      ? formatPoiCategory(enrichedData.poiCategory)
-                      : capitalise(poi.subtype)}
-                    {parsed.cuisine ? ` · ${parsed.cuisine}` : ''}
-                    {parsed.stars ? ` · ${parsed.stars}` : ''}
-                  </Text>
-                  {(parsed.brand ?? parsed.operator) && (
-                    <Text style={[styles.operatorLabel, { color: subtextColor }]}>
-                      {parsed.brand ?? parsed.operator}
-                    </Text>
-                  )}
-                </View>
-              </View>
-            )}
-
             {/* ── Action pill buttons ────────────────────────────────────── */}
             <View style={styles.actions}>
               <ActionPill
@@ -931,26 +907,6 @@ export function POIInfoCard() {
                   icon="globe"
                   label="Website"
                   onPress={handleWebsite}
-                  color={pillSecondaryContent}
-                  fillColor={pillSecondaryFill}
-                  borderColor={pillSecondaryBorder}
-                />
-              )}
-              {parsed.menuUrl && (
-                <ActionPill
-                  icon="restaurant-outline"
-                  label="Menu"
-                  onPress={handleMenu}
-                  color={pillSecondaryContent}
-                  fillColor={pillSecondaryFill}
-                  borderColor={pillSecondaryBorder}
-                />
-              )}
-              {parsed.email && (
-                <ActionPill
-                  icon="mail"
-                  label="Email"
-                  onPress={handleEmail}
                   color={pillSecondaryContent}
                   fillColor={pillSecondaryFill}
                   borderColor={pillSecondaryBorder}
@@ -1159,8 +1115,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.xs,
+    paddingBottom: spacing.md,
+  },
+  topTitle: {
+    flex: 1,
+    alignItems: 'center',
+    minWidth: 0,
+    paddingHorizontal: spacing.xs,
   },
   handleWrap: {
     flex: 1,
@@ -1194,46 +1157,16 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     borderCurve: 'continuous',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
-    gap: spacing.md,
-  },
-  categoryCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  brandLogo: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    flexShrink: 0,
-    backgroundColor: '#ffffff',
-  },
-  headerText: {
-    flex: 1,
-    paddingRight: spacing.md,
-  },
   name: {
     fontSize: 20,
     fontWeight: '700' as const,
     lineHeight: 26,
-    marginBottom: 2,
+    textAlign: 'center',
   },
   categoryLabel: {
     ...typography.bodySmall,
-    marginBottom: 1,
-  },
-  operatorLabel: {
-    ...typography.caption,
+    textAlign: 'center',
+    marginTop: 1,
   },
   actions: {
     flexDirection: 'row',
