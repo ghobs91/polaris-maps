@@ -773,20 +773,20 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
 // Screen-pixel sizes for the nav puck arrow.  They are converted to meters at
 // the current zoom/latitude so the arrow stays proportionate to the fixed-pixel
-// CircleLayer background.  The disc is 36px in radius; the arrow spans ~51% of
-// its diameter (37px long, 28px wide) and is shifted back so its visual mass
+// CircleLayer background.  The disc is 20px in radius; the arrow spans ~55% of
+// its diameter (22px long, 18px wide) and is shifted back so its visual mass
 // sits centered in the halo disc.
-const ARROW_TIP_PX = 20;
-const ARROW_BASE_PX = -17;
-const ARROW_HALF_WIDTH_PX = 14;
-const ARROW_NOTCH_PX = -10.5;
-const ARROW_TIP_RADIUS_PX = 7;
-const ARROW_BASE_RADIUS_PX = 5.5;
-const ARROW_NOTCH_RADIUS_PX = 3.5;
-const ARROW_CENTERING_PX = 3;
-const BODY_SHIFT_PX = 3.5;
+const ARROW_TIP_PX = 12;
+const ARROW_BASE_PX = -10;
+const ARROW_HALF_WIDTH_PX = 9;
+const ARROW_NOTCH_PX = -6;
+const ARROW_TIP_RADIUS_PX = 4;
+const ARROW_BASE_RADIUS_PX = 3;
+const ARROW_NOTCH_RADIUS_PX = 2;
+const ARROW_CENTERING_PX = 1.5;
+const BODY_SHIFT_PX = 2;
 const BODY_SCALE = 1.06;
-const SHADOW_SHIFT_PX = 4;
+const SHADOW_SHIFT_PX = 2;
 
 /**
  * Convert a screen-pixel dimension to ground meters at the given zoom/latitude.
@@ -951,18 +951,18 @@ function buildNavPuckShadowGeoJSON(
   return {
     type: 'FeatureCollection',
     features: [
-      ellipseFeature(22, 17, 'rgba(26, 39, 61, 0.14)'),
-      ellipseFeature(17, 13, 'rgba(26, 39, 61, 0.2)'),
+      ellipseFeature(12, 9, 'rgba(26, 39, 61, 0.14)'),
+      ellipseFeature(9, 7, 'rgba(26, 39, 61, 0.2)'),
     ],
   };
 }
 
 /**
- * Build the map-plane halo ellipse behind the arrow.  It has equal forward and
- * lateral semi-axes so it reads as a flat disc when the map is level, and it
- * foreshortens/rotates with the arrow as the user pitches/bears the map —
- * matching the arrow's own map-plane rendering.  Two nested ellipses recreate
- * the translucent fill with the light-blue rim of the old CircleLayer.
+ * Build the map-plane halo ellipse behind the arrow.  It is centered on the
+ * nav position and lies flat on the map, so it foreshortens and rotates with
+ * the pitched/rotated camera exactly like the arrow's own map-plane
+ * rendering.  Two nested ellipses recreate the translucent blue fill with the
+ * light-blue rim of the old CircleLayer.
  */
 function buildNavPuckHaloGeoJSON(
   position: [number, number],
@@ -984,7 +984,7 @@ function buildNavPuckHaloGeoJSON(
     properties: { fillColor: '#65D8FF' },
     geometry: {
       type: 'Polygon' as const,
-      coordinates: [buildEllipseRing(lng, lat, bearing, zoom, 36, 36)] as [[number, number][]],
+      coordinates: [buildEllipseRing(lng, lat, bearing, zoom, 18, 18)] as [[number, number][]],
     },
   };
 
@@ -993,7 +993,7 @@ function buildNavPuckHaloGeoJSON(
     properties: { fillColor: 'rgba(0, 145, 214, 0.38)' },
     geometry: {
       type: 'Polygon' as const,
-      coordinates: [buildEllipseRing(lng, lat, bearing, zoom, 34, 34)] as [[number, number][]],
+      coordinates: [buildEllipseRing(lng, lat, bearing, zoom, 16, 16)] as [[number, number][]],
     },
   };
 
