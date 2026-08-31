@@ -109,7 +109,7 @@ platform :ios do
     UI.header("Step 5/7: Ensuring distribution certificate and provisioning profile")
     match(
       app_identifier: ["com.polarismaps.app"],
-      type: "app_store",
+      type: "appstore",
       # Store the encrypted certs/profiles in the same repo (a `match` branch)
       # so no separate match repo or PAT is required.
       git_url: "https://github.com/ghobs91/polaris-maps.git",
@@ -212,7 +212,7 @@ platform :ios do
     UI.header("Step 5/7: Ensuring distribution certificate and provisioning profile")
     match(
       app_identifier: ["com.polarismaps.app"],
-      type: "app_store",
+      type: "appstore",
       git_url: "https://github.com/ghobs91/polaris-maps.git",
       branch: "match",
       readonly: false,
