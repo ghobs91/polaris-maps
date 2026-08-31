@@ -103,10 +103,20 @@ platform :ios do
     UI.header("Step 4/7: Resolving build number")
     bump_build
 
-    # Ensure distribution provisioning profile exists
-    UI.header("Step 5/7: Ensuring provisioning profile")
-    sigh(
-      app_identifier: "com.polarismaps.app",
+    # Ensure distribution certificate + provisioning profile exist.
+    # match stores them encrypted in the `match` branch of this repo and
+    # installs the cert into a keychain for Xcode automatic signing.
+    UI.header("Step 5/7: Ensuring distribution certificate and provisioning profile")
+    match(
+      app_identifier: ["com.polarismaps.app"],
+      type: "app_store",
+      # Store the encrypted certs/profiles in the same repo (a `match` branch)
+      # so no separate match repo or PAT is required.
+      git_url: "https://github.com/ghobs91/polaris-maps.git",
+      branch: "match",
+      # readonly: false lets match create the distribution cert + profile on the
+      # first run and push them to the `match` branch; later runs reuse them.
+      readonly: false,
       api_key: app_store_connect_api_key(
         key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
         issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
@@ -198,10 +208,14 @@ platform :ios do
     UI.header("Step 4/7: Resolving build number")
     bump_build
 
-    # Ensure distribution provisioning profile exists
-    UI.header("Step 5/7: Ensuring provisioning profile")
-    sigh(
-      app_identifier: "com.polarismaps.app",
+    # Ensure distribution certificate + provisioning profile exist.
+    UI.header("Step 5/7: Ensuring distribution certificate and provisioning profile")
+    match(
+      app_identifier: ["com.polarismaps.app"],
+      type: "app_store",
+      git_url: "https://github.com/ghobs91/polaris-maps.git",
+      branch: "match",
+      readonly: false,
       api_key: app_store_connect_api_key(
         key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
         issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],

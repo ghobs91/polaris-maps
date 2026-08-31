@@ -48,6 +48,11 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
 
+    # match needs to clone + (on first run) push the `match` branch in this
+    # repo, so the default GITHUB_TOKEN requires contents: write.
+    permissions:
+      contents: write
+
     steps:
       # -------------------------------------------------------------------
       # Checkout
@@ -216,6 +221,15 @@ jobs:
           APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
 
       # -------------------------------------------------------------------
+      # Git auth for fastlane match (clones/pushes the `match` branch).
+      # -------------------------------------------------------------------
+      - name: Configure git auth for match
+        run: |
+          git config --global user.name "polaris-ios-ci"
+          git config --global user.email "polaris-ios-ci@users.noreply.github.com"
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      # -------------------------------------------------------------------
       # Build and upload via Fastlane
       # -------------------------------------------------------------------
       - name: Build and upload to TestFlight
@@ -225,6 +239,8 @@ jobs:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_PATH: ${{ env.APP_STORE_CONNECT_KEY_PATH || format('{0}/.appstoreconnect/ci_key.p8', github.workspace) }}
           EXPO_PUBLIC_TOMTOM_API_KEY: ${{ secrets.EXPO_PUBLIC_TOMTOM_API_KEY }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_KEYCHAIN_PASSWORD: ${{ secrets.MATCH_KEYCHAIN_PASSWORD }}
         timeout-minutes: 45
 
       # -------------------------------------------------------------------
