@@ -53,6 +53,17 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: jest.fn().mockReturnValue(true),
 }));
 
+const mockMmkvStore = new Map<string, boolean>();
+jest.mock('../../src/services/storage/mmkv', () => ({
+  __esModule: true,
+  storage: {
+    getBoolean: (key: string) => mockMmkvStore.get(key),
+    set: (key: string, value: boolean) => {
+      mockMmkvStore.set(key, value);
+    },
+  },
+}));
+
 let mockPlatformOs = 'ios';
 jest.mock('react-native', () => ({
   __esModule: true,
@@ -90,6 +101,7 @@ function denied() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockMmkvStore.clear();
   mockPlatformOs = 'ios';
   useNavigationStore.getState().stopNavigation();
   useNavigationTrackingStore.getState().setBackgroundSessionActive(false);
@@ -138,6 +150,27 @@ describe('background navigation session — start', () => {
     expect(started).toBe(false);
     expect(mockRequestBackgroundPermissions).not.toHaveBeenCalled();
     expect(mockStartLocationUpdates).not.toHaveBeenCalled();
+  });
+
+  it('persists a "Not Now" dismissal and never prompts again on later launches', async () => {
+    mockGetBackgroundPermissions.mockResolvedValue(undetermined());
+    (Alert.alert as jest.Mock).mockImplementation(
+      (_title, _message, buttons) => buttons[0].onPress(), // "Not Now"
+    );
+
+    await startBackgroundNavSession();
+    expect(mockMmkvStore.get('backgroundNavExplainerDismissed')).toBe(true);
+
+    // Fresh launch: same undetermined/can-ask-again OS state, no dialog.
+    jest.clearAllMocks();
+    mockGetForegroundPermissions.mockResolvedValue(granted());
+    mockGetBackgroundPermissions.mockResolvedValue(undetermined());
+
+    const started = await startBackgroundNavSession();
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(mockRequestBackgroundPermissions).not.toHaveBeenCalled();
+    expect(started).toBe(false);
   });
 
   it('falls back without prompting when background permission was previously denied', async () => {

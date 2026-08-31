@@ -267,6 +267,9 @@ PODS:
     - ExpoModulesCore
   - ExpoSystemUI (57.0.1):
     - ExpoModulesCore
+  - ExpoTaskManager (57.0.13):
+    - ExpoModulesCore
+    - UMAppLoader
   - ExpoUI (57.0.7):
     - ExpoModulesCore
     - ExpoModulesWorklets
@@ -2594,6 +2597,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - UMAppLoader (57.0.1)
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2635,6 +2639,7 @@ DEPENDENCIES:
   - "ExpoSQLite (from `../node_modules/.pnpm/expo-sqlite@57.0.1_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-native-com_ca2ee6aa07cac6560a9b6ae805473e9b/node_modules/expo-sqlite/ios`)"
   - "ExpoSymbols (from `../node_modules/.pnpm/expo-symbols@57.0.1_expo-font@57.0.1_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_cd17ac260205b0de8e181252bc60fd40/node_modules/expo-symbols/ios`)"
   - "ExpoSystemUI (from `../node_modules/.pnpm/expo-system-ui@57.0.1_expo@57.0.8_react-native-web@0.21.2_encoding@0.1.13_react-dom@19._7a10917eac89e40db095d4eb42203eb6/node_modules/expo-system-ui/ios`)"
+  - "ExpoTaskManager (from `../node_modules/.pnpm/expo-task-manager@57.0.13_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-nat_2c0deda5860d045d92249e2a034f05c2/node_modules/expo-task-manager/ios`)"
   - "ExpoUI (from `../node_modules/.pnpm/@expo+ui@57.0.7_@babel+core@7.29.0_@types+react@19.2.17_expo@57.0.8_react-dom@19.2.3_re_fef12467ac976406208ad7b13f144b9f/node_modules/@expo/ui/ios`)"
   - "ExpoWebBrowser (from `../node_modules/.pnpm/expo-web-browser@57.0.2_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-nativ_15e745904911107c1895969a36ee220d/node_modules/expo-web-browser/ios`)"
   - "EXUpdatesInterface (from `../node_modules/.pnpm/expo-updates-interface@57.0.1_expo@57.0.8/node_modules/expo-updates-interface/ios`)"
@@ -2727,6 +2732,7 @@ DEPENDENCIES:
   - "RNReanimated (from `../node_modules/.pnpm/react-native-reanimated@4.5.0_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-na_142962b1d4b7216d76bc4b81bd816d69/node_modules/react-native-reanimated`)"
   - "RNScreens (from `../node_modules/.pnpm/react-native-screens@4.26.2_react-native@0.86.0_@babel+core@7.29.0_@react-native-commun_de84d18aa3b543c93a04d23044b14d37/node_modules/react-native-screens`)"
   - "RNWorklets (from `../node_modules/.pnpm/react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+metro-config@0.86.0_@babe_98d4a45bef0ad5c87d693c99ffa4d31c/node_modules/react-native-worklets`)"
+  - "UMAppLoader (from `../node_modules/.pnpm/unimodules-app-loader@57.0.1/node_modules/unimodules-app-loader/ios`)"
   - "Yoga (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactCommon/yoga`)"
 
 SPEC REPOS:
@@ -2810,6 +2816,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-symbols@57.0.1_expo-font@57.0.1_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_cd17ac260205b0de8e181252bc60fd40/node_modules/expo-symbols/ios"
   ExpoSystemUI:
     :path: "../node_modules/.pnpm/expo-system-ui@57.0.1_expo@57.0.8_react-native-web@0.21.2_encoding@0.1.13_react-dom@19._7a10917eac89e40db095d4eb42203eb6/node_modules/expo-system-ui/ios"
+  ExpoTaskManager:
+    :path: "../node_modules/.pnpm/expo-task-manager@57.0.13_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-nat_2c0deda5860d045d92249e2a034f05c2/node_modules/expo-task-manager/ios"
   ExpoUI:
     :path: "../node_modules/.pnpm/@expo+ui@57.0.7_@babel+core@7.29.0_@types+react@19.2.17_expo@57.0.8_react-dom@19.2.3_re_fef12467ac976406208ad7b13f144b9f/node_modules/@expo/ui/ios"
   ExpoWebBrowser:
@@ -2993,6 +3001,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/react-native-screens@4.26.2_react-native@0.86.0_@babel+core@7.29.0_@react-native-commun_de84d18aa3b543c93a04d23044b14d37/node_modules/react-native-screens"
   RNWorklets:
     :path: "../node_modules/.pnpm/react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+metro-config@0.86.0_@babe_98d4a45bef0ad5c87d693c99ffa4d31c/node_modules/react-native-worklets"
+  UMAppLoader:
+    :path: "../node_modules/.pnpm/unimodules-app-loader@57.0.1/node_modules/unimodules-app-loader/ios"
   Yoga:
     :path: "../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactCommon/yoga"
 
@@ -3035,6 +3045,7 @@ SPEC CHECKSUMS:
   ExpoSQLite: ddd65ed74bdebcff20f6766e682f9321ecb28ab8
   ExpoSymbols: 7c7c7bd3c52f0b6dcbba6e8af4088b0dc1ea7d29
   ExpoSystemUI: 6f2ce8968292aaa91f4aa553c23bdd8cee5cdc85
+  ExpoTaskManager: 988d2e4bab5190e36ccbab2acc2829a8c2e2d891
   ExpoUI: 19f2ca6e82d91240530ee9762dedccc31fc6f429
   ExpoWebBrowser: 9b98d939d5f1c5dd8f523f0a0683056fb1204434
   EXUpdatesInterface: 92d2aa5194b6fb93ca8ab749db75665cb28b2e60
@@ -3127,6 +3138,7 @@ SPEC CHECKSUMS:
   RNReanimated: 731df8426dc647413b269a663d872ec1ea26efe4
   RNScreens: c1a06fd73d0581a2a28a160577be393f579662b9
   RNWorklets: 8cccab22f4c14ba3e1ec1e0d757cd77edca292c4
+  UMAppLoader: 173cb90a3039aa9c1b84bace4487e1907a4a5a39
   Yoga: fe50ab299e578f397fef753cf309c6703a4db29b
 
 PODFILE CHECKSUM: 6ca29bb605a20880fc1a4447445751d2eac3b1c5

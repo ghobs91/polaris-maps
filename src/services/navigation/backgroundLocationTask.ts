@@ -6,6 +6,7 @@ import type { LocationObject } from 'expo-location';
 import { processFix } from './trackingService';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
+import { storage } from '../storage/mmkv';
 
 /**
  * Headless background location task + managed session lifecycle for
@@ -19,6 +20,11 @@ import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore
  */
 
 export const BACKGROUND_LOCATION_TASK = 'polaris-background-navigation';
+
+// MMKV flag: the user dismissed the explainer ("Not Now"). The OS leaves the
+// permission status "undetermined" in that case, so without this persisted
+// flag the explainer would re-show on every fresh launch.
+const EXPLAINER_DISMISSED_KEY = 'backgroundNavExplainerDismissed';
 
 // Registered at module load so the task exists before any session starts.
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
@@ -68,8 +74,13 @@ export async function startBackgroundNavSession(): Promise<boolean> {
     const background = await Location.getBackgroundPermissionsAsync();
     let granted = background.granted;
     if (!granted && background.canAskAgain && background.status === 'undetermined') {
+      // Respect a previous "Not Now" — never nag on every launch.
+      if (storage.getBoolean(EXPLAINER_DISMISSED_KEY)) return false;
       const proceed = await showBackgroundPermissionExplainer();
-      if (!proceed) return false;
+      if (!proceed) {
+        storage.set(EXPLAINER_DISMISSED_KEY, true);
+        return false;
+      }
       const requested = await Location.requestBackgroundPermissionsAsync();
       granted = requested.granted;
     }
