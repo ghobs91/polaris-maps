@@ -84,7 +84,7 @@ describe('CarPlay iOS configuration', () => {
     expect(simulatorEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
     expect(debugEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
     expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
-    expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-navigation</key>');
+    expect(releaseEntitlements).not.toContain('<key>com.apple.developer.carplay-navigation</key>');
   });
 
   it('buffers CarPlay scene state until the React Native module attaches', () => {
