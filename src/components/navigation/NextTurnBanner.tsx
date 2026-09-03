@@ -3,13 +3,20 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
-import type { ValhallaManeuver, ManeuverType } from '../../models/route';
+import type {
+  ValhallaManeuver,
+  ManeuverType,
+  LaneGuidance as LaneGuidanceType,
+} from '../../models/route';
+import { LaneGuidance } from './LaneGuidance';
 
 interface NextTurnBannerProps {
   maneuver: ValhallaManeuver | null;
   nextManeuver?: ValhallaManeuver | null;
   /** Live remaining distance to the next turn (overrides the static route value). */
   distanceToTurnMeters?: number;
+  /** Lane arrows for the current maneuver; shown as a Google-style bottom strip. */
+  laneGuidance?: LaneGuidanceType | null;
 }
 
 function getManeuverIcon(type: ManeuverType): { name: string; rotate: number } {
@@ -50,6 +57,7 @@ export function NextTurnBanner({
   maneuver,
   nextManeuver,
   distanceToTurnMeters,
+  laneGuidance,
 }: NextTurnBannerProps) {
   if (!maneuver) return null;
 
@@ -118,6 +126,9 @@ export function NextTurnBanner({
           )}
         </View>
       )}
+
+      {/* Lane guidance strip — which lane to be in for the exit/merge */}
+      {laneGuidance && <LaneGuidance laneGuidance={laneGuidance} />}
     </View>
   );
 }

@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
-import { NextTurnBanner, EtaDisplay, SpeedLimitSign, LaneGuidance } from '@/components/navigation';
+import { NextTurnBanner, EtaDisplay, SpeedLimitSign } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
@@ -14,7 +14,7 @@ import { useNavigationStore } from '@/stores/navigationStore';
 import { spacing, typography, borderRadius } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
-import { computeBearing } from '@/utils/routeSnap';
+import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import {
   startTracking,
@@ -24,6 +24,8 @@ import {
   getRouteCoords,
   advanceAlongRoute,
   distToIndex,
+  isWrongWayDriving,
+  getGpsCourse,
 } from '@/services/navigation/trackingService';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
@@ -259,24 +261,46 @@ export default function NavigationScreen() {
         let curSegIdx: number;
 
         if (anchor.speedMps > 0.3 && elapsed > 0) {
-          [curPos, curSegIdx] = advanceAlongRoute(
-            anchor.pos,
-            anchor.segIdx,
-            anchor.speedMps * elapsed,
+          // When driving the wrong way the route bearing points opposite the
+          // car: point the puck along the real GPS course and hold the
+          // GPS-snapped position instead of gliding forward along the route
+          // (which reads as driving backwards).
+          const gpsCourse = getGpsCourse();
+          const routeBearingGuess = computeBearing(
+            coords[anchor.segIdx],
+            coords[Math.min(anchor.segIdx + 1, coords.length - 1)],
           );
-          // Compute the route bearing and smoothly interpolate toward it.
-          // Uses shortest-path interpolation over BEARING_DURATION_MS so
-          // turns animate naturally without a visible snap.
-          // Only restart interpolation when the target changes meaningfully
-          // (>0.5°) to avoid micro-restarts from floating-point drift.
-          const rawBearing = computeBearing(
-            coords[curSegIdx],
-            coords[Math.min(curSegIdx + 1, coords.length - 1)],
-          );
-          if (Math.abs(shortestAngleDelta(bearingTarget, rawBearing)) > 0.5) {
-            bearingStart = smoothBearingRef.current;
-            bearingTarget = rawBearing;
-            bearingStartTime = now;
+          const gpsDisagrees =
+            gpsCourse != null &&
+            (isWrongWayDriving() || angleDifferenceDeg(routeBearingGuess, gpsCourse) > 90);
+          if (gpsDisagrees && gpsCourse != null) {
+            curPos = anchor.pos;
+            curSegIdx = anchor.segIdx;
+            if (Math.abs(shortestAngleDelta(bearingTarget, gpsCourse)) > 0.5) {
+              bearingStart = smoothBearingRef.current;
+              bearingTarget = gpsCourse;
+              bearingStartTime = now;
+            }
+          } else {
+            [curPos, curSegIdx] = advanceAlongRoute(
+              anchor.pos,
+              anchor.segIdx,
+              anchor.speedMps * elapsed,
+            );
+            // Compute the route bearing and smoothly interpolate toward it.
+            // Uses shortest-path interpolation over BEARING_DURATION_MS so
+            // turns animate naturally without a visible snap.
+            // Only restart interpolation when the target changes meaningfully
+            // (>0.5°) to avoid micro-restarts from floating-point drift.
+            const rawBearing = computeBearing(
+              coords[curSegIdx],
+              coords[Math.min(curSegIdx + 1, coords.length - 1)],
+            );
+            if (Math.abs(shortestAngleDelta(bearingTarget, rawBearing)) > 0.5) {
+              bearingStart = smoothBearingRef.current;
+              bearingTarget = rawBearing;
+              bearingStartTime = now;
+            }
           }
           const t = Math.min((now - bearingStartTime) / BEARING_DURATION_MS, 1.0);
           smoothBearingRef.current = interpolateBearing(bearingStart, bearingTarget, t);
@@ -377,10 +401,8 @@ export default function NavigationScreen() {
               maneuver={currentManeuver}
               nextManeuver={nextManeuver}
               distanceToTurnMeters={distanceToTurn ?? undefined}
+              laneGuidance={currentManeuver?.laneGuidance}
             />
-            {currentManeuver?.laneGuidance && (
-              <LaneGuidance laneGuidance={currentManeuver.laneGuidance} />
-            )}
           </View>
           {currentManeuver?.speedLimitMph != null && (
             <SpeedLimitSign speedLimitMph={currentManeuver.speedLimitMph} />

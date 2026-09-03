@@ -47,9 +47,19 @@ export interface LaneGuidance {
   laneCount: number;
   /** Which lanes are active (0-indexed from left) */
   activeLanes: number[];
-  /** Direction arrows for each lane: 'left', 'slight_left', 'straight', 'slight_right', 'right' */
-  laneDirections: Array<'left' | 'slight_left' | 'straight' | 'slight_right' | 'right'>;
+  /** Display direction arrow for each lane, left to right */
+  laneDirections: LaneDirection[];
 }
+
+export type LaneDirection =
+  | 'left'
+  | 'slight_left'
+  | 'straight'
+  | 'slight_right'
+  | 'right'
+  | 'merge_left'
+  | 'merge_right'
+  | 'u_turn';
 
 export interface ValhallaManeuver {
   type: ManeuverType;

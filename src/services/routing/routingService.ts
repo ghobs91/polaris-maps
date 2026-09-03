@@ -7,6 +7,7 @@ import type {
   ValhallaManeuver,
   ManeuverType,
   CostingModel,
+  LaneDirection,
   LaneGuidance,
 } from '../../models/route';
 
@@ -77,41 +78,226 @@ function valhallaTypeCode(code: number): ManeuverType {
   }
 }
 
-/** Parse Valhalla lane data into our LaneGuidance format.
- *  Valhalla returns lanes as an array of objects with `active` boolean
- *  and `direction` string (e.g. "left", "straight", "right"). */
+/** Valhalla turn-lane direction bitmask values (see Valhalla API docs). */
+const LANE_BIT_THROUGH = 2;
+const LANE_BIT_SHARP_LEFT = 4;
+const LANE_BIT_LEFT = 8;
+const LANE_BIT_SLIGHT_LEFT = 16;
+const LANE_BIT_SLIGHT_RIGHT = 32;
+const LANE_BIT_RIGHT = 64;
+const LANE_BIT_SHARP_RIGHT = 128;
+const LANE_BIT_REVERSE = 256;
+const LANE_BIT_MERGE_LEFT = 512;
+const LANE_BIT_MERGE_RIGHT = 1024;
+
+/** Map a single Valhalla lane bit to a display direction. */
+function laneBitToDirection(bit: number): LaneDirection | null {
+  switch (bit) {
+    case LANE_BIT_LEFT:
+    case LANE_BIT_SHARP_LEFT:
+      return 'left';
+    case LANE_BIT_SLIGHT_LEFT:
+      return 'slight_left';
+    case LANE_BIT_THROUGH:
+      return 'straight';
+    case LANE_BIT_SLIGHT_RIGHT:
+      return 'slight_right';
+    case LANE_BIT_RIGHT:
+    case LANE_BIT_SHARP_RIGHT:
+      return 'right';
+    case LANE_BIT_MERGE_LEFT:
+      return 'merge_left';
+    case LANE_BIT_MERGE_RIGHT:
+      return 'merge_right';
+    case LANE_BIT_REVERSE:
+      return 'u_turn';
+    default:
+      return null;
+  }
+}
+
+/** Bit priority when a lane allows several directions and no single one stands out. */
+const LANE_BIT_PRIORITY = [
+  LANE_BIT_THROUGH,
+  LANE_BIT_SLIGHT_LEFT,
+  LANE_BIT_SLIGHT_RIGHT,
+  LANE_BIT_LEFT,
+  LANE_BIT_RIGHT,
+  LANE_BIT_SHARP_LEFT,
+  LANE_BIT_SHARP_RIGHT,
+  LANE_BIT_MERGE_LEFT,
+  LANE_BIT_MERGE_RIGHT,
+  LANE_BIT_REVERSE,
+];
+
+/** First display direction for the set bits in `mask`, following `priority`. */
+function pickDirectionFromMask(mask: number, priority: number[]): LaneDirection {
+  for (const bit of priority) {
+    if (mask & bit) {
+      const dir = laneBitToDirection(bit);
+      if (dir) return dir;
+    }
+  }
+  return 'straight';
+}
+
+/** Normalize one raw lane entry to direction/active/valid bitmasks. */
+function normalizeLaneMasks(lane: Record<string, unknown>): {
+  mask: number;
+  activeMask: number | null;
+  validMask: number | null;
+} {
+  let mask = 0;
+  const rawDirections = lane['directions'];
+  if (typeof rawDirections === 'number' && Number.isFinite(rawDirections)) {
+    mask = rawDirections;
+  } else if (typeof rawDirections === 'string') {
+    mask = maskForDirectionString(rawDirections);
+  } else if (Array.isArray(rawDirections)) {
+    for (const d of rawDirections) {
+      if (typeof d === 'string') mask |= maskForDirectionString(d);
+      else if (typeof d === 'number' && Number.isFinite(d)) mask |= d;
+    }
+  } else if (typeof lane['direction'] === 'string') {
+    // Legacy single-string shape.
+    return {
+      mask: maskForDirectionString(lane['direction']),
+      activeMask: lane['active'] === true ? maskForDirectionString(lane['direction']) : null,
+      validMask: null,
+    };
+  }
+
+  const toMask = (v: unknown): number | null => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (v === true) return mask;
+    return null;
+  };
+  return { mask, activeMask: toMask(lane['active']), validMask: toMask(lane['valid']) };
+}
+
+/** Bitmask for one direction string (handles 'slight left' and 'slight_left'). */
+function maskForDirectionString(direction: string): number {
+  switch (direction.replace(/ /g, '_')) {
+    case 'through':
+    case 'straight':
+    case 'none':
+      return LANE_BIT_THROUGH;
+    case 'sharp_left':
+    case 'left':
+      return direction.includes('sharp') ? LANE_BIT_SHARP_LEFT : LANE_BIT_LEFT;
+    case 'slight_left':
+      return LANE_BIT_SLIGHT_LEFT;
+    case 'slight_right':
+      return LANE_BIT_SLIGHT_RIGHT;
+    case 'sharp_right':
+    case 'right':
+      return direction.includes('sharp') ? LANE_BIT_SHARP_RIGHT : LANE_BIT_RIGHT;
+    case 'reverse':
+      return LANE_BIT_REVERSE;
+    case 'merge_left':
+      return LANE_BIT_MERGE_LEFT;
+    case 'merge_right':
+      return LANE_BIT_MERGE_RIGHT;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Parse Valhalla lane data into our LaneGuidance format.
+ *
+ * Expects `turn_lanes: true` in the route request. Each lane carries a
+ * `directions` bitmask of possible turns plus optional `active`/`valid`
+ * bitmasks marking the lanes to follow for the maneuver (`active` = best,
+ * `valid` = usable). `maneuverType` only breaks ties for multi-direction
+ * lanes with no active/valid hint.
+ */
 function parseLaneGuidance(
   lanes: Array<Record<string, unknown>> | undefined,
+  maneuverType?: ManeuverType,
 ): LaneGuidance | undefined {
   if (!lanes || lanes.length === 0) return undefined;
 
+  const normalized = lanes.map(normalizeLaneMasks);
+  const hasActive = normalized.some((l) => (l.activeMask ?? 0) !== 0);
+  const useValidFallback = !hasActive && normalized.some((l) => (l.validMask ?? 0) !== 0);
+
+  const sideBias: number[] =
+    maneuverType === 'turn_left' ||
+    maneuverType === 'sharp_left' ||
+    maneuverType === 'slight_left' ||
+    maneuverType === 'merge_left' ||
+    maneuverType === 'u_turn'
+      ? [
+          LANE_BIT_LEFT,
+          LANE_BIT_SHARP_LEFT,
+          LANE_BIT_SLIGHT_LEFT,
+          LANE_BIT_THROUGH,
+          LANE_BIT_SLIGHT_RIGHT,
+          LANE_BIT_RIGHT,
+          LANE_BIT_SHARP_RIGHT,
+          LANE_BIT_MERGE_LEFT,
+          LANE_BIT_MERGE_RIGHT,
+          LANE_BIT_REVERSE,
+        ]
+      : maneuverType === 'turn_right' ||
+          maneuverType === 'sharp_right' ||
+          maneuverType === 'slight_right' ||
+          maneuverType === 'merge_right' ||
+          maneuverType === 'exit_highway' ||
+          maneuverType === 'enter_highway'
+        ? [
+            LANE_BIT_RIGHT,
+            LANE_BIT_SHARP_RIGHT,
+            LANE_BIT_SLIGHT_RIGHT,
+            LANE_BIT_THROUGH,
+            LANE_BIT_SLIGHT_LEFT,
+            LANE_BIT_LEFT,
+            LANE_BIT_SHARP_LEFT,
+            LANE_BIT_MERGE_RIGHT,
+            LANE_BIT_MERGE_LEFT,
+            LANE_BIT_REVERSE,
+          ]
+        : LANE_BIT_PRIORITY;
+
   const activeLanes: number[] = [];
-  const laneDirections: LaneGuidance['laneDirections'] = [];
-
-  for (let i = 0; i < lanes.length; i++) {
-    const lane = lanes[i];
-    const active = lane['active'] === true;
-    const direction = (lane['direction'] as string) ?? 'straight';
-
-    if (active) {
-      activeLanes.push(i);
+  const laneDirections: LaneDirection[] = normalized.map((l, i) => {
+    const highlightMask = hasActive ? (l.activeMask ?? 0) : (l.validMask ?? 0);
+    if (useValidFallback || hasActive) {
+      if (highlightMask !== 0) activeLanes.push(i);
     }
-
-    // Map Valhalla direction strings to our enum
-    let dir: LaneGuidance['laneDirections'][0] = 'straight';
-    if (direction === 'left' || direction === 'sharp_left') dir = 'left';
-    else if (direction === 'slight_left') dir = 'slight_left';
-    else if (direction === 'right' || direction === 'sharp_right') dir = 'right';
-    else if (direction === 'slight_right') dir = 'slight_right';
-
-    laneDirections.push(dir);
-  }
+    // Display the maneuver-relevant direction when there is exactly one
+    // active/valid bit; otherwise fall back to the lane's own directions.
+    const singleActive = singleBit(highlightMask);
+    if (singleActive) return laneBitToDirection(singleActive) ?? 'straight';
+    const singleDirection = singleBit(l.mask);
+    if (singleDirection) return laneBitToDirection(singleDirection) ?? 'straight';
+    if (l.mask === 0) return 'straight';
+    return pickDirectionFromMask(l.mask, sideBias);
+  });
 
   return {
     laneCount: lanes.length,
     activeLanes,
     laneDirections,
   };
+}
+
+/** Return `mask` when exactly one known lane bit is set, else null. */
+function singleBit(mask: number): number | null {
+  const known =
+    LANE_BIT_THROUGH |
+    LANE_BIT_SHARP_LEFT |
+    LANE_BIT_LEFT |
+    LANE_BIT_SLIGHT_LEFT |
+    LANE_BIT_SLIGHT_RIGHT |
+    LANE_BIT_RIGHT |
+    LANE_BIT_SHARP_RIGHT |
+    LANE_BIT_REVERSE |
+    LANE_BIT_MERGE_LEFT |
+    LANE_BIT_MERGE_RIGHT;
+  const bits = mask & known;
+  return bits !== 0 && (bits & (bits - 1)) === 0 ? bits : null;
 }
 
 /** Wrap a routing error with a human-friendly message. */
@@ -195,6 +381,8 @@ async function computeRouteOnline(
     locations: waypoints.map((w) => ({ lat: w.lat, lon: w.lng, type: 'break' })),
     costing,
     alternates: options?.alternates ?? 0,
+    // Lane-level guidance for highway exits and merges (parsed per maneuver).
+    turn_lanes: true,
     costing_options: {
       [costing]: {
         use_tolls: options?.avoidTolls ? 0 : 1,
@@ -221,22 +409,28 @@ async function computeRouteOnline(
     const rawLegs = (trip['legs'] ?? []) as Record<string, unknown>[];
     const legs = rawLegs.map((leg) => ({
       maneuvers: ((leg['maneuvers'] ?? []) as Record<string, unknown>[]).map(
-        (m): ValhallaManeuver => ({
-          type: valhallaTypeCode((m['type'] as number) ?? 0),
-          instruction: (m['instruction'] as string) ?? '',
-          distanceMeters: ((m['length'] as number) ?? 0) * 1000,
-          durationSeconds: (m['time'] as number) ?? 0,
-          beginShapeIndex: (m['begin_shape_index'] as number) ?? 0,
-          endShapeIndex: (m['end_shape_index'] as number) ?? 0,
-          streetNames: m['street_names'] as string[] | undefined,
-          verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
-          verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
-          speedLimitMph:
-            typeof m['speed_limit'] === 'number'
-              ? Math.round((m['speed_limit'] as number) * 0.621371) // km/h → mph
-              : undefined,
-          laneGuidance: parseLaneGuidance(m['lanes'] as Array<Record<string, unknown>> | undefined),
-        }),
+        (m): ValhallaManeuver => {
+          const type = valhallaTypeCode((m['type'] as number) ?? 0);
+          return {
+            type,
+            instruction: (m['instruction'] as string) ?? '',
+            distanceMeters: ((m['length'] as number) ?? 0) * 1000,
+            durationSeconds: (m['time'] as number) ?? 0,
+            beginShapeIndex: (m['begin_shape_index'] as number) ?? 0,
+            endShapeIndex: (m['end_shape_index'] as number) ?? 0,
+            streetNames: m['street_names'] as string[] | undefined,
+            verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
+            verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
+            speedLimitMph:
+              typeof m['speed_limit'] === 'number'
+                ? Math.round((m['speed_limit'] as number) * 0.621371) // km/h → mph
+                : undefined,
+            laneGuidance: parseLaneGuidance(
+              m['lanes'] as Array<Record<string, unknown>> | undefined,
+              type,
+            ),
+          };
+        },
       ),
       distanceMeters:
         (((leg['summary'] as Record<string, unknown>)?.['length'] as number) ?? 0) * 1000,

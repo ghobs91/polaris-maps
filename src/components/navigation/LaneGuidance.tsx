@@ -1,56 +1,46 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { LaneGuidance as LaneGuidanceType } from '../../models/route';
+import type { LaneDirection, LaneGuidance as LaneGuidanceType } from '../../models/route';
 
 interface LaneGuidanceProps {
   laneGuidance: LaneGuidanceType;
 }
 
-/** Get the appropriate Ionicons name for a lane direction */
-function getLaneIcon(direction: LaneGuidanceType['laneDirections'][0]): string {
+/** Icon + rotation for a lane arrow. Straight-ish arrows share one glyph so
+ *  weights match; turns rotate it like the maneuver banner icons. */
+function getLaneGlyph(direction: LaneDirection): { name: string; rotate: number } {
   switch (direction) {
     case 'left':
-      return 'arrow-back';
+      return { name: 'arrow-up', rotate: -90 };
     case 'slight_left':
-      return 'arrow-up';
+      return { name: 'arrow-up', rotate: -45 };
     case 'straight':
-      return 'arrow-up';
+      return { name: 'arrow-up', rotate: 0 };
     case 'slight_right':
-      return 'arrow-up';
+      return { name: 'arrow-up', rotate: 45 };
     case 'right':
-      return 'arrow-forward';
+      return { name: 'arrow-up', rotate: 90 };
+    case 'merge_left':
+      return { name: 'arrow-up', rotate: -30 };
+    case 'merge_right':
+      return { name: 'arrow-up', rotate: 30 };
+    case 'u_turn':
+      return { name: 'return-up-back', rotate: 0 };
     default:
-      return 'arrow-up';
-  }
-}
-
-/** Get rotation angle for lane direction */
-function getLaneRotation(direction: LaneGuidanceType['laneDirections'][0]): number {
-  switch (direction) {
-    case 'left':
-      return -90;
-    case 'slight_left':
-      return -45;
-    case 'straight':
-      return 0;
-    case 'slight_right':
-      return 45;
-    case 'right':
-      return 90;
-    default:
-      return 0;
+      return { name: 'arrow-up', rotate: 0 };
   }
 }
 
 /**
- * Lane guidance component showing which lanes to use at an upcoming maneuver.
- * Displays a row of lane indicators with active lanes highlighted.
+ * Google-style lane strip: one arrow per lane, recommended lanes bright
+ * white, the rest dimmed. Rendered as the bottom row of the turn banner so
+ * the driver sees at a glance which lane to be in for the exit/merge.
  */
 export function LaneGuidance({ laneGuidance }: LaneGuidanceProps) {
   const { laneCount, activeLanes, laneDirections } = laneGuidance;
 
-  if (laneCount === 0) return null;
+  if (laneCount < 2 || laneDirections.length < 2) return null;
 
   return (
     <View
@@ -60,17 +50,17 @@ export function LaneGuidance({ laneGuidance }: LaneGuidanceProps) {
       <View style={styles.lanesRow}>
         {laneDirections.map((direction, index) => {
           const isActive = activeLanes.includes(index);
-          const iconName = getLaneIcon(direction);
-          const rotation = getLaneRotation(direction);
+          const { name, rotate } = getLaneGlyph(direction);
 
           return (
-            <View key={index} style={[styles.lane, isActive && styles.laneActive]}>
+            <View key={index} style={styles.lane}>
               <Ionicons
-                name={iconName as any}
-                size={16}
-                color={isActive ? '#FFFFFF' : 'rgba(255,255,255,0.4)'}
-                style={rotation !== 0 ? { transform: [{ rotate: `${rotation}deg` }] } : undefined}
+                name={name as any}
+                size={26}
+                color={isActive ? '#FFFFFF' : 'rgba(255,255,255,0.35)'}
+                style={rotate !== 0 ? { transform: [{ rotate: `${rotate}deg` }] } : undefined}
               />
+              {index < laneDirections.length - 1 && <View style={styles.divider} />}
             </View>
           );
         })}
@@ -81,26 +71,25 @@ export function LaneGuidance({ laneGuidance }: LaneGuidanceProps) {
 
 const styles = StyleSheet.create({
   container: {
-    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0,0,0,0.2)',
     alignItems: 'center',
   },
   lanesRow: {
     flexDirection: 'row',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 14,
   },
   lane: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  laneActive: {
-    backgroundColor: '#007AFF',
+  divider: {
+    width: 1,
+    height: 22,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginLeft: 14,
   },
 });

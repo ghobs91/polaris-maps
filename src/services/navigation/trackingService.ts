@@ -6,6 +6,7 @@ import {
   snapToRoute,
   computeRemainingMeters,
   haversineMeters,
+  angleDifferenceDeg,
   isOffRoute,
   OFF_ROUTE_THRESHOLD_METERS,
 } from '../../utils/routeSnap';
@@ -38,6 +39,22 @@ let gpsSegmentIndex = 0;
 let offRouteCount = 0;
 // Prevents overlapping reroute requests.
 let reroutingFix = false;
+// Wrong-way driving (user moving opposite the route direction while still
+// snapped near the polyline, so distance-based off-route never fires).
+let wrongWayCount = 0;
+let wrongWayActive = false;
+let lastGpsHeading: number | null = null;
+let lastGpsSpeedMps = 0;
+let lastGpsRemaining: number | null = null;
+
+/** GPS course is only trusted above walking speed (m/s). */
+export const WRONG_WAY_MIN_SPEED_MPS = 3;
+/** Heading vs route-bearing mismatch that counts as opposite direction. */
+export const WRONG_WAY_HEADING_THRESHOLD_DEG = 120;
+/** Consecutive opposite-direction fixes required before rerouting. */
+export const WRONG_WAY_CONSECUTIVE_COUNT = 3;
+/** Remaining-distance growth (m) that counts as driving backwards when no heading. */
+const WRONG_WAY_BACKWARD_GROWTH_METERS = 10;
 
 /**
  * Begin tracking `route`. Decodes the polyline, builds the maneuver list and
@@ -49,6 +66,13 @@ export function startTracking(route: ValhallaRoute): void {
   activeRouteSummaryDistanceMeters = route.summary.distanceMeters;
   activeRouteSummaryDurationSeconds = route.summary.durationSeconds;
   trackingActive = true;
+  offRouteCount = 0;
+  reroutingFix = false;
+  wrongWayCount = 0;
+  wrongWayActive = false;
+  lastGpsHeading = null;
+  lastGpsSpeedMps = 0;
+  lastGpsRemaining = null;
 }
 
 /** Clear all tracking state. Called when navigation ends. */
@@ -62,6 +86,11 @@ export function stopTracking(): void {
   gpsSegmentIndex = 0;
   offRouteCount = 0;
   reroutingFix = false;
+  wrongWayCount = 0;
+  wrongWayActive = false;
+  lastGpsHeading = null;
+  lastGpsSpeedMps = 0;
+  lastGpsRemaining = null;
 }
 
 export function isTracking(): boolean {
@@ -76,6 +105,21 @@ export function getAnchor(): Readonly<DrAnchor> | null {
 /** GPS-confirmed segment index, updated on every processed fix. */
 export function getGpsSegmentIndex(): number {
   return gpsSegmentIndex;
+}
+
+/** True while the user is driving opposite the route direction. */
+export function isWrongWayDriving(): boolean {
+  return wrongWayActive;
+}
+
+/** Last trusted GPS course in degrees, or null when unknown/slow. */
+export function getGpsCourse(): number | null {
+  return lastGpsHeading;
+}
+
+/** Last GPS speed in m/s (0 when unknown). */
+export function getGpsSpeed(): number {
+  return lastGpsSpeedMps;
 }
 
 /** Decoded polyline of the route being tracked ([] when not tracking). */
@@ -130,9 +174,55 @@ export function processFix(location: LocationObject): void {
   if (!trackingActive || coords.length < 2) return;
 
   const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
-  const { snapped, segmentIndex, distanceMeters: distFromRoute } = snapToRoute(gpsPos, coords);
+  const {
+    snapped,
+    segmentIndex,
+    distanceMeters: distFromRoute,
+    bearing: routeBearing,
+  } = snapToRoute(gpsPos, coords);
   gpsSegmentIndex = segmentIndex;
   const now = performance.now();
+
+  // --- Wrong-way detection (driving opposite the route while still near it) ---
+  // Distance-based off-route never fires here: the snapped point stays close
+  // to the polyline, so compare travel direction against the route bearing.
+  const rawSpeed = location.coords.speed ?? -1;
+  const rawHeading = location.coords.heading;
+  const headingValid =
+    rawHeading != null && Number.isFinite(rawHeading) && rawHeading >= 0 && rawHeading <= 360;
+  const movingFast = rawSpeed >= WRONG_WAY_MIN_SPEED_MPS;
+  lastGpsSpeedMps = rawSpeed >= 0 ? rawSpeed : 0;
+  lastGpsHeading = movingFast && headingValid ? rawHeading! : null;
+  const gpsRemainingNow = computeRemainingMeters(snapped, segmentIndex, coords);
+  if (distFromRoute <= OFF_ROUTE_THRESHOLD_METERS && movingFast) {
+    if (headingValid) {
+      const headingDiff = angleDifferenceDeg(routeBearing, rawHeading!);
+      if (headingDiff > WRONG_WAY_HEADING_THRESHOLD_DEG) {
+        wrongWayCount++;
+      } else {
+        wrongWayCount = 0;
+        if (headingDiff < 90) wrongWayActive = false;
+      }
+    } else {
+      // No compass course — fall back to route progress: remaining distance
+      // growing while moving means driving backwards along the route.
+      if (lastGpsRemaining != null) {
+        const growth = gpsRemainingNow - lastGpsRemaining;
+        if (growth > WRONG_WAY_BACKWARD_GROWTH_METERS) {
+          wrongWayCount++;
+        } else if (growth < -WRONG_WAY_BACKWARD_GROWTH_METERS) {
+          wrongWayCount = 0;
+          wrongWayActive = false;
+        }
+      }
+    }
+    if (wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT) wrongWayActive = true;
+  } else if (distFromRoute > OFF_ROUTE_THRESHOLD_METERS) {
+    // Truly off-route — heading comparison is meaningless until re-snapped.
+    wrongWayCount = 0;
+    wrongWayActive = false;
+  }
+  lastGpsRemaining = gpsRemainingNow;
 
   // --- Off-route detection & rerouting ---
   if (distFromRoute > OFF_ROUTE_THRESHOLD_METERS) {
@@ -142,8 +232,10 @@ export function processFix(location: LocationObject): void {
   }
 
   const store = useNavigationStore.getState();
+  const needsReroute =
+    isOffRoute(distFromRoute, offRouteCount) || wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT;
 
-  if (isOffRoute(distFromRoute, offRouteCount) && !reroutingFix && store.destination) {
+  if (needsReroute && !reroutingFix && store.destination) {
     reroutingFix = true;
     store.setDeviated(true);
     store.setRerouting(true);
@@ -185,11 +277,16 @@ export function processFix(location: LocationObject): void {
           }
         }
         offRouteCount = 0;
+        wrongWayCount = 0;
+        wrongWayActive = false;
+        lastGpsRemaining = null;
         reroutingFix = false;
       })
       .catch(() => {
         // Reroute failed (e.g., no connectivity) — clear rerouting flag
         // so it will retry on the next off-route GPS reading.
+        // Keep wrongWayCount so a wrong-way drive retries immediately,
+        // mirroring the off-route counter behaviour.
         useNavigationStore.getState().setRerouting(false);
         reroutingFix = false;
       });
@@ -208,14 +305,13 @@ export function processFix(location: LocationObject): void {
   // Clamp to reasonable road speed (0–55 m/s ≈ 200 km/h)
   speedMps = Math.min(Math.max(speedMps, 0), 55);
 
-  // Never move the marker backwards. If the current dead-reckoning
-  // projection is *ahead* of the GPS snapped position on the route,
-  // keep the DR position as the new anchor and simply adopt the
-  // GPS speed. This prevents the visible backward jump that occurs
-  // when GPS latency/inaccuracy reports a position behind the smooth
-  // extrapolation.
+  // Never move the marker backwards — unless the user is driving the wrong
+  // way. In that case the GPS-snapped position legitimately moves backwards
+  // along the route, and holding the DR projection ahead is exactly what
+  // makes the puck glide forward while the car reverses relative to it.
+  const suspectedWrongWay = wrongWayCount > 0;
   const prevAnchor = drAnchor;
-  if (prevAnchor && prevAnchor.speedMps > 0.3) {
+  if (prevAnchor && prevAnchor.speedMps > 0.3 && !suspectedWrongWay) {
     const elapsed = Math.min((now - prevAnchor.time) / 1000, 2.0);
     const [drPos, drSegIdx] = advanceAlongRoute(
       prevAnchor.pos,

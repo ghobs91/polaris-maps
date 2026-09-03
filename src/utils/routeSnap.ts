@@ -10,6 +10,11 @@ export function computeBearing(from: [number, number], to: [number, number]): nu
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
+/** Smallest angular difference between two bearings in degrees (0–180). */
+export function angleDifferenceDeg(a: number, b: number): number {
+  return Math.abs((((a - b + 540) % 360) - 180) % 360);
+}
+
 /** Approximate distance in meters between two [lng, lat] points (Haversine). */
 export function haversineMeters(a: [number, number], b: [number, number]): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
