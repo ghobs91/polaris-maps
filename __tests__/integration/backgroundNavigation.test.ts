@@ -173,6 +173,45 @@ describe('background navigation session — start', () => {
     expect(started).toBe(false);
   });
 
+  it('asks only once: stays silent after Continue when the OS did not grant Always', async () => {
+    // iOS commonly defers the Always grant, leaving status undetermined.
+    mockGetBackgroundPermissions.mockResolvedValue(undetermined());
+    mockRequestBackgroundPermissions.mockResolvedValue(undetermined());
+    (Alert.alert as jest.Mock).mockImplementation((_title, _message, buttons) =>
+      buttons[1].onPress(),
+    );
+
+    const first = await startBackgroundNavSession();
+
+    expect(first).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(mockRequestBackgroundPermissions).toHaveBeenCalledTimes(1);
+    expect(mockStartLocationUpdates).not.toHaveBeenCalled();
+
+    // Next navigation start: same undetermined OS state, no second dialog.
+    jest.clearAllMocks();
+    mockGetForegroundPermissions.mockResolvedValue(granted());
+    mockGetBackgroundPermissions.mockResolvedValue(undetermined());
+
+    const second = await startBackgroundNavSession();
+
+    expect(second).toBe(false);
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(mockRequestBackgroundPermissions).not.toHaveBeenCalled();
+    expect(mockStartLocationUpdates).not.toHaveBeenCalled();
+  });
+
+  it('starts the session on a later launch once Always is granted in Settings', async () => {
+    mockMmkvStore.set('backgroundNavPermissionRequested', true);
+    mockGetBackgroundPermissions.mockResolvedValue(granted());
+
+    const started = await startBackgroundNavSession();
+
+    expect(started).toBe(true);
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(mockStartLocationUpdates).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back without prompting when background permission was previously denied', async () => {
     mockGetBackgroundPermissions.mockResolvedValue(denied());
 

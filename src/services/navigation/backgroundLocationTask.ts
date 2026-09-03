@@ -25,6 +25,14 @@ export const BACKGROUND_LOCATION_TASK = 'polaris-background-navigation';
 // permission status "undetermined" in that case, so without this persisted
 // flag the explainer would re-show on every fresh launch.
 const EXPLAINER_DISMISSED_KEY = 'backgroundNavExplainerDismissed';
+// MMKV flag: we already showed the explainer AND issued the OS-level "Always"
+// request. iOS commonly defers the Always grant (provisional WhenInUse plus a
+// later system upgrade prompt, or the user picks "Keep Only While Using"), so
+// the status can stay "undetermined" across launches. Without this flag the
+// explainer would re-appear on every navigation start. After one attempt we
+// stay silent; if the user enables "Always" in Settings, the next navigation
+// picks it up via the granted check above.
+const BACKGROUND_REQUEST_ATTEMPTED_KEY = 'backgroundNavPermissionRequested';
 
 // Registered at module load so the task exists before any session starts.
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
@@ -62,7 +70,9 @@ function showBackgroundPermissionExplainer(): Promise<boolean> {
  * running (the screen's foreground watcher then hands over to the task).
  *
  * Graceful degradation: returns false on denial/failure and navigation falls
- * back to foreground-only tracking. Never re-prompts a previously denied user.
+ * back to foreground-only tracking. The explainer + OS request happen at most
+ * once — afterwards we stay silent until the OS reports "Always" as granted
+ * (e.g. enabled in Settings), so navigation start never nags repeatedly.
  */
 export async function startBackgroundNavSession(): Promise<boolean> {
   if (Platform.OS !== 'ios') return false;
@@ -76,11 +86,15 @@ export async function startBackgroundNavSession(): Promise<boolean> {
     if (!granted && background.canAskAgain && background.status === 'undetermined') {
       // Respect a previous "Not Now" — never nag on every launch.
       if (storage.getBoolean(EXPLAINER_DISMISSED_KEY)) return false;
+      // We already asked once (explainer + OS request) without a grant.
+      // Stay silent; the user can enable "Always" in Settings.
+      if (storage.getBoolean(BACKGROUND_REQUEST_ATTEMPTED_KEY)) return false;
       const proceed = await showBackgroundPermissionExplainer();
       if (!proceed) {
         storage.set(EXPLAINER_DISMISSED_KEY, true);
         return false;
       }
+      storage.set(BACKGROUND_REQUEST_ATTEMPTED_KEY, true);
       const requested = await Location.requestBackgroundPermissionsAsync();
       granted = requested.granted;
     }

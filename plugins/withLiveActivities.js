@@ -60,6 +60,22 @@ function copyFiles() {
   }
 }
 
+function registerMainTargetSources(project, mainTargetUuid) {
+  const groupUuid = project.findPBXGroupKey({ name: 'PolarisMaps' });
+  for (const { dest } of NATIVE_FILES) {
+    const relativePath = dest.replace(/^ios\//, '');
+    if (project.hasFile(relativePath)) {
+      continue;
+    }
+    const file = project.addSourceFile(relativePath, { target: mainTargetUuid }, groupUuid);
+    if (file) {
+      console.log('[withLiveActivities] Registered ' + path.basename(dest) + ' in main target');
+    } else {
+      console.warn('[withLiveActivities] Failed to register ' + relativePath);
+    }
+  }
+}
+
 function patchBridgingHeader() {
   const bridgingHeader = path.join(IOS_DIR, 'PolarisMaps', 'PolarisMaps-Bridging-Header.h');
   if (fs.existsSync(bridgingHeader)) {
@@ -174,6 +190,8 @@ function withLiveActivities(config) {
       console.warn('[withLiveActivities] Could not find main target');
       return cfg;
     }
+
+    registerMainTargetSources(project, mainTargetUuid);
 
     let extTarget = project.pbxTargetByName(EXTENSION_NAME);
     if (!extTarget) {
