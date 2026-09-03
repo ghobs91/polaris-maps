@@ -26,6 +26,7 @@ import { spacing, typography, borderRadius } from '../../constants/theme';
 import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
+import { isAbortError } from '../../services/search/abortUtils';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
@@ -684,6 +685,8 @@ export function FloatingSearchPanel({
   const inputRef = useRef<TextInput>(null);
   const stopSearchInputRef = useRef<TextInput>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Aborts the in-flight full search when a newer keystroke supersedes it. */
+  const searchAbortRef = useRef<AbortController | null>(null);
   /** Incremented on every query change and on explicit clear; in-flight results
    * compare against this to detect staleness and discard themselves. */
   const searchGenRef = useRef(0);
@@ -796,7 +799,7 @@ export function FloatingSearchPanel({
   // ── Search ──────────────────────────────────
   const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
-  const performSearch = useCallback(async (text: string, gen: number) => {
+  const performSearch = useCallback(async (text: string, gen: number, signal: AbortSignal) => {
     const vp = useMapStore.getState().viewport;
     const vb = useOsmPoiStore.getState().viewportBounds;
 
@@ -826,6 +829,13 @@ export function FloatingSearchPanel({
             ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
             : undefined,
           userLocation: userLocationRef.current ?? undefined,
+          signal,
+          // Render scored local results the moment the fast local phase
+          // finishes; the awaited return replaces them with the full merge.
+          onPartial: (partial) => {
+            if (searchGenRef.current !== gen || signal.aborted) return;
+            setResults(partial.map(unifiedToGeocodingResult));
+          },
         }),
         searchOtpStops(text, vp.lat, vp.lng).catch(
           () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
@@ -934,7 +944,9 @@ export function FloatingSearchPanel({
       }
 
       searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
-    } catch {
+    } catch (err) {
+      // A superseded search leaves the UI alone — the newer search owns it.
+      if (isAbortError(err)) return;
       if (searchGenRef.current === gen) {
         useOsmPoiStore.getState().clearCategorySearch();
         setResults([]);
@@ -950,6 +962,8 @@ export function FloatingSearchPanel({
     (text: string) => {
       setQuery(text);
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      // Supersede any in-flight search so it stops consuming network/CPU.
+      searchAbortRef.current?.abort();
       const gen = ++searchGenRef.current;
 
       // Clear active category if user manually typed something different
@@ -966,9 +980,35 @@ export function FloatingSearchPanel({
       setResults([]);
       useOsmPoiStore.getState().clearCategorySearch();
       useOsmPoiStore.getState().setIsCategorySearching(true);
+
+      // Phase A (no debounce): local-DB results render in milliseconds.
+      const vp = useMapStore.getState().viewport;
+      const vb = useOsmPoiStore.getState().viewportBounds;
+      void unifiedSearch(text, {
+        lat: vp.lat,
+        lng: vp.lng,
+        zoom: vp.zoom,
+        limit: 20,
+        viewportBounds: vb
+          ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
+          : undefined,
+        userLocation: userLocationRef.current ?? undefined,
+        localOnly: true,
+      })
+        .then((partial) => {
+          if (searchGenRef.current !== gen) return;
+          setResults(partial.map(unifiedToGeocodingResult));
+        })
+        .catch(() => {
+          // Local failures degrade to empty — the full search still runs.
+        });
+
+      // Phase B (debounced): full multi-source search with live local partials.
       debounceTimer.current = setTimeout(() => {
-        void performSearch(text, gen);
-      }, 180);
+        const controller = new AbortController();
+        searchAbortRef.current = controller;
+        void performSearch(text, gen, controller.signal);
+      }, 300);
     },
     [performSearch, activeCategory],
   );
@@ -977,12 +1017,15 @@ export function FloatingSearchPanel({
     const text = query.trim();
     if (text.length < 2) return;
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    searchAbortRef.current?.abort();
     const gen = ++searchGenRef.current;
     setQuery(text);
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
     useOsmPoiStore.getState().setIsCategorySearching(true);
-    void performSearch(text, gen);
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    void performSearch(text, gen, controller.signal);
   }, [performSearch, query]);
 
   const handleFocus = useCallback(() => {
@@ -997,7 +1040,8 @@ export function FloatingSearchPanel({
     setActiveCategory(null);
     searchAnchorRef.current = null;
     setShowSearchThisArea(false);
-    // Advance generation to discard any in-flight search before clearing.
+    // Abort the in-flight search and advance generation to discard stragglers.
+    searchAbortRef.current?.abort();
     searchGenRef.current++;
     useOsmPoiStore.getState().clearCategorySearch();
   }, []);

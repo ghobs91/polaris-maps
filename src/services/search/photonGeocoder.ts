@@ -7,6 +7,7 @@
  */
 
 import type { OsmPoi } from '../poi/osmFetcher';
+import { withTimeout } from './abortUtils';
 import { isAddressQuery } from './queryParser';
 
 const PHOTON_BASE_URL = 'https://photon.komoot.io/api';
@@ -55,8 +56,10 @@ export async function searchPhoton(
   limit: number = 20,
   lang: string = 'en',
   osmTagFilter?: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<PhotonResult[]> {
   if (!query.trim()) return [];
+  if (opts?.signal?.aborted) return [];
 
   const params = new URLSearchParams({
     q: query,
@@ -78,13 +81,13 @@ export async function searchPhoton(
     params.append('osm_tag', osmTagFilter);
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PHOTON_TIMEOUT_MS);
+  // Combine the caller signal (stale keystroke) with the request timeout.
+  const { signal, cleanup } = withTimeout(opts?.signal, PHOTON_TIMEOUT_MS);
 
   try {
     const res = await fetch(`${PHOTON_BASE_URL}?${params.toString()}`, {
       headers: { Accept: 'application/json' },
-      signal: controller.signal,
+      signal,
     });
 
     if (!res.ok) return [];
@@ -93,10 +96,13 @@ export async function searchPhoton(
     return data.features
       .filter((f) => f.properties.name || f.properties.housenumber)
       .map(photonFeatureToResult);
-  } catch {
+  } catch (err) {
+    // A caller abort must propagate so the orchestrator can stop promptly;
+    // timeouts and network errors still degrade to "no Photon results".
+    if (opts?.signal?.aborted) throw err;
     return [];
   } finally {
-    clearTimeout(timer);
+    cleanup();
   }
 }
 

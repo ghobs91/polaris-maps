@@ -7,6 +7,7 @@ import Pbf from 'pbf';
 import type { Place, PlaceCategory } from '../../models/poi';
 import type { OverturePlace, OverturePlaceCollection } from '../../types/overture';
 import type { SQLiteBindValue } from 'expo-sqlite';
+import { throwIfAborted } from '../search/abortUtils';
 
 const TILE_ZOOM = 15;
 const MAX_TILE_FEATURE_CACHE_ENTRIES = 256;
@@ -196,8 +197,10 @@ export async function fetchOverturePlaces(
   north: number,
   east: number,
   limit: number = 200,
+  opts?: { signal?: AbortSignal },
 ): Promise<Place[]> {
   if (!OVERTURE_PLACES_PM_TILES_URL) return [];
+  throwIfAborted(opts?.signal);
 
   const tiles = getTileCoordsForBounds(south, west, north, east, TILE_ZOOM);
   if (tiles.length === 0) return [];
@@ -205,6 +208,8 @@ export async function fetchOverturePlaces(
   const responses = await Promise.all(
     tiles.map(({ z, x, y }) => fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[])),
   );
+  // A superseded search skips the expensive SQLite upsert + FTS rebuild.
+  throwIfAborted(opts?.signal);
 
   const featureMap = new Map<string, OverturePlace>();
   for (const features of responses) {

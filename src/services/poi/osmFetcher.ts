@@ -1,4 +1,5 @@
 import { overpassFetch } from '../overpassClient';
+import { throwIfAborted } from '../search/abortUtils';
 
 // ---------------------------------------------------------------------------
 // Bbox-keyed response cache
@@ -157,9 +158,10 @@ export async function fetchOsmPoisByTags(
   /** Extra tag filters ANDed onto every clause (e.g. cuisine=pizza). */
   extraFilters?: Array<[string, string]>,
   /** When false, don't require a `name` tag — include unnamed POIs. Default: true. */
-  options?: { requireName?: boolean },
+  options?: { requireName?: boolean; signal?: AbortSignal },
 ): Promise<OsmPoi[]> {
   if (tagPairs.length === 0) return [];
+  throwIfAborted(options?.signal);
 
   const requireName = options?.requireName ?? true;
 
@@ -185,6 +187,7 @@ export async function fetchOsmPoisByTags(
   const data = await overpassFetch<{ elements: any[] }>({
     query,
     timeoutMs: OVERPASS_TIMEOUT_MS,
+    signal: options?.signal,
   });
 
   const pois = (data.elements as any[])
@@ -239,8 +242,10 @@ export async function fetchOsmPoisByName(
   north: number,
   east: number,
   namePattern: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<OsmPoi[]> {
   if (!namePattern.trim()) return [];
+  throwIfAborted(opts?.signal);
 
   // Sanitize the pattern for Overpass regex — escape special regex chars
   // except alphanumerics and spaces
@@ -268,6 +273,7 @@ out body center;`;
   const data = await overpassFetch<{ elements: any[] }>({
     query,
     timeoutMs: OVERPASS_TIMEOUT_MS,
+    signal: opts?.signal,
   });
 
   const pois = (data.elements as any[])

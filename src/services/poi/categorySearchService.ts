@@ -2,6 +2,7 @@ import type { PlaceCategory } from '../../models/poi';
 import type { OsmPoi } from './osmFetcher';
 import { searchPlacesByCategory } from './poiService';
 import { fetchOsmPoisByTags } from './osmFetcher';
+import { isAbortError, throwIfAborted, withTimeout } from '../search/abortUtils';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import {
   resolveSearchCategories,
@@ -77,6 +78,13 @@ export interface CategorySearchResult {
  * Returns null when the query doesn't match any known category —
  * the caller should treat it as a free-text / address search instead.
  */
+export interface CategorySearchOptions {
+  /** Abort a stale in-flight search (e.g. superseded by a newer keystroke). */
+  signal?: AbortSignal;
+  /** Return local-DB results only — skip the Overpass/Nominatim fallbacks. */
+  localOnly?: boolean;
+}
+
 export async function searchByCategory(
   query: string,
   south: number,
@@ -84,9 +92,11 @@ export async function searchByCategory(
   north: number,
   east: number,
   limit: number = 50,
+  opts?: CategorySearchOptions,
 ): Promise<CategorySearchResult | null> {
   const categories = resolveSearchCategories(query);
   if (!categories) return null;
+  throwIfAborted(opts?.signal);
 
   // Extract cuisine hint for refined searches (e.g. "chinese" from "chinese food")
   const cuisineHint = extractCuisineHint(query);
@@ -104,9 +114,10 @@ export async function searchByCategory(
 
   const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD;
 
-  if (localPrimary) {
+  if (localPrimary || opts?.localOnly) {
     return { categories, pois: localPois.slice(0, limit), localPrimary: true };
   }
+  throwIfAborted(opts?.signal);
 
   // Step 2: Overpass fallback — build tag pairs for all resolved categories
   const allTags = categories.flatMap(categoryToOverpassTags);
@@ -123,20 +134,22 @@ export async function searchByCategory(
         east,
         allTags,
         [['cuisine', cuisineHint]],
-        { requireName: false },
+        { requireName: false, signal: opts?.signal },
       );
     }
     // Broaden to all category results if narrow query was empty or no hint
     if (overpassPois.length === 0) {
       overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, undefined, {
         requireName: false,
+        signal: opts?.signal,
       });
       if (cuisineHint) {
         overpassPois = rankByCuisineRelevance(overpassPois, cuisineHint);
       }
     }
-  } catch {
-    // Overpass unavailable — try Nominatim next
+  } catch (err) {
+    // A caller abort must propagate; Overpass outages fall through to Nominatim.
+    if (isAbortError(err) || opts?.signal?.aborted) throw err;
   }
 
   if (overpassPois.length > 0) {
@@ -155,9 +168,11 @@ export async function searchByCategory(
       east,
       limit,
       cuisineHint,
+      opts?.signal,
     );
-  } catch {
-    // Nominatim also failed — return whatever local data we have
+  } catch (err) {
+    // A caller abort must propagate; otherwise return whatever local data we have.
+    if (isAbortError(err) || opts?.signal?.aborted) throw err;
   }
 
   // Step 4: Merge — local takes priority for deduplication
@@ -251,6 +266,7 @@ async function fetchNominatimPois(
   east: number,
   limit: number,
   cuisineHint?: string | null,
+  signal?: AbortSignal,
 ): Promise<OsmPoi[]> {
   // When a cuisine hint is present, use it as the primary search term
   // (e.g. "chinese restaurant" instead of just "restaurant")
@@ -266,12 +282,21 @@ async function fetchNominatimPois(
   }
 
   // First try a strictly bounded search within the viewbox
-  let pois = await fetchNominatimPoiSingle(queryTerms, west, north, east, south, limit, true);
+  let pois = await fetchNominatimPoiSingle(
+    queryTerms,
+    west,
+    north,
+    east,
+    south,
+    limit,
+    true,
+    signal,
+  );
   if (pois.length > 0) return pois;
 
   // Retry without strict bounding — viewbox acts as a preference/bias so
   // Nominatim can return nearby POIs that may be just outside the box.
-  pois = await fetchNominatimPoiSingle(queryTerms, west, north, east, south, limit, false);
+  pois = await fetchNominatimPoiSingle(queryTerms, west, north, east, south, limit, false, signal);
   return pois;
 }
 
@@ -287,7 +312,9 @@ async function fetchNominatimPoiSingle(
   south: number,
   limit: number,
   bounded: boolean,
+  signal?: AbortSignal,
 ): Promise<OsmPoi[]> {
+  throwIfAborted(signal);
   const params = new URLSearchParams({
     q: queryTerms,
     format: 'jsonv2',
@@ -297,42 +324,54 @@ async function fetchNominatimPoiSingle(
     addressdetails: '1',
   });
 
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-    headers: {
-      'User-Agent': 'PolarisMaps/1.0',
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) return [];
-
-  const data: NominatimSearchResult[] = await response.json();
-
-  return data
-    .filter((item) => {
-      if (!POI_CLASSES.has(item.class)) return false;
-      const lat = parseFloat(item.lat);
-      const lng = parseFloat(item.lon);
-      return !isNaN(lat) && !isNaN(lng);
-    })
-    .map((item) => {
-      // Extract a short name from display_name (first part before the first comma)
-      const shortName = item.display_name.split(',')[0].trim();
-      return {
-        id: item.place_id,
-        lat: parseFloat(item.lat),
-        lng: parseFloat(item.lon),
-        name: shortName,
-        type: item.class,
-        subtype: item.type,
-        tags: {
-          [item.class]: item.type,
-          name: shortName,
-          ...(item.address?.road ? { 'addr:street': item.address.road } : {}),
-          ...((item.address?.city ?? item.address?.town ?? item.address?.village)
-            ? { 'addr:city': (item.address?.city ?? item.address?.town ?? item.address?.village)! }
-            : {}),
+  // Client-side timeout — this fetch was previously unbounded.
+  const { signal: fetchSignal, cleanup } = withTimeout(signal, 8_000);
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+      {
+        headers: {
+          'User-Agent': 'PolarisMaps/1.0',
+          Accept: 'application/json',
         },
-      };
-    });
+        signal: fetchSignal,
+      },
+    );
+
+    if (!response.ok) return [];
+
+    const data: NominatimSearchResult[] = await response.json();
+
+    return data
+      .filter((item) => {
+        if (!POI_CLASSES.has(item.class)) return false;
+        const lat = parseFloat(item.lat);
+        const lng = parseFloat(item.lon);
+        return !isNaN(lat) && !isNaN(lng);
+      })
+      .map((item) => {
+        // Extract a short name from display_name (first part before the first comma)
+        const shortName = item.display_name.split(',')[0].trim();
+        return {
+          id: item.place_id,
+          lat: parseFloat(item.lat),
+          lng: parseFloat(item.lon),
+          name: shortName,
+          type: item.class,
+          subtype: item.type,
+          tags: {
+            [item.class]: item.type,
+            name: shortName,
+            ...(item.address?.road ? { 'addr:street': item.address.road } : {}),
+            ...((item.address?.city ?? item.address?.town ?? item.address?.village)
+              ? {
+                  'addr:city': (item.address?.city ?? item.address?.town ?? item.address?.village)!,
+                }
+              : {}),
+          },
+        };
+      });
+  } finally {
+    cleanup();
+  }
 }

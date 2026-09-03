@@ -17,6 +17,7 @@ import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { unifiedSearch, type UnifiedSearchResult } from '@/services/search/unifiedSearch';
+import { isAbortError } from '@/services/search/abortUtils';
 import type { GeocodingEntry } from '@/models/geocoding';
 
 // ---------------------------------------------------------------------------
@@ -79,6 +80,8 @@ export default function SearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchAbortRef = useRef<AbortController | null>(null);
+  const searchGenRef = useRef(0);
   const lastQueryRef = useRef<string>('');
   const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(
     null,
@@ -95,6 +98,9 @@ export default function SearchScreen() {
       setQuery(q);
       lastQueryRef.current = q;
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      // Supersede any in-flight search so it stops consuming network/CPU.
+      searchAbortRef.current?.abort();
+      const gen = ++searchGenRef.current;
       if (q.length < 2) {
         setResults([]);
         return;
@@ -109,6 +115,8 @@ export default function SearchScreen() {
       }
 
       debounceTimer.current = setTimeout(async () => {
+        const controller = new AbortController();
+        searchAbortRef.current = controller;
         try {
           // Pass the actual map viewport bounds so nearby results get boosted
           const bounds = useOsmPoiStore.getState().viewportBounds;
@@ -124,7 +132,14 @@ export default function SearchScreen() {
                   east: bounds.maxLng,
                 }
               : undefined,
+            signal: controller.signal,
+            // Render scored local results while the network phase runs.
+            onPartial: (partial) => {
+              if (searchGenRef.current !== gen) return;
+              setResults(partial.map(unifiedToGeocodingResult));
+            },
           });
+          if (searchGenRef.current !== gen) return;
 
           // Record the bbox that was used for this search
           const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, viewport.zoom)) * 2));
@@ -136,8 +151,9 @@ export default function SearchScreen() {
           };
 
           setResults(unified.map(unifiedToGeocodingResult));
-        } catch {
-          setResults([]);
+        } catch (err) {
+          if (isAbortError(err)) return;
+          if (searchGenRef.current === gen) setResults([]);
         }
       }, 300);
     },

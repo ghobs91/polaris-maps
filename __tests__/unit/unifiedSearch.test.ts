@@ -21,13 +21,29 @@ jest.mock('../../src/services/identity/keypair', () => ({
   getOrCreateKeypair: jest.fn(),
 }));
 
-// Mock the 6 search sources that unifiedSearch calls
-jest.mock('../../src/services/poi/poiService');
-jest.mock('../../src/services/poi/categorySearchService');
-jest.mock('../../src/services/search/photonGeocoder');
-jest.mock('../../src/services/geocoding/geocodingService');
-jest.mock('../../src/services/poi/overtureFetcher');
-jest.mock('../../src/services/poi/osmFetcher');
+// Mock the 6 search sources that unifiedSearch calls.
+//
+// Factory mocks (not automocks): automocking loads the real modules to infer
+// their shape, which transitively pulls in untransformable expo ESM
+// (expo/virtual/env.js) and fails the suite at import time.
+jest.mock('../../src/services/poi/poiService', () => ({
+  searchPlacesFts: jest.fn(),
+}));
+jest.mock('../../src/services/poi/categorySearchService', () => ({
+  searchByCategory: jest.fn(),
+}));
+jest.mock('../../src/services/search/photonGeocoder', () => ({
+  searchPhoton: jest.fn(),
+}));
+jest.mock('../../src/services/geocoding/geocodingService', () => ({
+  searchAddress: jest.fn(),
+}));
+jest.mock('../../src/services/poi/overtureFetcher', () => ({
+  fetchOverturePlaces: jest.fn(),
+}));
+jest.mock('../../src/services/poi/osmFetcher', () => ({
+  fetchOsmPoisByName: jest.fn(),
+}));
 
 import { unifiedSearch } from '../../src/services/search/unifiedSearch';
 import * as poiService from '../../src/services/poi/poiService';
@@ -350,5 +366,136 @@ describe('unifiedSearch', () => {
 
     expect(results.some((r) => r.name === "Joe's Deli")).toBe(true);
     expect(results.some((r) => r.name === 'Delisle Avenue')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Progressive (local-first) + cancellation contract
+// ---------------------------------------------------------------------------
+
+describe('unifiedSearch progressive + cancellation', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    // Default: all sources return empty
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([]);
+    (categorySearchService.searchByCategory as jest.Mock).mockResolvedValue(null);
+    (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue([]);
+    (geocodingService.searchAddress as jest.Mock).mockResolvedValue([]);
+    (overtureFetcher.fetchOverturePlaces as jest.Mock).mockResolvedValue([]);
+    (osmFetcher.fetchOsmPoisByName as jest.Mock).mockResolvedValue([]);
+  });
+
+  it('localOnly resolves local results without touching network sources', async () => {
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
+      makePlace({ name: 'Starbucks', uuid: 'p-starbucks' }),
+    ]);
+    const onPartial = jest.fn();
+
+    const results = await unifiedSearch('Starbucks', {
+      ...defaultOpts,
+      localOnly: true,
+      onPartial,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('Starbucks');
+    expect(results[0].type).toBe('poi');
+    // Network sources are never consulted…
+    expect(photonGeocoder.searchPhoton).not.toHaveBeenCalled();
+    expect(overtureFetcher.fetchOverturePlaces).not.toHaveBeenCalled();
+    expect(osmFetcher.fetchOsmPoisByName).not.toHaveBeenCalled();
+    // …and the partial callback is redundant with the return value.
+    expect(onPartial).not.toHaveBeenCalled();
+    // Address ran in local-only mode for this name search.
+    expect(geocodingService.searchAddress).toHaveBeenCalledWith(
+      expect.anything(),
+      10,
+      defaultOpts.lat,
+      defaultOpts.lng,
+      expect.objectContaining({ localOnly: true }),
+    );
+  });
+
+  it('localOnly requests localOnly from the category source for category queries', async () => {
+    (categorySearchService.searchByCategory as jest.Mock).mockResolvedValue({
+      categories: ['cafe'],
+      pois: [],
+      localPrimary: true,
+    });
+
+    await unifiedSearch('coffee', { ...defaultOpts, localOnly: true });
+
+    expect(categorySearchService.searchByCategory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.objectContaining({ localOnly: true }),
+    );
+    expect(photonGeocoder.searchPhoton).not.toHaveBeenCalled();
+  });
+
+  it('onPartial emits local results before the network phase completes', async () => {
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
+      makePlace({ name: 'Starbucks', uuid: 'p-starbucks' }),
+    ]);
+    let resolvePhoton!: (value: ReturnType<typeof makePhotonResult>[]) => void;
+    (photonGeocoder.searchPhoton as jest.Mock).mockImplementation(
+      () =>
+        new Promise<ReturnType<typeof makePhotonResult>[]>((resolve) => {
+          resolvePhoton = resolve;
+        }),
+    );
+    const onPartial = jest.fn();
+
+    const fullPromise = unifiedSearch('Starbucks', { ...defaultOpts, onPartial });
+    // Let phase 1 (local) settle while Photon is still pending.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onPartial).toHaveBeenCalledTimes(1);
+    expect(onPartial.mock.calls[0][0]).toHaveLength(1);
+    expect(onPartial.mock.calls[0][0][0].name).toBe('Starbucks');
+
+    resolvePhoton([makePhotonResult('Starbucks Reserve', true)]);
+    const full = await fullPromise;
+    expect(full).toHaveLength(2);
+    expect(onPartial).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects with AbortError when already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      unifiedSearch('Starbucks', { ...defaultOpts, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('rejects with AbortError when aborted mid-network-phase', async () => {
+    const controller = new AbortController();
+    let resolvePhoton!: (value: ReturnType<typeof makePhotonResult>[]) => void;
+    (photonGeocoder.searchPhoton as jest.Mock).mockImplementation(
+      () =>
+        new Promise<ReturnType<typeof makePhotonResult>[]>((resolve) => {
+          resolvePhoton = resolve;
+        }),
+    );
+    const onPartial = jest.fn();
+
+    const pending = unifiedSearch('Starbucks', {
+      ...defaultOpts,
+      signal: controller.signal,
+      onPartial,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    // Local phase completed and emitted a partial…
+    expect(onPartial).toHaveBeenCalledTimes(1);
+    controller.abort();
+    // …then the abort supersedes the pending network phase.
+    resolvePhoton([]);
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

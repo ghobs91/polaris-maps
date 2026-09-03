@@ -1,4 +1,5 @@
 import { getDatabase } from '../database/init';
+import { sleepWithAbort, throwIfAborted, withTimeout } from '../search/abortUtils';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { OsmPoi } from '../poi/osmFetcher';
 
@@ -13,20 +14,29 @@ export interface GeocodingResult {
   poi?: OsmPoi;
 }
 
+export interface SearchAddressOptions {
+  /** Abort a stale in-flight search (e.g. superseded by a newer keystroke). */
+  signal?: AbortSignal;
+  /** Return local-DB results only — skip the Nominatim network fallback. */
+  localOnly?: boolean;
+}
+
 export async function searchAddress(
   query: string,
   limit: number = 10,
   lat?: number,
   lng?: number,
+  opts?: SearchAddressOptions,
 ): Promise<GeocodingResult[]> {
   if (!query.trim()) return [];
 
   // Try local DB first — gracefully fall through to Nominatim on any error
   const localResults = await searchAddressLocal(query, limit).catch(() => []);
-  if (localResults.length > 0) return localResults;
+  if (localResults.length > 0 || opts?.localOnly) return localResults;
+  throwIfAborted(opts?.signal);
 
   // Fall back to Nominatim online geocoding
-  return searchAddressNominatim(query, limit, lat, lng);
+  return searchAddressNominatim(query, limit, lat, lng, opts?.signal);
 }
 
 async function searchAddressLocal(query: string, limit: number): Promise<GeocodingResult[]> {
@@ -71,20 +81,27 @@ async function searchAddressLocal(query: string, limit: number): Promise<Geocodi
   }));
 }
 
+/** Client-side timeout for Nominatim requests (previously unbounded). */
+const NOMINATIM_TIMEOUT_MS = 8_000;
+
 async function searchAddressNominatim(
   query: string,
   limit: number,
   lat?: number,
   lng?: number,
+  signal?: AbortSignal,
 ): Promise<GeocodingResult[]> {
-  // Enforce minimum 1 000 ms inter-request gap (Nominatim usage policy)
+  // Enforce minimum 1 000 ms inter-request gap (Nominatim usage policy).
+  // Abort-aware so a stale keystroke doesn't hold the throttle budget.
   const now = Date.now();
   const elapsed = now - _lastNominatimRequestAt;
   if (elapsed < NOMINATIM_MIN_INTERVAL_MS) {
-    await new Promise((r) => setTimeout(r, NOMINATIM_MIN_INTERVAL_MS - elapsed));
+    await sleepWithAbort(NOMINATIM_MIN_INTERVAL_MS - elapsed, signal);
   }
+  throwIfAborted(signal);
   _lastNominatimRequestAt = Date.now();
 
+  const { signal: fetchSignal, cleanup } = withTimeout(signal, NOMINATIM_TIMEOUT_MS);
   try {
     const params = new URLSearchParams({
       q: query,
@@ -108,6 +125,7 @@ async function searchAddressNominatim(
           'User-Agent': 'PolarisMaps/1.0',
           Accept: 'application/json',
         },
+        signal: fetchSignal,
       },
     );
 
@@ -131,8 +149,11 @@ async function searchAddressNominatim(
       },
       rank: i,
     }));
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err;
     return [];
+  } finally {
+    cleanup();
   }
 }
 
