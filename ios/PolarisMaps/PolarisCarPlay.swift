@@ -32,8 +32,15 @@ class PolarisCarPlay: RCTEventEmitter {
   }
 
   /// Publishes a buffered scene connection once the RN-managed instance exists.
+  /// Always activates on the main thread: `init` and `startObserving` run on
+  /// RN bridge queues, and UIKit/CarPlay calls made off-main raise and abort
+  /// the process (SIGABRT on CarPlay connect).
   static func attachPendingSceneIfNeeded() {
     guard instance != nil, pendingInterfaceController != nil else { return }
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { Self.attachPendingSceneIfNeeded() }
+      return
+    }
     mapTemplateManager.activate(
       interfaceController: pendingInterfaceController!, window: pendingWindow!)
     emit("carPlayConnected", ["connected": true])

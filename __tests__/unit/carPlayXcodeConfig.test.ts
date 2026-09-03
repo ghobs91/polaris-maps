@@ -98,4 +98,15 @@ describe('CarPlay iOS configuration', () => {
     expect(nativeModule).toContain('attachPendingSceneIfNeeded()');
     expect(nativeModule).toContain('resolve(Self.isSceneConnected)');
   });
+
+  it('attaches the buffered CarPlay scene on the main thread', () => {
+    // startObserving/init run on RN bridge queues; activating UIKit templates
+    // off-main raises and aborts the process (SIGABRT on CarPlay connect).
+    const nativeModule = readRepoFile('ios/PolarisMaps/PolarisCarPlay.swift');
+
+    expect(nativeModule).toContain('Thread.isMainThread');
+    expect(nativeModule).toContain(
+      'DispatchQueue.main.async { Self.attachPendingSceneIfNeeded() }',
+    );
+  });
 });
