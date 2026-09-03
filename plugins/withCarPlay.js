@@ -10,11 +10,7 @@ const path = require('path');
 const PLUGIN_DIR = path.dirname(__filename);
 const IOS_DIR = 'ios';
 const NATIVE_SRC = path.join(PLUGIN_DIR, 'native');
-const PBXPROJ_PATH = path.join(
-  IOS_DIR,
-  'PolarisMaps.xcodeproj',
-  'project.pbxproj'
-);
+const PBXPROJ_PATH = path.join(IOS_DIR, 'PolarisMaps.xcodeproj', 'project.pbxproj');
 
 const NATIVE_FILES = [
   {
@@ -35,7 +31,10 @@ const NATIVE_FILES = [
   },
 ];
 
-const ENTITLEMENTS_FILES = ['PolarisMaps.Debug.entitlements', 'PolarisMaps.SimulatorCarPlay.entitlements'];
+const ENTITLEMENTS_FILES = [
+  'PolarisMaps.Debug.entitlements',
+  'PolarisMaps.SimulatorCarPlay.entitlements',
+];
 
 const CARPLAY_SCENE_ROLE = 'CPTemplateApplicationSceneSessionRoleApplication';
 const SIMULATOR_ENTITLEMENTS_SETTING = 'CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]';
@@ -124,7 +123,8 @@ function ensureSignatureWorkaroundPhaseExists(project) {
     }
     if (
       value.name === SIGNATURE_WORKAROUND_PHASE ||
-      (typeof value.shellScript === 'string' && value.shellScript.includes(SIGNATURE_WORKAROUND_PHASE))
+      (typeof value.shellScript === 'string' &&
+        value.shellScript.includes(SIGNATURE_WORKAROUND_PHASE))
     ) {
       return;
     }
@@ -171,11 +171,10 @@ function normalizePbxprojText() {
 
   content = content.replace(
     /^(\s*)CODE_SIGN_ENTITLEMENTS\[sdk=iphonesimulator\*\] = "([^"]+)";$/gm,
-    '$1"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = $2;'
+    '$1"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = $2;',
   );
 
-  const signatureRm =
-    'rm -rf \\"$CONFIGURATION_BUILD_DIR/MapLibre.xcframework-ios.signature\\";';
+  const signatureRm = 'rm -rf \\"$CONFIGURATION_BUILD_DIR/MapLibre.xcframework-ios.signature\\";';
   const xcentRm = '\n          rm -f \\"$TARGET_BUILD_DIR/app-Simulated.xcent\\";';
   if (content.includes(signatureRm) && !content.includes('app-Simulated.xcent')) {
     content = content.replace(signatureRm, signatureRm + xcentRm);
@@ -211,9 +210,26 @@ function withCarPlay(config) {
   config = withInfoPlist(config, (cfg) => {
     cfg.modResults.UISupportsCarPlay = true;
     const manifest = cfg.modResults.UIApplicationSceneManifest ?? {};
+    // The phone UI and the CarPlay template scene are alive at the same time,
+    // so multiple scenes must be enabled or iOS never connects the CarPlay
+    // scene on a real head unit.
+    manifest.UIApplicationSupportsMultipleScenes = true;
     manifest.UISceneConfigurations = manifest.UISceneConfigurations ?? {};
+    // Keep the phone scene if withSceneLifecycle (or Expo defaults) defined it.
+    manifest.UISceneConfigurations.UIWindowSceneSessionRoleApplication = manifest
+      .UISceneConfigurations.UIWindowSceneSessionRoleApplication ?? [
+      {
+        UISceneConfigurationName: 'Default Configuration',
+        UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
+      },
+    ];
+    // Apple requires the CarPlay entry to name the scene class explicitly —
+    // without CPTemplateApplicationScene UIKit never creates a template scene
+    // and the app is invisible in CarPlay.
     manifest.UISceneConfigurations[CARPLAY_SCENE_ROLE] = [
       {
+        UISceneClassName: 'CPTemplateApplicationScene',
+        UISceneConfigurationName: 'CarPlayTemplateScene',
         UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate',
       },
     ];

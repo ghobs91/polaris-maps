@@ -1,4 +1,5 @@
 internal import Expo
+import CarPlay
 import React
 import ReactAppDependencyProvider
 import UIKit
@@ -35,7 +36,10 @@ class AppDelegate: ExpoAppDelegate {
 
     // Route CarPlay template application scenes to their own delegate; all
     // other roles (the phone UI) keep the React-hosting SceneDelegate.
+    // sceneClass must be CPTemplateApplicationScene or UIKit never creates a
+    // CarPlay template scene and the app won't appear in CarPlay.
     if connectingSceneSession.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" {
+      configuration.sceneClass = CPTemplateApplicationScene.self
       configuration.delegateClass = CarPlaySceneDelegate.self
     } else {
       configuration.delegateClass = SceneDelegate.self

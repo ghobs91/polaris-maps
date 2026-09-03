@@ -49,16 +49,21 @@ function withSceneLifecycle(config) {
   ]);
 
   config = withInfoPlist(config, (cfg) => {
-    cfg.modResults.UIApplicationSceneManifest = {
-      UIApplicationSupportsMultipleScenes: false,
-      UISceneConfigurations: {
-        UIWindowSceneSessionRoleApplication: [
-          {
-            UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
-          },
-        ],
+    const manifest = cfg.modResults.UIApplicationSceneManifest ?? {};
+    const configs = manifest.UISceneConfigurations ?? {};
+    // Preserve any CarPlay scene added by withCarPlay regardless of plugin
+    // order — overwriting the manifest here used to wipe it.
+    configs.UIWindowSceneSessionRoleApplication = [
+      {
+        UISceneConfigurationName: 'Default Configuration',
+        UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
       },
-    };
+    ];
+    manifest.UISceneConfigurations = configs;
+    // CarPlay shows a second scene (phone + car) simultaneously, so multiple
+    // scenes must be enabled for the template scene to connect on device.
+    manifest.UIApplicationSupportsMultipleScenes = true;
+    cfg.modResults.UIApplicationSceneManifest = manifest;
     return cfg;
   });
 
