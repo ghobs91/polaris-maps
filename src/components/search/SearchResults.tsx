@@ -16,6 +16,7 @@ export function SearchResults({ results, onSelect }: SearchResultsProps) {
       <Pressable
         style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
         onPress={() => onSelect(item)}
+        accessibilityLabel={`${item.entry.text}, match ${Math.min(100, Math.max(0, Math.round(item.rank)))} percent`}
       >
         <View style={styles.iconContainer}>
           <Ionicons name="location-outline" size={20} color={colors.primary} />
@@ -26,6 +27,9 @@ export function SearchResults({ results, onSelect }: SearchResultsProps) {
           </Text>
           <Text style={styles.type} numberOfLines={1}>
             {item.entry.city ? item.entry.city : item.entry.type !== 'place' ? item.entry.type : ''}
+            {typeof item.rank === 'number'
+              ? ` · ${Math.min(100, Math.max(0, Math.round(item.rank)))}% match`
+              : ''}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />

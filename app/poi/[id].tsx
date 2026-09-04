@@ -434,6 +434,10 @@ export default function POIDetailScreen() {
             </Pressable>
           )}
         </ScrollView>
+        <Text style={styles.attestHint}>
+          Verify I&apos;m Here proves you were within 100 m without revealing your exact position.
+          Signed with your device key.
+        </Text>
 
         <Modal visible={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Save to List">
           <SaveToListSheet
@@ -454,6 +458,9 @@ export default function POIDetailScreen() {
         {pendingEdits.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Pending Edits ({pendingEdits.length})</Text>
+            <Text style={styles.attestHint}>
+              Peer-proposed · corroborations/disputes are Schnorr-signed attestations.
+            </Text>
             {pendingEdits.map((edit) => (
               <View key={edit.id} style={styles.editCard}>
                 <Text style={styles.editDiff}>
@@ -575,6 +582,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   editMeta: { ...typography.caption, color: colors.textSecondary },
+  attestHint: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
   photoStrip: { gap: spacing.sm, paddingVertical: spacing.xs },
   photoThumb: {
     width: 80,

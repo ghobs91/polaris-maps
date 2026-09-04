@@ -36,6 +36,7 @@ export const ReviewCard = memo(function ReviewCard({ review }: ReviewCardProps) 
       <View style={styles.authorRow}>
         <MaterialCommunityIcons name={authorIcon} size={14} color={authorColor} />
         <Text style={[styles.author, { color: authorColor }]}>{authorLabel}</Text>
+        <Text style={styles.signed}> · Schnorr-signed</Text>
       </View>
     </View>
   );
@@ -78,5 +79,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+  },
+  signed: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontSize: 11,
   },
 });

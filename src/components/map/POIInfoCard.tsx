@@ -923,6 +923,18 @@ export function POIInfoCard() {
             </View>
 
             {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
+            {embedState === 'embedded' && (
+              <Text
+                style={{
+                  ...typography.caption,
+                  color: subtextColor,
+                  paddingHorizontal: spacing.md,
+                  marginBottom: 4,
+                }}
+              >
+                Phone, hours & photos provided by Apple MapKit · rest by OpenStreetMap
+              </Text>
+            )}
             <PlaceDetailEmbed
               poi={poi}
               onLoaded={() => setEmbedState('embedded')}

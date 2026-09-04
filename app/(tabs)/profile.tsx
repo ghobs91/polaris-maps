@@ -62,7 +62,13 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <Text style={styles.heading}>Node Dashboard</Text>
-        <Text style={styles.pubkey}>{pubkeyShort}</Text>
+        <Text style={styles.pubkey} selectable>
+          {localNode ? localNode.pubkey : pubkeyShort}
+        </Text>
+        <Text style={styles.identityHint}>
+          No accounts — this secp256k1 key in your secure enclave is your identity. Actions are
+          Schnorr-signed; reputation builds from contributions.
+        </Text>
 
         <NodeDashboard
           node={localNode}
@@ -99,6 +105,11 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       ...typography.caption,
       color: colors.textSecondary,
       fontFamily: 'monospace',
+      marginBottom: spacing.xs,
+    },
+    identityHint: {
+      ...typography.caption,
+      color: colors.textSecondary,
       marginBottom: spacing.lg,
     },
     actions: { marginTop: spacing.xl, gap: spacing.sm },

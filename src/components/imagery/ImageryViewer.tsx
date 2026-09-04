@@ -84,6 +84,7 @@ export function ImageryViewer({
             {currentIndex + 1} / {images.length}
           </Text>
         </View>
+        <Text style={styles.provenance}>Peer-shared · privacy-blurred · Schnorr-signed</Text>
 
         {onClose && (
           <Pressable style={styles.closeBtn} onPress={onClose}>
@@ -126,6 +127,7 @@ const styles = StyleSheet.create({
   bearingText: { color: '#FFF', fontWeight: '700', fontSize: 12 },
   dateText: { color: '#FFF', ...typography.caption },
   counter: { color: '#FFF', ...typography.caption },
+  provenance: { color: 'rgba(255,255,255,0.7)', fontSize: 11, textAlign: 'center', marginTop: 6 },
   closeBtn: {
     position: 'absolute',
     top: -400,

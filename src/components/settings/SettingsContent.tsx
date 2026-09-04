@@ -193,7 +193,10 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
         </View>
       </SettingsGroup>
 
-      <SettingsGroup header="Privacy">
+      <SettingsGroup
+        header="Privacy"
+        footer="Telemetry shares anonymous speed probes on geohash channels to build live traffic with nearby peers. Contributions pause offline and queue (max 500) for replay."
+      >
         <SettingsRow
           title="Location Access"
           rightAdornment={
@@ -234,6 +237,13 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             />
           }
         />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="CarPlay"
+        footer="Navigation state, maneuvers, and search forward to CarPlay automatically when connected. No setup needed."
+      >
+        <SettingsRow title="CarPlay Mirroring" value="Automatic when connected" />
       </SettingsGroup>
 
       <SettingsGroup header="About">

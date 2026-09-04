@@ -11,13 +11,19 @@ const LEGEND_ITEMS = [
 
 export function TrafficLegend() {
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      accessibilityLabel="Traffic legend, fused from TomTom, HERE, and peer speed probes"
+    >
       {LEGEND_ITEMS.map((item) => (
         <View key={item.label} style={styles.row}>
           <View style={[styles.swatch, { backgroundColor: item.color }]} />
           <Text style={styles.label}>{item.label}</Text>
         </View>
       ))}
+      <Text style={styles.source}>TomTom · HERE · peer probes</Text>
+      <Text style={styles.source}>You contribute anonymously when telemetry is on</Text>
+      <Text style={styles.source}>Auto-reroutes at 25%+ congestion delay</Text>
     </View>
   );
 }
@@ -48,5 +54,10 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 11,
     color: 'rgba(255,255,255,0.85)',
+  },
+  source: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 4,
   },
 });

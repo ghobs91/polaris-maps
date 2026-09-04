@@ -73,8 +73,12 @@ export default function CaptureScreen() {
 
         <View style={styles.overlay}>
           <View style={styles.stats}>
-            <Text style={styles.statText}>Uploaded: {uploadCount}</Text>
-            <Text style={styles.statText}>Queue: {queueSize}</Text>
+            <View style={styles.statsRow}>
+              <Text style={styles.statText}>Uploaded: {uploadCount}</Text>
+              <Text style={styles.statText}>Queue: {queueSize}</Text>
+            </View>
+            <Text style={styles.statSub}>Privacy blur on-device · Schnorr-signed · shared P2P</Text>
+            <Text style={styles.statSub}>Auto interval 5s · appended to your Hypercore feed</Text>
           </View>
 
           <View style={styles.controls}>
@@ -114,15 +118,20 @@ const styles = StyleSheet.create({
   },
   overlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: spacing.lg },
   stats: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.lg,
+    alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: borderRadius.md,
     padding: spacing.sm,
     marginBottom: spacing.md,
+    gap: 2,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.lg,
   },
   statText: { color: '#FFF', ...typography.caption },
+  statSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, textAlign: 'center' },
   controls: { alignItems: 'center', marginBottom: spacing.md },
   captureBtn: {
     width: 72,

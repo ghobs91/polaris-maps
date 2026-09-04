@@ -81,6 +81,11 @@ export default function OnboardingScreen() {
           <Text style={styles.title}>Welcome to Polaris Maps</Text>
           <Text style={styles.body}>
             A fully decentralized mapping app. No servers, no tracking — just you and the open road.
+            Every phone is a node: you share traffic, places, tiles, and imagery peer-to-peer.
+          </Text>
+          <Text style={styles.body}>
+            No accounts — a secp256k1 key in your secure enclave is your identity, and actions are
+            Schnorr-signed. CarPlay mirrors navigation when connected.
           </Text>
           <Text style={styles.body}>
             We need location access to center the map and provide navigation.

@@ -53,6 +53,8 @@ export default function NavigationScreen() {
   const advanceLeg = useNavigationStore((s) => s.advanceLeg);
   const costing = useNavigationStore((s) => s.costing);
   const destination = useNavigationStore((s) => s.destination);
+  const isRerouting = useNavigationStore((s) => s.isRerouting);
+  const hasDeviated = useNavigationStore((s) => s.hasDeviated);
   const addWaypointAndReplaceRoute = useNavigationStore((s) => s.addWaypointAndReplaceRoute);
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
@@ -372,7 +374,10 @@ export default function NavigationScreen() {
     return (
       <View style={[styles.empty, { paddingTop: insets.top }]}>
         <Text style={styles.emptyText}>No active navigation</Text>
-        <Text style={styles.emptyHint}>Search for a destination and start a route</Text>
+        <Text style={styles.emptyHint}>
+          Search for a destination and start a route. Driving routes can combine with transit via
+          park-and-ride.
+        </Text>
       </View>
     );
   }
@@ -395,6 +400,18 @@ export default function NavigationScreen() {
 
       {/* Turn banner + speed limit + lane guidance overlaid at top */}
       <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
+        {(isRerouting || hasDeviated) && (
+          <View
+            style={styles.rerouteBanner}
+            accessibilityRole="alert"
+            accessibilityLabel={isRerouting ? 'Rerouting' : 'Off route, rerouting'}
+          >
+            <Text style={styles.rerouteText}>
+              {isRerouting ? 'Rerouting…' : 'Off route — rerouting…'}
+            </Text>
+            <Text style={styles.rerouteSub}>GPS snapped to route · auto-reroutes</Text>
+          </View>
+        )}
         <View style={styles.bannerRow}>
           <View style={styles.bannerFlex}>
             <NextTurnBanner
@@ -583,6 +600,15 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       fontSize: 13,
       fontWeight: '500',
     },
+    rerouteBanner: {
+      backgroundColor: 'rgba(64,156,255,0.95)',
+      borderRadius: 12,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      marginBottom: 8,
+    },
+    rerouteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    rerouteSub: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 1 },
     skipStopBtn: {
       paddingVertical: 2,
       paddingHorizontal: 8,

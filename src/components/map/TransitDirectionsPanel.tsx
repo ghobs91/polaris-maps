@@ -385,6 +385,10 @@ export function TransitDirectionsPanel({ onClose }: TransitDirectionsPanelProps)
       {!isLoading && !error && itineraries.length === 0 && (
         <View style={styles.center}>
           <Text style={[styles.emptyText, { color: subtextColor }]}>No transit routes found</Text>
+          <Text style={[styles.coverageText, { color: subtextColor }]}>
+            Coverage is automatic by region via OpenTripPlanner, with dedicated Amtrak and MBTA
+            feeds where available. Try another time or check outside offline areas.
+          </Text>
         </View>
       )}
 
@@ -402,6 +406,9 @@ export function TransitDirectionsPanel({ onClose }: TransitDirectionsPanelProps)
           ))}
         </ScrollView>
       )}
+      <Text style={[styles.coverageText, { color: subtextColor }]}>
+        Multi-modal via OpenTripPlanner · includes Amtrak + MBTA where covered
+      </Text>
     </View>
   );
 }
@@ -447,6 +454,12 @@ const createStyles = (isDark: boolean, textColor: string, subtextColor: string) 
     },
     emptyText: {
       fontSize: 14,
+    },
+    coverageText: {
+      fontSize: 11,
+      textAlign: 'center',
+      marginTop: 8,
+      opacity: 0.8,
     },
     list: {
       maxHeight: 300,

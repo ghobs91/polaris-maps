@@ -31,6 +31,7 @@ export function EtaDisplay({
   destinationName,
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
+  const freeFlowEtaSeconds = useNavigationStore((s) => s.freeFlowEtaSeconds);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
   const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
 
@@ -58,6 +59,11 @@ export function EtaDisplay({
 
   const arrival = new Date(Date.now() + displayEta * 1000);
   const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const isTrafficAdjusted = scaledTrafficEta != null;
+  const delaySecs =
+    isTrafficAdjusted && freeFlowEtaSeconds != null
+      ? Math.max(0, Math.round(displayEta - freeFlowEtaSeconds))
+      : 0;
 
   return (
     <View
@@ -80,6 +86,8 @@ export function EtaDisplay({
         >
           {remainingDistanceMeters != null ? `${formatDistance(remainingDistanceMeters)} · ` : ''}
           {arrivalStr}
+          {isTrafficAdjusted ? ' · Live traffic' : ''}
+          {delaySecs > 60 ? ` (+${Math.round(delaySecs / 60)} min delay)` : ''}
         </Text>
       </View>
       <View style={styles.buttons}>

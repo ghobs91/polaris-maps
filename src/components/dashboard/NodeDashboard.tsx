@@ -48,6 +48,11 @@ export function NodeDashboard({ node, activePeers, syncingFeeds, isOnline }: Nod
         <MetricCard label="Uptime" value={uptimeHours} unit="hrs" />
         <MetricCard label="Regions" value={regionsCount} />
       </View>
+
+      <Text style={[styles.explainer, { color: colors.textSecondary }]}>
+        Every phone is a node, not just a client — you seed map tiles, traffic probes, places, and
+        imagery to nearby peers over an encrypted P2P mesh.
+      </Text>
     </GlassView>
   );
 }
@@ -77,5 +82,10 @@ const styles = StyleSheet.create({
   metricsRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  explainer: {
+    ...typography.caption,
+    marginTop: spacing.xs,
+    lineHeight: 16,
   },
 });

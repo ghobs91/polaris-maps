@@ -299,6 +299,12 @@ export default function OsmEditScreen() {
           ? 'This data comes from Overture Maps. Review and adjust before submitting to OpenStreetMap.'
           : 'Edit the fields below. Changes are submitted directly to OpenStreetMap.'}
       </Text>
+      {!isCreateMode && node != null && (
+        <Text style={styles.hint}>
+          Live OSM node v{node.version} · edits use optimistic locking — reload if someone else
+          saved first. Full history lives on openstreetmap.org.
+        </Text>
+      )}
 
       {/* Editable fields */}
       {EDITABLE_FIELDS.map((field) => (

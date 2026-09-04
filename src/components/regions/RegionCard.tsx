@@ -21,6 +21,8 @@ export const RegionCard = memo(function RegionCard({
   onDelete,
   updateAvailable,
 }: RegionCardProps) {
+  const toMb = (b?: number | null) =>
+    ((b ?? 0) / (1024 * 1024)).toFixed(b && b >= 10 * 1024 * 1024 ? 0 : 1);
   const sizeMb = region.tilesSizeBytes
     ? Math.round(
         ((region.tilesSizeBytes ?? 0) +
@@ -29,6 +31,10 @@ export const RegionCard = memo(function RegionCard({
           (1024 * 1024),
       )
     : null;
+  const contents =
+    region.tilesSizeBytes != null
+      ? `Tiles ${toMb(region.tilesSizeBytes)} MB · Routing ${toMb(region.routingSizeBytes)} MB · Geocoding ${toMb(region.geocodingSizeBytes)} MB`
+      : null;
 
   return (
     <View style={styles.card}>
@@ -50,7 +56,11 @@ export const RegionCard = memo(function RegionCard({
           </View>
         </View>
 
-        {sizeMb != null && <Text style={styles.size}>{sizeMb} MB</Text>}
+        {sizeMb != null && <Text style={styles.size}>{sizeMb} MB total</Text>}
+        {contents != null && <Text style={styles.contents}>{contents}</Text>}
+        {region.downloadStatus === 'complete' && (
+          <Text style={styles.contents}>Stored offline · seeding to nearby peers via P2P</Text>
+        )}
       </Pressable>
 
       <View style={styles.actions}>
@@ -165,7 +175,13 @@ const styles = StyleSheet.create({
   },
   name: { ...typography.subtitle, color: colors.text, flex: 1 },
   badges: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
-  size: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.sm },
+  size: { ...typography.caption, color: colors.textSecondary, marginBottom: 2 },
+  contents: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+    fontSize: 11,
+  },
   badge: { borderRadius: borderRadius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   badgeText: { ...typography.caption, fontWeight: '600' },
   updateBadge: { backgroundColor: colors.warning + '20' },

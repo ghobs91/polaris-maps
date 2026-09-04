@@ -255,6 +255,9 @@ export default function MyPlacesScreen() {
             style={styles.sortButton}
           />
         </View>
+        <Text style={styles.homeWorkHint}>
+          Home/Work favorites are set from the map search bar for quick routing.
+        </Text>
 
         <Button
           title="+ New list"
@@ -306,7 +309,8 @@ export default function MyPlacesScreen() {
           />
           <Text style={styles.importDivider}>— or paste content —</Text>
           <Text style={styles.importHint}>
-            CSV, JSON, GeoJSON, KML, or GPX from a Google Maps export:
+            CSV, JSON, GeoJSON, KML, or GPX from a Google Maps export (Google Takeout → Maps → Saved
+            places → export, then pick the file above):
           </Text>
           <ScrollView style={styles.importScrollWrap}>
             <GlassView material="regular" style={styles.importInputWrapper}>
@@ -456,6 +460,12 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       marginHorizontal: spacing.lg,
       marginVertical: spacing.sm,
       borderCurve: 'continuous',
+    },
+    homeWorkHint: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.xs,
     },
     listContent: { paddingBottom: spacing.xxl },
     footer: {
