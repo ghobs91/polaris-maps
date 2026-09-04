@@ -175,8 +175,12 @@ interface StopNode {
   tags?: Record<string, string>;
 }
 
-/** Minimum distance (degrees, ~300 m) for snapping standalone stops to route geometry. */
-const SNAP_THRESHOLD_DEG = 0.003;
+/**
+ * Minimum distance (degrees, ~110 m) for snapping standalone stops to route geometry.
+ * Kept tight so distinct stations in dense metros (e.g. NYC City Hall vs
+ * Brooklyn Bridge-City Hall, ~240 m apart) are not attached to each other's lines.
+ */
+const SNAP_THRESHOLD_DEG = 0.001;
 
 /** Project a point onto a polyline, returning the fractional cumulative distance along it. */
 function projectOntoSegments(
@@ -1516,13 +1520,27 @@ function stopKey(lat: number, lon: number): string {
 }
 
 /**
- * Find **all** transit route relations whose track (railway ways) passes
- * near the given stop coordinates, even if the relation doesn't list the
- * stop as a member.
+ * Whether a route line's stop list comes from schedule data (GTFS/OTP)
+ * rather than OSM relation membership. Schedule-derived stops are exact,
+ * so geometry-proximity heuristics must not second-guess them.
+ */
+export function hasAuthoritativeStops(line: Pick<TransitRouteLine, 'id'>): boolean {
+  return line.id.startsWith('otp:');
+}
+
+/**
+ * Find the transit route relations that actually serve the stop at the
+ * given coordinates, by OSM relation *membership* — not track proximity.
  *
- * Strategy: query Overpass for railway ways within 500 m of the stop,
- * then walk backward (`rel(bw)`) to find route relations using those ways.
- * Results are cached per-stop.
+ * Strategy: find stop nodes near the point, then select route relations
+ * containing those nodes (`rel(bn)`). Location is used only to identify
+ * *which stop* was tapped; route attribution is exact.
+ *
+ * This matters because track-proximity attribution is fundamentally broken
+ * in dense metros: verified live at NYC City Hall (N/R/W), where tracks of
+ * the 2/3 (Park Place) pass within 150 m without serving the station, so no
+ * radius can separate them — while the membership query returns exactly
+ * N/R/W. Results are cached per-stop.
  */
 export async function fetchRoutesAtStop(lat: number, lon: number): Promise<OverpassRouteTag[]> {
   const key = stopKey(lat, lon);
@@ -1530,8 +1548,11 @@ export async function fetchRoutesAtStop(lat: number, lon: number): Promise<Overp
   if (cached) return cached;
 
   const query = `[out:json][timeout:15];
-way(around:500,${lat},${lon})["railway"~"^(rail|light_rail|subway|tram|narrow_gauge)$"];
-rel(bw)["route"~"^(subway|light_rail|train|tram|monorail)$"];
+(
+  node(around:100,${lat},${lon})["railway"~"^(station|halt|stop)$"];
+  node(around:100,${lat},${lon})["public_transport"="stop_position"];
+)->.stops;
+rel(bn.stops)["route"~"^(subway|light_rail|train|tram|monorail)$"];
 out tags;`;
 
   try {

@@ -440,6 +440,51 @@ export async function searchOtpStops(
     .map(({ name, lat, lon, id }) => ({ name, lat, lon, id }));
 }
 
+// ── Short-lived response caches ─────────────────────────────────────
+// The stop card fires overlapping lookups per tap (badges + departures +
+// trip prefetch). These collapse duplicate in-flight requests and briefly
+// reuse fresh responses. Routes are near-static; stoptimes and trip times
+// are realtime so they are shared for seconds only. Empty results are never
+// cached (a transient failure must not blank data for a full TTL).
+
+interface TimedEntry {
+  value: unknown;
+  expiresAt: number;
+}
+
+const responseCache = new Map<string, TimedEntry>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+async function cachedJson<T>(key: string, ttlMs: number, loader: () => Promise<T[]>): Promise<T[]> {
+  const hit = responseCache.get(key);
+  if (hit && Date.now() < hit.expiresAt) return hit.value as T[];
+  const ongoing = inflightRequests.get(key);
+  if (ongoing) return ongoing as Promise<T[]>;
+  const promise = (async (): Promise<T[]> => {
+    try {
+      const value = await loader();
+      if (value.length > 0) {
+        responseCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+        if (responseCache.size > 200) {
+          const first = responseCache.keys().next().value;
+          if (first) responseCache.delete(first);
+        }
+      }
+      return value;
+    } finally {
+      inflightRequests.delete(key);
+    }
+  })();
+  inflightRequests.set(key, promise);
+  return promise;
+}
+
+/** Exposed for testing. Reset the short-lived response caches. */
+export function __clearOtpResponseCache(): void {
+  responseCache.clear();
+  inflightRequests.clear();
+}
+
 /**
  * Fetch routes serving an OTP stop by its ID.
  * Uses the OTP1 REST `/index/stops/{id}/routes` endpoint.
@@ -452,6 +497,15 @@ export async function fetchOtpRoutesAtStop(
   const ep = findEndpointForCoords(lat, lon);
   if (!ep || ep.apiStyle !== 'rest-v1') return [];
 
+  return cachedJson(`${ep.label}|routes|${stopId}`, 5 * 60_000, () =>
+    loadOtpRoutesAtStop(ep, stopId),
+  );
+}
+
+async function loadOtpRoutesAtStop(
+  ep: OtpEndpoint,
+  stopId: string,
+): Promise<Array<{ ref?: string; name?: string; color?: string; mode: TransitMode }>> {
   const baseUrl = ep.url.replace(/\/plan$/, '');
   const url = `${baseUrl}/index/stops/${encodeURIComponent(stopId)}/routes`;
 
@@ -485,17 +539,18 @@ export async function fetchOtpRoutesAtStop(
 // ── Stop ID lookup by name + coordinates ────────────────────────────
 
 /**
- * Find the OTP GTFS stop ID for a station by its name and coordinates.
+ * Find ALL OTP GTFS stop IDs for a station by its name and coordinates.
  * Searches the OTP stops cache (loaded by `ensureStopsLoaded`).
- * Returns `null` if the cache is empty or no match within ~500m.
+ *
+ * A station often has several directional stop IDs sharing one name and
+ * location (e.g. MTA City Hall = R24S southbound + R24N northbound at
+ * identical coordinates). Callers that need complete departures must query
+ * every returned ID — querying just one shows a single direction.
+ * Sorted nearest-first; capped to bound downstream fetches.
  */
-export async function findOtpStopId(
-  name: string,
-  lat: number,
-  lon: number,
-): Promise<string | null> {
+export async function findOtpStopIds(name: string, lat: number, lon: number): Promise<string[]> {
   const ep = findEndpointForCoords(lat, lon);
-  if (!ep) return null;
+  if (!ep) return [];
 
   // Make sure the stops cache is loaded (wait up to 8s)
   if (!stopsCache.has(ep.label)) {
@@ -505,29 +560,105 @@ export async function findOtpStopId(
   }
 
   const stops = stopsCache.get(ep.label);
-  if (!stops) return null;
+  if (!stops) return [];
 
+  const byDist = (a: { dist: number }, b: { dist: number }) => a.dist - b.dist;
   const q = name.toLowerCase();
-  // First pass: exact name match within ~500m (~0.005°)
+  // First pass: exact name matches within ~500m (~0.005°)
   const CLOSE = 0.005;
-  let best: { id: string; dist: number } | null = null;
+  const exact: { id: string; dist: number }[] = [];
   for (const s of stops) {
     if (s.name.toLowerCase() !== q) continue;
     const d = (s.lat - lat) ** 2 + (s.lon - lon) ** 2;
     if (d > CLOSE * CLOSE) continue;
-    if (!best || d < best.dist) best = { id: s.id, dist: d };
+    exact.push({ id: s.id, dist: d });
   }
-  if (best) return best.id;
+  if (exact.length > 0) {
+    return exact
+      .sort(byDist)
+      .slice(0, 6)
+      .map((e) => e.id);
+  }
 
-  // Second pass: substring match within ~200m
+  // Second pass: substring matches within ~200m
   const VERY_CLOSE = 0.002;
+  const fuzzy: { id: string; dist: number }[] = [];
   for (const s of stops) {
     if (!s.name.toLowerCase().includes(q) && !q.includes(s.name.toLowerCase())) continue;
     const d = (s.lat - lat) ** 2 + (s.lon - lon) ** 2;
     if (d > VERY_CLOSE * VERY_CLOSE) continue;
-    if (!best || d < best.dist) best = { id: s.id, dist: d };
+    fuzzy.push({ id: s.id, dist: d });
   }
-  return best?.id ?? null;
+  return fuzzy
+    .sort(byDist)
+    .slice(0, 6)
+    .map((e) => e.id);
+}
+
+/**
+ * Find the single best OTP GTFS stop ID for a station.
+ * Prefer `findOtpStopIds` when departures for all directions are needed.
+ */
+export async function findOtpStopId(
+  name: string,
+  lat: number,
+  lon: number,
+): Promise<string | null> {
+  const ids = await findOtpStopIds(name, lat, lon);
+  return ids[0] ?? null;
+}
+
+// ── OTP1 REST trip stoptimes (ordered stop list for one trip) ───────
+
+export interface Otp1TripStopTime {
+  stopId: string;
+  stopName?: string;
+  stopLat?: number;
+  stopLon?: number;
+  stopIndex: number;
+  /** Seconds since midnight (service day), like the stop stoptimes */
+  scheduledArrival: number;
+  scheduledDeparture: number;
+  realtimeArrival: number;
+  realtimeDeparture: number;
+  realtime: boolean;
+}
+
+/**
+ * Fetch the ordered stop list (with scheduled + realtime times) for a
+ * single trip. Used for the trip-detail view when a departure is tapped.
+ * Standard OTP1 REST `StopTimeShort` array; empty when unavailable.
+ */
+export async function fetchOtpTripStoptimes(
+  tripId: string,
+  lat: number,
+  lon: number,
+): Promise<Otp1TripStopTime[]> {
+  const ep = findEndpointForCoords(lat, lon);
+  if (!ep || ep.apiStyle !== 'rest-v1') return [];
+
+  return cachedJson(`${ep.label}|trip|${tripId}`, 30_000, () => loadOtpTripStoptimes(ep, tripId));
+}
+
+async function loadOtpTripStoptimes(ep: OtpEndpoint, tripId: string): Promise<Otp1TripStopTime[]> {
+  const baseUrl = ep.url.replace(/\/plan$/, '');
+  const url = `${baseUrl}/index/trips/${encodeURIComponent(tripId)}/stoptimes`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: ep.headers ?? {},
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as Otp1TripStopTime[];
+    return [...data].sort((a, b) => a.stopIndex - b.stopIndex);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── OTP1 REST stoptimes (real departures) ───────────────────────────
@@ -537,6 +668,20 @@ export interface Otp1StopTime {
   pattern: {
     id: string;
     desc?: string;
+  };
+  /**
+   * Route serving this pattern (standard OTP1 `StopTimesInPattern` field,
+   * e.g. `{ id: "MTASBWY:W", shortName: "W", longName: "Broadway Local",
+   * mode: "SUBWAY", color: "F6BC26" }`). This is the authoritative source
+   * for the departure's line — never derive it from the trip ID, whose
+   * first segment is the agency/feed ID (e.g. "MTASBWY", the whole network).
+   */
+  route?: {
+    id?: string;
+    shortName?: string;
+    longName?: string;
+    mode?: string;
+    color?: string;
   };
   times: Array<{
     /** Seconds since midnight (scheduled departure) */
@@ -551,6 +696,8 @@ export interface Otp1StopTime {
     serviceDay: number;
     /** Trip GTFS ID */
     tripId: string;
+    /** Trip headsign / terminal (e.g. "86 St") */
+    tripHeadsign?: string;
     /** Stop headsign (destination) */
     stopHeadsign?: string;
   }>;
@@ -569,6 +716,10 @@ export async function fetchOtp1Stoptimes(
   const ep = findEndpointForCoords(lat, lon);
   if (!ep || ep.apiStyle !== 'rest-v1') return [];
 
+  return cachedJson(`${ep.label}|stoptimes|${stopId}`, 20_000, () => loadOtp1Stoptimes(ep, stopId));
+}
+
+async function loadOtp1Stoptimes(ep: OtpEndpoint, stopId: string): Promise<Otp1StopTime[]> {
   const baseUrl = ep.url.replace(/\/plan$/, '');
   const url = `${baseUrl}/index/stops/${encodeURIComponent(stopId)}/stoptimes`;
 

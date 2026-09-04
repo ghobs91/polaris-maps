@@ -9,10 +9,11 @@
 import type { TransitMode } from '../../models/transit';
 import { isInMbtaArea, fetchMbtaDepartures } from './mbtaFetcher';
 import {
-  findOtpStopId,
+  findOtpStopIds,
   fetchOtp1Stoptimes,
   fetchOtpRoutesAtStop,
   type Otp1StopTime,
+  type Otp1TripStopTime,
 } from './otpEndpointRegistry';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -36,6 +37,12 @@ export interface Departure {
   isRealtime: boolean;
   /** Minutes until departure */
   minutesAway: number;
+  /** OTP trip ID (enables the trip-detail stop list); absent for estimates */
+  tripId?: string;
+  /** Trip headsign / terminal (e.g. "86 St") when OTP provides one */
+  tripHeadsign?: string;
+  /** Service-day midnight (epoch seconds) for resolving per-stop times */
+  serviceDay?: number;
 }
 
 export interface StopDepartureInfo {
@@ -53,6 +60,107 @@ export interface StopDepartureInfo {
   }>;
   /** Upcoming departures sorted by time */
   departures: Departure[];
+}
+
+/**
+ * Far-future departures read better as a clock time ("7:07 AM") than as a
+ * large minute count, so the row shows the leaving time when more than 60
+ * minutes away and a countdown otherwise.
+ */
+export function shouldShowClockTime(minutesAway: number): boolean {
+  return minutesAway > 60;
+}
+
+// ── Trip detail (stops served by one departure) ─────────────────────
+
+export interface TripStop {
+  name: string;
+  lat?: number;
+  lon?: number;
+  /** Scheduled arrival ISO timestamp (absent when unresolvable) */
+  scheduledTime?: string;
+  /** Real-time arrival ISO timestamp (if predicted) */
+  realtimeTime?: string;
+  isRealtime: boolean;
+  minutesAway?: number;
+}
+
+export interface TripStopList {
+  stops: TripStop[];
+  /** Index of the first stop at/after the boarded station */
+  currentIndex: number;
+}
+
+/**
+ * Assemble an ordered trip stop list from OTP1 trip stoptimes.
+ * Per-stop times are seconds-since-midnight on `serviceDay`; without a
+ * service day only names/coordinates are returned. The boarded station is
+ * located by name first, then nearest coordinates.
+ */
+export function buildTripStopList(
+  times: Otp1TripStopTime[],
+  serviceDay: number | undefined,
+  currentStop: { name: string; lat: number; lon: number },
+  nowMs = Date.now(),
+): TripStopList {
+  const ordered = [...times].sort((a, b) => a.stopIndex - b.stopIndex);
+  const q = currentStop.name.toLowerCase().trim();
+
+  let currentIndex = ordered.findIndex((t) => (t.stopName ?? '').toLowerCase().trim() === q);
+  if (currentIndex < 0 && q) {
+    currentIndex = ordered.findIndex((t) => {
+      const n = (t.stopName ?? '').toLowerCase().trim();
+      return n && (n.includes(q) || q.includes(n));
+    });
+  }
+  if (currentIndex < 0) {
+    let best = Infinity;
+    ordered.forEach((t, i) => {
+      if (t.stopLat == null || t.stopLon == null) return;
+      const d = (t.stopLat - currentStop.lat) ** 2 + (t.stopLon - currentStop.lon) ** 2;
+      if (d < best) {
+        best = d;
+        currentIndex = i;
+      }
+    });
+  }
+  if (currentIndex < 0) currentIndex = 0;
+
+  const stops: TripStop[] = ordered.map((t) => {
+    const scheduledTime =
+      serviceDay != null
+        ? new Date((serviceDay + t.scheduledArrival) * 1000).toISOString()
+        : undefined;
+    const realtimeTime =
+      serviceDay != null && t.realtime
+        ? new Date((serviceDay + t.realtimeArrival) * 1000).toISOString()
+        : undefined;
+    const arrivalMs =
+      realtimeTime != null
+        ? Date.parse(realtimeTime)
+        : scheduledTime != null
+          ? Date.parse(scheduledTime)
+          : NaN;
+    return {
+      name: t.stopName ?? t.stopId,
+      lat: t.stopLat,
+      lon: t.stopLon,
+      scheduledTime,
+      realtimeTime,
+      isRealtime: t.realtime,
+      minutesAway: Number.isNaN(arrivalMs) ? undefined : Math.round((arrivalMs - nowMs) / 60_000),
+    };
+  });
+
+  return { stops, currentIndex };
+}
+
+/** Status sub-label for one trip stop ("Live · in 14 min", "Live", "Scheduled"). */
+export function formatTripStopStatus(stop: Pick<TripStop, 'isRealtime' | 'minutesAway'>): string {
+  if (!stop.isRealtime) return 'Scheduled';
+  if (stop.minutesAway == null || stop.minutesAway < 0) return 'Live';
+  if (stop.minutesAway <= 1) return 'Live · now';
+  return `Live · in ${stop.minutesAway} min`;
 }
 
 // ── Headway estimation ──────────────────────────────────────────────
@@ -83,6 +191,45 @@ function estimateHeadwayDepartures(routes: StopDepartureInfo['routes']): Departu
 
 // ── OTP1 REST stoptimes → Departures ────────────────────────────────
 
+/** Map an OTP1 route mode string onto our TransitMode (default: RAIL). */
+function otpRouteMode(mode: string | undefined, fallback: TransitMode): TransitMode {
+  switch (mode) {
+    case 'SUBWAY':
+      return 'SUBWAY';
+    case 'RAIL':
+      return 'RAIL';
+    case 'TRAM':
+    case 'LIGHT_RAIL':
+      return 'TRAM';
+    case 'FERRY':
+      return 'FERRY';
+    case 'BUS':
+      return 'BUS';
+    default:
+      return fallback;
+  }
+}
+
+/** Normalise a route colour to 6-hex without `#` (undefined when absent/invalid). */
+function normalizeRouteColor(color: string | undefined): string | undefined {
+  if (!color) return undefined;
+  const hex = color.startsWith('#') ? color.slice(1) : color;
+  return /^[0-9A-Fa-f]{6}$/.test(hex) ? hex : undefined;
+}
+
+/**
+ * Familiar names for OTP agency/feed IDs. The trip ID's first segment is the
+ * agency (e.g. "LI"), never a line — LIRR routes carry no shortName, so the
+ * raw code would otherwise reach the UI. Show the public name instead.
+ */
+export const OTP_AGENCY_DISPLAY_NAMES: Record<string, string> = {
+  LI: 'LIRR',
+  MNR: 'Metro-North',
+  MTASBWY: 'Subway',
+  PATH: 'PATH',
+  NJT: 'NJ Transit',
+};
+
 function otp1StoptimesToDepartures(
   stoptimes: Otp1StopTime[],
   routesByStopId: Map<string, { color?: string; mode: TransitMode }>,
@@ -90,25 +237,42 @@ function otp1StoptimesToDepartures(
   const now = Date.now();
   const departures: Departure[] = [];
 
-  for (const pattern of stoptimes) {
-    // Extract route short name from pattern description or id
-    // Pattern id format: "routeId:directionId:patternNum"
+  for (const entry of stoptimes) {
+    // The departure's line comes from the pattern's route object
+    // (e.g. shortName "W" for MTASBWY:W). Never use the trip ID's first
+    // segment — that is the agency/feed ID ("MTASBWY" = the whole network).
     // Pattern desc: "Port Jefferson Branch to Penn Station via Hicksville"
-    const desc = pattern.pattern.desc ?? '';
+    const desc = entry.pattern.desc ?? '';
 
-    for (const t of pattern.times) {
+    let ref = entry.route?.shortName?.trim() || undefined;
+    let color = normalizeRouteColor(entry.route?.color);
+    let mode: TransitMode | undefined = entry.route?.mode
+      ? otpRouteMode(entry.route.mode, 'RAIL')
+      : undefined;
+
+    if (!ref) {
+      // Fall back to the route segment of the pattern id
+      // (MTA "MTASBWY:W:1:02" → "W", LIRR-style "1:LI:test" → "LI"),
+      // but only when it matches a route known to serve this stop.
+      const seg = entry.pattern.id.split(':').find((s) => routesByStopId.has(s.trim()));
+      if (seg) ref = seg.trim();
+    }
+    const known = (ref && routesByStopId.get(ref)) || undefined;
+    color ??= known?.color;
+    mode ??= known?.mode ?? 'RAIL';
+
+    for (const t of entry.times) {
       const depEpochMs = (t.serviceDay + t.realtimeDeparture) * 1000;
       if (depEpochMs < now) continue; // skip past departures
 
       const minutesAway = Math.round((depEpochMs - now) / 60_000);
       if (minutesAway > 180) continue; // skip departures > 3h away
 
-      // Try to extract the route short name from the tripId (e.g. "LI:149::LI_FP_D3-Weekday-047")
-      const tripParts = t.tripId?.split(':') ?? [];
-      const agencyPrefix = tripParts[0] ?? '';
-
-      // Try to find route info from the OTP routes data
-      const routeInfo = routesByStopId.get(agencyPrefix);
+      // Last resort for endpoints without route objects or matching pattern
+      // ids: the trip ID's first segment, mapped to a familiar agency name
+      // when it is a known agency code (e.g. "LI" → "LIRR").
+      const tripPrefix = t.tripId?.split(':')[0] || undefined;
+      const tripPrefixDisplay = (tripPrefix && OTP_AGENCY_DISPLAY_NAMES[tripPrefix]) || tripPrefix;
 
       // Extract headsign: prefer stopHeadsign, fall back to pattern desc
       let headsign = t.stopHeadsign ?? '';
@@ -123,15 +287,18 @@ function otp1StoptimesToDepartures(
       }
 
       departures.push({
-        routeName: agencyPrefix || '?',
-        routeLongName: desc,
+        routeName: ref || tripPrefixDisplay || '?',
+        routeLongName: entry.route?.longName?.trim() || desc || undefined,
         headsign,
-        color: routeInfo?.color,
-        mode: routeInfo?.mode ?? 'RAIL',
+        color,
+        mode: mode ?? 'RAIL',
         scheduledTime: new Date((t.serviceDay + t.scheduledDeparture) * 1000).toISOString(),
         realtimeTime: t.realtime ? new Date(depEpochMs).toISOString() : undefined,
         isRealtime: t.realtime,
         minutesAway,
+        tripId: t.tripId || undefined,
+        tripHeadsign: t.tripHeadsign || undefined,
+        serviceDay: t.serviceDay,
       });
     }
   }
@@ -173,12 +340,31 @@ export async function fetchDepartures(
 
   // Try OTP1 REST stoptimes (covers MTA/LIRR/Metro-North/NJT etc.)
   try {
-    const stopId = await findOtpStopId(stopName, _lat, _lon);
-    if (stopId) {
-      const [stoptimes, otpRoutes] = await Promise.all([
-        fetchOtp1Stoptimes(stopId, _lat, _lon),
-        fetchOtpRoutesAtStop(stopId, _lat, _lon),
-      ]);
+    // A station can have several directional stop IDs sharing one name
+    // (e.g. MTA City Hall = R24S southbound + R24N northbound). Query all of
+    // them so departures cover both directions, then merge.
+    const stopIds = await findOtpStopIds(stopName, _lat, _lon);
+    if (stopIds.length > 0) {
+      const perStop = await Promise.all(
+        stopIds.map(async (stopId) => {
+          const [stoptimes, otpRoutes] = await Promise.all([
+            fetchOtp1Stoptimes(stopId, _lat, _lon),
+            fetchOtpRoutesAtStop(stopId, _lat, _lon),
+          ]);
+          return { stoptimes, otpRoutes };
+        }),
+      );
+      const stoptimes = perStop.flatMap((p) => p.stoptimes);
+      // Union routes across directions, deduped by ref
+      const seenRefs = new Set<string>();
+      const otpRoutes = perStop
+        .flatMap((p) => p.otpRoutes)
+        .filter((r) => {
+          const key = r.ref ?? r.name ?? '';
+          if (seenRefs.has(key)) return false;
+          seenRefs.add(key);
+          return true;
+        });
 
       if (stoptimes.length > 0) {
         // Build a lookup for route metadata keyed by agency prefix
@@ -193,14 +379,14 @@ export async function fetchDepartures(
 
         const departures = otp1StoptimesToDepartures(stoptimes, routeMap);
         if (departures.length > 0) {
-          // Build route badges from actual departures
+          // Build route badges from actual departures — one badge per line
+          // (route short name), not per headsign/destination.
           const seenRoutes = new Set<string>();
           const depRoutes: StopDepartureInfo['routes'] = [];
           for (const d of departures) {
-            const key = `${d.routeName}-${d.headsign}`;
-            if (seenRoutes.has(key)) continue;
-            seenRoutes.add(key);
-            depRoutes.push({ name: d.headsign || d.routeName, color: d.color, mode: d.mode });
+            if (seenRoutes.has(d.routeName)) continue;
+            seenRoutes.add(d.routeName);
+            depRoutes.push({ name: d.routeName, color: d.color, mode: d.mode });
           }
 
           return {

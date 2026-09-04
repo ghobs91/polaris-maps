@@ -32,8 +32,12 @@ import { shadow } from '../../constants/theme';
 import { useTransitStore } from '../../stores/transitStore';
 import {
   fetchDepartures,
+  shouldShowClockTime,
+  buildTripStopList,
+  formatTripStopStatus,
   type StopDepartureInfo,
   type Departure,
+  type TripStopList,
 } from '../../services/transit/transitDepartureFetcher';
 import {
   fetchRoutesAtStop,
@@ -44,8 +48,13 @@ import {
   localRouteToItinerary,
 } from '../../services/transit/transitLineFetcher';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
-import { searchOtpStops } from '../../services/transit/otpEndpointRegistry';
-import type { OtpItinerary, OtpLeg } from '../../models/transit';
+import {
+  searchOtpStops,
+  findOtpStopId,
+  fetchOtpRoutesAtStop,
+  fetchOtpTripStoptimes,
+} from '../../services/transit/otpEndpointRegistry';
+import type { OtpItinerary, OtpLeg, TransitMode } from '../../models/transit';
 import TransitTimeSelector from './TransitTimeSelector';
 
 const { height: SCREEN_H } = Dimensions.get('window');
@@ -90,45 +99,187 @@ function isLightColor(hex: string): boolean {
 
 // ── Departure row ───────────────────────────────────────────────────
 
-function DepartureRow({ departure }: { departure: Departure }) {
+function DepartureRow({ departure, onPress }: { departure: Departure; onPress?: () => void }) {
   const { colors } = useTheme();
-  const branchName = routeFullName(departure);
-  const branchBg =
-    departure.color && /^[0-9A-Fa-f]{6}$/.test(departure.color)
-      ? `#${departure.color}`
-      : modeDefaultColor(departure.mode);
-  const branchTextColor = isLightColor(branchBg) ? '#000000' : '#FFFFFF';
 
   const timeLabel = departure.isRealtime ? 'Live' : 'Scheduled';
   const departureTime = new Date(departure.realtimeTime ?? departure.scheduledTime);
   const timeStr = departureTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
-    <View style={depStyles.row}>
-      <View style={depStyles.infoRow}>
-        <View style={depStyles.info}>
-          {departure.headsign ? (
-            <Text style={[depStyles.headsign, { color: colors.text }]} numberOfLines={1}>
-              {departure.headsign}
+    <TouchableOpacity
+      style={depStyles.row}
+      onPress={onPress}
+      disabled={!onPress}
+      activeOpacity={0.6}
+    >
+      <RouteBadge name={departure.routeName} color={departure.color} mode={departure.mode} />
+      <View style={depStyles.info}>
+        {departure.headsign ? (
+          <Text style={[depStyles.headsign, { color: colors.text }]} numberOfLines={1}>
+            {departure.headsign}
+          </Text>
+        ) : null}
+        <Text style={[depStyles.timeLabel, { color: colors.textSecondary }]}>
+          {timeLabel} · {timeStr}
+        </Text>
+      </View>
+      <View style={depStyles.right}>
+        {shouldShowClockTime(departure.minutesAway) ? (
+          <Text style={[depStyles.clockTime, { color: colors.text }]}>{timeStr}</Text>
+        ) : (
+          <>
+            <Text style={[depStyles.minutes, { color: colors.text }]}>{departure.minutesAway}</Text>
+            <Text style={[depStyles.minLabel, { color: colors.textSecondary }]}>min</Text>
+          </>
+        )}
+      </View>
+      {onPress ? <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} /> : null}
+    </TouchableOpacity>
+  );
+}
+
+// ── Trip detail (stops served by one tapped departure) ──────────────
+
+function TripDetailView({
+  trip,
+  fromName,
+  stops,
+  loading,
+  showPrev,
+  onTogglePrev,
+  onBack,
+}: {
+  trip: Departure;
+  fromName: string;
+  stops: TripStopList | null;
+  loading: boolean;
+  showPrev: boolean;
+  onTogglePrev: () => void;
+  onBack: () => void;
+}) {
+  const { colors } = useTheme();
+  const lineColor =
+    trip.color && /^[0-9A-Fa-f]{6}$/.test(trip.color)
+      ? `#${trip.color}`
+      : modeDefaultColor(trip.mode);
+  const visibleStops = stops
+    ? showPrev
+      ? stops.stops
+      : stops.stops.slice(stops.currentIndex)
+    : [];
+
+  return (
+    <>
+      <TouchableOpacity
+        style={styles.backRow}
+        onPress={onBack}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="arrow-back" size={18} color={colors.primary} />
+        <Text style={[styles.backLabel, { color: colors.primary }]}>Departures</Text>
+      </TouchableOpacity>
+
+      {/* Trip header: line badge + terminal, origin station */}
+      <View style={tripStyles.header}>
+        <RouteBadge name={trip.routeName} color={trip.color} mode={trip.mode} />
+        <View style={tripStyles.headerText}>
+          <Text style={[tripStyles.destination, { color: colors.text }]} numberOfLines={1}>
+            {trip.tripHeadsign || trip.headsign}
+          </Text>
+          <Text style={[tripStyles.fromLine, { color: colors.textSecondary }]} numberOfLines={1}>
+            From {fromName}
+          </Text>
+        </View>
+      </View>
+
+      <ScrollView style={styles.departuresList} showsVerticalScrollIndicator={false}>
+        {loading && (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+              Loading stops…
             </Text>
-          ) : null}
-          <Text style={[depStyles.timeLabel, { color: colors.textSecondary }]}>
-            {timeLabel} · {timeStr}
-          </Text>
-        </View>
-        <View style={depStyles.right}>
-          <Text style={[depStyles.minutes, { color: colors.text }]}>{departure.minutesAway}</Text>
-          <Text style={[depStyles.minLabel, { color: colors.textSecondary }]}>min</Text>
-        </View>
-      </View>
-      <View style={depStyles.pillRow}>
-        <View style={[depStyles.branchPill, { backgroundColor: branchBg }]}>
-          <Text style={[depStyles.branchPillText, { color: branchTextColor }]} numberOfLines={1}>
-            {branchName}
-          </Text>
-        </View>
-      </View>
-    </View>
+          </View>
+        )}
+
+        {!loading && stops && stops.stops.length === 0 && (
+          <View style={styles.emptyRow}>
+            <Ionicons name="train-outline" size={20} color={colors.textSecondary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              No stop information available
+            </Text>
+          </View>
+        )}
+
+        {!loading && stops && stops.stops.length > 0 && (
+          <>
+            {stops.currentIndex > 0 && (
+              <TouchableOpacity
+                style={tripStyles.prevToggle}
+                onPress={onTogglePrev}
+                activeOpacity={0.6}
+              >
+                <Ionicons
+                  name={showPrev ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={colors.primary}
+                />
+                <Text style={[tripStyles.prevToggleText, { color: colors.primary }]}>
+                  {showPrev ? 'Hide previous stops' : 'Show previous stops'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {visibleStops.map((s, i) => {
+              const isLast = i === visibleStops.length - 1;
+              const isBoarded = !showPrev && i === 0;
+              const clockSrc = s.realtimeTime ?? s.scheduledTime;
+              const clock = clockSrc
+                ? new Date(clockSrc).toLocaleTimeString([], {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })
+                : undefined;
+              return (
+                <View key={`${s.name}-${i}`} style={rdStyles.stationRow}>
+                  <View style={rdStyles.timelineCol}>
+                    <View
+                      style={[
+                        rdStyles.stationDot,
+                        { borderColor: lineColor },
+                        isBoarded ? { backgroundColor: lineColor } : undefined,
+                      ]}
+                    />
+                    {!isLast && (
+                      <View style={[rdStyles.timelineLine, { backgroundColor: lineColor }]} />
+                    )}
+                  </View>
+                  <View style={rdStyles.stationContent}>
+                    <View style={rdStyles.stationNameRow}>
+                      <Text
+                        style={[rdStyles.stationName, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {s.name}
+                      </Text>
+                      {clock ? (
+                        <Text style={[rdStyles.stationTime, { color: colors.textSecondary }]}>
+                          {clock}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text style={[tripStyles.stopSub, { color: colors.textSecondary }]}>
+                      {formatTripStopStatus(s)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </>
+        )}
+      </ScrollView>
+    </>
   );
 }
 
@@ -142,6 +293,12 @@ export function TransitStopCard() {
 
   const [departureInfo, setDepartureInfo] = useState<StopDepartureInfo | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Trip detail state (stop list for one tapped departure)
+  const [selectedTrip, setSelectedTrip] = useState<Departure | null>(null);
+  const [tripStops, setTripStops] = useState<TripStopList | null>(null);
+  const [tripLoading, setTripLoading] = useState(false);
+  const [showPrevStops, setShowPrevStops] = useState(false);
 
   // Station details panel state
   const [showDetails, setShowDetails] = useState(false);
@@ -210,6 +367,10 @@ export function TransitStopCard() {
         useNativeDriver: true,
       }).start();
       setDepartureInfo(null);
+      setSelectedTrip(null);
+      setTripStops(null);
+      setTripLoading(false);
+      setShowPrevStops(false);
       setShowDetails(false);
       setStationTags(null);
       setShowDirections(false);
@@ -233,6 +394,23 @@ export function TransitStopCard() {
       .catch(() => setStationTags({}))
       .finally(() => setDetailsLoading(false));
   }, [selectedStop, stationTags, detailsLoading]);
+
+  // Open the trip-detail stop list for a tapped departure (OTP trips only —
+  // headway estimates carry no trip ID and stay non-tappable).
+  const handleDeparturePress = useCallback(
+    (dep: Departure) => {
+      if (!dep.tripId || !selectedStop) return;
+      setSelectedTrip(dep);
+      setTripStops(null);
+      setShowPrevStops(false);
+      setTripLoading(true);
+      fetchOtpTripStoptimes(dep.tripId, selectedStop.lat, selectedStop.lon)
+        .then((times) => setTripStops(buildTripStopList(times, dep.serviceDay, selectedStop)))
+        .catch(() => setTripStops({ stops: [], currentIndex: 0 }))
+        .finally(() => setTripLoading(false));
+    },
+    [selectedStop],
+  );
 
   // ── Directions handlers ─────────────────────────────────────────
 
@@ -403,56 +581,141 @@ export function TransitStopCard() {
     [selectedStop],
   );
 
-  // Fetch departures when a stop is selected, enriching route list
-  // with a reverse-way Overpass lookup to catch routes whose OSM
-  // relations don't explicitly list this stop as a member.
+  // Fetch departures when a stop is selected. Departures fire immediately
+  // from the known routes and never wait on enrichment; route badges are
+  // refined independently when the (slower) enrichment lookups land.
   const [enrichedRoutes, setEnrichedRoutes] = useState<
     Array<{ ref?: string; name?: string; color?: string; mode: string }>
   >([]);
 
   useEffect(() => {
     if (!selectedStop) return;
+    const snapshot = selectedStop;
     let cancelled = false;
     setLoading(true);
-    setEnrichedRoutes(selectedStop.routes);
+    setSelectedTrip(null);
+    setTripStops(null);
+    setShowPrevStops(false);
+    setEnrichedRoutes(snapshot.routes);
 
-    // Fire enrichment + departure fetch in parallel
-    const enrichPromise = fetchRoutesAtStop(selectedStop.lat, selectedStop.lon);
+    const toArgs = (rs: Array<{ ref?: string; name?: string; color?: string; mode: string }>) => ({
+      names: rs.map((r) => routeBadgeLabel(r)),
+      colors: rs.map((r) => r.color),
+      modes: rs.map((r) => r.mode as TransitMode),
+    });
 
-    enrichPromise
-      .then((overpassRoutes) => {
-        if (cancelled) return;
-        // Merge Overpass-discovered routes into the known set
-        const merged = [...selectedStop.routes];
+    // Route enrichment for badges (OTP authoritative, Overpass fallback).
+    // In OTP-covered regions (e.g. NYC MTA) the OTP stop index is
+    // authoritative: when it yields routes, use them as-is so nearby lines
+    // serving different stations don't leak into this stop's badges.
+    const enrichment = (async (): Promise<Array<{
+      ref?: string;
+      name?: string;
+      color?: string;
+      mode: TransitMode;
+    }> | null> => {
+      try {
+        const stopId = await findOtpStopId(snapshot.name, snapshot.lat, snapshot.lon);
+        if (cancelled) return null;
+        if (stopId) {
+          const otpRoutes = await fetchOtpRoutesAtStop(stopId, snapshot.lat, snapshot.lon);
+          if (otpRoutes.length > 0) {
+            return otpRoutes.map((r) => ({
+              ref: r.ref,
+              name: r.name,
+              color: r.color,
+              mode: r.mode,
+            }));
+          }
+        }
+      } catch {
+        // Fall through to Overpass
+      }
+      try {
+        const overpassRoutes = await fetchRoutesAtStop(snapshot.lat, snapshot.lon);
+        const merged: Array<{
+          ref?: string;
+          name?: string;
+          color?: string;
+          mode: TransitMode;
+        }> = [...snapshot.routes];
         for (const r of overpassRoutes) {
           const label = routeBadgeLabel({ ref: r.ref, name: r.name });
           if (!merged.some((m) => routeBadgeLabel(m) === label)) {
             merged.push({ ref: r.ref, name: r.name, color: r.colour, mode: r.mode });
           }
         }
-        if (!cancelled) setEnrichedRoutes(merged);
+        return merged;
+      } catch {
+        return null;
+      }
+    })();
 
-        // Generate departures from the full route list
-        const routeNames = merged.map((r) => routeBadgeLabel(r));
-        const routeColors = merged.map((r) => r.color);
-        const modes = merged.map((r) => r.mode);
-        return fetchDepartures(
-          selectedStop.name,
-          selectedStop.lat,
-          selectedStop.lon,
-          routeNames,
-          routeColors,
-          modes,
+    // Badges update whenever enrichment lands (independent of departures)
+    enrichment.then((merged) => {
+      if (!cancelled && merged) setEnrichedRoutes(merged);
+    });
+
+    // Warm the trip-stop cache for the visible departures so tapping one
+    // opens instantly (shares the request cache with the trip detail view).
+    // Covers the whole first screen (~5 rows); deeper rows fetch on demand.
+    const prefetchTrips = (deps: Departure[]) => {
+      deps
+        .filter((d) => d.tripId)
+        .slice(0, 5)
+        .forEach((d) => {
+          fetchOtpTripStoptimes(d.tripId!, snapshot.lat, snapshot.lon).catch(() => {});
+        });
+    };
+
+    // Fast path: departures immediately from the known routes. If these turn
+    // out to be mere headway estimates and enrichment discovered more lines,
+    // refetch once with the fuller set.
+    const args0 = toArgs(snapshot.routes);
+    fetchDepartures(
+      snapshot.name,
+      snapshot.lat,
+      snapshot.lon,
+      args0.names,
+      args0.colors,
+      args0.modes,
+    )
+      .then(async (info) => {
+        if (cancelled || !info) {
+          if (!cancelled) setLoading(false);
+          return;
+        }
+        setDepartureInfo(info);
+        setLoading(false);
+        prefetchTrips(info.departures);
+
+        const estimated = info.departures.length > 0 && info.departures.every((d) => !d.isRealtime);
+        if (!estimated) return;
+        const merged = await enrichment;
+        if (cancelled || !merged) return;
+        const added = merged.some(
+          (m) => !snapshot.routes.some((x) => routeBadgeLabel(x) === routeBadgeLabel(m)),
         );
-      })
-      .then((info) => {
-        if (!cancelled && info) setDepartureInfo(info);
+        if (!added) return;
+        const args1 = toArgs(merged);
+        const info2 = await fetchDepartures(
+          snapshot.name,
+          snapshot.lat,
+          snapshot.lon,
+          args1.names,
+          args1.colors,
+          args1.modes,
+        );
+        if (!cancelled && info2) {
+          setDepartureInfo(info2);
+          prefetchTrips(info2.departures);
+        }
       })
       .catch(() => {
-        if (!cancelled) setDepartureInfo(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setDepartureInfo(null);
+          setLoading(false);
+        }
       });
 
     return () => {
@@ -735,6 +998,17 @@ export function TransitStopCard() {
             </ScrollView>
           )}
         </>
+      ) : selectedTrip ? (
+        /* ── Trip detail (stops served by one departure) ───────────────── */
+        <TripDetailView
+          trip={selectedTrip}
+          fromName={selectedStop.name}
+          stops={tripStops}
+          loading={tripLoading}
+          showPrev={showPrevStops}
+          onTogglePrev={() => setShowPrevStops((v) => !v)}
+          onBack={() => setSelectedTrip(null)}
+        />
       ) : (
         /* ── Departure board ───────────────────────────────────────────── */
         <>
@@ -814,9 +1088,13 @@ export function TransitStopCard() {
               </View>
             ))}
 
-            {/* Departure rows */}
+            {/* Departure rows — tappable when trip details are available */}
             {departureInfo?.departures.map((dep, i) => (
-              <DepartureRow key={`${dep.routeName}-${dep.minutesAway}-${i}`} departure={dep} />
+              <DepartureRow
+                key={`${dep.tripId ?? dep.routeName}-${dep.minutesAway}-${i}`}
+                departure={dep}
+                onPress={dep.tripId ? () => handleDeparturePress(dep) : undefined}
+              />
             ))}
           </ScrollView>
         </>
@@ -1289,35 +1567,6 @@ function routeBadgeLabel(r: { ref?: string; name?: string }): string {
   return ref || name || '?';
 }
 
-/**
- * Derive the full branch/line name (e.g. "Babylon Branch",
- * "Port Jefferson Branch") for a departure's route.  Prefers the route long
- * name and keeps its Branch/Line suffix, stripping the network prefix when
- * present.  Falls back to the short ref / route name.
- */
-function routeFullName(route: Pick<Departure, 'routeName' | 'routeLongName'>): string {
-  const ref = (route.routeName ?? '').trim();
-  const longName = (route.routeLongName ?? '').trim();
-
-  if (longName) {
-    const match = longName.match(/[A-Z][\w\s/.-]*?(?:Branch|Line|Express|Local)\b/);
-    if (match) {
-      const full = match[0].trim();
-      const cleaned = full
-        .replace(/^Long Island Rail Road:\s*/i, '')
-        .replace(/^LIRR\s+/i, '')
-        .replace(/^Metro-North Railroad:\s*/i, '')
-        .replace(/^NJ Transit\s+/i, '')
-        .replace(/^MTA\s+/i, '')
-        .trim();
-      if (cleaned) return cleaned;
-    }
-  }
-
-  if (ref && ref.length <= 3 && /^[A-Z]{2,4}$/.test(ref)) return ref;
-  return ref || longName || '?';
-}
-
 // ── Styles ──────────────────────────────────────────────────────────
 
 const badgeStyles = StyleSheet.create({
@@ -1339,35 +1588,14 @@ const depStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(128,128,128,0.2)',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    flex: 1,
+    gap: 12,
   },
   info: {
     flex: 1,
-  },
-  pillRow: {
-    marginTop: 8,
-  },
-  branchPill: {
-    alignSelf: 'flex-start',
-    height: 24,
-    minHeight: 24,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    justifyContent: 'center',
-  },
-  branchPillText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   headsign: {
     fontSize: 15,
@@ -1387,6 +1615,46 @@ const depStyles = StyleSheet.create({
   },
   minLabel: {
     fontSize: 12,
+  },
+  clockTime: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+});
+
+const tripStyles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+    gap: 10,
+  },
+  headerText: {
+    flex: 1,
+  },
+  destination: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  fromLine: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  prevToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  prevToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  stopSub: {
+    fontSize: 13,
+    marginTop: 1,
   },
 });
 

@@ -55,12 +55,12 @@ Trip planning:
 
 ## Key Constants
 
-| Constant              | Value   | Description                                  |
-| --------------------- | ------- | -------------------------------------------- |
-| `TILE_SIZE_DEG`       | 0.05    | Spatial cache tile granularity (~5km)        |
-| `PROXIMITY_DEG`       | 0.003   | Stop-to-route geometry matching threshold    |
-| `STOP_CACHE_TTL_MS`   | 300,000 | 5-minute TTL for stop cache entries          |
-| `STOP_ROUTE_RADIUS_M` | 500     | Maximum distance for on-tap route enrichment |
+| Constant              | Value   | Description                                                                                                             |
+| --------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `TILE_SIZE_DEG`       | 0.05    | Spatial cache tile granularity (~5km)                                                                                   |
+| `PROXIMITY_DEG`       | 0.001   | Stop-to-route geometry matching threshold                                                                               |
+| `STOP_CACHE_TTL_MS`   | 300,000 | 5-minute TTL for stop cache entries                                                                                     |
+| `STOP_ROUTE_RADIUS_M` | 100     | Stop-identification radius for on-tap route enrichment (attribution is by OSM relation membership, not track proximity) |
 
 ## Related Files
 

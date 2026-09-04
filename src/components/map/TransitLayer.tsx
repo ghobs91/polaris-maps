@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { useTransitStore } from '../../stores/transitStore';
+import { hasAuthoritativeStops } from '../../services/transit/transitLineFetcher';
 
 import type { TransitRouteLine, OtpItinerary, SelectedTransitStop } from '../../models/transit';
 
@@ -144,13 +145,15 @@ const STOP_LABEL_STYLE_HIDDEN = {
 
 /**
  * Approximate degree-distance threshold for stop↔route association.
- * ~0.003° ≈ 300 m — if a route's geometry passes within this distance
+ * ~0.001° ≈ 110 m — if a route's geometry passes within this distance
  * of a stop, we consider that route as serving the stop.  This catches
  * cases where OSM relations are incomplete (e.g. LIRR Ronkonkoma
  * Branch doesn't list Hicksville as a member even though its tracks
- * run through the station).
+ * run through the station) without merging distinct stations in dense
+ * metros (e.g. NYC City Hall (N/R/W) vs Brooklyn Bridge-City Hall
+ * (4/5/6/J/Z), ~240 m apart, must stay distinct).
  */
-const PROXIMITY_DEG = 0.003;
+const PROXIMITY_DEG = 0.001;
 
 // ── Spatial grid index for fast geometry-proximity lookups ──────────
 // Buckets route geometry points into ~1 km cells so stop↔route
@@ -264,11 +267,16 @@ function RouteStopsLayer({
     // ── Geometry-proximity enrichment (spatial-indexed) ─────────────
     // For each stop, check only lines whose geometry passes nearby
     // using the grid index, then confirm with fine-grained check.
+    // Skipped for schedule-derived lines (OTP/GTFS): their stop lists are
+    // exact, and geometry guessing merges distinct stations in dense metros
+    // (e.g. NYC City Hall N/R/W vs Brooklyn Bridge-City Hall 4/5/6/J/Z).
+    // Only OSM-sourced lines (known-incomplete membership) are enriched.
     const grid = buildRouteGrid(lines);
     for (const stop of seen.values()) {
       const candidateIndices = getNearbyLineIndices(grid, stop.lat, stop.lon);
       for (const li of candidateIndices) {
         const line = lines[li];
+        if (hasAuthoritativeStops(line)) continue;
         const routeKey = `${line.ref}\0${line.name}`;
         if (stop.routeSet.has(routeKey)) continue;
         if (routePassesNear(line, stop.lat, stop.lon)) {
