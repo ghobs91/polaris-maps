@@ -24,6 +24,7 @@ import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { PlaceDetailEmbed } from './PlaceDetailEmbed';
+import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
 import { buildPlaceDetailUrl } from '../../services/poi/placeDetailEmbed';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
@@ -921,6 +922,9 @@ export function POIInfoCard() {
                 borderColor={pillSecondaryBorder}
               />
             </View>
+
+            {/* ── Website photos (on-device headless browse of POI website) ─── */}
+            <WebsitePhotosCarousel websiteUrl={parsed.website} resetKey={poi.id} />
 
             {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
             {embedState === 'embedded' && (
