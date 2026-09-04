@@ -109,4 +109,14 @@ describe('CarPlay iOS configuration', () => {
       'DispatchQueue.main.async { Self.attachPendingSceneIfNeeded() }',
     );
   });
+
+  it('keeps asynchronous search results connected to the CarPlay completion handler', () => {
+    const nativeModule = readRepoFile('plugins/native/PolarisMaps/PolarisCarPlay.swift');
+
+    expect(nativeModule).toContain('private var pendingSearchCompletion');
+    expect(nativeModule).toContain('finishPendingSearch()');
+    expect(nativeModule).toContain('searchItems = items\n    finishPendingSearch()');
+    expect(nativeModule).toContain('pendingSearchCompletion = completionHandler');
+    expect(nativeModule).toContain('completionHandler: @escaping ([CPListItem]) -> Void');
+  });
 });

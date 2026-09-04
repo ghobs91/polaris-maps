@@ -56,8 +56,8 @@ jest.mock('../../src/native/valhalla', () => ({
 jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: jest.fn().mockReturnValue(true),
 }));
-jest.mock('../../src/services/search/unifiedSearch');
-jest.mock('../../src/services/routing/routingService');
+jest.mock('../../src/services/search/unifiedSearch', () => ({ unifiedSearch: jest.fn() }));
+jest.mock('../../src/services/routing/routingService', () => ({ computeRoute: jest.fn() }));
 
 import { NativeModules } from 'react-native';
 import {
@@ -219,11 +219,39 @@ describe('CarPlayManager', () => {
     initCarPlay();
     fireEvent('carPlayConnected');
 
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationName: 'Dest',
+        destinationLat: 40.76,
+        destinationLng: -73.97,
+        encodedPolyline: route.geometry,
+      }),
+    );
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
       expect.objectContaining({
         isNavigating: true,
         instruction: 'Head north on Main St',
         maneuverType: 'start',
+      }),
+    );
+  });
+
+  it('starts a CarPlay navigation session when phone navigation starts while connected', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    jest.clearAllMocks();
+
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationName: 'Dest',
+        destinationLat: 40.76,
+        destinationLng: -73.97,
+        encodedPolyline: route.geometry,
       }),
     );
   });

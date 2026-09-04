@@ -11,8 +11,9 @@
 
 import { Platform } from 'react-native';
 import * as CarPlay from '../../native/carplay';
-import type { CarPlaySearchResult } from '../../native/carplay';
+import type { CarPlaySearchResult, CarPlayStartNavigationData } from '../../native/carplay';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { useMapStore } from '../../stores/mapStore';
 import { unifiedSearch } from '../search/unifiedSearch';
 import { computeRoute } from '../routing/routingService';
@@ -22,6 +23,12 @@ let initialized = false;
 let connected = false;
 let subscriptions: EmitterSubscription[] = [];
 let navUnsubscribe: (() => void) | null = null;
+let trackingUnsubscribe: (() => void) | null = null;
+let carPlayRouteKey: string | null = null;
+let searchRequestId = 0;
+let searchAbortController: AbortController | null = null;
+let mapCenterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingMapCenter: { lat: number; lng: number; heading: number } | null = null;
 
 /**
  * Initialise the CarPlay manager. Safe to call multiple times — subsequent
@@ -52,8 +59,15 @@ export function teardownCarPlay(): void {
   subscriptions = [];
   navUnsubscribe?.();
   navUnsubscribe = null;
+  trackingUnsubscribe?.();
+  trackingUnsubscribe = null;
+  clearMapCenterUpdate();
+  searchAbortController?.abort();
+  searchAbortController = null;
+  searchRequestId += 1;
   initialized = false;
   connected = false;
+  carPlayRouteKey = null;
 }
 
 /** Whether CarPlay is currently connected. */
@@ -73,6 +87,8 @@ function onConnected() {
   // Sync current navigation state whenever it changes
   navUnsubscribe?.();
   navUnsubscribe = useNavigationStore.subscribe(syncNavigationState);
+  trackingUnsubscribe?.();
+  trackingUnsubscribe = useNavigationTrackingStore.subscribe(syncMapCenter);
 
   // If navigation is already active, push initial state
   syncNavigationState(useNavigationStore.getState());
@@ -82,15 +98,30 @@ function onDisconnected() {
   connected = false;
   navUnsubscribe?.();
   navUnsubscribe = null;
+  trackingUnsubscribe?.();
+  trackingUnsubscribe = null;
+  clearMapCenterUpdate();
+  searchAbortController?.abort();
+  searchAbortController = null;
+  searchRequestId += 1;
+  carPlayRouteKey = null;
 }
 
 function syncNavigationState(state: ReturnType<typeof useNavigationStore.getState>) {
   if (!connected) return;
 
-  if (!state.isNavigating || !state.activeRoute || !state.currentManeuver) {
+  if (!state.isNavigating || !state.activeRoute || !state.currentManeuver || !state.destination) {
+    clearMapCenterUpdate();
     CarPlay.updateNavigation({ isNavigating: false } as any);
     CarPlay.endNavigation();
+    carPlayRouteKey = null;
     return;
+  }
+
+  const routeKey = `${state.activeRoute.geometry}:${state.destination.lat}:${state.destination.lng}`;
+  if (carPlayRouteKey !== routeKey) {
+    CarPlay.startNavigation(toCarPlayNavigationData(state));
+    carPlayRouteKey = routeKey;
   }
 
   const allManeuvers = state.activeRoute.legs.flatMap((l) => l.maneuvers);
@@ -109,18 +140,53 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     nextDistanceMeters: nextManeuver?.distanceMeters,
     nextDurationSeconds: nextManeuver?.durationSeconds,
   });
+  syncMapCenter(useNavigationTrackingStore.getState());
+}
+
+function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getState>) {
+  if (!connected || !useNavigationStore.getState().isNavigating || !state.navPosition) return;
+
+  pendingMapCenter = {
+    lat: state.navPosition[1],
+    lng: state.navPosition[0],
+    heading: state.navBearing,
+  };
+  if (mapCenterUpdateTimer !== null) return;
+
+  mapCenterUpdateTimer = setTimeout(() => {
+    mapCenterUpdateTimer = null;
+    const center = pendingMapCenter;
+    pendingMapCenter = null;
+    if (!center || !connected || !useNavigationStore.getState().isNavigating) return;
+    CarPlay.updateMapCenter(center.lat, center.lng, center.heading);
+  }, 100);
+}
+
+function clearMapCenterUpdate() {
+  if (mapCenterUpdateTimer !== null) {
+    clearTimeout(mapCenterUpdateTimer);
+    mapCenterUpdateTimer = null;
+  }
+  pendingMapCenter = null;
 }
 
 async function onSearchQuery({ query }: { query: string }) {
   if (!connected) return;
 
+  const requestId = ++searchRequestId;
+  searchAbortController?.abort();
+  const controller = new AbortController();
+  searchAbortController = controller;
   const { viewport } = useMapStore.getState();
   try {
     const results = await unifiedSearch(query, {
       lat: viewport.lat,
       lng: viewport.lng,
       zoom: viewport.zoom,
+      signal: controller.signal,
     });
+
+    if (requestId !== searchRequestId || controller.signal.aborted || !connected) return;
 
     const carPlayResults: CarPlaySearchResult[] = results.slice(0, 12).map((r) => ({
       name: r.name,
@@ -131,7 +197,9 @@ async function onSearchQuery({ query }: { query: string }) {
 
     CarPlay.pushSearchResults(carPlayResults);
   } catch {
-    CarPlay.pushSearchResults([]);
+    if (requestId === searchRequestId && !controller.signal.aborted && connected) {
+      CarPlay.pushSearchResults([]);
+    }
   }
 }
 
@@ -158,28 +226,32 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
     const route = routes[0];
     if (!route) return;
 
-    // Build maneuver list for CarPlay
-    const maneuvers = route.legs.flatMap((leg) =>
-      leg.maneuvers.map((m) => ({
-        instruction: m.instruction,
-        maneuverType: m.type,
-        distanceMeters: m.distanceMeters,
-        durationSeconds: m.durationSeconds,
-      })),
-    );
-
-    // Start navigation on CarPlay display
-    CarPlay.startNavigation({
-      destinationName: name,
-      destinationLat: lat,
-      destinationLng: lng,
-      encodedPolyline: route.geometry,
-      maneuvers,
-    });
-
-    // Also start navigation in the phone-side store so state stays in sync
+    // Start navigation in the phone-side store. The store subscription above
+    // creates the CarPlay session and keeps it in sync for every entry point.
     useNavigationStore.getState().startNavigation(route, [], { lat, lng, name }, 'auto');
   } catch {
     // Route computation failed — silently ignore on CarPlay
   }
+}
+
+function toCarPlayNavigationData(
+  state: ReturnType<typeof useNavigationStore.getState>,
+): CarPlayStartNavigationData {
+  const route = state.activeRoute!;
+  const destination = state.destination!;
+
+  return {
+    destinationName: destination.name ?? 'Destination',
+    destinationLat: destination.lat,
+    destinationLng: destination.lng,
+    encodedPolyline: route.geometry,
+    maneuvers: route.legs.flatMap((leg) =>
+      leg.maneuvers.map((maneuver) => ({
+        instruction: maneuver.instruction,
+        maneuverType: maneuver.type,
+        distanceMeters: maneuver.distanceMeters,
+        durationSeconds: maneuver.durationSeconds,
+      })),
+    ),
+  };
 }

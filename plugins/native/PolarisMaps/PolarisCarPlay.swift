@@ -196,6 +196,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   private var navigationSession: CPNavigationSession?
   private var searchItems: [CarPlaySearchItem] = []
+  private var activeSearchText = ""
+  private var pendingSearchCompletion: (([CPListItem]) -> Void)?
 
   private lazy var mapViewHost = CarPlayMapViewHost()
 
@@ -226,6 +228,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     mapTemplate = nil
     searchTemplate = nil
     sessionConfiguration = nil
+    searchItems = []
+    activeSearchText = ""
+    pendingSearchCompletion = nil
   }
 
   // MARK: Map buttons
@@ -257,6 +262,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     else { return }
 
     endNavigation()
+
+    // A phone-side navigation session may connect before its first position
+    // update reaches CarPlay. Use the route start instead of leaving the trip
+    // origin at the map host's (0, 0) default.
+    if mapViewHost.currentCoordinate.latitude == 0 && mapViewHost.currentCoordinate.longitude == 0,
+      let firstCoordinate = PolylineDecoder.decode(payload.encodedPolyline).first {
+      mapViewHost.currentCoordinate = firstCoordinate
+    }
 
     let origin = MKMapItem(placemark: MKPlacemark(coordinate: mapViewHost.currentCoordinate))
     origin.name = "Current location"
@@ -335,12 +348,30 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func replaceSearchResults(_ items: [CarPlaySearchItem]) {
     searchItems = items
+    finishPendingSearch()
   }
 
   private func makeListItem(from item: CarPlaySearchItem) -> CPListItem {
     let listItem = CPListItem(text: item.name, detailText: item.subtitle)
     listItem.userInfo = ["lat": item.lat, "lng": item.lng, "name": item.name]
     return listItem
+  }
+
+  private func listItems(for searchText: String) -> [CPListItem] {
+    let query = searchText.lowercased()
+    let matches =
+      query.isEmpty
+      ? searchItems
+      : searchItems.filter {
+        $0.name.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
+      }
+    return matches.prefix(12).map { makeListItem(from: $0) }
+  }
+
+  private func finishPendingSearch() {
+    guard let completion = pendingSearchCompletion else { return }
+    pendingSearchCompletion = nil
+    completion(listItems(for: activeSearchText))
   }
 
   // MARK: CPSearchTemplateDelegate
@@ -350,16 +381,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     updatedSearchText searchText: String,
     completionHandler: @escaping ([CPListItem]) -> Void
   ) {
+    // Complete the previous request before replacing it. CarPlay invokes this
+    // delegate for each keystroke, while the JS search pipeline is async.
+    finishPendingSearch()
+    activeSearchText = searchText
+    pendingSearchCompletion = completionHandler
     PolarisCarPlay.emitSearchQuery(searchText)
-
-    let query = searchText.lowercased()
-    let matches =
-      query.isEmpty
-      ? searchItems
-      : searchItems.filter {
-        $0.name.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
-      }
-    completionHandler(matches.prefix(12).map { makeListItem(from: $0) })
   }
 
   func searchTemplate(_ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void) {
