@@ -167,6 +167,13 @@ export default function NavigationScreen() {
     setShowAddDestination(false);
   }, []);
 
+  // Search submitted in the add-stop panel: release camera follow so the
+  // route-overview fit isn't yanked back to the chevron on the next GPS tick.
+  // The Re-center button appears so the user can resume follow mode.
+  const handleShowSearchResultsOnMap = useCallback(() => {
+    setFollowCamera(false);
+  }, []);
+
   const handleSelectDestination = useCallback(
     async (result: UnifiedSearchResult) => {
       const pos = navPositionRef.current;
@@ -498,6 +505,7 @@ export default function NavigationScreen() {
         visible={showAddDestination}
         onClose={handleCloseAddDestination}
         onSelect={handleSelectDestination}
+        onShowOnMap={handleShowSearchResultsOnMap}
         searchCenter={
           navPosition ? { lat: navPosition[1], lng: navPosition[0] } : { lat: 0, lng: 0 }
         }

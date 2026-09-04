@@ -7,22 +7,40 @@ import {
   FlatList,
   StyleSheet,
   Animated,
-  KeyboardAvoidingView,
   Platform,
   Keyboard,
   ActivityIndicator,
   Pressable,
+  InteractionManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
+import { computeRoute } from '../../services/routing/routingService';
+import { useNavigationStore } from '../../stores/navigationStore';
+import { useMapStore } from '../../stores/mapStore';
+import { decodePolyline } from '../../utils/polyline';
 import { spacing } from '../../constants/theme';
+
+function detourKey(r: { lat: number; lng: number }): string {
+  return `${r.lat.toFixed(5)},${r.lng.toFixed(5)}`;
+}
+
+/** Human-readable detour label. `undefined` = still calculating, `null` = failed. */
+function detourLabel(detour: number | null | undefined): string | null {
+  if (detour === undefined) return 'Calculating detour…';
+  if (detour === null) return null;
+  if (detour <= 90) return 'On route';
+  return `+${Math.round(detour / 60)} min detour`;
+}
 
 interface AddDestinationPanelProps {
   visible: boolean;
   onClose: () => void;
   onSelect: (result: UnifiedSearchResult) => void;
   searchCenter: { lat: number; lng: number };
+  /** Called when the user submits a search so the host can show the route overview (break camera follow). */
+  onShowOnMap?: () => void;
 }
 
 export function AddDestinationPanel({
@@ -30,19 +48,35 @@ export function AddDestinationPanel({
   onClose,
   onSelect,
   searchCenter,
+  onShowOnMap,
 }: AddDestinationPanelProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UnifiedSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  /** True after the user hits search — results stay visible with detour times + map pins. */
+  const [submitted, setSubmitted] = useState(false);
+  const [detours, setDetours] = useState<Record<string, number | null>>({});
   const slideAnim = useRef(new Animated.Value(0)).current;
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<TextInput>(null);
+  const detourGenRef = useRef(0);
+
+  const activeRoute = useNavigationStore((s) => s.activeRoute);
+  const waypoints = useNavigationStore((s) => s.waypoints);
+  const currentLegIndex = useNavigationStore((s) => s.currentLegIndex);
+  const destination = useNavigationStore((s) => s.destination);
+  const costing = useNavigationStore((s) => s.costing);
+  const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
 
   // Animate panel in/out
   useEffect(() => {
     if (visible) {
       setQuery('');
       setResults([]);
+      setSubmitted(false);
+      setDetours({});
       Animated.timing(slideAnim, {
         toValue: 1,
         duration: 250,
@@ -56,6 +90,36 @@ export function AddDestinationPanel({
       }).start();
     }
   }, [visible, slideAnim]);
+
+  // Track keyboard height and pad the panel above it. (A KeyboardAvoidingView
+  // with behavior="padding" doesn't shift this absolutely-positioned bottom
+  // sheet, which left the input hidden behind the keyboard.)
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Focus the input after layout settles — autoFocus fires while the slide-up
+  // animation is still running, which races the keyboard and leaves the input
+  // covered on first open.
+  useEffect(() => {
+    if (visible) {
+      const handle = InteractionManager.runAfterInteractions(() => {
+        inputRef.current?.focus();
+      });
+      return () => handle.cancel();
+    }
+  }, [visible]);
 
   // Handle speech recognition events
   useSpeechRecognitionEvent('result', (event) => {
@@ -115,10 +179,10 @@ export function AddDestinationPanel({
   }, [isListening, checkPermissions]);
 
   const performSearch = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<UnifiedSearchResult[]> => {
       if (!text.trim()) {
         setResults([]);
-        return;
+        return [];
       }
       setLoading(true);
       try {
@@ -130,8 +194,10 @@ export function AddDestinationPanel({
           userLocation: searchCenter,
         });
         setResults(searchResults);
+        return searchResults;
       } catch {
         setResults([]);
+        return [];
       } finally {
         setLoading(false);
       }
@@ -142,13 +208,104 @@ export function AddDestinationPanel({
   const handleChangeText = useCallback(
     (text: string) => {
       setQuery(text);
+      // New keystrokes invalidate the submitted overview — clear pins/detours
+      // until the user hits search again.
+      setSubmitted(false);
+      setDetours({});
+      useMapStore.getState().setStopSearchMarkers([]);
       if (searchTimeout.current) clearTimeout(searchTimeout.current);
       searchTimeout.current = setTimeout(() => {
-        performSearch(text);
+        void performSearch(text);
       }, 350);
     },
     [performSearch],
   );
+
+  // User hit search/submit: keep the list visible, drop pins for every result
+  // on the map, and zoom out to the full route so they can pick a stop.
+  const handleSearchSubmit = useCallback(async () => {
+    if (searchTimeout.current) {
+      clearTimeout(searchTimeout.current);
+      searchTimeout.current = null;
+    }
+    const searchResults = await performSearch(query);
+    if (searchResults.length === 0) return;
+    Keyboard.dismiss();
+    setSubmitted(true);
+    useMapStore
+      .getState()
+      .setStopSearchMarkers(searchResults.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })));
+    // Fit the camera to the route + all results (MapView applies bottom
+    // padding for the "search" mode so the sheet doesn't cover the pins).
+    const coords: Array<[number, number]> = [];
+    if (activeRoute?.geometry) {
+      coords.push(...decodePolyline(activeRoute.geometry));
+    }
+    for (const r of searchResults) coords.push([r.lng, r.lat]);
+    if (coords.length > 0) {
+      let minLng = Infinity;
+      let minLat = Infinity;
+      let maxLng = -Infinity;
+      let maxLat = -Infinity;
+      for (const [lng, lat] of coords) {
+        if (lng < minLng) minLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lng > maxLng) maxLng = lng;
+        if (lat > maxLat) maxLat = lat;
+      }
+      useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat], 'search');
+    }
+    onShowOnMap?.();
+  }, [query, performSearch, activeRoute, onShowOnMap]);
+
+  // Compute the added drive time for each submitted result by routing through
+  // it (inserted after the current target, same as onSelect) vs. the current
+  // route's duration.
+  useEffect(() => {
+    if (!submitted || results.length === 0 || !destination) return;
+    const baseSeconds = activeRoute?.summary.durationSeconds;
+    if (baseSeconds == null) return;
+    let cancelled = false;
+    const gen = (detourGenRef.current += 1);
+    setDetours({});
+    const pending = waypoints.slice(currentLegIndex);
+    void (async () => {
+      const settled = await Promise.allSettled(
+        results.map(async (r) => {
+          const withNew = [...pending];
+          const stop = { lat: r.lat, lng: r.lng, name: r.name };
+          if (withNew.length > 0) withNew.splice(1, 0, stop);
+          else withNew.push(stop);
+          const routeWaypoints = [
+            { lat: searchCenter.lat, lng: searchCenter.lng },
+            ...withNew,
+            { lat: destination.lat, lng: destination.lng },
+          ];
+          const routes = await computeRoute(routeWaypoints, costing);
+          const duration = routes[0]?.summary.durationSeconds;
+          return duration != null ? Math.max(0, duration - baseSeconds) : null;
+        }),
+      );
+      if (cancelled || detourGenRef.current !== gen) return;
+      const next: Record<string, number | null> = {};
+      settled.forEach((entry, i) => {
+        next[detourKey(results[i])] = entry.status === 'fulfilled' ? entry.value : null;
+      });
+      setDetours(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    submitted,
+    results,
+    activeRoute,
+    waypoints,
+    currentLegIndex,
+    destination,
+    costing,
+    searchCenter,
+  ]);
 
   const handleClose = useCallback(() => {
     Keyboard.dismiss();
@@ -156,6 +313,10 @@ export function AddDestinationPanel({
       ExpoSpeechRecognitionModule.stop();
       setIsListening(false);
     }
+    useMapStore.getState().setStopSearchMarkers([]);
+    useMapStore.getState().setPendingStopSelection(null);
+    setSubmitted(false);
+    setDetours({});
     onClose();
   }, [onClose, isListening]);
 
@@ -166,6 +327,10 @@ export function AddDestinationPanel({
         ExpoSpeechRecognitionModule.stop();
         setIsListening(false);
       }
+      useMapStore.getState().setStopSearchMarkers([]);
+      useMapStore.getState().setPendingStopSelection(null);
+      setSubmitted(false);
+      setDetours({});
       onSelect(result);
       setQuery('');
       setResults([]);
@@ -173,27 +338,49 @@ export function AddDestinationPanel({
     [onSelect, isListening],
   );
 
+  // Tapping a result pin on the map selects that result.
+  useEffect(() => {
+    if (!pendingStopSelection) return;
+    const match = results.find(
+      (r) =>
+        Math.abs(r.lat - pendingStopSelection.lat) < 0.0001 &&
+        Math.abs(r.lng - pendingStopSelection.lng) < 0.0001,
+    );
+    if (match) {
+      useMapStore.getState().setPendingStopSelection(null);
+      handleSelect(match);
+    }
+  }, [pendingStopSelection, results, handleSelect]);
+
   const renderItem = useCallback(
-    ({ item }: { item: UnifiedSearchResult }) => (
-      <Pressable
-        style={({ pressed }) => [styles.resultItem, pressed && styles.resultItemPressed]}
-        onPress={() => handleSelect(item)}
-      >
-        <View style={styles.resultIcon}>
-          <Ionicons name="location-outline" size={20} color="#409CFF" />
-        </View>
-        <View style={styles.resultTextContainer}>
-          <Text style={styles.resultName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.resultSubtitle} numberOfLines={1}>
-            {item.subtitle}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
-      </Pressable>
-    ),
-    [handleSelect, styles],
+    ({ item }: { item: UnifiedSearchResult }) => {
+      const label = submitted ? detourLabel(detours[detourKey(item)]) : null;
+      return (
+        <Pressable
+          style={({ pressed }) => [styles.resultItem, pressed && styles.resultItemPressed]}
+          onPress={() => handleSelect(item)}
+        >
+          <View style={styles.resultIcon}>
+            <Ionicons name="location-outline" size={20} color="#409CFF" />
+          </View>
+          <View style={styles.resultTextContainer}>
+            <Text style={styles.resultName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.resultSubtitle} numberOfLines={1}>
+              {item.subtitle}
+            </Text>
+            {label != null && (
+              <Text style={styles.resultDetour} numberOfLines={1}>
+                {label}
+              </Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.3)" />
+        </Pressable>
+      );
+    },
+    [handleSelect, styles, detours, submitted],
   );
 
   const renderSeparator = useCallback(() => <View style={styles.separator} />, []);
@@ -208,10 +395,7 @@ export function AddDestinationPanel({
   return (
     <View style={styles.overlay} pointerEvents={visible ? 'auto' : 'none'}>
       <TouchableOpacity style={styles.backdrop} onPress={handleClose} activeOpacity={1} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.keyboardAvoid}
-      >
+      <View style={[styles.keyboardAvoid, keyboardHeight > 0 && { paddingBottom: keyboardHeight }]}>
         <Animated.View style={[styles.panel, { transform: [{ translateY }] }]}>
           {/* Drag handle */}
           <View style={styles.dragHandle} />
@@ -226,12 +410,13 @@ export function AddDestinationPanel({
                 style={styles.searchIcon}
               />
               <TextInput
+                ref={inputRef}
                 style={styles.searchInput}
                 value={query}
                 onChangeText={handleChangeText}
+                onSubmitEditing={handleSearchSubmit}
                 placeholder="Where to?"
                 placeholderTextColor="rgba(255,255,255,0.4)"
-                autoFocus={visible}
                 autoCorrect={false}
                 returnKeyType="search"
                 selectionColor="#409CFF"
@@ -296,7 +481,7 @@ export function AddDestinationPanel({
             />
           )}
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
@@ -430,6 +615,12 @@ const styles = StyleSheet.create({
   resultSubtitle: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 13,
+    marginTop: 2,
+  },
+  resultDetour: {
+    color: '#4ADE80',
+    fontSize: 13,
+    fontWeight: '600',
     marginTop: 2,
   },
   separator: {
