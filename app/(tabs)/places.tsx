@@ -12,7 +12,6 @@ import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
-import { useICloudSync } from '../../src/hooks/useICloudSync';
 import { isICloudAvailable } from '../../src/services/icloud/iCloudSyncService';
 import { parseImport } from '../../src/services/places/importService';
 import { PlaceListCard } from '../../src/components/places';
@@ -30,7 +29,6 @@ export default function MyPlacesScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  useICloudSync();
 
   const lists = usePlaceListStore((s) => s.lists);
   const createList = usePlaceListStore((s) => s.createList);

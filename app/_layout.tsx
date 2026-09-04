@@ -13,9 +13,15 @@ import {
   resumeTrafficP2P,
 } from '@/services/traffic/trafficFlowService';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
+import { useICloudSync } from '@/hooks/useICloudSync';
 
 function RootLayoutInner() {
   const { isDark, colors } = useTheme();
+
+  // Sync place lists + favorites with iCloud for the whole app lifetime.
+  // Previously this only ran while the My Places tab was mounted, so edits
+  // made elsewhere (e.g. Home/Work favorites) never synced.
+  useICloudSync();
 
   useEffect(() => {
     useAtprotoAuthStore.getState().restore();

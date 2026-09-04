@@ -12,6 +12,30 @@ export interface FavoriteLocation {
 
 const FAVORITES_KEY = 'favorites_v1';
 
+type FavoritesListener = () => void;
+const listeners = new Set<FavoritesListener>();
+
+/**
+ * Subscribe to favorite changes (saves, removals, iCloud restores).
+ * Used by the iCloud sync hook to push local edits. Returns unsubscribe.
+ */
+export function subscribeFavorites(listener: FavoritesListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function notifyFavoritesChanged(): void {
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      // A failing listener must not break favorites persistence.
+    }
+  }
+}
+
 export function getFavorites(): FavoriteLocation[] {
   const raw = storage.getString(FAVORITES_KEY);
   if (!raw) return [];
@@ -35,11 +59,21 @@ export function setFavorite(fav: FavoriteLocation): void {
   } else {
     storage.set(FAVORITES_KEY, JSON.stringify([...list, fav]));
   }
+  notifyFavoritesChanged();
 }
 
 export function removeFavorite(id: string): void {
   const list = getFavorites().filter((f) => f.id !== id);
   storage.set(FAVORITES_KEY, JSON.stringify(list));
+  notifyFavoritesChanged();
+}
+
+/**
+ * Replace the entire favorites collection (used by iCloud sync merge).
+ */
+export function replaceAllFavorites(favorites: FavoriteLocation[]): void {
+  storage.set(FAVORITES_KEY, JSON.stringify(favorites));
+  notifyFavoritesChanged();
 }
 
 export function getHome(): FavoriteLocation | undefined {

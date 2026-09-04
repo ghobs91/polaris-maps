@@ -1,7 +1,17 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import type { PlaceList } from '../../models/placeList';
+import type { FavoriteLocation } from '../favorites/favoritesService';
 
-const CLOUD_FILE = 'place_lists.json';
+export const LISTS_KEY = 'place_lists.json';
+export const FAVORITES_KEY = 'favorites.json';
+
+/**
+ * NSUbiquitousKeyValueStore caps out around 1MB total with small per-key
+ * limits (~64KB). Refuse oversized writes instead of silently losing data —
+ * callers get `false` and can surface a warning. Large libraries need a
+ * CloudKit / iCloud Drive backend, which this bridge does not provide.
+ */
+export const MAX_KVS_VALUE_BYTES = 60 * 1024;
 
 interface CloudStoreModule {
   isAvailable(): Promise<boolean>;
@@ -31,29 +41,88 @@ export async function isICloudAvailable(): Promise<boolean> {
   }
 }
 
-export async function writeListsToICloud(lists: PlaceList[]): Promise<boolean> {
+export function utf8ByteLength(value: string): number {
+  try {
+    if (typeof TextEncoder !== 'undefined') {
+      return new TextEncoder().encode(value).length;
+    }
+  } catch {
+    // Fall through to the manual estimate below.
+  }
+  let length = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x80) {
+      length += 1;
+    } else if (code < 0x800) {
+      length += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        length += 4;
+        i++;
+      } else {
+        length += 3;
+      }
+    } else {
+      length += 3;
+    }
+  }
+  return length;
+}
+
+async function writeKey(key: string, value: unknown): Promise<boolean> {
   if (!CloudStore) return false;
   try {
     const available = await CloudStore.isAvailable();
     if (!available) return false;
-    const json = JSON.stringify(lists);
-    return await CloudStore.write(CLOUD_FILE, json);
+    const json = JSON.stringify(value);
+    if (utf8ByteLength(json) > MAX_KVS_VALUE_BYTES) {
+      console.warn(
+        `[iCloudSync] Payload for "${key}" exceeds the key-value size limit ` +
+          'and was not written. Large libraries need CloudKit / iCloud Drive.',
+      );
+      return false;
+    }
+    return await CloudStore.write(key, json);
   } catch {
     return false;
   }
 }
 
-export async function readListsFromICloud(): Promise<PlaceList[] | null> {
+async function readKey<T>(key: string): Promise<T | null> {
   if (!CloudStore) return null;
   try {
     const available = await CloudStore.isAvailable();
     if (!available) return null;
-    const raw = await CloudStore.read(CLOUD_FILE);
+    const raw = await CloudStore.read(key);
     if (!raw) return null;
-    return JSON.parse(raw) as PlaceList[];
+    const parsed: unknown = JSON.parse(raw);
+    // A missing key, a partially synced value, or a corrupt payload all
+    // surface as null so callers never merge garbage over local data.
+    // Note: null is ambiguous — it means "no confirmed cloud data", not
+    // "cloud is empty". Callers must not treat it as permission to push
+    // an empty local state over the cloud copy (see useICloudSync).
+    return Array.isArray(parsed) ? (parsed as T) : null;
   } catch {
     return null;
   }
+}
+
+export async function writeListsToICloud(lists: PlaceList[]): Promise<boolean> {
+  return writeKey(LISTS_KEY, lists);
+}
+
+export async function readListsFromICloud(): Promise<PlaceList[] | null> {
+  return readKey<PlaceList[]>(LISTS_KEY);
+}
+
+export async function writeFavoritesToICloud(favorites: FavoriteLocation[]): Promise<boolean> {
+  return writeKey(FAVORITES_KEY, favorites);
+}
+
+export async function readFavoritesFromICloud(): Promise<FavoriteLocation[] | null> {
+  return readKey<FavoriteLocation[]>(FAVORITES_KEY);
 }
 
 /**
@@ -78,15 +147,51 @@ export function mergeLists(local: PlaceList[], cloud: PlaceList[]): PlaceList[] 
   return Array.from(merged.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Merge cloud favorites (Home/Work/pins) with local favorites.
+ * Favorites carry no timestamps, so same-ID conflicts keep the local
+ * entry and entries unique to either side are preserved. Home sorts
+ * first, Work second, matching favoritesService ordering.
+ */
+export function mergeFavorites(
+  local: FavoriteLocation[],
+  cloud: FavoriteLocation[],
+): FavoriteLocation[] {
+  const merged = new Map<string, FavoriteLocation>();
+
+  for (const fav of cloud) {
+    merged.set(fav.id, fav);
+  }
+
+  for (const fav of local) {
+    merged.set(fav.id, fav);
+  }
+
+  const rank = (fav: FavoriteLocation): number =>
+    fav.kind === 'home' ? 0 : fav.kind === 'work' ? 1 : 2;
+  return Array.from(merged.values()).sort((a, b) => rank(a) - rank(b));
+}
+
+let listsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let favoritesDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Debounced write to iCloud. Batches rapid updates.
+ * Debounced write of place lists to iCloud. Batches rapid updates.
  */
 export function scheduleICloudSync(lists: PlaceList[]): void {
-  if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
-  syncDebounceTimer = setTimeout(() => {
-    writeListsToICloud(lists);
+  if (listsDebounceTimer) clearTimeout(listsDebounceTimer);
+  listsDebounceTimer = setTimeout(() => {
+    void writeListsToICloud(lists);
+  }, 2000);
+}
+
+/**
+ * Debounced write of favorites to iCloud. Batches rapid updates.
+ */
+export function scheduleFavoritesSync(favorites: FavoriteLocation[]): void {
+  if (favoritesDebounceTimer) clearTimeout(favoritesDebounceTimer);
+  favoritesDebounceTimer = setTimeout(() => {
+    void writeFavoritesToICloud(favorites);
   }, 2000);
 }
 
