@@ -65,4 +65,16 @@ describe('WebsitePhotosCarousel', () => {
       expect.arrayContaining([expect.objectContaining({ paddingTop: 52 })]),
     );
   });
+
+  it('reserves the thumbnail viewport height in the parent scroll view', async () => {
+    const screen = render(
+      <WebsitePhotosCarousel websiteUrl="https://example.com" resetKey="place-1" />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('website-photo-strip')).toBeTruthy());
+
+    expect(screen.getByTestId('website-photo-strip').props.style).toEqual(
+      expect.objectContaining({ height: 120 }),
+    );
+  });
 });

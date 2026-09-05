@@ -30,6 +30,7 @@ import { borderRadius, spacing, typography } from '../../constants/theme';
 
 const WEBVIEW_TIMEOUT_MS = 15000;
 const VIEWER_WIDTH = Dimensions.get('window').width;
+const PHOTO_SIZE = 120;
 
 interface Props {
   websiteUrl: string | null | undefined;
@@ -186,6 +187,8 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
           </Text>
           <FlatList
             data={visiblePhotos}
+            testID="website-photo-strip"
+            style={styles.photoStrip}
             horizontal
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item) => item}
@@ -281,6 +284,9 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
   },
+  photoStrip: {
+    height: PHOTO_SIZE,
+  },
   title: {
     ...typography.label,
     marginBottom: spacing.sm,
@@ -289,8 +295,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   thumb: {
-    width: 120,
-    height: 120,
+    width: PHOTO_SIZE,
+    height: PHOTO_SIZE,
     borderRadius: borderRadius.md,
     borderWidth: 1,
   },
