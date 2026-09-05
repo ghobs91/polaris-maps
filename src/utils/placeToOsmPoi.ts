@@ -78,6 +78,7 @@ export function placeToOsmPoi(place: Place): OsmPoi {
 
   if (place.phone) tags['phone'] = place.phone;
   if (place.website) tags['website'] = place.website;
+  if (place.tripadvisor) tags['polaris:tripadvisor'] = place.tripadvisor;
   if (place.hours) tags['opening_hours'] = place.hours;
   if (place.brandWikidata) tags['brand:wikidata'] = place.brandWikidata;
   if (place.addressStreet) tags['addr:street'] = place.addressStreet;

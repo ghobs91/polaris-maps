@@ -23,9 +23,8 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
-import { PlaceDetailEmbed } from './PlaceDetailEmbed';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
-import { buildPlaceDetailUrl } from '../../services/poi/placeDetailEmbed';
+import { TripadvisorRatingCard } from './TripadvisorRatingCard';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
@@ -41,10 +40,6 @@ const PEEK_H = SCREEN_H * 0.55;
 const FULL_H = SCREEN_H * 0.85;
 // Height of the card hidden below the screen edge in peek (non-expanded) mode.
 const PEEK_OFFSET = FULL_H - PEEK_H;
-
-// Tri-state resolution of the MapKit embed: pending (still loading), embedded
-// (showing Apple's card), or hidden (embed unavailable — show full OSM fields).
-type EmbedState = 'pending' | 'embedded' | 'hidden';
 
 // ---------------------------------------------------------------------------
 // Tag parsing helpers
@@ -382,10 +377,6 @@ export function POIInfoCard() {
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
   const [showSaveSheet, setShowSaveSheet] = useState(false);
-  // Resolution state of the MapKit "Photos & Reviews" embed. The card stays in
-  // a loading state until the embed's fate is known so OSM fields don't flash
-  // in and then disappear.
-  const [embedState, setEmbedState] = useState<EmbedState>('pending');
   // Reactive expanded flag (mirrors expandedRef) so the ScrollView's bottom
   // padding can compensate for the portion of the card hidden in peek mode.
   const [expanded, setExpanded] = useState(false);
@@ -470,19 +461,6 @@ export function POIInfoCard() {
   const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
-
-  // Whether the embed can never appear for this POI (transient map-selection
-  // pin, or the hosted MapKit page/token is unconfigured). Used to skip the
-  // loading state and go straight to full OSM fields.
-  const embedHiddenImmediately = useMemo(
-    () => (poi ? isMapSelectionPoi(poi) || !buildPlaceDetailUrl(poi, 'adaptive') : true),
-    [poi],
-  );
-
-  // Reset embed state when POI changes
-  useEffect(() => {
-    setEmbedState(embedHiddenImmediately ? 'hidden' : 'pending');
-  }, [embedHiddenImmediately]);
 
   // Trigger Apple Maps enrichment when a POI is selected
   useEffect(() => {
@@ -624,9 +602,7 @@ export function POIInfoCard() {
       );
   }, [parsed?.instagram]);
 
-  // Info rows. When the MapKit embed is showing, rows it already displays
-  // (address, hours, phone, website, email) are dropped as redundant; the
-  // section is skipped entirely if nothing remains.
+  // Info rows
   type InfoRowData = {
     icon: React.ComponentProps<typeof Ionicons>['name'];
     label: string;
@@ -635,39 +611,34 @@ export function POIInfoCard() {
   };
   const rawInfoRows: Array<InfoRowData | '' | false | null | undefined> = parsed
     ? [
-        parsed.address &&
-          embedState === 'hidden' && {
-            icon: 'location-outline' as const,
-            label: parsed.address,
-          },
-        parsed.hours &&
-          embedState === 'hidden' && {
-            icon: 'time-outline' as const,
-            label: parsed.hours,
-          },
-        parsed.phone &&
-          embedState === 'hidden' && {
-            icon: 'call-outline' as const,
-            label: parsed.phone,
-            onPress: handlePhone,
-            iconColor: primary,
-          },
-        parsed.website &&
-          embedState === 'hidden' && {
-            icon: 'globe-outline' as const,
-            label: new URL(
-              parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`,
-            ).hostname.replace(/^www\./, ''),
-            onPress: handleWebsite,
-            iconColor: primary,
-          },
-        parsed.email &&
-          embedState === 'hidden' && {
-            icon: 'mail-outline' as const,
-            label: parsed.email,
-            onPress: handleEmail,
-            iconColor: primary,
-          },
+        parsed.address && {
+          icon: 'location-outline' as const,
+          label: parsed.address,
+        },
+        parsed.hours && {
+          icon: 'time-outline' as const,
+          label: parsed.hours,
+        },
+        parsed.phone && {
+          icon: 'call-outline' as const,
+          label: parsed.phone,
+          onPress: handlePhone,
+          iconColor: primary,
+        },
+        parsed.website && {
+          icon: 'globe-outline' as const,
+          label: new URL(
+            parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`,
+          ).hostname.replace(/^www\./, ''),
+          onPress: handleWebsite,
+          iconColor: primary,
+        },
+        parsed.email && {
+          icon: 'mail-outline' as const,
+          label: parsed.email,
+          onPress: handleEmail,
+          iconColor: primary,
+        },
         parsed.wheelchair === 'yes' && {
           icon: 'accessibility-outline' as const,
           label: 'Wheelchair accessible',
@@ -803,29 +774,25 @@ export function POIInfoCard() {
                   <Ionicons name="share-outline" size={18} color={subtextColor} />
                 </GlassView>
               </TouchableOpacity>
-              {/* The MapKit embed already shows the name once it loads, so hide
-                  the app's title here to avoid a duplicate. */}
-              {embedState !== 'embedded' && (
-                <View style={styles.topTitle}>
-                  <Text
-                    style={[styles.name, { color: textColor }]}
-                    numberOfLines={1}
-                    accessibilityRole="header"
-                    accessibilityLabel={poi.name}
-                  >
-                    {poi.name}
-                  </Text>
-                  <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
-                    {category
-                      ? enrichedData?.poiCategory
-                        ? formatPoiCategory(enrichedData.poiCategory)
-                        : capitalise(poi.subtype)
-                      : capitalise(String(poi.type))}
-                    {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
-                    {parsed?.stars ? ` · ${parsed.stars}` : ''}
-                  </Text>
-                </View>
-              )}
+              <View style={styles.topTitle}>
+                <Text
+                  style={[styles.name, { color: textColor }]}
+                  numberOfLines={1}
+                  accessibilityRole="header"
+                  accessibilityLabel={poi.name}
+                >
+                  {poi.name}
+                </Text>
+                <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
+                  {category
+                    ? enrichedData?.poiCategory
+                      ? formatPoiCategory(enrichedData.poiCategory)
+                      : capitalise(poi.subtype)
+                    : capitalise(String(poi.type))}
+                  {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
+                  {parsed?.stars ? ` · ${parsed.stars}` : ''}
+                </Text>
+              </View>
               <TouchableOpacity
                 onPress={() => setSelectedPoi(null)}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -926,24 +893,8 @@ export function POIInfoCard() {
             {/* ── Website photos (on-device headless browse of POI website) ─── */}
             <WebsitePhotosCarousel websiteUrl={parsed.website} resetKey={poi.id} />
 
-            {/* ── Photos & Reviews (Apple MapKit JS PlaceDetail embed) ─── */}
-            {embedState === 'embedded' && (
-              <Text
-                style={{
-                  ...typography.caption,
-                  color: subtextColor,
-                  paddingHorizontal: spacing.md,
-                  marginBottom: 4,
-                }}
-              >
-                Phone, hours & photos provided by Apple MapKit · rest by OpenStreetMap
-              </Text>
-            )}
-            <PlaceDetailEmbed
-              poi={poi}
-              onLoaded={() => setEmbedState('embedded')}
-              onFailed={() => setEmbedState((prev) => (prev === 'pending' ? 'hidden' : prev))}
-            />
+            {/* ── External TripAdvisor rating (on-device headless browse) ───── */}
+            <TripadvisorRatingCard poi={poi} resetKey={poi.id} />
 
             <RNModal
               visible={showSaveSheet}
