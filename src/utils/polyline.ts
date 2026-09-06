@@ -31,3 +31,29 @@ export function decodePolyline(encoded: string, precision = 6): [number, number]
 
   return coords;
 }
+
+/** Encode [lng, lat] pairs into a Valhalla precision-6 encoded polyline. */
+export function encodePolyline(coords: [number, number][], precision = 6): string {
+  const factor = Math.pow(10, precision);
+  let prevLat = 0;
+  let prevLng = 0;
+  let out = '';
+  const enc = (v: number): string => {
+    let val = v < 0 ? ~(v << 1) : v << 1;
+    let chunk = '';
+    while (val >= 0x20) {
+      chunk += String.fromCharCode((0x20 | (val & 0x1f)) + 63);
+      val >>= 5;
+    }
+    chunk += String.fromCharCode(val + 63);
+    return chunk;
+  };
+  for (const [lng, lat] of coords) {
+    const latE = Math.round(lat * factor);
+    const lngE = Math.round(lng * factor);
+    out += enc(latE - prevLat) + enc(lngE - prevLng);
+    prevLat = latE;
+    prevLng = lngE;
+  }
+  return out;
+}
