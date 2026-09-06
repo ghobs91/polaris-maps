@@ -18,6 +18,7 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-spe
 import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { computeRoute } from '../../services/routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useMapStore } from '../../stores/mapStore';
 import { decodePolyline } from '../../utils/polyline';
 import { spacing } from '../../constants/theme';
@@ -62,6 +63,11 @@ export function AddDestinationPanel({
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
   const detourGenRef = useRef(0);
+  /** Route origin snapshotted when the user submits the search. The live
+   *  `searchCenter` prop moves with GPS, so the detour effect must NOT
+   *  depend on it — otherwise every position tick restarts all detour
+   *  requests and they read as "calculating" forever. */
+  const submittedOriginRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const activeRoute = useNavigationStore((s) => s.activeRoute);
   const waypoints = useNavigationStore((s) => s.waypoints);
@@ -232,6 +238,8 @@ export function AddDestinationPanel({
     if (searchResults.length === 0) return;
     Keyboard.dismiss();
     setSubmitted(true);
+    // Freeze the origin for detour math — see submittedOriginRef.
+    submittedOriginRef.current = { lat: searchCenter.lat, lng: searchCenter.lng };
     useMapStore
       .getState()
       .setStopSearchMarkers(searchResults.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })));
@@ -256,19 +264,24 @@ export function AddDestinationPanel({
       useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat], 'search');
     }
     onShowOnMap?.();
-  }, [query, performSearch, activeRoute, onShowOnMap]);
+  }, [query, performSearch, activeRoute, onShowOnMap, searchCenter]);
 
   // Compute the added drive time for each submitted result by routing through
   // it (inserted after the current target, same as onSelect) vs. the current
-  // route's duration.
+  // route's duration. Uses the origin snapshotted at submit time — depending
+  // on the live searchCenter would restart this effect on every GPS tick and
+  // the detours would never resolve ("calculating" forever).
   useEffect(() => {
     if (!submitted || results.length === 0 || !destination) return;
+    const origin = submittedOriginRef.current;
+    if (!origin) return;
     const baseSeconds = activeRoute?.summary.durationSeconds;
     if (baseSeconds == null) return;
     let cancelled = false;
     const gen = (detourGenRef.current += 1);
     setDetours({});
     const pending = waypoints.slice(currentLegIndex);
+    const prefs = useSettingsStore.getState().routePreferences;
     void (async () => {
       const settled = await Promise.allSettled(
         results.map(async (r) => {
@@ -277,11 +290,15 @@ export function AddDestinationPanel({
           if (withNew.length > 0) withNew.splice(1, 0, stop);
           else withNew.push(stop);
           const routeWaypoints = [
-            { lat: searchCenter.lat, lng: searchCenter.lng },
+            { lat: origin.lat, lng: origin.lng },
             ...withNew,
             { lat: destination.lat, lng: destination.lng },
           ];
-          const routes = await computeRoute(routeWaypoints, costing);
+          const routes = await computeRoute(routeWaypoints, costing, {
+            avoidTolls: prefs.avoidTolls,
+            avoidHighways: prefs.avoidHighways,
+            avoidFerries: prefs.avoidFerries,
+          });
           const duration = routes[0]?.summary.durationSeconds;
           return duration != null ? Math.max(0, duration - baseSeconds) : null;
         }),
@@ -296,16 +313,7 @@ export function AddDestinationPanel({
     return () => {
       cancelled = true;
     };
-  }, [
-    submitted,
-    results,
-    activeRoute,
-    waypoints,
-    currentLegIndex,
-    destination,
-    costing,
-    searchCenter,
-  ]);
+  }, [submitted, results, activeRoute, waypoints, currentLegIndex, destination, costing]);
 
   const handleClose = useCallback(() => {
     Keyboard.dismiss();

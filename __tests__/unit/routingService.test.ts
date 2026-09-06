@@ -8,6 +8,8 @@
 
 // ── Mock factories ─────────────────────────────────────────────────────────
 
+import { decodePolyline, encodePolyline } from '../../src/utils/polyline';
+
 const mockNativeComputeRoute = jest.fn();
 const mockNativeReroute = jest.fn();
 const mockInitialize = jest.fn().mockResolvedValue(undefined);
@@ -367,6 +369,112 @@ describe('routingService fallback', () => {
       await expect(svc.reroute(reroutePos, destination, 'auto')).rejects.toThrow(
         'No offline routing data and no internet connection.',
       );
+    });
+
+    it('routes through via-points and sends the GPS heading on reroute', async () => {
+      const svc = loadRoutingService();
+      mockOnlineSuccess();
+
+      const via = [{ lat: 40.73, lng: -74.0 }];
+      await svc.reroute(reroutePos, destination, 'auto', { via, heading: 90 });
+
+      expect(mockFetchImpl).toHaveBeenCalled();
+      const body = JSON.parse(
+        (mockFetchImpl.mock.calls[0][1] as { body: string }).body as string,
+      ) as { locations: Array<Record<string, unknown>> };
+      expect(body.locations).toHaveLength(3);
+      expect(body.locations[1]).toMatchObject({ lat: 40.73, lon: -74.0 });
+      expect(body.locations[0]).toMatchObject({ heading: 90 });
+    });
+
+    it('omits heading from the reroute request when unknown', async () => {
+      const svc = loadRoutingService();
+      mockOnlineSuccess();
+
+      await svc.reroute(reroutePos, destination, 'auto');
+
+      const body = JSON.parse(
+        (mockFetchImpl.mock.calls[0][1] as { body: string }).body as string,
+      ) as { locations: Array<Record<string, unknown>> };
+      expect(body.locations[0]).not.toHaveProperty('heading');
+    });
+  });
+
+  // ── multi-leg geometry ───────────────────────────────────────────────
+
+  describe('multi-leg routes', () => {
+    it('combines per-leg shapes with offset maneuver indices', async () => {
+      const svc = loadRoutingService();
+      const A = { lat: 40.7, lng: -74.0 };
+      const B = { lat: 40.71, lng: -74.0 };
+      const C = { lat: 40.72, lng: -74.0 };
+      const leg0shape = encodePolyline([
+        [A.lng, A.lat],
+        [B.lng, B.lat],
+      ]);
+      const leg1shape = encodePolyline([
+        [B.lng, B.lat],
+        [C.lng, C.lat],
+      ]);
+      mockFetchImpl.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          trip: {
+            legs: [
+              {
+                maneuvers: [
+                  {
+                    type: 1,
+                    instruction: 'Start',
+                    length: 1,
+                    time: 60,
+                    begin_shape_index: 0,
+                    end_shape_index: 1,
+                  },
+                ],
+                summary: { length: 1, time: 60 },
+                shape: leg0shape,
+              },
+              {
+                maneuvers: [
+                  {
+                    type: 8,
+                    instruction: 'Continue',
+                    length: 1,
+                    time: 60,
+                    begin_shape_index: 0,
+                    end_shape_index: 1,
+                  },
+                ],
+                summary: { length: 1, time: 60 },
+                shape: leg1shape,
+              },
+            ],
+            summary: {
+              length: 2,
+              time: 120,
+              has_toll: false,
+              has_ferry: false,
+              min_lon: -74.0,
+              min_lat: 40.7,
+              max_lon: -74.0,
+              max_lat: 40.72,
+            },
+          },
+        }),
+      } as unknown as Response);
+
+      const routes = await svc.computeRoute([A, B, C], 'auto');
+
+      expect(routes).toHaveLength(1);
+      // Geometry spans both legs (shared via-point deduplicated).
+      const pts = decodePolyline(routes[0].geometry);
+      expect(pts).toHaveLength(3);
+      expect(pts[0][1]).toBeCloseTo(A.lat, 5);
+      expect(pts[2][1]).toBeCloseTo(C.lat, 5);
+      // Second-leg maneuver indices are offset into the combined shape.
+      expect(routes[0].legs[1].maneuvers[0].beginShapeIndex).toBe(1);
+      expect(routes[0].legs[1].maneuvers[0].endShapeIndex).toBe(2);
     });
   });
 });

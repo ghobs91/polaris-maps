@@ -11,6 +11,7 @@ import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import { useNavigationStore } from '@/stores/navigationStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { spacing, typography, borderRadius } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
@@ -26,6 +27,7 @@ import {
   distToIndex,
   isWrongWayDriving,
   getGpsCourse,
+  setTrackingRoutePreferences,
 } from '@/services/navigation/trackingService';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
@@ -202,7 +204,12 @@ export default function NavigationScreen() {
       ];
 
       try {
-        const routes = await computeRoute(routeWaypoints, costing);
+        const prefs = useSettingsStore.getState().routePreferences;
+        const routes = await computeRoute(routeWaypoints, costing, {
+          avoidTolls: prefs.avoidTolls,
+          avoidHighways: prefs.avoidHighways,
+          avoidFerries: prefs.avoidFerries,
+        });
         if (routes.length > 0) {
           addWaypointAndReplaceRoute(routes[0], pendingWaypoints);
         }
@@ -227,6 +234,18 @@ export default function NavigationScreen() {
     }
   }, [isNavigating, activeRoute, navPosition]);
 
+  // Rounded grid cell (~11 m) so the add-stop panel doesn't see a new search
+  // center object on every GPS tick (it would restart detour math endlessly).
+  // The string is referentially stable until the user moves to a new cell.
+  const searchCenterCell = navPosition
+    ? `${Math.round(navPosition[1] * 1e4)},${Math.round(navPosition[0] * 1e4)}`
+    : 'none';
+  const searchCenter = useMemo(() => {
+    if (searchCenterCell === 'none') return { lat: 0, lng: 0 };
+    const [latE4, lngE4] = searchCenterCell.split(',').map(Number);
+    return { lat: latE4 / 1e4, lng: lngE4 / 1e4 };
+  }, [searchCenterCell]);
+
   // Low-pass filtered bearing so turns animate smoothly rather than snapping.
   const smoothBearingRef = useRef(0);
   const interpolationRafRef = useRef<number | null>(null);
@@ -239,10 +258,10 @@ export default function NavigationScreen() {
   useEffect(() => {
     if (!isNavigating || !activeRoute) return;
 
+    setTrackingRoutePreferences(useSettingsStore.getState().routePreferences);
     startTracking(activeRoute);
 
-    const coords = [...getRouteCoords()];
-    if (coords.length < 2) return;
+    if (getRouteCoords().length < 2) return;
 
     const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
     let subscription: Location.LocationSubscription | null = null;
@@ -263,7 +282,12 @@ export default function NavigationScreen() {
     const interpolate = (now: number) => {
       const anchor = getAnchor();
       const trackingStore = useNavigationTrackingStore.getState();
-      if (anchor) {
+      // Read the tracked geometry live every frame: after a reroute the
+      // tracker adopts the new route (see trackingService) while this
+      // closure would otherwise keep gliding along the old polyline and
+      // immediately report off-route again (reroute loop).
+      const coords = getRouteCoords();
+      if (anchor && coords.length >= 2) {
         const elapsed = Math.min((now - anchor.time) / 1000, 2.0); // cap at 2s
 
         let curPos: [number, number];
@@ -506,9 +530,7 @@ export default function NavigationScreen() {
         onClose={handleCloseAddDestination}
         onSelect={handleSelectDestination}
         onShowOnMap={handleShowSearchResultsOnMap}
-        searchCenter={
-          navPosition ? { lat: navPosition[1], lng: navPosition[0] } : { lat: 0, lng: 0 }
-        }
+        searchCenter={searchCenter}
       />
 
       {/* Incident report panel */}
