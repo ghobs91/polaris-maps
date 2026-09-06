@@ -439,7 +439,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       distanceRemaining: Measurement(value: totalDistance, unit: UnitLength.meters),
       timeRemaining: totalTime
     )
-    template.update(tripEstimates, for: trip)
+    template.updateEstimates(tripEstimates, for: trip)
 
     // Show the full maneuver list from the start — the current maneuver is
     // index 0, and per-update sync narrows it to the live pair.
@@ -462,7 +462,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
         for: current
       )
       if let trip = activeTrip {
-        template.update(
+        template.updateEstimates(
           travelEstimates(distanceMeters: update.remainingDistanceMeters, seconds: update.etaSeconds),
           for: trip
         )
@@ -501,7 +501,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     session.upcomingManeuvers = upcoming
     mapViewHost.showSpeedLimit(value: update.speedLimitValue, unit: update.speedLimitUnit)
     if let trip = activeTrip {
-      template.update(
+      template.updateEstimates(
         travelEstimates(distanceMeters: update.remainingDistanceMeters, seconds: update.etaSeconds),
         for: trip
       )
@@ -524,10 +524,16 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func showReroutingAlert() {
     guard let template = mapTemplate, reroutingAlert == nil else { return }
+    // The SDK requires at least a primary action on navigation alerts.
+    let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
+      self?.hideNavigationAlert()
+    }
     let alert = CPNavigationAlert(
       titleVariants: ["Rerouting…"],
       subtitleVariants: ["Finding the best route"],
-      imageSet: nil,
+      image: nil,
+      primaryAction: dismiss,
+      secondaryAction: nil,
       duration: 0
     )
     reroutingAlert = alert
@@ -540,7 +546,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       return
     }
     reroutingAlert = nil
-    template.dismissNavigationAlert(animated: true)
+    template.dismissNavigationAlert(animated: true, completion: { _ in })
   }
 
   private func applyManeuvers(_ steps: [CarPlayManeuverStep]) {
@@ -607,6 +613,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   /// Maps Valhalla maneuver type strings (see src/models/route.ts) to the
   /// CarPlay maneuver taxonomy so head units render the right symbol/label.
+  @available(iOS 17.4, *)
   private func maneuverType(for typeName: String) -> CPManeuverType {
     switch typeName {
     case "start": return .startRoute
@@ -625,7 +632,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     case "enter_roundabout": return .enterRoundabout
     case "exit_roundabout": return .exitRoundabout
     case "exit_highway": return .offRamp
-    case "ferry": return .enterFerry
+    case "ferry": return .enter_Ferry
     default: return .noTurn
     }
   }

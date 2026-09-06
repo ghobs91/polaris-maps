@@ -280,9 +280,6 @@ class PolarisValhalla: NSObject {
         ]
     }
 
-        /// Maps Valhalla integer maneuver type codes to ManeuverType strings
-    /// matching the `ManeuverType` union in src/models/route.ts.
-
     // MARK: - Polyline helpers (precision 6, matching Valhalla shape encoding)
 
     /// Decode a precision-6 encoded polyline into (lon, lat) pairs.
@@ -339,7 +336,11 @@ class PolarisValhalla: NSObject {
             prevLng = lngE
         }
         return out
-    }    private func mapManeuverType(_ code: Int) -> String {
+    }
+
+    /// Maps Valhalla integer maneuver type codes to ManeuverType strings
+    /// matching the `ManeuverType` union in src/models/route.ts.
+    private func mapManeuverType(_ code: Int) -> String {
         switch code {
         case 1, 2, 3: return "start"
         case 4, 5, 6: return "destination"

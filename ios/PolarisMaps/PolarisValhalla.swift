@@ -203,15 +203,35 @@ class PolarisValhalla: NSObject {
         let trip = response.trip
         let summary = trip.summary
 
-        let legs: [[String: Any]] = trip.legs.map { leg in
+        // Each leg carries its own shape with shape indices relative to that
+        // leg. Stitch them into one geometry (dropping duplicated via-point
+        // joints) and offset maneuver indices into the combined shape —
+        // otherwise multi-stop routes only track/render the first leg.
+        let legShapes = trip.legs.map { $0.shape }
+        let legPointArrays = legShapes.map { decodePolyline6($0) }
+        var shapeOffsets: [Int] = []
+        var acc = 0
+        for pts in legPointArrays {
+            shapeOffsets.append(acc)
+            if !pts.isEmpty { acc += pts.count - 1 }
+        }
+        var combinedPoints: [(Double, Double)] = []
+        for pts in legPointArrays {
+            guard !pts.isEmpty else { continue }
+            combinedPoints.append(contentsOf: pts.dropFirst(combinedPoints.isEmpty ? 0 : 1))
+        }
+        let multiLeg = trip.legs.count > 1
+
+        let legs: [[String: Any]] = trip.legs.enumerated().map { (legIdx, leg) in
+            let offset = multiLeg ? (shapeOffsets[legIdx]) : 0
             let maneuvers: [[String: Any]] = leg.maneuvers.map { m in
                 [
                     "type": mapManeuverType(m.type),
                     "instruction": m.instruction,
                     "distance_meters": m.length * 1000,
                     "duration_seconds": m.time,
-                    "begin_shape_index": m.beginShapeIndex,
-                    "end_shape_index": m.endShapeIndex,
+                    "begin_shape_index": m.beginShapeIndex + offset,
+                    "end_shape_index": m.endShapeIndex + offset,
                     "street_names": m.streetNames ?? [],
                     "verbal_pre_transition": m.verbalPreTransitionInstruction ?? "",
                     "verbal_post_transition": m.verbalPostTransitionInstruction as Any,
@@ -226,7 +246,11 @@ class PolarisValhalla: NSObject {
             ]
         }
 
-        let shape = trip.legs.first?.shape ?? ""
+        let shape: String = {
+            if !multiLeg { return legShapes.first ?? "" }
+            guard !combinedPoints.isEmpty else { return legShapes.first ?? "" }
+            return encodePolyline6(combinedPoints)
+        }()
 
         // RouteSummary no longer exposes hasToll/hasFerry, so derive them from maneuvers.
         var hasToll = false
@@ -254,6 +278,64 @@ class PolarisValhalla: NSObject {
                 summary.maxLat,
             ],
         ]
+    }
+
+    // MARK: - Polyline helpers (precision 6, matching Valhalla shape encoding)
+
+    /// Decode a precision-6 encoded polyline into (lon, lat) pairs.
+    private func decodePolyline6(_ encoded: String) -> [(Double, Double)] {
+        var coords: [(Double, Double)] = []
+        var index = encoded.unicodeScalars.startIndex
+        let end = encoded.unicodeScalars.endIndex
+        var lat = 0
+        var lng = 0
+        let factor = 1_000_000.0
+        func nextDelta() -> Int? {
+            var shift = 0
+            var result = 0
+            while index < end {
+                let byte = Int(encoded.unicodeScalars[index].value) - 63
+                index = encoded.unicodeScalars.index(after: index)
+                result |= (byte & 0x1f) << shift
+                shift += 5
+                if byte < 0x20 {
+                    return (result & 1) != 0 ? ~(result >> 1) : (result >> 1)
+                }
+            }
+            return nil
+        }
+        while true {
+            guard let dLat = nextDelta(), let dLng = nextDelta() else { break }
+            lat += dLat
+            lng += dLng
+            coords.append((Double(lng) / factor, Double(lat) / factor))
+        }
+        return coords
+    }
+
+    /// Encode (lon, lat) pairs into a precision-6 encoded polyline.
+    private func encodePolyline6(_ coords: [(Double, Double)]) -> String {
+        let factor = 1_000_000.0
+        var prevLat = 0
+        var prevLng = 0
+        var out = ""
+        func enc(_ v: Int) {
+            var val = v < 0 ? ~(v << 1) : (v << 1)
+            while val >= 0x20 {
+                out.append(Character(UnicodeScalar((0x20 | (val & 0x1f)) + 63)!))
+                val >>= 5
+            }
+            out.append(Character(UnicodeScalar(val + 63)!))
+        }
+        for (lon, lat) in coords {
+            let latE = Int((lat * factor).rounded())
+            let lngE = Int((lon * factor).rounded())
+            enc(latE - prevLat)
+            enc(lngE - prevLng)
+            prevLat = latE
+            prevLng = lngE
+        }
+        return out
     }
 
     /// Maps Valhalla integer maneuver type codes to ManeuverType strings
