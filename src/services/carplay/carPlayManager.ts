@@ -14,7 +14,10 @@ import * as CarPlay from '../../native/carplay';
 import type { CarPlaySearchResult, CarPlayStartNavigationData } from '../../native/carplay';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
+import { useTrafficStore } from '../../stores/trafficStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useMapStore } from '../../stores/mapStore';
+import { buildCarPlayTrafficRanges, trafficRangesSignature } from './carPlayTrafficRanges';
 import { unifiedSearch } from '../search/unifiedSearch';
 import { computeRoute } from '../routing/routingService';
 import type { EmitterSubscription } from 'react-native';
@@ -24,7 +27,11 @@ let connected = false;
 let subscriptions: EmitterSubscription[] = [];
 let navUnsubscribe: (() => void) | null = null;
 let trackingUnsubscribe: (() => void) | null = null;
+let trafficUnsubscribe: (() => void) | null = null;
 let carPlayRouteKey: string | null = null;
+let rerouteAlertShown = false;
+let lastDistanceBucket: number | null = null;
+let lastTrafficSignature = '';
 let searchRequestId = 0;
 let searchAbortController: AbortController | null = null;
 let mapCenterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,6 +68,8 @@ export function teardownCarPlay(): void {
   navUnsubscribe = null;
   trackingUnsubscribe?.();
   trackingUnsubscribe = null;
+  trafficUnsubscribe?.();
+  trafficUnsubscribe = null;
   clearMapCenterUpdate();
   searchAbortController?.abort();
   searchAbortController = null;
@@ -68,6 +77,9 @@ export function teardownCarPlay(): void {
   initialized = false;
   connected = false;
   carPlayRouteKey = null;
+  rerouteAlertShown = false;
+  lastDistanceBucket = null;
+  lastTrafficSignature = '';
 }
 
 /** Whether CarPlay is currently connected. */
@@ -88,7 +100,9 @@ function onConnected() {
   navUnsubscribe?.();
   navUnsubscribe = useNavigationStore.subscribe(syncNavigationState);
   trackingUnsubscribe?.();
-  trackingUnsubscribe = useNavigationTrackingStore.subscribe(syncMapCenter);
+  trackingUnsubscribe = useNavigationTrackingStore.subscribe(onTrackingUpdate);
+  trafficUnsubscribe?.();
+  trafficUnsubscribe = useTrafficStore.subscribe(syncRouteTraffic);
 
   // If navigation is already active, push initial state
   syncNavigationState(useNavigationStore.getState());
@@ -100,11 +114,16 @@ function onDisconnected() {
   navUnsubscribe = null;
   trackingUnsubscribe?.();
   trackingUnsubscribe = null;
+  trafficUnsubscribe?.();
+  trafficUnsubscribe = null;
   clearMapCenterUpdate();
   searchAbortController?.abort();
   searchAbortController = null;
   searchRequestId += 1;
   carPlayRouteKey = null;
+  rerouteAlertShown = false;
+  lastDistanceBucket = null;
+  lastTrafficSignature = '';
 }
 
 function syncNavigationState(state: ReturnType<typeof useNavigationStore.getState>) {
@@ -112,9 +131,17 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
 
   if (!state.isNavigating || !state.activeRoute || !state.currentManeuver || !state.destination) {
     clearMapCenterUpdate();
-    CarPlay.updateNavigation({ isNavigating: false } as any);
-    CarPlay.endNavigation();
-    carPlayRouteKey = null;
+    // Only tear down a session we actually started. This subscriber fires on
+    // every store change, and repeating finishTrip while idle can flicker a
+    // stale guidance card on some head units.
+    if (carPlayRouteKey !== null) {
+      CarPlay.updateNavigation({ isNavigating: false } as any);
+      CarPlay.endNavigation();
+      carPlayRouteKey = null;
+    }
+    lastDistanceBucket = null;
+    lastTrafficSignature = '';
+    hideRerouteAlert();
     return;
   }
 
@@ -122,25 +149,123 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
   if (carPlayRouteKey !== routeKey) {
     CarPlay.startNavigation(toCarPlayNavigationData(state));
     carPlayRouteKey = routeKey;
+    // Fresh route — re-evaluate traffic colors even if the store didn't change.
+    lastTrafficSignature = '';
+    syncRouteTraffic();
   }
 
   const allManeuvers = state.activeRoute.legs.flatMap((l) => l.maneuvers);
   const nextManeuver = allManeuvers[state.currentStepIndex + 1];
+  const tracking = useNavigationTrackingStore.getState();
+  const maneuver = state.currentManeuver;
+  const rerouting = state.isRerouting || state.hasDeviated;
+  syncRerouteAlert(rerouting);
+  const liveDistance = tracking.distanceToTurn ?? maneuver.distanceMeters;
+  lastDistanceBucket = distanceBucket(liveDistance);
 
   CarPlay.updateNavigation({
     isNavigating: true,
-    instruction: state.currentManeuver.instruction,
-    maneuverType: state.currentManeuver.type,
-    distanceToTurnMeters: state.currentManeuver.distanceMeters,
-    durationToTurnSeconds: state.currentManeuver.durationSeconds,
+    instruction: maneuver.instruction,
+    displayInstruction: maneuver.verbalPreTransition || maneuver.instruction,
+    maneuverType: maneuver.type,
+    // Live countdown from the tracking pipeline (like the phone banner),
+    // falling back to the static route value before the first GPS fix.
+    distanceToTurnMeters: liveDistance,
+    durationToTurnSeconds: maneuver.durationSeconds,
     etaSeconds: state.trafficEtaSeconds ?? state.etaSeconds ?? 0,
     remainingDistanceMeters: state.remainingDistanceMeters ?? 0,
     nextInstruction: nextManeuver?.instruction,
     nextManeuverType: nextManeuver?.type,
     nextDistanceMeters: nextManeuver?.distanceMeters,
     nextDurationSeconds: nextManeuver?.durationSeconds,
+    nextStreetNames: nextManeuver?.streetNames,
+    ...toCarPlaySpeedLimit(maneuver.speedLimitMph),
+    laneGuidance: maneuver.laneGuidance
+      ? {
+          laneCount: maneuver.laneGuidance.laneCount,
+          activeLanes: maneuver.laneGuidance.activeLanes,
+          laneDirections: maneuver.laneGuidance.laneDirections,
+        }
+      : undefined,
+    isRerouting: rerouting,
   });
-  syncMapCenter(useNavigationTrackingStore.getState());
+  syncMapCenter(tracking);
+}
+
+/** Shows/dismisses the native "Rerouting" alert only on transitions. */
+function syncRerouteAlert(rerouting: boolean): void {
+  if (rerouting === rerouteAlertShown) return;
+  rerouteAlertShown = rerouting;
+  if (rerouting) {
+    CarPlay.showReroutingAlert();
+  } else {
+    CarPlay.hideNavigationAlert();
+  }
+}
+
+function hideRerouteAlert(): void {
+  if (!rerouteAlertShown) return;
+  rerouteAlertShown = false;
+  CarPlay.hideNavigationAlert();
+}
+
+/**
+ * Posted speed limit for the CarPlay sign, converted to the user's unit
+ * preference exactly like the phone's `SpeedLimitSign`.
+ */
+export function toCarPlaySpeedLimit(speedLimitMph: number | undefined): {
+  speedLimitValue?: number;
+  speedLimitUnit?: 'mph' | 'km/h';
+} {
+  if (speedLimitMph == null) return {};
+  const useMetric = useSettingsStore.getState().useMetric;
+  return {
+    speedLimitValue: useMetric ? Math.round(speedLimitMph * 1.60934) : speedLimitMph,
+    speedLimitUnit: useMetric ? 'km/h' : 'mph',
+  };
+}
+
+/**
+ * Pushes traffic-colored route ranges to the native map. Runs on traffic
+ * store updates and route starts only — never on the hot position path —
+ * and no-ops unless the colors actually changed.
+ */
+function syncRouteTraffic(): void {
+  if (!connected || carPlayRouteKey === null) return;
+  const nav = useNavigationStore.getState();
+  if (!nav.isNavigating || !nav.activeRoute) return;
+  const ranges = buildCarPlayTrafficRanges(
+    nav.activeRoute.geometry,
+    useTrafficStore.getState().normalizedSegments,
+  );
+  const signature = trafficRangesSignature(ranges);
+  if (signature === lastTrafficSignature) return;
+  lastTrafficSignature = signature;
+  CarPlay.updateRouteTraffic(ranges ?? []);
+}
+
+/**
+ * Tracking-pipeline subscriber: moves the map camera and re-pushes the
+ * maneuver panel when the live countdown crosses a distance bucket. The
+ * native side applies those re-pushes as in-place estimate updates (no card
+ * rebuild), so the CarPlay banner counts down just like the phone banner.
+ */
+function onTrackingUpdate(state: ReturnType<typeof useNavigationTrackingStore.getState>) {
+  syncMapCenter(state);
+  if (!connected) return;
+  const nav = useNavigationStore.getState();
+  if (!nav.isNavigating || !nav.currentManeuver) return;
+  const live = state.distanceToTurn ?? nav.currentManeuver.distanceMeters;
+  const bucket = distanceBucket(live);
+  if (bucket === lastDistanceBucket) return;
+  syncNavigationState(nav);
+}
+
+/** Coarse buckets keep countdown pushes near ~1 Hz at city speeds. */
+function distanceBucket(meters: number): number {
+  if (meters < 100) return Math.round(meters / 5) * 5;
+  if (meters < 500) return Math.round(meters / 10) * 10;
+  return Math.round(meters / 25) * 25;
 }
 
 function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getState>) {

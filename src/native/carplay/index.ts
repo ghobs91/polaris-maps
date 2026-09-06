@@ -1,11 +1,19 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import type {
+  CarPlayLaneGuidance,
   CarPlayNavigationData,
   CarPlayStartNavigationData,
   CarPlaySearchResult,
+  CarPlayTrafficRange,
 } from './NativePolarisCarPlay';
 
-export type { CarPlayNavigationData, CarPlayStartNavigationData, CarPlaySearchResult };
+export type {
+  CarPlayLaneGuidance,
+  CarPlayNavigationData,
+  CarPlayStartNavigationData,
+  CarPlaySearchResult,
+  CarPlayTrafficRange,
+};
 
 const NativeModule = Platform.OS === 'ios' ? NativeModules.PolarisCarPlay : null;
 
@@ -23,6 +31,18 @@ export function startNavigation(data: CarPlayStartNavigationData): void {
 
 export function endNavigation(): void {
   NativeModule?.endNavigation();
+}
+
+export function updateRouteTraffic(ranges: CarPlayTrafficRange[]): void {
+  (NativeModule as any)?.updateRouteTraffic?.(ranges);
+}
+
+export function showReroutingAlert(): void {
+  (NativeModule as any)?.showReroutingAlert?.();
+}
+
+export function hideNavigationAlert(): void {
+  (NativeModule as any)?.hideNavigationAlert?.();
 }
 
 export function pushSearchResults(results: CarPlaySearchResult[]): void {
