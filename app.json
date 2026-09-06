@@ -11,7 +11,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.polarismaps.app",
       "infoPlist": {
-        "UIBackgroundModes": ["location", "audio"],
+        "UIBackgroundModes": ["location"],
         "NSLocationWhenInUseUsageDescription": "Polaris Maps needs your location to show your position on the map and provide turn-by-turn navigation directions.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Polaris Maps uses your location in the background to keep turn-by-turn guidance running while the app is closed or your screen is locked, and to contribute anonymous traffic data to the P2P network.",
         "NSCameraUsageDescription": "Polaris Maps uses the camera to capture street-level imagery for the community.",

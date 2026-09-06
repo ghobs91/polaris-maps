@@ -13,6 +13,21 @@ import {
 import { reroute } from '../routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
 
+/** Avoidance preferences forwarded to the reroute request. Injected via
+ *  `setTrackingRoutePreferences` (rather than importing the settings store)
+ *  so this module stays free of native-module imports for headless use. */
+export interface TrackingRoutePreferences {
+  avoidTolls?: boolean;
+  avoidHighways?: boolean;
+  avoidFerries?: boolean;
+}
+
+let reroutePrefs: TrackingRoutePreferences = {};
+
+export function setTrackingRoutePreferences(prefs: TrackingRoutePreferences): void {
+  reroutePrefs = { ...prefs };
+}
+
 /**
  * Dead-reckoning anchor: updated on every GPS fix.
  * pos/segIdx = snapped position on route; speedMps = estimated travel speed;
@@ -164,14 +179,27 @@ export function distToIndex(pos: [number, number], segIdx: number, targetIdx: nu
   return d;
 }
 
+export interface ProcessFixOptions {
+  /**
+   * True when invoked from the headless background location task. Network
+   * reroutes and haptics are skipped — the fix is still snapped, the
+   * dead-reckoning anchor still advances, and a deviation is flagged so the
+   * foreground reroutes on return. Background tasks that perform network
+   * I/O risk an iOS watchdog kill (reported as a crash).
+   */
+  background?: boolean;
+}
+
 /**
  * Process one GPS fix through the full turn-by-turn pipeline:
  * snap-to-route, off-route detection & rerouting, dead-reckoning anchor
  * update (with the no-backwards-jump rule), ETA update, and maneuver step
- * advancement. Identical whether invoked foreground or background.
+ * advancement. Identical whether invoked foreground or background, except
+ * background invocations never trigger a network reroute or haptics.
  */
-export function processFix(location: LocationObject): void {
+export function processFix(location: LocationObject, opts?: ProcessFixOptions): void {
   if (!trackingActive || coords.length < 2) return;
+  const isBackground = opts?.background === true;
 
   const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
   const {
@@ -236,62 +264,82 @@ export function processFix(location: LocationObject): void {
     isOffRoute(distFromRoute, offRouteCount) || wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT;
 
   if (needsReroute && !reroutingFix && store.destination) {
-    reroutingFix = true;
-    store.setDeviated(true);
-    store.setRerouting(true);
+    if (isBackground) {
+      // Defer the reroute to the foreground: flag the deviation so the next
+      // foreground fix reroutes immediately, but perform no network I/O or
+      // haptics here. Fall through to the normal DR/ETA update below.
+      store.setDeviated(true);
+    } else {
+      reroutingFix = true;
+      store.setDeviated(true);
+      store.setRerouting(true);
 
-    const gpsBearing = location.coords.heading ?? 0;
-    reroute(
-      {
-        lat: location.coords.latitude,
-        lng: location.coords.longitude,
-        bearing: gpsBearing,
-      },
-      { lat: store.destination.lat, lng: store.destination.lng },
-      store.costing,
-    )
-      .then((newRoute) => {
-        const navStore = useNavigationStore.getState();
-        if (navStore.isNavigating) {
-          navStore.replaceRoute(newRoute);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          // Reset DR anchor and GPS segment index to start of the new route.
-          // The next GPS callback will correct the segment index to the
-          // actual position; using 0 here prevents stale indices from the
-          // previous route causing premature step advances.
-          const newCoords = decodePolyline(newRoute.geometry);
-          if (newCoords.length >= 2) {
-            // Adopt the new route into this tracker without resetting
-            // bookkeeping the caller may still rely on.
-            coords = newCoords;
-            allManeuvers = newRoute.legs.flatMap((l) => l.maneuvers);
-            activeRouteSummaryDistanceMeters = newRoute.summary.distanceMeters;
-            activeRouteSummaryDurationSeconds = newRoute.summary.durationSeconds;
-            drAnchor = {
-              pos: newCoords[0],
-              segIdx: 0,
-              speedMps: (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0,
-              time: now,
-            };
-            gpsSegmentIndex = 0;
+      const gpsBearing = location.coords.heading ?? 0;
+      // Preserve the stops the user hasn't reached yet — rerouting to the
+      // final destination only would silently drop them from the trip.
+      const pending = store.waypoints.slice(store.currentLegIndex);
+      reroute(
+        {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+          bearing: gpsBearing,
+        },
+        { lat: store.destination.lat, lng: store.destination.lng },
+        store.costing,
+        {
+          via: pending.length > 0 ? pending : undefined,
+          avoidTolls: reroutePrefs.avoidTolls,
+          avoidHighways: reroutePrefs.avoidHighways,
+          avoidFerries: reroutePrefs.avoidFerries,
+          // Only trust the compass course when moving — a stationary/fresh
+          // GPS heading (or the 0 fallback) would bias the engine toward a
+          // phantom direction and produce U-turn-heavy "weird" routes.
+          heading: movingFast && headingValid ? rawHeading! : undefined,
+        },
+      )
+        .then((newRoute) => {
+          const navStore = useNavigationStore.getState();
+          if (navStore.isNavigating) {
+            navStore.replaceRoute(newRoute);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+            // Reset DR anchor and GPS segment index to start of the new route.
+            // The next GPS callback will correct the segment index to the
+            // actual position; using 0 here prevents stale indices from the
+            // previous route causing premature step advances.
+            const newCoords = decodePolyline(newRoute.geometry);
+            if (newCoords.length >= 2) {
+              // Adopt the new route into this tracker without resetting
+              // bookkeeping the caller may still rely on.
+              coords = newCoords;
+              allManeuvers = newRoute.legs.flatMap((l) => l.maneuvers);
+              activeRouteSummaryDistanceMeters = newRoute.summary.distanceMeters;
+              activeRouteSummaryDurationSeconds = newRoute.summary.durationSeconds;
+              drAnchor = {
+                pos: newCoords[0],
+                segIdx: 0,
+                speedMps: (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0,
+                time: now,
+              };
+              gpsSegmentIndex = 0;
+            }
           }
-        }
-        offRouteCount = 0;
-        wrongWayCount = 0;
-        wrongWayActive = false;
-        lastGpsRemaining = null;
-        reroutingFix = false;
-      })
-      .catch(() => {
-        // Reroute failed (e.g., no connectivity) — clear rerouting flag
-        // so it will retry on the next off-route GPS reading.
-        // Keep wrongWayCount so a wrong-way drive retries immediately,
-        // mirroring the off-route counter behaviour.
-        useNavigationStore.getState().setRerouting(false);
-        reroutingFix = false;
-      });
+          offRouteCount = 0;
+          wrongWayCount = 0;
+          wrongWayActive = false;
+          lastGpsRemaining = null;
+          reroutingFix = false;
+        })
+        .catch(() => {
+          // Reroute failed (e.g., no connectivity) — clear rerouting flag
+          // so it will retry on the next off-route GPS reading.
+          // Keep wrongWayCount so a wrong-way drive retries immediately,
+          // mirroring the off-route counter behaviour.
+          useNavigationStore.getState().setRerouting(false);
+          reroutingFix = false;
+        });
 
-    return; // Skip normal DR update while rerouting
+      return; // Skip normal DR update while rerouting
+    }
   }
 
   // Prefer the GPS speed field; fall back to estimating from distance/time delta.

@@ -36,17 +36,28 @@ const BACKGROUND_REQUEST_ATTEMPTED_KEY = 'backgroundNavPermissionRequested';
 
 // Registered at module load so the task exists before any session starts.
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
-  if (error) return;
+  try {
+    if (error) return;
 
-  // Zombie-session guard: if the OS relaunches the app headlessly but
-  // navigation is not active, exit without processing.
-  if (!useNavigationStore.getState().isNavigating) return;
+    // Zombie-session guard: if the OS relaunches the app headlessly but
+    // navigation is not active, exit without processing.
+    if (!useNavigationStore.getState().isNavigating) return;
 
-  const { locations } = data as { locations?: LocationObject[] };
-  if (!locations?.length) return;
+    const { locations } = data as { locations?: LocationObject[] };
+    if (!locations?.length) return;
 
-  for (const location of locations) {
-    processFix(location);
+    for (const location of locations) {
+      try {
+        // Background mode: no network reroutes or haptics (watchdog risk).
+        // Deviations are flagged so the foreground reroutes on return.
+        processFix(location, { background: true });
+      } catch {
+        // One malformed fix must never kill the headless task.
+      }
+    }
+  } catch {
+    // Never throw out of a headless task — an uncaught error here becomes
+    // a background crash (and a user-visible "crashed" dialog).
   }
 });
 
@@ -109,6 +120,32 @@ export async function startBackgroundNavSession(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Stop a stale OS-level location session left over from a previous run.
+ *
+ * `startLocationUpdatesAsync` sessions survive app kills until explicitly
+ * stopped, but navigation state does not (in-memory store). Without this,
+ * the OS keeps relaunching the killed app for location delivery forever —
+ * each relaunch a chance to crash in the background. Call once at startup:
+ * if a session is running but nothing is navigating, it is by definition
+ * a zombie.
+ */
+export async function reconcileStaleBackgroundSession(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+
+  try {
+    if (useNavigationStore.getState().isNavigating) return;
+    const hasStarted = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    if (hasStarted) {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    }
+  } catch {
+    // Native side unavailable — nothing to do.
+  } finally {
+    useNavigationTrackingStore.getState().setBackgroundSessionActive(false);
   }
 }
 

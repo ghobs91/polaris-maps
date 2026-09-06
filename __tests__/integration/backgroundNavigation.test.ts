@@ -82,12 +82,17 @@ import { Alert } from 'react-native';
 const TaskManager = require('expo-task-manager');
 import {
   BACKGROUND_LOCATION_TASK,
+  reconcileStaleBackgroundSession,
   startBackgroundNavSession,
   stopBackgroundNavSession,
 } from '../../src/services/navigation/backgroundLocationTask';
 import { useNavigationStore } from '../../src/stores/navigationStore';
 import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingStore';
-import { isTracking, startTracking } from '../../src/services/navigation/trackingService';
+import {
+  isTracking,
+  startTracking,
+  stopTracking,
+} from '../../src/services/navigation/trackingService';
 
 function granted(status = 'granted') {
   return { granted: true, status, canAskAgain: true };
@@ -247,6 +252,45 @@ describe('background navigation session — stop', () => {
   });
 });
 
+describe('stale session reconciliation (startup)', () => {
+  it('stops a zombie OS session when nothing is navigating', async () => {
+    mockHasStartedLocationUpdates.mockResolvedValue(true);
+
+    await reconcileStaleBackgroundSession();
+
+    expect(mockHasStartedLocationUpdates).toHaveBeenCalledWith(BACKGROUND_LOCATION_TASK);
+    expect(mockStopLocationUpdates).toHaveBeenCalledWith(BACKGROUND_LOCATION_TASK);
+    expect(useNavigationTrackingStore.getState().backgroundSessionActive).toBe(false);
+  });
+
+  it('leaves the session alone when nothing was started', async () => {
+    mockHasStartedLocationUpdates.mockResolvedValue(false);
+
+    await reconcileStaleBackgroundSession();
+
+    expect(mockStopLocationUpdates).not.toHaveBeenCalled();
+  });
+
+  it('never stops an active navigation session', async () => {
+    mockHasStartedLocationUpdates.mockResolvedValue(true);
+    useNavigationStore.setState({ isNavigating: true });
+
+    await reconcileStaleBackgroundSession();
+
+    expect(mockStopLocationUpdates).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op on Android', async () => {
+    mockPlatformOs = 'android';
+    mockHasStartedLocationUpdates.mockResolvedValue(true);
+
+    await reconcileStaleBackgroundSession();
+
+    expect(mockHasStartedLocationUpdates).not.toHaveBeenCalled();
+    expect(mockStopLocationUpdates).not.toHaveBeenCalled();
+  });
+});
+
 describe('background navigation task handler', () => {
   function getHandler(): (body: unknown) => Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -254,6 +298,50 @@ describe('background navigation task handler', () => {
     expect(handler).toBeDefined();
     return handler;
   }
+
+  it('never throws on task errors or malformed payloads', async () => {
+    await expect(
+      getHandler()({ error: new Error('location unavailable') }),
+    ).resolves.toBeUndefined();
+    await expect(getHandler()({ data: {} })).resolves.toBeUndefined();
+    await expect(getHandler()({ data: { locations: [{}] } })).resolves.toBeUndefined();
+    await expect(getHandler()({})).resolves.toBeUndefined();
+  });
+
+  it('survives malformed fixes while tracking is active', async () => {
+    // '????' decodes to [[0,0],[0,0]] — just enough geometry to activate
+    // the pipeline so malformed fixes reach processFix and must be caught.
+    startTracking({
+      summary: { distanceMeters: 100, durationSeconds: 60, hasToll: false, hasFerry: false },
+      legs: [
+        {
+          maneuvers: [
+            {
+              type: 'start',
+              instruction: 'Head north',
+              distanceMeters: 100,
+              durationSeconds: 60,
+              beginShapeIndex: 0,
+              endShapeIndex: 1,
+            },
+          ],
+          distanceMeters: 100,
+          durationSeconds: 60,
+        },
+      ],
+      geometry: '????',
+      boundingBox: [-1, -1, 1, 1],
+    });
+    useNavigationStore.setState({ isNavigating: true });
+
+    await expect(
+      getHandler()({ data: { locations: [undefined, null, {}] } }),
+    ).resolves.toBeUndefined();
+    expect(isTracking()).toBe(true);
+
+    stopTracking();
+    useNavigationStore.getState().stopNavigation();
+  });
 
   it('exits early when navigation is not active', async () => {
     // Not navigating → even valid location data must be ignored.

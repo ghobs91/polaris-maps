@@ -13,8 +13,8 @@ jest.mock('../../src/services/routing/routingService', () => ({
 }));
 
 jest.mock('expo-haptics', () => ({
-  notificationAsync: jest.fn(),
-  impactAsync: jest.fn(),
+  notificationAsync: jest.fn().mockResolvedValue(undefined),
+  impactAsync: jest.fn().mockResolvedValue(undefined),
   ImpactFeedbackStyle: { Medium: 'medium', Light: 'light' },
   NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
 }));
@@ -321,6 +321,31 @@ describe('trackingService — off-route detection & rerouting', () => {
     expect(mockReroute).toHaveBeenCalledTimes(1);
   });
 
+  it('defers reroute in background: flags deviation, skips network, still updates ETA', () => {
+    startNav(makeRoute());
+    startTracking(makeRoute());
+    mockReroute.mockResolvedValue(makeRoute());
+
+    const bg = { background: true } as const;
+    processFix(farOffRouteFix(), bg);
+    processFix(farOffRouteFix(), bg);
+    processFix(farOffRouteFix(), bg);
+
+    // No network reroute from a headless background task (watchdog risk).
+    expect(mockReroute).not.toHaveBeenCalled();
+    // Deviation is flagged so the next foreground fix reroutes immediately…
+    expect(useNavigationStore.getState().hasDeviated).toBe(true);
+    // …and the anchor/ETA pipeline still advanced on the same fixes.
+    expect(getAnchor()).not.toBeNull();
+    expect(useNavigationStore.getState().remainingDistanceMeters).not.toBeNull();
+
+    // Foreground fix with the deviated flag set reroutes on the threshold.
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+  });
+
   it('does not trigger overlapping reroutes', async () => {
     startNav(makeRoute());
     startTracking(makeRoute());
@@ -350,6 +375,37 @@ describe('trackingService — off-route detection & rerouting', () => {
     processFix(farOffRouteFix());
 
     expect(mockReroute).not.toHaveBeenCalled();
+  });
+
+  it('forwards unreached waypoints to reroute so stops survive deviation', async () => {
+    const stop = { lat: B[1], lng: B[0], name: 'Mid stop' };
+    useNavigationStore
+      .getState()
+      .startNavigation(makeRoute(), [], { lat: B[1], lng: B[0] }, 'auto', [stop]);
+    startTracking(makeRoute());
+    mockReroute.mockResolvedValue(makeRoute());
+
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    await Promise.resolve();
+
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+    expect(mockReroute.mock.calls[0][3]).toMatchObject({ via: [stop] });
+  });
+
+  it('omits via-points when the trip has no intermediate stops', async () => {
+    startNav(makeRoute());
+    startTracking(makeRoute());
+    mockReroute.mockResolvedValue(makeRoute());
+
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    await Promise.resolve();
+
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+    expect(mockReroute.mock.calls[0][3]).toMatchObject({ via: undefined });
   });
 });
 

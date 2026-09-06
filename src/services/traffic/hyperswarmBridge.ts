@@ -13,6 +13,7 @@
 let WorkletClass:
   | (new () => {
       start(entry: string, bundle: string, args: string[]): void;
+      terminate(): void;
       IPC: unknown;
     })
   | null = null;
@@ -98,8 +99,11 @@ type TileRequestHandler = (req: {
 }) => void;
 type TileResponseHandler = (res: { id: string; tile: WireTilePayload | null }) => void;
 
-let worklet: { start(entry: string, bundle: string, args: string[]): void; IPC: unknown } | null =
-  null;
+let worklet: {
+  start(entry: string, bundle: string, args: string[]): void;
+  terminate(): void;
+  IPC: unknown;
+} | null = null;
 let rpc: { request(cmd: number): { send(data: Uint8Array): void } } | null = null;
 let started = false;
 
@@ -198,12 +202,21 @@ function handleWorkletRequest(req: RpcRequest): void {
   }
 }
 
-/** Gracefully shut down the Bare worklet. */
+/**
+ * Gracefully shut down the Bare worklet. Terminates the native thread —
+ * merely dropping the JS reference (as before) leaked the worklet, leaving
+ * its DHT sockets and broadcast interval running in the background.
+ */
 export function disposeHyperswarmBridge(): void {
   if (rpc) {
     rpc = null;
   }
   if (worklet) {
+    try {
+      worklet.terminate();
+    } catch {
+      // Already terminated or native side gone — nothing to do.
+    }
     worklet = null;
   }
   started = false;
