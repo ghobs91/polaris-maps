@@ -161,12 +161,35 @@ export async function unifiedSearch(
 
   // allSettled: an individual local-source failure (e.g. empty FTS table)
   // degrades to "no local results" rather than failing the whole search.
+  // For category queries ("coffee"), fan FTS out across the core query plus
+  // each category name so shops whose name lacks the query word
+  // ("Babylon Bean", a cafe) still surface from the instant local pass.
+  const ftsQueries =
+    !addressQuery && parsed.categories
+      ? Array.from(new Set([parsed.coreQuery, ...parsed.categories]))
+      : [parsed.brand ?? parsed.coreQuery];
   const [localPlacesSettled, localCategorySettled, localAddressSettled] = await Promise.allSettled([
     // Source 1: Local FTS5 search (instant, offline)
     // Skip for address queries — FTS matches street names against POI names
     addressQuery
       ? Promise.resolve([])
-      : searchPlacesFts(parsed.brand ?? parsed.coreQuery, south, west, north, east, limit),
+      : (async () => {
+          const batches = await Promise.all(
+            ftsQueries.map((q) =>
+              searchPlacesFts(q, south, west, north, east, limit).catch(() => [] as Place[]),
+            ),
+          );
+          const seen = new Set<string>();
+          const merged: Place[] = [];
+          for (const batch of batches) {
+            for (const p of batch) {
+              if (seen.has(p.uuid)) continue;
+              seen.add(p.uuid);
+              merged.push(p);
+            }
+          }
+          return merged.slice(0, limit);
+        })(),
 
     // Source 2 (local part): Category search restricted to the local DB
     parsed.categories

@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
-import { getAllRegions } from '../../services/regions/regionRepository';
+import { getAllRegions, getRegionById } from '../../services/regions/regionRepository';
+import { deleteRegionData } from '../../services/regions/downloadService';
 import {
-  downloadRegion,
-  deleteRegionData,
-  type DownloadProgress,
-} from '../../services/regions/downloadService';
+  startBackgroundDownload,
+  cancelBackgroundDownload,
+  ensureDownloadAppStateHandler,
+} from '../../services/regions/downloadManager';
+import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
 import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
 import { upsertRegion } from '../../services/regions/regionRepository';
@@ -26,9 +28,10 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
   const [regions, setRegions] = useState<Region[]>([]);
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [activeProgress, setActiveProgress] = useState<DownloadProgress | null>(null);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
-  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  // Global progress — survives screen unmount + app backgrounding.
+  const progressByRegion = useRegionDownloadStore((s) => s.progressByRegion);
+  const activeIds = useRegionDownloadStore((s) => s.activeIds);
 
   const loadRegions = useCallback(async () => {
     setLoading(true);
@@ -51,32 +54,32 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
       .catch(() => {
         // Network may be unavailable — silently continue with local data
       });
+    // Resume interrupted downloads on foreground (e.g. app was minimized).
+    ensureDownloadAppStateHandler((id) => getRegionById(id), loadRegions);
   }, [loadRegions]);
+
+  // Refresh the list whenever all background downloads finish.
+  const prevActiveCount = React.useRef(activeIds.length);
+  useEffect(() => {
+    if (prevActiveCount.current > 0 && activeIds.length === 0) {
+      void loadRegions();
+    }
+    prevActiveCount.current = activeIds.length;
+  }, [activeIds.length, loadRegions]);
 
   const handleDownload = useCallback(
     (region: Region) => {
-      const controller = new AbortController();
-      abortControllersRef.current.set(region.id, controller);
-
-      downloadRegion(
-        region,
-        (progress) => {
-          setActiveProgress(progress);
-          if (progress.stage === 'complete' || progress.stage === 'error') {
-            abortControllersRef.current.delete(region.id);
-            setDownloadingPath(null);
-            loadRegions().then(() => setActiveProgress(null));
+      // Fire-and-forget into the global manager: navigating away or
+      // minimizing no longer cancels — progress lives in the store.
+      void startBackgroundDownload(region).then(
+        () => loadRegions(),
+        (err: unknown) => {
+          if (err instanceof Error && err.name !== 'AbortError') {
+            Alert.alert('Download Failed', err.message);
           }
+          loadRegions();
         },
-        controller.signal,
-      ).catch((err: unknown) => {
-        abortControllersRef.current.delete(region.id);
-        setDownloadingPath(null);
-        if (err instanceof Error && err.name !== 'AbortError') {
-          Alert.alert('Download Failed', err.message);
-        }
-        loadRegions().then(() => setActiveProgress(null));
-      });
+      );
     },
     [loadRegions],
   );
@@ -85,22 +88,16 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     async (node: GeoNode) => {
       if (downloadingPath) return;
       const region = geoNodeToRegion(node);
-      const controller = new AbortController();
-      abortControllersRef.current.set(region.id, controller);
       setDownloadingPath(node.path);
-      setActiveProgress(null);
       try {
         await upsertRegion(region);
-        await downloadRegion(region, (p) => setActiveProgress(p), controller.signal);
-        if (!controller.signal.aborted) {
-          loadRegions().then(() => setActiveProgress(null));
-        }
+        await startBackgroundDownload(region);
+        loadRegions();
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
           Alert.alert('Download Failed', err instanceof Error ? err.message : 'Unknown error');
         }
       } finally {
-        abortControllersRef.current.delete(region.id);
         setDownloadingPath(null);
       }
     },
@@ -109,12 +106,7 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
 
   const handleCancel = useCallback(
     (region: Region) => {
-      const controller = abortControllersRef.current.get(region.id);
-      if (controller) {
-        controller.abort();
-        abortControllersRef.current.delete(region.id);
-      }
-      setActiveProgress(null);
+      cancelBackgroundDownload(region.id);
       setDownloadingPath(null);
       loadRegions();
     },
@@ -176,7 +168,16 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     <View style={styles.container}>
       {showHeading && <Text style={styles.heading}>Offline Regions</Text>}
 
-      {activeProgress && <DownloadProgressBar progress={activeProgress} />}
+      {activeIds.map((id) =>
+        progressByRegion[id] ? (
+          <DownloadProgressBar key={id} progress={progressByRegion[id]} />
+        ) : null,
+      )}
+      {activeIds.length > 0 && (
+        <Text style={styles.backgroundHint}>
+          Downloading in background — you can switch tabs or minimize the app.
+        </Text>
+      )}
 
       {downloadedRegions.length > 0 && (
         <View style={styles.section}>
@@ -234,6 +235,12 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       marginTop: spacing.md,
     },
     description: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
+    backgroundHint: {
+      ...typography.body,
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginBottom: spacing.sm,
+    },
     list: { paddingBottom: spacing.xl },
     emptyText: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
     downloadedScroll: {

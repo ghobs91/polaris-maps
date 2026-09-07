@@ -42,6 +42,7 @@ import {
 } from '../../services/favorites/favoritesService';
 import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useParkingStore } from '../../stores/parkingStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
 import type { ValhallaRoute } from '../../models/route';
@@ -415,13 +416,15 @@ function CtrlBtn({
   icon,
   onPress,
   isDark,
+  active,
 }: {
   icon: string;
   onPress: () => void;
   isDark: boolean;
+  active?: boolean;
 }) {
   const { colors } = useTheme();
-  const iconColor = isDark ? '#EBEBF5' : colors.text;
+  const iconColor = active ? '#0A84FF' : isDark ? '#EBEBF5' : colors.text;
   return (
     <GlassView material="regular" isInteractive style={ctrlStyles.btn}>
       <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btnInner}>
@@ -443,6 +446,20 @@ export function MapControlsColumn({
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
+  const parkingSpot = useParkingStore((s) => s.spot);
+  const saveParking = useParkingStore((s) => s.saveCurrentLocation);
+  const clearParking = useParkingStore((s) => s.clearSpot);
+
+  const handleParkingPress = (): void => {
+    if (parkingSpot) {
+      Alert.alert('Parking spot', 'Clear your saved parking spot?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear', style: 'destructive', onPress: () => clearParking() },
+      ]);
+    } else {
+      void saveParking();
+    }
+  };
 
   return (
     <View style={ctrlStyles.column}>
@@ -461,6 +478,12 @@ export function MapControlsColumn({
 
       {/* Stacked floating glass buttons */}
       <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
+      <CtrlBtn
+        isDark={isDark}
+        icon={parkingSpot ? 'car-sport' : 'car-outline'}
+        active={!!parkingSpot}
+        onPress={handleParkingPress}
+      />
       <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
     </View>
   );

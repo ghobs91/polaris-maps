@@ -6,6 +6,7 @@ import * as Location from 'expo-location';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
 import { FloatingSearchPanel, MapControlsColumn } from '@/components/map/FloatingSearchPanel';
+import { ParkingSpotCard } from '@/components/map/ParkingSpotCard';
 import { FloatingMenuPanel } from '@/components/map/FloatingMenuPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
@@ -153,6 +154,7 @@ export default function MapScreen() {
 
           <POIInfoCard />
           <TransitStopCard />
+          <ParkingSpotCard />
           <FloatingMenuPanel
             visible={showMenuPanel}
             onClose={() => setShowMenuPanel(false)}
@@ -182,6 +184,7 @@ export default function MapScreen() {
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <POIInfoCard />
         <TransitStopCard />
+        <ParkingSpotCard />
       </View>
     </ErrorBoundary>
   );

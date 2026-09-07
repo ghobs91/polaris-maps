@@ -488,41 +488,37 @@ export default function NavigationScreen() {
         />
       </View>
 
-      {/* Re-center button — shown when user has panned/zoomed away */}
-      {!followCamera && (
+      {/* Right-side hovering action stack — Report always visible,
+          Re-center appears below it when the camera is unfollowed. */}
+      <View
+        style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
+        pointerEvents="box-none"
+      >
         <Pressable
-          style={({ pressed }) => [
-            styles.recenterBtn,
-            { bottom: insets.bottom + spacing.md + 100, opacity: pressed ? 0.85 : 1 },
-          ]}
-          onPress={handleRecenter}
-          accessibilityLabel="Re-center map"
-          accessibilityHint="Return the map view to your current location"
+          style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+          onPress={() => setShowIncidentReport(true)}
+          accessibilityLabel="Report incident"
+          accessibilityHint="Report a traffic incident at your current location"
           accessibilityRole="button"
         >
-          <GlassView material="regular" isInteractive style={styles.recenterBtnInner}>
-            <Ionicons name="navigate" size={16} color="#fff" />
-            <Text style={styles.recenterText}>Re-center</Text>
+          <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+            <Ionicons name="alert-circle-outline" size={22} color="#fff" />
           </GlassView>
         </Pressable>
-      )}
-
-      {/* Report incident button */}
-      <Pressable
-        style={({ pressed }) => [
-          styles.reportBtn,
-          { bottom: insets.bottom + spacing.md + 100, opacity: pressed ? 0.85 : 1 },
-        ]}
-        onPress={() => setShowIncidentReport(true)}
-        accessibilityLabel="Report incident"
-        accessibilityHint="Report a traffic incident at your current location"
-        accessibilityRole="button"
-      >
-        <GlassView material="regular" isInteractive style={styles.reportBtnInner}>
-          <Ionicons name="alert-circle-outline" size={16} color="#fff" />
-          <Text style={styles.reportText}>Report</Text>
-        </GlassView>
-      </Pressable>
+        {!followCamera && (
+          <Pressable
+            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={handleRecenter}
+            accessibilityLabel="Re-center map"
+            accessibilityHint="Return the map view to your current location"
+            accessibilityRole="button"
+          >
+            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+              <Ionicons name="navigate" size={22} color="#fff" />
+            </GlassView>
+          </Pressable>
+        )}
+      </View>
 
       {/* Add destination search panel */}
       <AddDestinationPanel
@@ -567,51 +563,27 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
     emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
     emptyHint: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
-    reportBtn: {
+    rightActions: {
       position: 'absolute',
-      left: spacing.md,
+      right: spacing.md,
       zIndex: 10,
-      borderRadius: 999,
-      overflow: 'hidden',
-      borderCurve: 'continuous',
-    },
-    reportBtnInner: {
-      flexDirection: 'row',
+      flexDirection: 'column',
       alignItems: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      paddingHorizontal: 16,
+      gap: 12,
+    },
+    actionFab: {
       borderRadius: 999,
       overflow: 'hidden',
       borderCurve: 'continuous',
     },
-    reportText: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    recenterBtn: {
-      position: 'absolute',
-      alignSelf: 'center',
-      zIndex: 10,
-      borderRadius: 999,
-      overflow: 'hidden',
-      borderCurve: 'continuous',
-    },
-    recenterBtnInner: {
-      flexDirection: 'row',
+    actionFabInner: {
+      width: 52,
+      height: 52,
       alignItems: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      borderRadius: 999,
+      justifyContent: 'center',
+      borderRadius: 26,
       overflow: 'hidden',
       borderCurve: 'continuous',
-    },
-    recenterText: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: '600',
     },
     nextStopBanner: {
       flexDirection: 'row',

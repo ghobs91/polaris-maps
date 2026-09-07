@@ -33,7 +33,8 @@ function colorSpread(hex: string): number {
 
 describe('darkMapStyle', () => {
   const style = JSON.parse(DARK_MAP_STYLE_JSON);
-  const bgColor = '#1A2A32';
+  // Tesla-like near-black charcoal land.
+  const bgColor = '#101418';
   const bgLum = hexToLuminance(bgColor);
 
   it('should parse as valid JSON with version 8', () => {
@@ -107,27 +108,37 @@ describe('highway palette', () => {
   const darkStyle = JSON.parse(DARK_MAP_STYLE_JSON);
   const lightStyle = JSON.parse(LIGHT_MAP_STYLE_JSON);
 
-  it('uses muted blue-gray highway fills in both themes', () => {
-    for (const style of [darkStyle, lightStyle]) {
-      const motorway = style.layers.find((l: any) => l.id === 'road-motorway');
-      const trunk = style.layers.find((l: any) => l.id === 'road-trunk');
+  it('uses muted blue-gray highway fills in light theme; vibrant Tesla palette in dark', () => {
+    // Light theme keeps the classic muted palette.
+    const motorwayLight = lightStyle.layers.find((l: any) => l.id === 'road-motorway');
+    const trunkLight = lightStyle.layers.find((l: any) => l.id === 'road-trunk');
+    expect(motorwayLight.paint['line-color']).not.toMatch(/F2B322|C4AA73/);
+    expect(trunkLight.paint['line-color']).not.toMatch(/F2B322|B29C6C/);
+    expect(colorSpread(motorwayLight.paint['line-color'])).toBeLessThanOrEqual(48);
+    expect(colorSpread(trunkLight.paint['line-color'])).toBeLessThanOrEqual(48);
 
-      expect(motorway.paint['line-color']).not.toMatch(/F2B322|C4AA73/);
-      expect(trunk.paint['line-color']).not.toMatch(/F2B322|B29C6C/);
-      expect(colorSpread(motorway.paint['line-color'])).toBeLessThanOrEqual(48);
-      expect(colorSpread(trunk.paint['line-color'])).toBeLessThanOrEqual(48);
-    }
+    // Dark theme uses the Tesla-like vibrant palette: bright white motorway
+    // + amber trunk for instant feature discernment.
+    const motorwayDark = darkStyle.layers.find((l: any) => l.id === 'road-motorway');
+    const trunkDark = darkStyle.layers.find((l: any) => l.id === 'road-trunk');
+    expect(motorwayDark.paint['line-color']).toBe('#F5F7FA');
+    expect(trunkDark.paint['line-color']).toBe('#FFC251');
   });
 
-  it('keeps highways darker than primary roads', () => {
-    for (const style of [darkStyle, lightStyle]) {
-      const motorway = style.layers.find((l: any) => l.id === 'road-motorway');
-      const primary = style.layers.find((l: any) => l.id === 'road-primary');
+  it('keeps dark highways brighter than primary roads (Tesla hierarchy)', () => {
+    const motorway = darkStyle.layers.find((l: any) => l.id === 'road-motorway');
+    const primary = darkStyle.layers.find((l: any) => l.id === 'road-primary');
 
-      expect(hexToLuminance(motorway.paint['line-color'])).toBeLessThan(
-        hexToLuminance(primary.paint['line-color']),
-      );
-    }
+    expect(hexToLuminance(motorway.paint['line-color'])).toBeGreaterThanOrEqual(
+      hexToLuminance(primary.paint['line-color']) - 0.05,
+    );
+
+    // Light theme keeps the old darker-highway hierarchy.
+    const motorwayLight = lightStyle.layers.find((l: any) => l.id === 'road-motorway');
+    const primaryLight = lightStyle.layers.find((l: any) => l.id === 'road-primary');
+    expect(hexToLuminance(motorwayLight.paint['line-color'])).toBeLessThan(
+      hexToLuminance(primaryLight.paint['line-color']),
+    );
   });
 });
 

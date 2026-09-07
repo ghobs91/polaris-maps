@@ -1,12 +1,12 @@
 /**
- * Custom MapLibre dark-mode style inspired by Google Maps' dark appearance.
+ * Custom MapLibre dark-mode style inspired by Tesla navigation.
  *
- * Characteristics:
- *   - Dark teal-slate land (#1A2A32) — closer to Google Maps' dark mode
- *   - Deep blue water (#1E4260)
- *   - Muted teal-green parks and greenery
- *   - Blue-gray highways and local roads with strong visual hierarchy
- *   - Dark blue-slate buildings
+ * Characteristics (Tesla-like vibrant high-contrast dark):
+ *   - Near-black charcoal land (#101418) — roads pop like Tesla
+ *   - Deep vibrant navy water (#0A2A4A) — instantly distinct from land
+ *   - Saturated emerald parks (#155E3A) — easy to discern greenery
+ *   - Bright white major roads, amber trunk highways, light-grey minors
+ *   - Blue-slate buildings with stronger contrast
  *   - Bright white labels with dark halos for readability
  *
  * Uses OpenFreeMap vector tiles (OpenMapTiles schema). No API key required.
@@ -36,13 +36,13 @@ const style = {
           ['linear'],
           ['zoom'],
           0,
-          '#223A40',
+          '#14181D',
           3,
-          '#1F343B',
+          '#12161B',
           4,
-          '#1C2F36',
+          '#101418',
           5,
-          '#1A2A32',
+          '#101418',
         ],
       },
     },
@@ -313,7 +313,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['in', 'class', 'park', 'garden', 'playground'],
-      paint: { 'fill-color': '#1F4A3E', 'fill-opacity': 0.56 },
+      paint: { 'fill-color': '#155E3A', 'fill-opacity': 0.72 },
     },
     {
       id: 'landuse-cemetery',
@@ -354,18 +354,18 @@ const style = {
       type: 'fill',
       source: 'openmaptiles',
       'source-layer': 'park',
-      paint: { 'fill-color': '#1F4A3E', 'fill-opacity': 0.54 },
+      paint: { 'fill-color': '#155E3A', 'fill-opacity': 0.7 },
     },
 
     // ───────────────────── Water ─────────────────────
-    // Deep blue — clear contrast against the teal terrain background at
-    // zoomed-out levels, matching Google Maps dark mode.
+    // Vibrant navy — instantly distinct from near-black land,
+    // Tesla-style water contrast (light enough for ≥1.2:1 vs land).
     {
       id: 'water',
       type: 'fill',
       source: 'openmaptiles',
       'source-layer': 'water',
-      paint: { 'fill-color': '#1E4260' },
+      paint: { 'fill-color': '#123E66' },
     },
     {
       id: 'waterway',
@@ -373,7 +373,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'waterway',
       paint: {
-        'line-color': '#1E4260',
+        'line-color': '#1463B8',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 14, 2, 18, 4],
       },
     },
@@ -386,8 +386,8 @@ const style = {
       'source-layer': 'building',
       minzoom: 13,
       paint: {
-        'fill-color': '#263845',
-        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.58, 17, 0.78],
+        'fill-color': '#2E3E4E',
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.68, 17, 0.88],
       },
     },
     // Subtle ground shadow beneath extruded buildings
@@ -410,7 +410,7 @@ const style = {
       'source-layer': 'building',
       minzoom: 14,
       paint: {
-        'fill-extrusion-color': '#263845',
+        'fill-extrusion-color': '#2E3E4E',
         'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
         'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
         'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.85, 17, 0.95],
@@ -581,7 +581,7 @@ const style = {
       minzoom: 14,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#4A5A66',
+        'line-color': '#7A8B99',
         'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 18, 2],
         'line-dasharray': [2, 2],
       },
@@ -595,7 +595,7 @@ const style = {
       minzoom: 13,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#4A5A66',
+        'line-color': '#7A8B99',
         'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.3, 16, 1.5, 18, 4],
       },
     },
@@ -608,7 +608,7 @@ const style = {
       minzoom: 10,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#556776',
+        'line-color': '#8E9EAB',
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.3, 14, 1.5, 16, 4, 18, 8],
       },
     },
@@ -621,7 +621,7 @@ const style = {
       minzoom: 8,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#5F7387',
+        'line-color': '#A9BCCB',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.3, 14, 2, 16, 4.5, 18, 9],
       },
     },
@@ -634,7 +634,7 @@ const style = {
       minzoom: 6,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#93A7BA',
+        'line-color': '#E8EFF5',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.3, 10, 1, 14, 3, 18, 11],
       },
     },
@@ -647,7 +647,7 @@ const style = {
       minzoom: 5,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#6B7F93',
+        'line-color': '#FFC251',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.3, 10, 1.5, 14, 3.5, 18, 13],
       },
     },
@@ -660,7 +660,7 @@ const style = {
       minzoom: 4,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#788CA0',
+        'line-color': '#F5F7FA',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 8, 1, 14, 4, 18, 16],
       },
     },

@@ -401,7 +401,9 @@ async function autoSeedRegion(
 }
 
 export function cancelDownload(_regionId: string): void {
-  // Downloads use batch tile fetching — cancellation is a no-op for now
+  // Real cancellation lives in downloadManager.cancelBackgroundDownload,
+  // which owns the AbortController. Kept for backward compat — callers
+  // should migrate to the manager so downloads survive screen unmount.
 }
 
 export async function deleteRegionData(regionId: string): Promise<void> {

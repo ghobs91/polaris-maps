@@ -54,6 +54,11 @@ let gpsSegmentIndex = 0;
 let offRouteCount = 0;
 // Prevents overlapping reroute requests.
 let reroutingFix = false;
+// Latest GPS fix received while a reroute is in flight. The old code dropped
+// these fixes (early return) and re-anchored to the new route's start — i.e.
+// where the user deviated — so the puck snapped backwards. We now keep
+// tracking live and re-anchor to the latest position on success.
+let latestFixWhileRerouting: LocationObject | null = null;
 // Wrong-way driving (user moving opposite the route direction while still
 // snapped near the polyline, so distance-based off-route never fires).
 let wrongWayCount = 0;
@@ -83,6 +88,7 @@ export function startTracking(route: ValhallaRoute): void {
   trackingActive = true;
   offRouteCount = 0;
   reroutingFix = false;
+  latestFixWhileRerouting = null;
   wrongWayCount = 0;
   wrongWayActive = false;
   lastGpsHeading = null;
@@ -101,6 +107,7 @@ export function stopTracking(): void {
   gpsSegmentIndex = 0;
   offRouteCount = 0;
   reroutingFix = false;
+  latestFixWhileRerouting = null;
   wrongWayCount = 0;
   wrongWayActive = false;
   lastGpsHeading = null;
@@ -263,6 +270,13 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   const needsReroute =
     isOffRoute(distFromRoute, offRouteCount) || wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT;
 
+  // While a reroute is in flight, keep tracking the live position — do NOT
+  // early-return. Dropping fixes here froze the puck at the deviation point.
+  if (reroutingFix) {
+    latestFixWhileRerouting = location;
+    // Fall through to the DR/ETA update below so the marker keeps moving.
+  }
+
   if (needsReroute && !reroutingFix && store.destination) {
     if (isBackground) {
       // Defer the reroute to the foreground: flag the deviation so the next
@@ -271,6 +285,7 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
       store.setDeviated(true);
     } else {
       reroutingFix = true;
+      latestFixWhileRerouting = null;
       store.setDeviated(true);
       store.setRerouting(true);
 
@@ -278,12 +293,14 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
       // Preserve the stops the user hasn't reached yet — rerouting to the
       // final destination only would silently drop them from the trip.
       const pending = store.waypoints.slice(store.currentLegIndex);
+      const rerouteFrom = {
+        lat: location.coords.latitude,
+        lng: location.coords.longitude,
+        bearing: gpsBearing,
+      };
+      const rerouteHeading = movingFast && headingValid ? rawHeading! : undefined;
       reroute(
-        {
-          lat: location.coords.latitude,
-          lng: location.coords.longitude,
-          bearing: gpsBearing,
-        },
+        rerouteFrom,
         { lat: store.destination.lat, lng: store.destination.lng },
         store.costing,
         {
@@ -294,7 +311,7 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
           // Only trust the compass course when moving — a stationary/fresh
           // GPS heading (or the 0 fallback) would bias the engine toward a
           // phantom direction and produce U-turn-heavy "weird" routes.
-          heading: movingFast && headingValid ? rawHeading! : undefined,
+          heading: rerouteHeading,
         },
       )
         .then((newRoute) => {
@@ -302,10 +319,6 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
           if (navStore.isNavigating) {
             navStore.replaceRoute(newRoute);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-            // Reset DR anchor and GPS segment index to start of the new route.
-            // The next GPS callback will correct the segment index to the
-            // actual position; using 0 here prevents stale indices from the
-            // previous route causing premature step advances.
             const newCoords = decodePolyline(newRoute.geometry);
             if (newCoords.length >= 2) {
               // Adopt the new route into this tracker without resetting
@@ -314,16 +327,40 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
               allManeuvers = newRoute.legs.flatMap((l) => l.maneuvers);
               activeRouteSummaryDistanceMeters = newRoute.summary.distanceMeters;
               activeRouteSummaryDurationSeconds = newRoute.summary.durationSeconds;
+              // Re-anchor to the LATEST live position — not the stale fix
+              // that triggered the reroute. The user keeps moving during the
+              // network request; anchoring to newCoords[0] snapped the puck
+              // back to where they deviated.
+              const anchorFix = latestFixWhileRerouting ?? location;
+              const anchorPos: [number, number] = [
+                anchorFix.coords.longitude,
+                anchorFix.coords.latitude,
+              ];
+              const { snapped: anchorSnapped, segmentIndex: anchorSeg } = snapToRoute(
+                anchorPos,
+                newCoords,
+              );
+              const anchorSpeed = (anchorFix.coords.speed ?? -1) >= 0 ? anchorFix.coords.speed! : 0;
               drAnchor = {
-                pos: newCoords[0],
-                segIdx: 0,
-                speedMps: (location.coords.speed ?? -1) >= 0 ? location.coords.speed! : 0,
-                time: now,
+                pos: anchorSnapped,
+                segIdx: anchorSeg,
+                speedMps: anchorSpeed,
+                time: performance.now(),
               };
-              gpsSegmentIndex = 0;
+              gpsSegmentIndex = anchorSeg;
+              // If the fresh position is still far from the new route
+              // (user kept driving away), keep the off-route counter so the
+              // next fix immediately triggers a follow-up reroute instead of
+              // declaring success prematurely.
+              const anchorDist = haversineMeters(anchorPos, anchorSnapped);
+              offRouteCount = anchorDist > OFF_ROUTE_THRESHOLD_METERS ? 1 : 0;
+            } else {
+              offRouteCount = 0;
             }
+          } else {
+            offRouteCount = 0;
           }
-          offRouteCount = 0;
+          latestFixWhileRerouting = null;
           wrongWayCount = 0;
           wrongWayActive = false;
           lastGpsRemaining = null;
@@ -332,13 +369,15 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
         .catch(() => {
           // Reroute failed (e.g., no connectivity) — clear rerouting flag
           // so it will retry on the next off-route GPS reading.
-          // Keep wrongWayCount so a wrong-way drive retries immediately,
+          // Keep the latest fix so the retry uses the live position, and keep
+          // wrongWayCount so a wrong-way drive retries immediately,
           // mirroring the off-route counter behaviour.
           useNavigationStore.getState().setRerouting(false);
           reroutingFix = false;
         });
 
-      return; // Skip normal DR update while rerouting
+      // Fall through (no early return): keep the DR anchor, ETA, and step
+      // advancement live using the current fix while the reroute flies.
     }
   }
 

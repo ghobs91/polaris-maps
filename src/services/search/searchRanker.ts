@@ -10,7 +10,7 @@
 
 import type { OsmPoi } from '../poi/osmFetcher';
 import type { ParsedSearchQuery } from './queryParser';
-import { levenshtein, normalizeSearchText } from './queryParser';
+import { levenshtein, normalizeSearchText, expandTokenSynonyms } from './queryParser';
 
 export interface ScoredResult {
   poi: OsmPoi;
@@ -131,6 +131,7 @@ export function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
   const brandTag = normalizeSearchText(
     poi.tags['brand'] ?? poi.tags['brand:wikidata'] ?? '',
   ).toLowerCase();
+  if (!query) return 0;
 
   // Exact name match
   if (name === query) return 1.0;
@@ -154,6 +155,10 @@ export function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
     return 0.9;
   }
 
+  // Category-aware name match: a query like "coffee" should score a cafe
+  // POI even when "coffee" isn't in its name ("Babylon Bean" is a cafe).
+  // Uses subtype + cuisine + shop/amenity tags with synonym expansion.
+  const categoryTextScore = categoryTextMatchScore(poi, query);
   // Name starts with query
   if (name.startsWith(query)) return 0.85;
 
@@ -161,40 +166,113 @@ export function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
   const wordBoundary = new RegExp(`\\b${escapeRegex(query)}\\b`, 'i');
   if (wordBoundary.test(name)) return 0.75;
 
+  // Token prefix match: every query token prefix-matches a name word
+  // (e.g. "coff" → "coffee"). Stronger than substring, typo-tolerant.
+  const tokenPrefix = tokenPrefixScore(query, name);
+  if (tokenPrefix >= 1) return 0.7;
+
   // Name contains query as substring
-  if (name.includes(query)) return 0.6;
+  if (query.length >= 3 && name.includes(query)) return 0.6;
 
   // Query contains the place name (e.g. "starbucks coffee" search, poi name "Starbucks")
   if (query.includes(name) && name.length >= 3) return 0.55;
 
-  // Fuzzy match — for short queries check edit distance
+  // Fuzzy match — per-word so "cofee grind" still matches "coffee grind".
   if (query.length >= 3 && name.length >= 3) {
-    // Compare against the first word of the name for single-word queries
-    const nameFirst = name.split(/\s+/)[0];
-    const maxDist = query.length <= 5 ? 1 : 2;
-    if (levenshtein(query, nameFirst) <= maxDist) return 0.5;
-    if (levenshtein(query, name) <= maxDist) return 0.45;
+    const queryWords = query.split(/\s+/);
+    const nameWords = name.split(/\s+/);
+    let fuzzyHits = 0;
+    for (const qw of queryWords) {
+      if (qw.length < 3) continue;
+      const maxDist = qw.length <= 4 ? 1 : qw.length <= 7 ? 2 : 3;
+      for (const nw of nameWords) {
+        if (nw.length < 3) continue;
+        if (levenshtein(qw, nw) <= maxDist) {
+          fuzzyHits++;
+          break;
+        }
+      }
+    }
+    if (fuzzyHits > 0) {
+      const coverage = fuzzyHits / queryWords.length;
+      // Full fuzzy coverage outranks partial prefix coverage.
+      return Math.max(0.5 * coverage, tokenPrefix * 0.5, categoryTextScore * 0.9);
+    }
   }
 
   // Word-level matching: score based on how many query words match name words.
   // Matching 1 out of 4 query words is much weaker than matching 1 out of 1.
+  // Includes synonym expansion (coffee ↔ cafe) and substring fallback.
   const queryWords = query.split(/\s+/);
   const nameWords = name.split(/\s+/);
+  const haystack =
+    `${name} ${poi.subtype ?? ''} ${poi.tags['cuisine'] ?? ''} ${poi.tags['shop'] ?? ''}`.toLowerCase();
   let matchedQueryWords = 0;
   for (const qw of queryWords) {
-    for (const nw of nameWords) {
-      if (qw.length >= 3 && (nw.startsWith(qw) || qw.startsWith(nw))) {
-        matchedQueryWords++;
+    if (qw.length < 2) continue;
+    const synonyms = expandTokenSynonyms(qw);
+    let hit = false;
+    for (const syn of synonyms) {
+      for (const nw of nameWords) {
+        if (syn.length >= 3 && (nw.startsWith(syn) || syn.startsWith(nw))) {
+          hit = true;
+          break;
+        }
+      }
+      if (!hit && syn.length >= 3 && haystack.includes(syn)) hit = true;
+      if (hit) break;
+    }
+    if (hit) matchedQueryWords++;
+  }
+  if (matchedQueryWords > 0) {
+    const coverage = matchedQueryWords / queryWords.length;
+    return Math.max(0.35 * coverage, categoryTextScore * 0.85);
+  }
+
+  // Pure category hit (no name overlap) still returns the category signal
+  // so cafes rank for "coffee" instead of scoring zero.
+  if (categoryTextScore > 0) return categoryTextScore * 0.8;
+
+  return 0;
+}
+
+/** Score (0–1) for query tokens matching POI subtype/cuisine/shop tags. */
+function categoryTextMatchScore(poi: OsmPoi, query: string): number {
+  const subtype = (poi.subtype ?? '').toLowerCase().replace(/_/g, ' ');
+  const cuisine = (poi.tags['cuisine'] ?? '').toLowerCase();
+  const shop = (poi.tags['shop'] ?? '').toLowerCase();
+  const amenity = (poi.tags['amenity'] ?? '').toLowerCase();
+  const haystack = `${subtype} ${cuisine} ${shop} ${amenity}`;
+  const queryWords = query.split(/\s+/).filter((w) => w.length >= 2);
+  if (queryWords.length === 0) return 0;
+  let hits = 0;
+  for (const qw of queryWords) {
+    for (const syn of expandTokenSynonyms(qw)) {
+      if (syn.length >= 3 && haystack.includes(syn)) {
+        hits++;
         break;
       }
     }
   }
-  if (matchedQueryWords > 0) {
-    const coverage = matchedQueryWords / queryWords.length;
-    return 0.35 * coverage;
-  }
+  if (hits === 0) return 0;
+  return 0.65 * (hits / queryWords.length);
+}
 
-  return 0;
+/** Fraction (0–1) of query tokens that prefix-match a name word. */
+function tokenPrefixScore(query: string, name: string): number {
+  const queryWords = query.split(/\s+/).filter((w) => w.length >= 2);
+  const nameWords = name.split(/\s+/);
+  if (queryWords.length === 0) return 0;
+  let hits = 0;
+  for (const qw of queryWords) {
+    for (const nw of nameWords) {
+      if (qw.length >= 3 && (nw.startsWith(qw) || qw.startsWith(nw))) {
+        hits++;
+        break;
+      }
+    }
+  }
+  return hits / queryWords.length;
 }
 
 function categoryMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
@@ -250,17 +328,29 @@ function popularityScore(poi: OsmPoi): number {
 // Deduplication
 // ---------------------------------------------------------------------------
 
-/** Deduplicate results across sources using name similarity + distance. */
+/** Deduplicate results across sources using name similarity + distance.
+ *
+ *  Thorough but not noisy: the same venue from Photon + Overture + Overpass
+ *  often differs by 50–150 m, so exact name matches dedup up to 150 m.
+ *  Fuzzy matches only dedup when truly close (<80 m) to avoid collapsing
+ *  distinct shops in the same strip mall.
+ */
 export function deduplicateResults(results: ScoredResult[]): ScoredResult[] {
   const kept: ScoredResult[] = [];
 
   for (const r of results) {
     const isDup = kept.some((existing) => {
+      // Same source id — definitely the same place.
+      if (existing.poi.id === r.poi.id && existing.poi.id !== undefined && r.poi.id !== undefined)
+        return true;
       const dist = haversineKm(existing.poi.lat, existing.poi.lng, r.poi.lat, r.poi.lng);
-      if (dist > 0.05) return false; // >50m apart — not a duplicate
       const nameA = normalizeSearchText(existing.poi.name).toLowerCase().replace(/'/g, '');
       const nameB = normalizeSearchText(r.poi.name).toLowerCase().replace(/'/g, '');
-      return nameA === nameB || levenshtein(nameA, nameB) <= 2;
+      if (!nameA || !nameB) return false;
+      if (nameA === nameB) return dist <= 0.15; // exact name, up to 150 m
+      if (dist > 0.08) return false; // >80 m apart — not a fuzzy duplicate
+      if (Math.min(nameA.length, nameB.length) < 6) return false; // short names need exact
+      return levenshtein(nameA, nameB) <= 2;
     });
     if (!isDup) kept.push(r);
   }

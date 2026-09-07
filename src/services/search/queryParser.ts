@@ -144,12 +144,35 @@ export interface ParsedSearchQuery {
 }
 
 export function normalizeSearchText(text: string): string {
-  return text
-    .normalize('NFKD')
-    .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
-    .replace(/[\u2010-\u2015]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    text
+      .normalize('NFKD')
+      // Strip combining diacritical marks so "café" matches "cafe".
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+      .replace(/[\u2010-\u2015]/g, '-')
+      // Remove punctuation except ' & - so "coffee-grind" and "coffee grind" match.
+      .replace(/[^\p{L}\p{N}'&\- ]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+/** Category-word synonyms so name matching understands intent
+ *  (e.g. query "coffee" matches subtype "cafe" and vice versa). */
+const CATEGORY_SYNONYMS: Record<string, string[]> = {
+  coffee: ['coffee', 'cafe', 'espresso', 'cappuccino', 'latte'],
+  cafe: ['cafe', 'coffee', 'tea', 'espresso'],
+  pizza: ['pizza', 'pizzeria', 'italian'],
+  burger: ['burger', 'burgers', 'fast_food'],
+  bar: ['bar', 'pub', 'brewery', 'cocktail'],
+  gas: ['gas', 'fuel', 'petrol', 'gasoline'],
+};
+
+/** Expand a single query token into its synonym set (includes itself). */
+export function expandTokenSynonyms(token: string): string[] {
+  const lower = token.toLowerCase();
+  return CATEGORY_SYNONYMS[lower] ?? [lower];
 }
 
 /**
@@ -186,9 +209,12 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
   if (!coreQuery) coreQuery = originalQuery.trim();
 
   // 6. Determine if this is a name-based search
-  // It's a name search if we found a brand OR if there are no category matches
-  // and the query looks like a place name (capitalized, no obvious category words)
-  const isNameSearch = brand !== null || (categories === null && coreQuery.length >= 2);
+  // Treat almost every free-text query as a name search too — single-word
+  // category queries like "coffee" or "pizza" are ALSO place names
+  // ("The Coffee Grind", "Pizza Palace"). This broadens Photon fetch,
+  // enables name + category hybrid scoring, and keeps results thorough.
+  // Address handling is gated separately by isAddressQuery, so this is safe.
+  const isNameSearch = brand !== null || coreQuery.length >= 2;
 
   return {
     coreQuery,

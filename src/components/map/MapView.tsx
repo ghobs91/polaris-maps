@@ -11,6 +11,7 @@ import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Dimensions } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
+import { useParkingStore } from '../../stores/parkingStore';
 import { fetchOsmPois, fetchNominatimPois } from '../../services/poi/osmFetcher';
 import { getPlacesInBounds } from '../../services/poi/poiService';
 import { fetchOverturePlaces } from '../../services/poi/overtureFetcher';
@@ -180,6 +181,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const mapStylePref = useMapStore((s) => s.mapStyle);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
   const stopSearchMarkers = useMapStore((s) => s.stopSearchMarkers);
+  const parkingSpot = useParkingStore((s) => s.spot);
   // Track the last programmatic viewport change to fly to
   const lastProgrammaticMove = useRef(0);
   // Debounce timer for OSM POI fetching
@@ -758,6 +760,41 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 circleColor: '#FF9500',
                 circleStrokeWidth: 3,
                 circleStrokeColor: '#fff',
+              }}
+            />
+          </MapLibreGL.ShapeSource>
+        )}
+
+        {/* Saved parking spot — persistent blue P marker */}
+        {parkingSpot && (
+          <MapLibreGL.ShapeSource
+            id="parkingSpot"
+            shape={{
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'Point',
+                coordinates: [parkingSpot.lng, parkingSpot.lat],
+              },
+            }}
+          >
+            <MapLibreGL.CircleLayer
+              id="parkingSpotCircle"
+              style={{
+                circleRadius: 12,
+                circleColor: '#0A84FF',
+                circleStrokeWidth: 3,
+                circleStrokeColor: '#fff',
+              }}
+            />
+            <MapLibreGL.SymbolLayer
+              id="parkingSpotLabel"
+              style={{
+                textField: 'P',
+                textSize: 14,
+                textColor: '#fff',
+                textAllowOverlap: true,
+                textIgnorePlacement: true,
               }}
             />
           </MapLibreGL.ShapeSource>
