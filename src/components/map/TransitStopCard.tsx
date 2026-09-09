@@ -439,21 +439,25 @@ export function TransitStopCard() {
 
       // Try OTP first (registry auto-selects endpoint by coordinates);
       // fall back to local cached-line planner only if OTP fails.
+      const timeState = useTransitStore.getState();
+      const departureIso = timeState.departureTime?.toISOString();
+      let otpError: string | null = null;
       try {
-        const timeState = useTransitStore.getState();
         const itineraries = await planTransitTrip({
           from: { lat: origin.lat, lng: origin.lon },
           to: { lat: destLat, lng: destLng },
           modes: timeState.enabledModes,
-          departureTime: timeState.departureTime?.toISOString(),
+          departureTime: departureIso,
           isDepartAt: timeState.isDepartAt,
         });
         setDirItineraries(itineraries);
         if (itineraries.length === 0) setDirError('No transit routes found');
         setDirLoading(false);
         return;
-      } catch {
-        // OTP unavailable — fall through to local planner
+      } catch (e) {
+        // OTP unavailable — fall through to local planner, but remember the
+        // reason so a double failure doesn't misreport as a local-only miss.
+        otpError = e instanceof Error ? e.message : 'Trip planner unavailable';
       }
 
       // Local planner using cached transit line data
@@ -467,10 +471,14 @@ export function TransitStopCard() {
           destName,
         );
         if (localRoutes.length === 0) {
-          setDirError('No direct routes found between these stations');
+          setDirError(
+            departureIso
+              ? 'No transit routes found for selected time'
+              : (otpError ?? 'No direct routes found between these stations'),
+          );
           setDirItineraries(null);
         } else {
-          setDirItineraries(localRoutes.map(localRouteToItinerary));
+          setDirItineraries(localRoutes.map((r) => localRouteToItinerary(r, departureIso)));
         }
       } finally {
         setDirLoading(false);

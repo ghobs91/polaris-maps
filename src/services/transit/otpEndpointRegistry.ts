@@ -51,6 +51,8 @@ export interface OtpEndpoint {
   url: string;
   /** Which API style this endpoint speaks. */
   apiStyle: OtpApiStyle;
+  /** IANA timezone for date/time query params (OTP1 REST only). */
+  timezone?: string;
   /** Extra headers to include (e.g. client-name for Entur). */
   headers?: Record<string, string>;
   /**
@@ -81,6 +83,7 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
     bbox: [40.4, -74.3, 41.4, -72.0],
     url: 'https://otp-mta-prod.camsys-apps.com/otp/routers/default/plan',
     apiStyle: 'rest-v1',
+    timezone: 'America/New_York',
   },
   {
     label: 'WMATA Washington DC Metro',
@@ -93,6 +96,7 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
     bbox: [45.2, -123.2, 45.8, -122.2],
     url: 'https://maps.trimet.org/otp_mod/plan',
     apiStyle: 'rest-v1',
+    timezone: 'America/Los_Angeles',
   },
   {
     label: 'MBTA Boston & Massachusetts',

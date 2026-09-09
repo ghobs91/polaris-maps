@@ -25,6 +25,25 @@ export default function TransitTimeSelector() {
     return `${h}:${m} ${ampm}`;
   };
 
+  const formatDate = (date: Date) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return `${days[date.getDay()]} ${months[date.getMonth()]} ${date.getDate()}`;
+  };
+
   const isToday = (() => {
     const now = new Date();
     return (
@@ -56,7 +75,7 @@ export default function TransitTimeSelector() {
   const timeLabel = departureTime
     ? isToday
       ? formatTime(selectedTime)
-      : formatTime(selectedTime) + ' (other day)'
+      : `${formatDate(selectedTime)}, ${formatTime(selectedTime)}`
     : 'Now';
 
   return (

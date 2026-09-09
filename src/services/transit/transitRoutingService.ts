@@ -352,6 +352,40 @@ function otp1ItineraryToOtp(raw: Otp1Itinerary): OtpItinerary {
   };
 }
 
+/**
+ * Format a Date for OTP1 REST `date` (MM-DD-YYYY) + `time` (h:mmam/pm)
+ * params in the endpoint's timezone. OTP1 interprets date/time in the
+ * graph's local timezone, so device-local formatting breaks cross-midnight
+ * and non-local requests. Time uses the canonical lowercase no-space form
+ * (e.g. "9:00am") instead of toLocaleTimeString's "9:00 AM".
+ */
+export function formatOtp1DateTime(
+  dt: Date,
+  timeZone?: string,
+): { dateStr: string; timeStr: string } {
+  const dateParts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+  }).formatToParts(dt);
+  const get = (type: string) => dateParts.find((p) => p.type === type)?.value ?? '';
+  const dateStr = `${get('month')}-${get('day')}-${get('year')}`;
+
+  const timeParts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(dt);
+  const hour = timeParts.find((p) => p.type === 'hour')?.value ?? '';
+  const minute = timeParts.find((p) => p.type === 'minute')?.value ?? '00';
+  const dayPeriod = (timeParts.find((p) => p.type === 'dayPeriod')?.value ?? '').toLowerCase();
+  const timeStr = `${hour}:${minute}${dayPeriod}`;
+
+  return { dateStr, timeStr };
+}
+
 async function planViaOtp1Rest(
   endpoint: OtpEndpoint,
   options: PlanTransitOptions,
@@ -359,14 +393,7 @@ async function planViaOtp1Rest(
   const { from, to, departureTime, numItineraries = 5, isDepartAt } = options;
 
   const dt = departureTime ? new Date(departureTime) : new Date();
-  const timeStr = dt.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-  const month = String(dt.getMonth() + 1).padStart(2, '0');
-  const day = String(dt.getDate()).padStart(2, '0');
-  const dateStr = `${month}-${day}-${dt.getFullYear()}`;
+  const { dateStr, timeStr } = formatOtp1DateTime(dt, endpoint.timezone);
 
   const params = new URLSearchParams({
     fromPlace: `${from.lat},${from.lng}`,

@@ -1708,9 +1708,13 @@ function matchesStop(stop: TransitRouteLineStop, lat: number, lon: number, name?
       queryLower.startsWith(stopLower + ' ') ||
       queryLower.startsWith(stopLower + '\u2013') ||
       queryLower.startsWith(stopLower + '-');
-    // Strict: exact name must be within 400 m, partial within 200 m
+    // Strict: exact name must be within 400 m, partial within 200 m.
+    // Substring fallback (e.g. "Penn Station" vs "New York Penn Station")
+    // within 400 m so station-complex naming differences still match.
     if (stopLower === queryLower && dist < 400) return true;
     if (nameMatch && dist < 200) return true;
+    if (dist < 400 && (stopLower.includes(queryLower) || queryLower.includes(stopLower)))
+      return true;
     return false;
   }
 
@@ -1808,8 +1812,9 @@ export function planLocalTransitRoute(
  */
 export function localRouteToItinerary(
   route: LocalTransitRoute,
+  departureTimeIso?: string,
 ): import('../../models/transit').OtpItinerary {
-  const now = new Date();
+  const now = departureTimeIso ? new Date(departureTimeIso) : new Date();
   const start = now.toISOString();
   const end = new Date(now.getTime() + route.estimatedSeconds * 1000).toISOString();
 
