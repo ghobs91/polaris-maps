@@ -47,14 +47,20 @@ export function stopMonitoring(): void {
   unsubscribe = null;
 }
 
+export function getConnectionQuality(): ConnectionQuality {
+  return currentState.quality;
+}
+
 function deriveQuality(state: NetInfoState): ConnectionQuality {
   if (!state.isConnected) return 'none';
+  // NetInfo can report connected but unreachable (captive portal / weak link).
+  if (state.isInternetReachable === false) return 'none';
 
   if (state.type === 'wifi' || state.type === 'ethernet') return 'good';
 
   if (state.type === 'cellular') {
     const details = state.details as { cellularGeneration?: string } | null;
-    if (details?.cellularGeneration === '2g') return 'poor';
+    if (details?.cellularGeneration === '2g' || details?.cellularGeneration === '3g') return 'poor';
     return 'good';
   }
 

@@ -12,6 +12,7 @@ import {
   suspendTrafficP2P,
   resumeTrafficP2P,
 } from '@/services/traffic/trafficFlowService';
+import { startMonitoring as startConnectivityMonitoring } from '@/services/regions/connectivityService';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 import { useICloudSync } from '@/hooks/useICloudSync';
 
@@ -25,6 +26,10 @@ function RootLayoutInner() {
 
   useEffect(() => {
     useAtprotoAuthStore.getState().restore();
+    // Track connectivity for the banner, offline gating, and map fallback.
+    // Previously never started, so isOnline() was stuck at its optimistic
+    // default and the map never knew the connection was weak.
+    startConnectivityMonitoring();
     // Keep the iOS background navigation session in sync with navigation
     // state (starts/stops it wherever navigation is triggered from).
     initNavigationBackgroundSession();

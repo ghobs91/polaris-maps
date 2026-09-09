@@ -216,7 +216,9 @@ class PolarisTileServer: NSObject {
     switch ext.lowercased() {
     case "png": return "image/png"
     case "jpg", "jpeg": return "image/jpeg"
-    case "mvt": return "application/vnd.mapbox-vector-tile"
+    // Downloaded region packs store OpenMapTiles vector tiles as .pbf —
+    // byte-identical to .mvt, so serve the Mapbox vector TILE MIME type.
+    case "mvt", "pbf": return "application/vnd.mapbox-vector-tile"
     case "json": return "application/json"
     default: return "application/octet-stream"
     }

@@ -108,7 +108,8 @@ export async function ensureTrafficTileServer(): Promise<string | null> {
   try {
     const port = await startTileServer({ cachePath: `${FileSystem.cacheDirectory}`, port: 0 });
     if (port > 0) {
-      await addTileSource({ id: SOURCE_ID, filePath: cacheDir! });
+      // Native URL(fileURLWithPath:) needs a raw path, not a file:// URI.
+      await addTileSource({ id: SOURCE_ID, filePath: cacheDir!.replace(/^file:\/\//, '') });
       serverBaseUrl = getTileServerBaseUrl();
       serverStarted = serverBaseUrl.length > 0;
     }

@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
-import { StyleSheet, View, Dimensions } from 'react-native';
+import { StyleSheet, View, Dimensions, InteractionManager } from 'react-native';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useParkingStore } from '../../stores/parkingStore';
@@ -30,6 +30,18 @@ import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
 import { resolveMapStyle, setLayerVisibilityInStyle } from './mapStyleResolver';
+import {
+  getConnectivity,
+  type ConnectionQuality,
+} from '../../services/regions/connectivityService';
+import {
+  ensureOfflineTileServer,
+  syncOfflineSources,
+  getOfflinePackForPoint,
+  type OfflinePack,
+} from '../../services/map/offlineMapService';
+import { buildOfflineStyle } from '../../services/map/offlineStyle';
+import NetInfo from '@react-native-community/netinfo';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 // Suppress noisy MapLibre Native font-loading timeouts (e.g. missing glyph
@@ -177,6 +189,18 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }));
   const { isDark } = useTheme();
   const [styleLoadFailed, setStyleLoadFailed] = useState(false);
+  // Live connection quality: on poor/none we fall back to the lightweight
+  // raster compat style (no glyph/font dependencies) instead of stalling on
+  // vector tiles + fonts, and we skip competing POI/traffic network fetches.
+  const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality>(
+    () => getConnectivity().quality,
+  );
+  const styleLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const styleLoadedRef = useRef(false);
+  // Downloaded region pack serving the basemap while the link is weak, else null.
+  const [offlinePack, setOfflinePack] = useState<OfflinePack | null>(null);
+  // Rounded center cell driving offline-pack lookups (stable across GPS ticks).
+  const [lookupCell, setLookupCell] = useState<string | null>(null);
   const viewport = useMapStore((s) => s.viewport);
   const mapStylePref = useMapStore((s) => s.mapStyle);
   const selectedLocation = useMapStore((s) => s.selectedLocation);
@@ -360,16 +384,23 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
         // Fetch viewport traffic data so normalizedSegments are populated for
         // route-line traffic coloring even before a route is computed.
+        // Skipped while offline so the basemap gets full bandwidth and the
+        // cached map stays readable (P2P sync is cheap, keep it running).
         const centerLat = (minLat + maxLat) / 2;
         const centerLng = (minLng + maxLng) / 2;
-        fetchTrafficDebounced({ lat: centerLat, lng: centerLng, zoom });
+        // Rounded cell drives offline-pack lookups while the link is weak.
+        setLookupCell(`${centerLat.toFixed(3)},${centerLng.toFixed(3)}`);
+        const online = getConnectivity().isConnected;
+        if (online) {
+          fetchTrafficDebounced({ lat: centerLat, lng: centerLng, zoom });
+        }
 
         // Sync the P2P traffic topic subscriptions (geohash4 cells) with the
         // visible area so probes/conditions flow for where the user is looking.
         onViewportChange(centerLat, centerLng);
 
         // Seed traffic raster tiles (disk → P2P → TomTom) for the visible area.
-        if (useMapStore.getState().trafficLayerVisible) {
+        if (online && useMapStore.getState().trafficLayerVisible) {
           const { width, height } = Dimensions.get('window');
           void seedTrafficTilesForViewport(centerLat, centerLng, zoom, width, height).catch(
             () => {},
@@ -477,6 +508,17 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             useOsmPoiStore.getState().setPois(cachedOverturePois);
           }
 
+          // Offline: serve the SQLite cache only. Skipping phase-2 network
+          // fetches keeps the basemap readable on weak links instead of
+          // contending with it, and downloaded region packs stay usable.
+          if (!getConnectivity().isConnected) {
+            if (__DEV__)
+              console.warn(`[POI] offline — serving ${cachedOverturePois.length} cached`);
+            useOsmPoiStore.getState().setPois(cachedOverturePois);
+            lastLoadedFetchBounds.current = nextFetchBounds;
+            return;
+          }
+
           // Phase 2: Parallel network fetches — OSM Overpass + online Overture.
           // At street level (zoom >= 17), always fetch Overture to fill in gaps
           // from OSM — Overture has much richer business/POI data for commercial
@@ -569,21 +611,112 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     [onMapLongPress],
   );
 
+  // Subscribe to connection quality so a weak/slow link falls back to the
+  // lightweight raster style instead of stalling on vector tiles + fonts.
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      const connected = state.isConnected ?? true;
+      if (!connected || state.isInternetReachable === false) {
+        setConnectionQuality('none');
+      } else if (state.type === 'cellular') {
+        const gen = (state.details as { cellularGeneration?: string } | null)?.cellularGeneration;
+        setConnectionQuality(gen === '2g' || gen === '3g' ? 'poor' : 'good');
+      } else if (state.type === 'wifi' || state.type === 'ethernet') {
+        setConnectionQuality('good');
+      } else if (state.type === 'unknown' || state.type === 'none') {
+        setConnectionQuality('poor');
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Start the loopback tile server after first paint so downloaded region
+  // packs can be served to MapLibre while the link is weak. Deferred past
+  // interactions so the map's first paint isn't delayed.
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      void ensureOfflineTileServer()
+        .then(() => syncOfflineSources())
+        .catch(() => {});
+    });
+    return () => task.cancel();
+  }, []);
+
+  // While navigating, the camera follows navPosition (region events are
+  // suppressed), so drive offline-pack lookups off the puck instead.
+  // Rounded to ~111 m cells so 1 Hz GPS ticks don't re-query the database.
+  useEffect(() => {
+    if (!navigationMode || !navPosition) return;
+    setLookupCell(`${navPosition[1].toFixed(3)},${navPosition[0].toFixed(3)}`);
+  }, [navigationMode, navPosition]);
+
+  // Resolve the downloaded pack covering the viewport whenever the link is
+  // weak. Cleared as soon as the link recovers — online vector wins then.
+  useEffect(() => {
+    if (connectionQuality === 'good' || !lookupCell) {
+      if (connectionQuality === 'good') setOfflinePack(null);
+      return;
+    }
+    let cancelled = false;
+    const [lat, lng] = lookupCell.split(',').map(Number);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    void getOfflinePackForPoint(lat, lng).then((pack) => {
+      if (!cancelled) {
+        setOfflinePack((prev) => (prev?.sourceId === pack?.sourceId ? prev : pack));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lookupCell, connectionQuality]);
+
+  // Slow-link fallback counts as a style failure: the raster compat style has
+  // no font/glyph dependencies and far fewer requests, so it paints on links
+  // where the vector style stalls (and MapLibre keeps its native tile cache
+  // underneath for previously visited areas).
+  const useOfflineFallback = styleLoadFailed || connectionQuality !== 'good';
+
+  // Downloaded packs win over the raster fallback: full vector detail from
+  // localhost with zero network. Null when the link is good (online vector
+  // wins), no pack covers the viewport, or the server is unavailable.
+  const offlineMapStyle = useMemo(() => {
+    if (!offlinePack) return null;
+    try {
+      let base = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false });
+      if (navigationMode) {
+        base = setLayerVisibilityInStyle(base, 'housenumber', 'none');
+      }
+      return buildOfflineStyle(base, {
+        sourceId: offlinePack.sourceId,
+        tileBaseUrl: offlinePack.tileBaseUrl,
+        fallbackBackground: isDark ? '#101418' : '#F2EFE9',
+      });
+    } catch {
+      return null;
+    }
+  }, [offlinePack, mapStylePref, isDark, navigationMode]);
+
   // Resolve the map style based on user preference and dark mode.
   // Hide house numbers when in navigation mode.
-  const resolvedMapStyle = useMemo(() => {
+  const vectorOrRasterStyle = useMemo(() => {
     let style = resolveMapStyle({
       mapStylePref,
       isDark,
-      styleLoadFailed,
+      styleLoadFailed: useOfflineFallback,
     });
     if (navigationMode) {
       style = setLayerVisibilityInStyle(style, 'housenumber', 'none');
     }
     return style;
-  }, [mapStylePref, isDark, styleLoadFailed, navigationMode]);
+  }, [mapStylePref, isDark, useOfflineFallback, navigationMode]);
+
+  const resolvedMapStyle = offlineMapStyle ?? vectorOrRasterStyle;
 
   const handleMapLoadFail = useCallback(() => {
+    if (styleLoadTimer.current) {
+      clearTimeout(styleLoadTimer.current);
+      styleLoadTimer.current = null;
+    }
     if (!styleLoadFailed) {
       setStyleLoadFailed(true);
       if (__DEV__) {
@@ -591,6 +724,38 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
     }
   }, [styleLoadFailed]);
+
+  const handleMapLoadSuccess = useCallback(() => {
+    styleLoadedRef.current = true;
+    if (styleLoadTimer.current) {
+      clearTimeout(styleLoadTimer.current);
+      styleLoadTimer.current = null;
+    }
+  }, []);
+
+  // If the vector style stalls (slow link), fall back to raster after a
+  // timeout instead of leaving a half-painted map. Poor links get a shorter
+  // fuse since the raster style is very likely to win there.
+  useEffect(() => {
+    styleLoadedRef.current = false;
+    if (styleLoadTimer.current) clearTimeout(styleLoadTimer.current);
+    if (useOfflineFallback) return;
+    const timeoutMs = connectionQuality === 'good' ? 8000 : 4000;
+    styleLoadTimer.current = setTimeout(() => {
+      if (!styleLoadedRef.current) {
+        setStyleLoadFailed(true);
+        if (__DEV__) {
+          console.warn('[Map] Style load timed out, switching to compatibility raster style');
+        }
+      }
+    }, timeoutMs);
+    return () => {
+      if (styleLoadTimer.current) {
+        clearTimeout(styleLoadTimer.current);
+        styleLoadTimer.current = null;
+      }
+    };
+  }, [resolvedMapStyle, connectionQuality, useOfflineFallback]);
 
   // Build the nav puck shapes in map-plane coordinates.  Memoizing avoids
   // re-computing the GeoJSON on every render while still reacting to zoom,
@@ -613,6 +778,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         style={styles.map}
         mapStyle={resolvedMapStyle}
         onDidFailLoadingMap={handleMapLoadFail}
+        onDidFinishLoadingMap={handleMapLoadSuccess}
         onPress={handlePress}
         onLongPress={handleLongPress}
         onRegionIsChanging={handleRegionIsChanging}
