@@ -641,6 +641,18 @@ export async function reroute(
     originHeading: options?.heading,
   };
 
+  // When a GPS course is known and we're online, prefer the heading-aware
+  // online engine first: the native fast-path drops `heading`, producing
+  // U-turn-heavy routes that immediately read as off-route again.
+  if (initialized && options?.heading != null && isOnline() && via.length === 0) {
+    try {
+      const routes = await computeRouteOnline(waypoints, costing, routeOpts);
+      if (routes.length) return routes[0];
+    } catch {
+      // Fall through to native fast-path below.
+    }
+  }
+
   if (initialized) {
     try {
       if (via.length > 0) {

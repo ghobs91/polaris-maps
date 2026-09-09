@@ -66,6 +66,12 @@ let wrongWayActive = false;
 let lastGpsHeading: number | null = null;
 let lastGpsSpeedMps = 0;
 let lastGpsRemaining: number | null = null;
+// Reroute backoff: failed attempts (offline / no coverage) must not hammer
+// the engine at 1 Hz forever. Exponential backoff between attempts.
+let rerouteFailureCount = 0;
+let nextRerouteAllowedAt = 0;
+const REROUTE_BASE_BACKOFF_MS = 5000;
+const REROUTE_MAX_BACKOFF_MS = 30000;
 
 /** GPS course is only trusted above walking speed (m/s). */
 export const WRONG_WAY_MIN_SPEED_MPS = 3;
@@ -94,6 +100,8 @@ export function startTracking(route: ValhallaRoute): void {
   lastGpsHeading = null;
   lastGpsSpeedMps = 0;
   lastGpsRemaining = null;
+  rerouteFailureCount = 0;
+  nextRerouteAllowedAt = 0;
 }
 
 /** Clear all tracking state. Called when navigation ends. */
@@ -113,6 +121,8 @@ export function stopTracking(): void {
   lastGpsHeading = null;
   lastGpsSpeedMps = 0;
   lastGpsRemaining = null;
+  rerouteFailureCount = 0;
+  nextRerouteAllowedAt = 0;
 }
 
 export function isTracking(): boolean {
@@ -147,6 +157,11 @@ export function getGpsSpeed(): number {
 /** Decoded polyline of the route being tracked ([] when not tracking). */
 export function getRouteCoords(): ReadonlyArray<[number, number]> {
   return coords;
+}
+
+/** True while recent fixes are off-route (puck shows live GPS, DR frozen). */
+export function isOffRouteActive(): boolean {
+  return offRouteCount >= 1;
 }
 
 /**
@@ -267,8 +282,10 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   }
 
   const store = useNavigationStore.getState();
+  const backoffElapsed = Date.now() >= nextRerouteAllowedAt;
   const needsReroute =
-    isOffRoute(distFromRoute, offRouteCount) || wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT;
+    (isOffRoute(distFromRoute, offRouteCount) || wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT) &&
+    backoffElapsed;
 
   // While a reroute is in flight, keep tracking the live position — do NOT
   // early-return. Dropping fixes here froze the puck at the deviation point.
@@ -365,13 +382,20 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
           wrongWayActive = false;
           lastGpsRemaining = null;
           reroutingFix = false;
+          rerouteFailureCount = 0;
+          nextRerouteAllowedAt = 0;
         })
         .catch(() => {
-          // Reroute failed (e.g., no connectivity) — clear rerouting flag
-          // so it will retry on the next off-route GPS reading.
-          // Keep the latest fix so the retry uses the live position, and keep
-          // wrongWayCount so a wrong-way drive retries immediately,
-          // mirroring the off-route counter behaviour.
+          // Reroute failed (e.g., no connectivity) — back off exponentially
+          // instead of retrying on the very next 1 Hz fix forever.
+          // The puck keeps showing live GPS (see anchor update below) while
+          // the next attempt waits out the backoff window.
+          rerouteFailureCount += 1;
+          const backoff = Math.min(
+            REROUTE_MAX_BACKOFF_MS,
+            REROUTE_BASE_BACKOFF_MS * 2 ** (rerouteFailureCount - 1),
+          );
+          nextRerouteAllowedAt = Date.now() + backoff;
           useNavigationStore.getState().setRerouting(false);
           reroutingFix = false;
         });
@@ -396,9 +420,16 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   // way. In that case the GPS-snapped position legitimately moves backwards
   // along the route, and holding the DR projection ahead is exactly what
   // makes the puck glide forward while the car reverses relative to it.
+  // While truly off-route, anchor to LIVE GPS (not the snapped point) and
+  // freeze dead-reckoning advance: projecting forward along the stale route
+  // is what made the puck glide down the original road while the car drove
+  // away, feeding the rerouter a stale origin on every retry.
   const suspectedWrongWay = wrongWayCount > 0;
+  const isCurrentlyOffRoute = distFromRoute > OFF_ROUTE_THRESHOLD_METERS;
   const prevAnchor = drAnchor;
-  if (prevAnchor && prevAnchor.speedMps > 0.3 && !suspectedWrongWay) {
+  if (isCurrentlyOffRoute) {
+    drAnchor = { pos: gpsPos, segIdx: segmentIndex, speedMps, time: now };
+  } else if (prevAnchor && prevAnchor.speedMps > 0.3 && !suspectedWrongWay) {
     const elapsed = Math.min((now - prevAnchor.time) / 1000, 2.0);
     const [drPos, drSegIdx] = advanceAlongRoute(
       prevAnchor.pos,

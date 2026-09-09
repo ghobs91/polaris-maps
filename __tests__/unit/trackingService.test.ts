@@ -312,13 +312,24 @@ describe('trackingService — off-route detection & rerouting', () => {
     await Promise.resolve(); // flush .catch
 
     expect(useNavigationStore.getState().isRerouting).toBe(false);
-    // The off-route counter survives a failed attempt (matches screen
-    // behaviour), so the very next far fix retries the reroute immediately.
+    // Failed attempts back off exponentially instead of retrying on the very
+    // next 1 Hz fix (which hammered the engine endlessly while offline).
     mockReroute.mockClear();
     mockReroute.mockResolvedValue(makeRoute());
     processFix(farOffRouteFix());
     await Promise.resolve();
-    expect(mockReroute).toHaveBeenCalledTimes(1);
+    expect(mockReroute).not.toHaveBeenCalled();
+
+    // After the backoff window elapses, the next off-route fix retries.
+    const realNow = Date.now();
+    const dateNowSpy = jest.spyOn(Date, 'now').mockImplementation(() => realNow + 60_000);
+    try {
+      processFix(farOffRouteFix());
+      await Promise.resolve();
+      expect(mockReroute).toHaveBeenCalledTimes(1);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
   });
 
   it('defers reroute in background: flags deviation, skips network, still updates ETA', () => {

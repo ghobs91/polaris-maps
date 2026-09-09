@@ -26,6 +26,7 @@ import {
   advanceAlongRoute,
   distToIndex,
   isWrongWayDriving,
+  isOffRouteActive,
   getGpsCourse,
   setTrackingRoutePreferences,
 } from '@/services/navigation/trackingService';
@@ -293,7 +294,15 @@ export default function NavigationScreen() {
         let curPos: [number, number];
         let curSegIdx: number;
 
-        if (anchor.speedMps > 0.3 && elapsed > 0) {
+        // While off-route the anchor already holds LIVE GPS (see
+        // trackingService): never project it forward along the stale route —
+        // that glides the puck down the original road while the car drives
+        // away and feeds the rerouter a stale origin.
+        const offRoute = isOffRouteActive();
+        const deviated = useNavigationStore.getState().hasDeviated;
+        const freezeForOffRoute = offRoute || deviated;
+
+        if (anchor.speedMps > 0.3 && elapsed > 0 && !freezeForOffRoute) {
           // When driving the wrong way the route bearing points opposite the
           // car: point the puck along the real GPS course and hold the
           // GPS-snapped position instead of gliding forward along the route
@@ -340,9 +349,24 @@ export default function NavigationScreen() {
           trackingStore.setNavPosition(curPos);
           trackingStore.setNavBearing(smoothBearingRef.current);
         } else {
-          // Stationary — hold at anchor position
+          // Stationary, or frozen while off-route — hold at anchor position
+          // (live GPS when deviated). Point the puck along the real GPS
+          // course when moving so it doesn't keep the old route bearing.
           curPos = anchor.pos;
           curSegIdx = anchor.segIdx;
+          if (freezeForOffRoute) {
+            const gpsCourse = getGpsCourse();
+            if (gpsCourse != null) {
+              if (Math.abs(shortestAngleDelta(bearingTarget, gpsCourse)) > 0.5) {
+                bearingStart = smoothBearingRef.current;
+                bearingTarget = gpsCourse;
+                bearingStartTime = now;
+              }
+              const t = Math.min((now - bearingStartTime) / BEARING_DURATION_MS, 1.0);
+              smoothBearingRef.current = interpolateBearing(bearingStart, bearingTarget, t);
+              trackingStore.setNavBearing(smoothBearingRef.current);
+            }
+          }
           trackingStore.setNavPosition(curPos);
         }
 
@@ -440,7 +464,7 @@ export default function NavigationScreen() {
             <Text style={styles.rerouteText}>
               {isRerouting ? 'Rerouting…' : 'Off route — rerouting…'}
             </Text>
-            <Text style={styles.rerouteSub}>GPS snapped to route · auto-reroutes</Text>
+            <Text style={styles.rerouteSub}>Using live GPS · auto-reroutes</Text>
           </View>
         )}
         <View style={styles.bannerRow}>
