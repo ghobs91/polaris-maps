@@ -35,11 +35,17 @@ export interface CarPlayStartNavigationData {
   destinationLat: number;
   destinationLng: number;
   encodedPolyline: string;
+  /** Phone route-preview summary ("26 min · 13.8 mi"); preferred over native formatting. */
+  routeSummary?: string;
   maneuvers: Array<{
     instruction: string;
+    /** Phone-banner text (verbalPreTransition || instruction); preferred for display. */
+    displayInstruction?: string;
     maneuverType: string;
     distanceMeters: number;
     durationSeconds: number;
+    /** Whether this step carries lane guidance (matches update-path signature). */
+    hasLaneGuidance?: boolean;
   }>;
 }
 
@@ -65,6 +71,7 @@ export interface Spec extends TurboModule {
   hideNavigationAlert(): void;
   pushSearchResults(results: Array<object>): void;
   updateMapCenter(lat: number, lng: number, heading: number): void;
+  updateMapStyle(styleJson: string): void;
   isConnected(): Promise<boolean>;
 
   addListener(eventName: string): void;

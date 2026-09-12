@@ -53,6 +53,10 @@ export function updateMapCenter(lat: number, lng: number, heading: number): void
   NativeModule?.updateMapCenter(lat, lng, heading);
 }
 
+export function updateMapStyle(styleJson: string): void {
+  (NativeModule as any)?.updateMapStyle?.(styleJson);
+}
+
 export async function isConnected(): Promise<boolean> {
   if (!NativeModule) return false;
   return NativeModule.isConnected();

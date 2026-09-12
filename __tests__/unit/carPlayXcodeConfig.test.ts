@@ -119,4 +119,41 @@ describe('CarPlay iOS configuration', () => {
     expect(nativeModule).toContain('pendingSearchCompletion = completionHandler');
     expect(nativeModule).toContain('completionHandler: @escaping ([CPListItem]) -> Void');
   });
+
+  it('keeps the committed ios/ CarPlay sources in sync with the plugin sources', () => {
+    // CI builds ios/ without running prebuild, so withCarPlay's copy step is
+    // bypassed: both copies must be identical by hand.
+    for (const file of ['PolarisCarPlay.swift', 'PolarisCarPlayMapView.swift']) {
+      expect(readRepoFile(`ios/PolarisMaps/${file}`)).toBe(
+        readRepoFile(`plugins/native/PolarisMaps/${file}`),
+      );
+    }
+  });
+
+  it('mirrors the phone UI on CarPlay: summaries, banner text, map style, add-stop', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      const mapView = readRepoFile(`${root}/PolarisCarPlayMapView.swift`);
+
+      // Phone route-preview summary + banner text ride the start payload.
+      expect(nativeModule).toContain('routeSummary');
+      expect(nativeModule).toContain('displayInstruction');
+      expect(nativeModule).toContain('payload.routeSummary ??');
+      // Phone map style (dark/light, satellite) applied to the CarPlay map.
+      expect(nativeModule).toContain('func updateMapStyle(_ json: String)');
+      expect(nativeModule).toContain('func applyMapStyle(_ json: String)');
+      expect(nativeModule).toContain('appliedStyleHash');
+      expect(mapView).toContain('func applyStyle(json: String)');
+      expect(mapView).toContain('polaris-carplay-style-');
+      // Destination flag survives the pending-state clear.
+      expect(mapView).toContain('stashedDestination');
+      // Failed styles never park the route forever.
+      expect(mapView).toContain('mapViewDidFailLoadingMap');
+      // Search results offer Start vs Add Stop like the phone place card.
+      expect(nativeModule).toContain('searchResultAddStop');
+      expect(nativeModule).toContain('Add Stop');
+      expect(nativeModule).toContain('Start Navigation');
+      expect(nativeModule).toContain('popToRootTemplate');
+    }
+  });
 });

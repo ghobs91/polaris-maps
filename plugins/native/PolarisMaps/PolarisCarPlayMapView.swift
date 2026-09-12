@@ -38,6 +38,8 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private var lastHeading: Double = 0
   private var puckView: UIImageView?
   private var speedSign: SpeedLimitBadge?
+  private var pendingStyleJson: String?
+  private var lastStyleFileURL: URL?
 
   var currentCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
 
@@ -69,6 +71,13 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     speedSign = badge
 
     layoutOverlays()
+
+    // A style push may have arrived before the map existed; apply it now so
+    // first paint already matches the phone.
+    if let pending = pendingStyleJson {
+      pendingStyleJson = nil
+      applyStyle(json: pending)
+    }
   }
 
   func deactivate() {
@@ -76,6 +85,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     pendingPolyline = nil
     pendingDestination = nil
     pendingTraffic = nil
+    pendingStyleJson = nil
+    if let previous = lastStyleFileURL {
+      try? FileManager.default.removeItem(at: previous)
+    }
+    lastStyleFileURL = nil
     styleLoaded = false
     puckView?.removeFromSuperview()
     puckView = nil
@@ -91,6 +105,40 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     layoutOverlays()
+  }
+
+  /// Applies a MapLibre style JSON (the phone's resolved style) so the
+  /// CarPlay map matches the phone map (dark/light mode, satellite). The
+  /// JSON is written to a content-tagged file because MLNMapView only
+  /// reloads when the style URL changes. Route/traffic/destination shape
+  /// annotations persist across the reload.
+  func applyStyle(json: String) {
+    guard !json.isEmpty else { return }
+    guard mapView != nil else {
+      pendingStyleJson = json
+      return
+    }
+    var hasher = Hasher()
+    hasher.combine(json)
+    let tag = String(format: "%08x", UInt32(truncatingIfNeeded: hasher.finalize()))
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "polaris-carplay-style-\(tag).json")
+    if url != lastStyleFileURL {
+      guard let data = json.data(using: .utf8) else { return }
+      do {
+        try data.write(to: url, options: .atomic)
+      } catch {
+        return
+      }
+      if let previous = lastStyleFileURL {
+        try? FileManager.default.removeItem(at: previous)
+      }
+      lastStyleFileURL = url
+      // Park the load flag before swapping; didFinishLoading re-arms it and
+      // draws anything pending.
+      styleLoaded = false
+      mapView?.styleURL = url
+    }
   }
 
   /// Puck stays pinned to the camera focal point (screen center); the speed
@@ -130,8 +178,10 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private func drawPendingRoute() {
     guard let view = mapView, let encoded = pendingPolyline else { return }
     pendingPolyline = nil
-    // Capture before clearRoute() resets the pending state.
+    // Capture before clearRoute() resets the pending state (it nils all
+    // three pendings, including the destination flag).
     let stashedTraffic = pendingTraffic
+    let stashedDestination = pendingDestination
     clearRoute()
 
     let coordinates = PolylineDecoder.decode(encoded)
@@ -150,8 +200,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     routeCore = core
     view.addAnnotation(core)
 
-    if let destination = pendingDestination {
-      pendingDestination = nil
+    if let destination = stashedDestination {
       let mark = MLNPointAnnotation()
       mark.coordinate = destination
       mark.title = "destination"
@@ -321,6 +370,13 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   // MARK: MLNMapViewDelegate
 
   func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+    styleLoaded = true
+    drawPendingRoute()
+  }
+
+  func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {
+    // Never leave a route parked forever behind a failed style: annotations
+    // can still be added and will paint if tiles arrive later.
     styleLoaded = true
     drawPendingRoute()
   }

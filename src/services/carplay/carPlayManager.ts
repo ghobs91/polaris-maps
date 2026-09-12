@@ -9,7 +9,7 @@
  * - Connecting/disconnecting lifecycle
  */
 
-import { Platform } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 import * as CarPlay from '../../native/carplay';
 import type { CarPlaySearchResult, CarPlayStartNavigationData } from '../../native/carplay';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -20,6 +20,8 @@ import { useMapStore } from '../../stores/mapStore';
 import { buildCarPlayTrafficRanges, trafficRangesSignature } from './carPlayTrafficRanges';
 import { unifiedSearch } from '../search/unifiedSearch';
 import { computeRoute } from '../routing/routingService';
+import { formatDistance } from '../../utils/units';
+import { resolveMapStyle, setLayerVisibilityInStyle } from '../../components/map/mapStyleResolver';
 import type { EmitterSubscription } from 'react-native';
 
 let initialized = false;
@@ -28,6 +30,10 @@ let subscriptions: EmitterSubscription[] = [];
 let navUnsubscribe: (() => void) | null = null;
 let trackingUnsubscribe: (() => void) | null = null;
 let trafficUnsubscribe: (() => void) | null = null;
+let settingsUnsubscribe: (() => void) | null = null;
+let mapStyleUnsubscribe: (() => void) | null = null;
+let appearanceSubscription: { remove: () => void } | null = null;
+let lastMapStyleKey: string | null = null;
 let carPlayRouteKey: string | null = null;
 let rerouteAlertShown = false;
 let lastDistanceBucket: number | null = null;
@@ -50,7 +56,10 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('carPlayDisconnected', onDisconnected),
     CarPlay.emitter.addListener('searchQuery', onSearchQuery),
     CarPlay.emitter.addListener('searchResultSelected', onSearchResultSelected),
+    CarPlay.emitter.addListener('searchResultAddStop', onSearchResultAddStop),
   ];
+  appearanceSubscription?.remove();
+  appearanceSubscription = Appearance.addChangeListener(syncMapStyle);
 
   void CarPlay.isConnected()
     .then((isConnected) => {
@@ -70,6 +79,13 @@ export function teardownCarPlay(): void {
   trackingUnsubscribe = null;
   trafficUnsubscribe?.();
   trafficUnsubscribe = null;
+  settingsUnsubscribe?.();
+  settingsUnsubscribe = null;
+  mapStyleUnsubscribe?.();
+  mapStyleUnsubscribe = null;
+  appearanceSubscription?.remove();
+  appearanceSubscription = null;
+  lastMapStyleKey = null;
   clearMapCenterUpdate();
   searchAbortController?.abort();
   searchAbortController = null;
@@ -103,6 +119,15 @@ function onConnected() {
   trackingUnsubscribe = useNavigationTrackingStore.subscribe(onTrackingUpdate);
   trafficUnsubscribe?.();
   trafficUnsubscribe = useTrafficStore.subscribe(syncRouteTraffic);
+  settingsUnsubscribe?.();
+  settingsUnsubscribe = useSettingsStore.subscribe(syncMapStyle);
+  mapStyleUnsubscribe?.();
+  mapStyleUnsubscribe = useMapStore.subscribe(syncMapStyle);
+
+  // Push the phone's current map style (dark/light, satellite) so the
+  // CarPlay map matches the phone map.
+  lastMapStyleKey = null;
+  syncMapStyle();
 
   // If navigation is already active, push initial state
   syncNavigationState(useNavigationStore.getState());
@@ -116,6 +141,11 @@ function onDisconnected() {
   trackingUnsubscribe = null;
   trafficUnsubscribe?.();
   trafficUnsubscribe = null;
+  settingsUnsubscribe?.();
+  settingsUnsubscribe = null;
+  mapStyleUnsubscribe?.();
+  mapStyleUnsubscribe = null;
+  lastMapStyleKey = null;
   clearMapCenterUpdate();
   searchAbortController?.abort();
   searchAbortController = null;
@@ -171,8 +201,9 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     // Live countdown from the tracking pipeline (like the phone banner),
     // falling back to the static route value before the first GPS fix.
     distanceToTurnMeters: liveDistance,
-    durationToTurnSeconds: maneuver.durationSeconds,
-    etaSeconds: state.trafficEtaSeconds ?? state.etaSeconds ?? 0,
+    durationToTurnSeconds: liveDurationToTurnSeconds(maneuver, liveDistance),
+    // Traffic-scaled remaining ETA, exactly like the phone's EtaDisplay.
+    etaSeconds: selectCarPlayEtaSeconds(state),
     remainingDistanceMeters: state.remainingDistanceMeters ?? 0,
     nextInstruction: nextManeuver?.instruction,
     nextManeuverType: nextManeuver?.type,
@@ -223,6 +254,85 @@ export function toCarPlaySpeedLimit(speedLimitMph: number | undefined): {
     speedLimitValue: useMetric ? Math.round(speedLimitMph * 1.60934) : speedLimitMph,
     speedLimitUnit: useMetric ? 'km/h' : 'mph',
   };
+}
+
+/**
+ * Trip ETA for CarPlay, matching the phone's `EtaDisplay`: the TomTom
+ * full-route traffic ETA scaled by the remaining-distance fraction so it
+ * stays in sync with the chevron, falling back to the base route ETA.
+ */
+export function selectCarPlayEtaSeconds(
+  state: Pick<
+    ReturnType<typeof useNavigationStore.getState>,
+    'activeRoute' | 'remainingDistanceMeters' | 'trafficEtaSeconds' | 'etaSeconds'
+  >,
+): number {
+  const totalMeters = state.activeRoute?.summary.distanceMeters ?? 0;
+  if (state.trafficEtaSeconds != null && state.activeRoute != null) {
+    const remaining = state.remainingDistanceMeters ?? totalMeters;
+    const progress = totalMeters > 0 ? remaining / totalMeters : 0;
+    return Math.round(progress * state.trafficEtaSeconds);
+  }
+  return state.trafficEtaSeconds ?? state.etaSeconds ?? 0;
+}
+
+/**
+ * Live time-to-turn for CarPlay: the static maneuver duration scaled by the
+ * remaining fraction of the maneuver so the CarPlay card counts down like
+ * the phone banner's distance countdown.
+ */
+export function liveDurationToTurnSeconds(
+  maneuver: Pick<
+    { distanceMeters: number; durationSeconds: number },
+    'distanceMeters' | 'durationSeconds'
+  >,
+  liveDistanceMeters: number,
+): number {
+  if (maneuver.distanceMeters <= 0) return maneuver.durationSeconds;
+  return (maneuver.durationSeconds * Math.max(liveDistanceMeters, 0)) / maneuver.distanceMeters;
+}
+
+/** Route-preview duration format, mirroring the phone's FloatingSearchPanel. */
+function formatPreviewDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+/**
+ * Route-choice summary for CarPlay ("26 min · 13.8 mi"), mirroring the
+ * phone's route-preview header: duration first, then `formatDistance` so
+ * units always match the phone (imperial/metric via device locale).
+ */
+export function formatCarPlayRouteSummary(distanceMeters: number, durationSeconds: number): string {
+  return `${formatPreviewDuration(durationSeconds)} · ${formatDistance(distanceMeters)}`;
+}
+
+/**
+ * Pushes the phone's resolved map style (dark/light, satellite preference,
+ * housenumbers hidden in navigation like the phone) to the CarPlay map.
+ * No-ops unless the resolved style actually changed — the JSON is large and
+ * the store subscribers fire on every GPS tick.
+ */
+export function syncMapStyle(): void {
+  if (!connected) return;
+  const themeMode = useSettingsStore.getState().themeMode;
+  const systemDark = Appearance.getColorScheme() === 'dark';
+  const isDark = themeMode === 'dark' || (themeMode === 'system' && systemDark);
+  const mapStylePref = useMapStore.getState().mapStyle;
+  const key = `${isDark ? 'dark' : 'light'}:${mapStylePref}`;
+  if (key === lastMapStyleKey) return;
+  lastMapStyleKey = key;
+  try {
+    let style = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false });
+    style = setLayerVisibilityInStyle(style, 'housenumber', 'none');
+    CarPlay.updateMapStyle(style);
+  } catch {
+    lastMapStyleKey = null;
+  }
 }
 
 /**
@@ -359,6 +469,60 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
   }
 }
 
+/**
+ * Adds a CarPlay search result as an intermediate stop on the active drive,
+ * mirroring the phone's add-destination panel. Falls back to starting fresh
+ * navigation when nothing is active.
+ */
+async function onSearchResultAddStop(result: { name?: string; lat?: number; lng?: number }) {
+  if (!connected) return;
+
+  const lat = result.lat;
+  const lng = result.lng;
+  const name = result.name ?? 'Destination';
+  if (lat == null || lng == null) return;
+
+  const nav = useNavigationStore.getState();
+  if (!nav.isNavigating || !nav.activeRoute || !nav.destination) {
+    await onSearchResultSelected(result);
+    return;
+  }
+
+  // Origin from live nav position (like the phone), viewport as fallback.
+  const navPosition = useNavigationTrackingStore.getState().navPosition;
+  const { viewport } = useMapStore.getState();
+  const origin =
+    navPosition != null
+      ? { lat: navPosition[1], lng: navPosition[0] }
+      : { lat: viewport.lat, lng: viewport.lng };
+
+  try {
+    const prefs = useSettingsStore.getState().routePreferences;
+    // Insert after the current target (index 1), matching the phone panel.
+    const pendingWaypoints = nav.waypoints.slice(nav.currentLegIndex);
+    const newWaypoint = { lat, lng, name };
+    if (pendingWaypoints.length > 0) {
+      pendingWaypoints.splice(1, 0, newWaypoint);
+    } else {
+      pendingWaypoints.push(newWaypoint);
+    }
+    const routes = await computeRoute(
+      [origin, ...pendingWaypoints, { lat: nav.destination.lat, lng: nav.destination.lng }],
+      nav.costing,
+      {
+        avoidTolls: prefs.avoidTolls,
+        avoidHighways: prefs.avoidHighways,
+        avoidFerries: prefs.avoidFerries,
+      },
+    );
+    const route = routes[0];
+    if (!route) return;
+    useNavigationStore.getState().addWaypointAndReplaceRoute(route, pendingWaypoints);
+  } catch {
+    // Route computation failed — silently ignore on CarPlay
+  }
+}
+
 function toCarPlayNavigationData(
   state: ReturnType<typeof useNavigationStore.getState>,
 ): CarPlayStartNavigationData {
@@ -370,12 +534,20 @@ function toCarPlayNavigationData(
     destinationLat: destination.lat,
     destinationLng: destination.lng,
     encodedPolyline: route.geometry,
+    // Phone route-preview summary so units/order match the phone exactly.
+    routeSummary: formatCarPlayRouteSummary(
+      route.summary.distanceMeters,
+      route.summary.durationSeconds,
+    ),
     maneuvers: route.legs.flatMap((leg) =>
       leg.maneuvers.map((maneuver) => ({
         instruction: maneuver.instruction,
+        // Phone-banner text; the native side prefers it for display.
+        displayInstruction: maneuver.verbalPreTransition || maneuver.instruction,
         maneuverType: maneuver.type,
         distanceMeters: maneuver.distanceMeters,
         durationSeconds: maneuver.durationSeconds,
+        hasLaneGuidance: maneuver.laneGuidance != null,
       })),
     ),
   };

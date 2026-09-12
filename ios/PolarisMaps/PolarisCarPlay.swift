@@ -72,7 +72,10 @@ class PolarisCarPlay: RCTEventEmitter {
   }
 
   override func supportedEvents() -> [String]! {
-    return ["carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected"]
+    return [
+      "carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected",
+      "searchResultAddStop",
+    ]
   }
 
   override func startObserving() {
@@ -113,6 +116,10 @@ class PolarisCarPlay: RCTEventEmitter {
 
   @objc func updateMapCenter(_ lat: Double, lng: Double, heading: Double) {
     DispatchQueue.main.async { Self.mapTemplateManager.updateCamera(lat: lat, lng: lng, heading: heading) }
+  }
+
+  @objc func updateMapStyle(_ json: String) {
+    DispatchQueue.main.async { Self.mapTemplateManager.applyMapStyle(json) }
   }
 
   @objc func updateRouteTraffic(_ ranges: NSArray) {
@@ -235,9 +242,13 @@ struct CarPlayNavigationUpdate {
 
 struct CarPlayManeuverStep {
   let instruction: String
+  /// Phone-banner text (verbal-first); preferred for display.
+  let displayInstruction: String
   let maneuverType: String
   let distanceMeters: Double
   let durationSeconds: Double
+  /// Mirrors the update-path signature so the first live update is flicker-free.
+  let hasLaneGuidance: Bool
 }
 
 /// One traffic-colored run over the route shape. `from`/`to` are inclusive
@@ -271,6 +282,8 @@ struct CarPlayStartNavigationPayload {
   let destinationLat: Double
   let destinationLng: Double
   let encodedPolyline: String
+  /// Phone route-preview summary ("26 min · 13.8 mi"); preferred over local formatting.
+  let routeSummary: String?
   let maneuvers: [CarPlayManeuverStep]
 
   init?(from data: NSDictionary) {
@@ -284,18 +297,22 @@ struct CarPlayStartNavigationPayload {
     destinationLat = lat
     destinationLng = lng
     encodedPolyline = polyline
+    routeSummary = data["routeSummary"] as? String
     var steps: [CarPlayManeuverStep] = []
     if let list = data["maneuvers"] as? NSArray {
       for entry in list {
         guard let m = entry as? NSDictionary,
           let instruction = m["instruction"] as? String
         else { continue }
+        let display = m["displayInstruction"] as? String ?? ""
         steps.append(
           CarPlayManeuverStep(
             instruction: instruction,
+            displayInstruction: display.isEmpty ? instruction : display,
             maneuverType: m["maneuverType"] as? String ?? "",
             distanceMeters: (m["distanceMeters"] as? NSNumber)?.doubleValue ?? 0,
-            durationSeconds: (m["durationSeconds"] as? NSNumber)?.doubleValue ?? 0
+            durationSeconds: (m["durationSeconds"] as? NSNumber)?.doubleValue ?? 0,
+            hasLaneGuidance: (m["hasLaneGuidance"] as? NSNumber)?.boolValue ?? false
           ))
       }
     }
@@ -323,6 +340,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var searchItems: [CarPlaySearchItem] = []
   private var activeSearchText = ""
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
+  private var appliedStyleHash = 0
 
   private lazy var mapViewHost = CarPlayMapViewHost()
 
@@ -351,6 +369,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activeTrip = nil
     activePolyline = ""
     maneuverSignature = ""
+    appliedStyleHash = 0
     mapViewHost.deactivate()
     interfaceController = nil
     mapTemplate = nil
@@ -416,7 +435,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
     let totalDistance = payload.maneuvers.reduce(0) { $0 + $1.distanceMeters }
     let totalTime = totalDuration(payload)
-    let summary = String(format: "%.1f km · %d min", totalDistance / 1000, Int(totalTime / 60))
+    // Phone route-preview summary ("26 min · 13.8 mi") so units and order
+    // always match the phone; legacy km formatting is the fallback.
+    let summary =
+      payload.routeSummary ?? String(format: "%.1f km · %d min", totalDistance / 1000, Int(totalTime / 60))
     let routeChoice = CPRouteChoice(
       summaryVariants: [summary],
       additionalInformationVariants: [],
@@ -553,8 +575,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     guard let session = navigationSession else { return }
     let maneuvers = steps.map { step in
       makeManeuver(
-        instruction: step.instruction,
-        shortInstruction: nil,
+        instruction: step.displayInstruction,
+        shortInstruction: step.displayInstruction != step.instruction ? step.instruction : nil,
         maneuverType: step.maneuverType,
         distanceMeters: step.distanceMeters,
         durationSeconds: step.durationSeconds
@@ -562,11 +584,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     }
     guard !maneuvers.isEmpty else { return }
     // Seed the signature from the live pair so the first steady-state update
-    // takes the flicker-free estimates path instead of rebuilding.
+    // takes the flicker-free estimates path instead of rebuilding. Shape
+    // matches CarPlayNavigationUpdate.signature: display text for the
+    // current maneuver, raw instruction for the next, lane presence flag.
     let first = steps[0]
     let second = steps.count > 1 ? steps[1] : nil
     maneuverSignature =
-      "\(first.maneuverType)|\(first.instruction)|\(second?.maneuverType ?? "")|\(second?.instruction ?? "")|false"
+      "\(first.maneuverType)|\(first.displayInstruction)|\(second?.maneuverType ?? "")|\(second?.instruction ?? "")|\(first.hasLaneGuidance)"
     session.upcomingManeuvers = maneuvers
   }
 
@@ -666,6 +690,19 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     mapViewHost.updateCenter(lat: lat, lng: lng, heading: heading)
   }
 
+  // MARK: Map style (phone parity: dark/light + satellite preference)
+
+  /// Applies the phone's resolved map style JSON. Dedupes by content hash so
+  /// repeated pushes are free; the host reloads the style in place and keeps
+  /// route/traffic annotations.
+  func applyMapStyle(_ json: String) {
+    guard !json.isEmpty else { return }
+    let hash = json.hashValue
+    guard hash != appliedStyleHash else { return }
+    appliedStyleHash = hash
+    mapViewHost.applyStyle(json: json)
+  }
+
   // MARK: Route traffic
 
   func applyRouteTraffic(_ ranges: [RouteTrafficRange]) {
@@ -718,14 +755,39 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   func searchTemplate(_ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void) {
-    defer { completionHandler() }
+    // Show a detail sheet mirroring the phone's place card: navigate now or
+    // add as a stop on the active drive (JS falls back to fresh navigation
+    // when idle).
+    completionHandler()
     guard
       let userInfo = item.userInfo as? [String: Any],
       let lat = userInfo["lat"] as? Double,
       let lng = userInfo["lng"] as? Double
     else { return }
-    PolarisCarPlay.emitSearchResultSelected(name: userInfo["name"] as? String, lat: lat, lng: lng)
-    interfaceController?.popTemplate(animated: true, completion: nil)
+    let name = userInfo["name"] as? String
+    let startItem = CPListItem(
+      text: "Start Navigation",
+      detailText: name,
+      image: UIImage(systemName: "car.fill")
+    )
+    startItem.handler = { [weak self] _, done in
+      PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
+      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      done()
+    }
+    let addStopItem = CPListItem(
+      text: "Add Stop",
+      detailText: "Add to your current drive",
+      image: UIImage(systemName: "plus.circle.fill")
+    )
+    addStopItem.handler = { [weak self] _, done in
+      PolarisCarPlay.emitSearchResultAddStop(name: name, lat: lat, lng: lng)
+      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      done()
+    }
+    let section = CPListSection(items: [startItem, addStopItem])
+    let detail = CPListTemplate(title: name ?? "Destination", sections: [section])
+    interfaceController?.pushTemplate(detail, animated: true, completion: nil)
   }
 
   // MARK: CPMapTemplateDelegate
@@ -820,5 +882,11 @@ extension PolarisCarPlay {
     var body: [String: Any] = ["lat": lat, "lng": lng]
     body["name"] = name
     emit("searchResultSelected", body)
+  }
+
+  fileprivate static func emitSearchResultAddStop(name: String?, lat: Double, lng: Double) {
+    var body: [String: Any] = ["lat": lat, "lng": lng]
+    body["name"] = name
+    emit("searchResultAddStop", body)
   }
 }

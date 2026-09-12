@@ -3,6 +3,10 @@ jest.mock('react-native', () => {
   const addListener = jest.fn().mockReturnValue({ remove: jest.fn() });
   return {
     Platform: { OS: 'ios' },
+    Appearance: {
+      getColorScheme: jest.fn(() => 'light'),
+      addChangeListener: jest.fn(() => ({ remove: jest.fn() })),
+    },
     NativeModules: {
       PolarisCarPlay: {
         updateNavigation: jest.fn(),
@@ -13,6 +17,7 @@ jest.mock('react-native', () => {
         hideNavigationAlert: jest.fn(),
         pushSearchResults: jest.fn(),
         updateMapCenter: jest.fn(),
+        updateMapStyle: jest.fn(),
         isConnected: jest.fn().mockResolvedValue(false),
         addListener: jest.fn(),
         removeListeners: jest.fn(),
@@ -74,6 +79,7 @@ import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingS
 import { useTrafficStore } from '../../src/stores/trafficStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { toCarPlaySpeedLimit } from '../../src/services/carplay/carPlayManager';
+import { formatDistance } from '../../src/utils/units';
 import { encodePolyline } from '../../src/utils/polyline';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 import { unifiedSearch } from '../../src/services/search/unifiedSearch';
@@ -158,6 +164,7 @@ describe('CarPlayManager', () => {
     useNavigationTrackingStore.getState().setDistanceToTurn(null);
     useTrafficStore.getState().setNormalizedSegments([]);
     useSettingsStore.getState().setUseMetric(false);
+    useSettingsStore.getState().setThemeMode('system');
     eventListeners = {};
     NativeModules.PolarisCarPlay.isConnected.mockResolvedValue(false);
 
@@ -183,13 +190,17 @@ describe('CarPlayManager', () => {
       'searchResultSelected',
       expect.any(Function),
     );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'searchResultAddStop',
+      expect.any(Function),
+    );
   });
 
   it('does not initialise twice', () => {
     initCarPlay();
     initCarPlay();
-    // addListener should be called only 4 times (once per event), not 8
-    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(4);
+    // addListener should be called only 5 times (once per event), not 10
+    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(5);
   });
 
   it('tracks connected state', () => {
@@ -343,6 +354,129 @@ describe('CarPlayManager', () => {
       }),
     );
     expect(NativeModules.PolarisCarPlay.showReroutingAlert).not.toHaveBeenCalled();
+  });
+
+  it('scales the trip ETA by remaining distance like the phone EtaDisplay', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    jest.clearAllMocks();
+
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    // Half the route remains; full-route traffic ETA is 1200 s.
+    useNavigationStore.getState().updateEta(600, 2500);
+    useNavigationStore.getState().updateTrafficEta(1200, 600, 1);
+
+    expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ etaSeconds: 600 }),
+    );
+  });
+
+  it('counts down the time-to-turn with the live distance', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    jest.clearAllMocks();
+
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    // First maneuver: 200 m in 30 s; halfway there → ~15 s left.
+    useNavigationTrackingStore.getState().setDistanceToTurn(100);
+
+    expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ distanceToTurnMeters: 100, durationToTurnSeconds: 15 }),
+    );
+  });
+
+  it('sends the phone route-preview summary and banner text on start', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    jest.clearAllMocks();
+
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeSummary: `10 min · ${formatDistance(5000)}`,
+      }),
+    );
+    const payload = (NativeModules.PolarisCarPlay.startNavigation as jest.Mock).mock.calls[0][0];
+    expect(payload.maneuvers[0]).toEqual(
+      expect.objectContaining({
+        instruction: 'Head north on Main St',
+        displayInstruction: 'Head north on Main Street',
+        hasLaneGuidance: false,
+      }),
+    );
+  });
+
+  it('pushes the phone map style on connect and on theme change only', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenCalledTimes(1);
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenCalledWith(
+      expect.stringContaining('Polaris Light'),
+    );
+
+    // Unrelated store churn must not resend the ~35 KB style JSON.
+    useNavigationStore.getState().updateEta(500, 4000);
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenCalledTimes(1);
+
+    useSettingsStore.getState().setThemeMode('dark');
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenCalledTimes(2);
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
+      expect.stringContaining('Polaris Dark'),
+    );
+  });
+
+  it('adds a search result as a stop on the active drive', async () => {
+    const route = makeRoute();
+    (computeRoute as jest.Mock).mockResolvedValue([route]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    jest.clearAllMocks();
+
+    fireEvent('searchResultAddStop', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(computeRoute).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ lat: expect.any(Number) }),
+        { lat: 40.75, lng: -73.98, name: 'Coffee Shop' },
+        { lat: 40.76, lng: -73.97 },
+      ]),
+      'auto',
+      expect.objectContaining({ avoidTolls: false }),
+    );
+    expect(useNavigationStore.getState().waypoints).toHaveLength(1);
+    expect(useNavigationStore.getState().waypoints[0]).toMatchObject({ name: 'Coffee Shop' });
+  });
+
+  it('starts fresh navigation when adding a stop while idle', async () => {
+    const route = makeRoute();
+    (computeRoute as jest.Mock).mockResolvedValue([route]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    jest.clearAllMocks();
+
+    fireEvent('searchResultAddStop', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({ destinationName: 'Coffee Shop' }),
+    );
   });
 
   it('shows and hides the rerouting alert on transitions only', () => {
