@@ -156,4 +156,21 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).toContain('popToRootTemplate');
     }
   });
+
+  it('starts the CarPlay template without waiting for the RN module to attach', () => {
+    // Tapping the home-screen app icon must open the map even on a cold
+    // launch, when no phone window scene (and so no React Native module)
+    // exists yet. Activation was previously gated on `instance != nil`, which
+    // left the icon unresponsive.
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      expect(nativeModule).not.toContain(
+        'guard instance != nil, pendingInterfaceController != nil',
+      );
+      expect(nativeModule).toContain(
+        'guard pendingInterfaceController != nil, pendingWindow != nil',
+      );
+      expect(nativeModule).toContain('Self.attachPendingSceneIfNeeded()');
+    }
+  });
 });

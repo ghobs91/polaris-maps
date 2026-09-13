@@ -31,12 +31,19 @@ class PolarisCarPlay: RCTEventEmitter {
     instance?.sendEvent(withName: event, body: body)
   }
 
-  /// Publishes a buffered scene connection once the RN-managed instance exists.
-  /// Always activates on the main thread: `init` and `startObserving` run on
-  /// RN bridge queues, and UIKit/CarPlay calls made off-main raise and abort
-  /// the process (SIGABRT on CarPlay connect).
+  /// Publishes a buffered scene connection. Always activates on the main
+  /// thread: `init` and `startObserving` run on RN bridge queues, and
+  /// UIKit/CarPlay calls made off-main raise and abort the process (SIGABRT on
+  /// CarPlay connect).
+  ///
+  /// Activation deliberately does NOT wait for the RN-managed instance. A
+  /// cold launch from the CarPlay home screen may create only the CarPlay
+  /// template scene, never the phone window scene — so React Native (and this
+  /// module) can attach much later. Gating on `instance` left the app icon
+  /// unresponsive; the template is purely native, and `carPlayConnected` is
+  /// replayed to JS once the module attaches (see `startObserving`/`init`).
   static func attachPendingSceneIfNeeded() {
-    guard instance != nil, pendingInterfaceController != nil else { return }
+    guard pendingInterfaceController != nil, pendingWindow != nil else { return }
     guard Thread.isMainThread else {
       DispatchQueue.main.async { Self.attachPendingSceneIfNeeded() }
       return
