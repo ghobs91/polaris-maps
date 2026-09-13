@@ -15,8 +15,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Same default style as the phone-side light map (src/constants/config.ts).
   private static let styleURL = URL(string: "https://tiles.openfreemap.org/styles/liberty")!
 
-  /// Phone parity: white casing + #4A8CFF core (see TrafficRouteLayer).
-  private static let routeCoreColor = UIColor(red: 0x4A / 255, green: 0x8C / 255, blue: 1, alpha: 1)
+  /// Phone parity: white casing + cyan core (DEFAULT_ROUTE_COLOR #2FD4F2,
+  /// see TrafficRouteLayer).
+  private static let routeCoreColor = UIColor(red: 0x2F / 255, green: 0xD4 / 255, blue: 0xF2 / 255, alpha: 1)
   /// Across-distance in meters approximating the phone's zoom-17 nav camera.
   private static let followDistance: CLLocationDistance = 350
   /// Camera target sits this far ahead of the vehicle so the puck renders low

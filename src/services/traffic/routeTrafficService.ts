@@ -2,7 +2,7 @@ import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { haversineMeters } from '../../utils/routeSnap';
 
 /** Default route color when no traffic data is available. */
-export const DEFAULT_ROUTE_COLOR = '#4A8CFF';
+export const DEFAULT_ROUTE_COLOR = '#2FD4F2';
 
 /** Display colors for the ETA number based on overall route traffic. */
 export const ETA_COLOR_GREEN = '#4ADE80';
@@ -18,7 +18,7 @@ const MATCH_THRESHOLD_DEG = 0.004;
 
 /** Map a congestion ratio (0–1) to a traffic color. */
 export function congestionColor(ratio: number): string {
-  if (ratio >= 0.75) return '#4A8CFF'; // blue — free flow (same as default route color)
+  if (ratio >= 0.75) return '#2FD4F2'; // cyan — free flow (same as default route color)
   if (ratio >= 0.5) return '#FFD600'; // yellow — slow
   if (ratio >= 0.25) return '#FF6D00'; // orange — congested
   return '#D50000'; // dark red — stopped / heavy delay

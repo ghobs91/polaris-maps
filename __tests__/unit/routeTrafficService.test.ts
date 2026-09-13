@@ -13,9 +13,9 @@ import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 // congestionColor
 // ---------------------------------------------------------------------------
 describe('congestionColor', () => {
-  it('returns blue for free-flow (ratio >= 0.75)', () => {
-    expect(congestionColor(0.75)).toBe('#4A8CFF');
-    expect(congestionColor(1.0)).toBe('#4A8CFF');
+  it('returns cyan for free-flow (ratio >= 0.75)', () => {
+    expect(congestionColor(0.75)).toBe('#2FD4F2');
+    expect(congestionColor(1.0)).toBe('#2FD4F2');
   });
 
   it('returns yellow for slow traffic (0.50 – 0.74)', () => {
@@ -84,7 +84,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     expect(result.features.length).toBeGreaterThanOrEqual(1);
 
     const colors = result.features.map((f) => f.properties.color);
-    expect(colors).toContain('#4A8CFF'); // blue
+    expect(colors).toContain('#2FD4F2'); // cyan
   });
 
   it('colors a route chunk red when stopped traffic is nearby', () => {
@@ -183,9 +183,9 @@ describe('buildRouteTrafficGeoJSON', () => {
     });
 
     const result = buildRouteTrafficGeoJSON(route, [seg]);
-    // All pairs should be green → merged into 1 feature
+    // All pairs should be cyan/free-flow → merged into 1 feature
     expect(result.features).toHaveLength(1);
-    expect(result.features[0].properties.color).toBe('#4A8CFF');
+    expect(result.features[0].properties.color).toBe('#2FD4F2');
     // Merged feature should contain all 5 coordinates
     expect(result.features[0].geometry.coordinates).toHaveLength(5);
   });
@@ -247,11 +247,11 @@ describe('buildRouteTrafficGeoJSON', () => {
 
     const result = buildRouteTrafficGeoJSON(route, segments);
     const colors = result.features.map((f) => f.properties.color);
-    // Should have multiple colors — not all blue
+    // Should have multiple colors — not all free-flow
     const uniqueColors = new Set(colors);
     expect(uniqueColors.size).toBeGreaterThan(1);
     // Should contain traffic colors from the matched segments
-    expect(colors).toContain('#4A8CFF'); // green from seg-1
+    expect(colors).toContain('#2FD4F2'); // cyan from seg-1
     expect(colors).toContain('#D50000'); // red from seg-2
   });
 

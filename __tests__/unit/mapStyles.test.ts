@@ -33,8 +33,8 @@ function colorSpread(hex: string): number {
 
 describe('darkMapStyle', () => {
   const style = JSON.parse(DARK_MAP_STYLE_JSON);
-  // Tesla-like near-black charcoal land.
-  const bgColor = '#101418';
+  // Apple Maps-like blue-slate dark land.
+  const bgColor = '#18262E';
   const bgLum = hexToLuminance(bgColor);
 
   it('should parse as valid JSON with version 8', () => {
@@ -108,7 +108,7 @@ describe('highway palette', () => {
   const darkStyle = JSON.parse(DARK_MAP_STYLE_JSON);
   const lightStyle = JSON.parse(LIGHT_MAP_STYLE_JSON);
 
-  it('uses muted blue-gray highway fills in light theme; vibrant Tesla palette in dark', () => {
+  it('uses muted blue-gray highway fills in light theme; light blue-gray ribbons in dark', () => {
     // Light theme keeps the classic muted palette.
     const motorwayLight = lightStyle.layers.find((l: any) => l.id === 'road-motorway');
     const trunkLight = lightStyle.layers.find((l: any) => l.id === 'road-trunk');
@@ -117,15 +117,15 @@ describe('highway palette', () => {
     expect(colorSpread(motorwayLight.paint['line-color'])).toBeLessThanOrEqual(48);
     expect(colorSpread(trunkLight.paint['line-color'])).toBeLessThanOrEqual(48);
 
-    // Dark theme uses the Tesla-like vibrant palette: bright white motorway
-    // + amber trunk for instant feature discernment.
+    // Dark theme uses Apple Maps-like light blue-gray ribbons so the road
+    // network reads clearly without the old white/amber Tesla contrast.
     const motorwayDark = darkStyle.layers.find((l: any) => l.id === 'road-motorway');
     const trunkDark = darkStyle.layers.find((l: any) => l.id === 'road-trunk');
-    expect(motorwayDark.paint['line-color']).toBe('#F5F7FA');
-    expect(trunkDark.paint['line-color']).toBe('#FFC251');
+    expect(motorwayDark.paint['line-color']).toBe('#A6B3C4');
+    expect(trunkDark.paint['line-color']).toBe('#94A2B4');
   });
 
-  it('keeps dark highways brighter than primary roads (Tesla hierarchy)', () => {
+  it('keeps dark highways brighter than primary roads (road hierarchy)', () => {
     const motorway = darkStyle.layers.find((l: any) => l.id === 'road-motorway');
     const primary = darkStyle.layers.find((l: any) => l.id === 'road-primary');
 

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import {
   buildRouteTrafficGeoJSON,
+  DEFAULT_ROUTE_COLOR,
   type TrafficFeatureCollection,
 } from '../../services/traffic/routeTrafficService';
 import { useTrafficStore } from '../../stores/trafficStore';
@@ -74,7 +75,7 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
         <MapLibreGL.LineLayer
           id="route-base-line"
           style={{
-            lineColor: '#4A8CFF',
+            lineColor: DEFAULT_ROUTE_COLOR,
             lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
             lineCap: 'round',
             lineJoin: 'round',
