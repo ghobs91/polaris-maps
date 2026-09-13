@@ -1009,11 +1009,13 @@ const BODY_SCALE = 1.06;
 const SHADOW_SHIFT_PX = 2;
 // Halo ellipse semi-axes in screen px.  Forward > lateral so the halo reads
 // as a narrow oval pointing the same way as the arrow, instead of a wide
-// disc.  Rim vs fill differ by 2px to leave a light-blue edge.
-const HALO_RIM_FORWARD_PX = 18;
-const HALO_RIM_LATERAL_PX = 12;
-const HALO_FILL_FORWARD_PX = 16;
-const HALO_FILL_LATERAL_PX = 10;
+// disc.  Rim vs fill differ by 2px to leave a light-blue edge.  Sized so the
+// halo diameter stays ~1.8× the arrow's length/width (Apple/Google-style
+// puck instead of a ring hugging the triangle).
+const HALO_RIM_FORWARD_PX = 20;
+const HALO_RIM_LATERAL_PX = 16;
+const HALO_FILL_FORWARD_PX = 18;
+const HALO_FILL_LATERAL_PX = 14;
 
 /**
  * Convert a screen-pixel dimension to ground meters at the given zoom/latitude.
