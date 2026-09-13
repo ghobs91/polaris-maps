@@ -5,5 +5,6 @@ import SwiftUI
 struct PolarisMapsLiveActivityBundle: WidgetBundle {
     var body: some Widget {
         NavigationLiveActivity()
+        DownloadLiveActivity()
     }
 }

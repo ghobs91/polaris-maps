@@ -6,6 +6,7 @@ import { ConnectivityBanner } from '@/components/common';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
+import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
 import {
   initTrafficP2P,
   disposeTrafficP2P,
@@ -33,6 +34,9 @@ function RootLayoutInner() {
     // Keep the iOS background navigation session in sync with navigation
     // state (starts/stops it wherever navigation is triggered from).
     initNavigationBackgroundSession();
+    // Show aggregate offline-download progress in a Live Activity while the
+    // app is backgrounded during an active region download.
+    initDownloadLiveActivity();
   }, []);
 
   useEffect(() => {

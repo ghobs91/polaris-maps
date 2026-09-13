@@ -22,6 +22,10 @@ const NATIVE_FILES = [
     dest: path.join(IOS_DIR, 'PolarisMaps', 'NavigationAttributes.swift'),
   },
   {
+    src: path.join(NATIVE_SRC, 'PolarisMaps', 'DownloadAttributes.swift'),
+    dest: path.join(IOS_DIR, 'PolarisMaps', 'DownloadAttributes.swift'),
+  },
+  {
     src: path.join(NATIVE_SRC, 'PolarisMaps', 'PolarisLiveActivity.swift'),
     dest: path.join(IOS_DIR, 'PolarisMaps', 'PolarisLiveActivity.swift'),
   },
@@ -35,6 +39,10 @@ const EXTENSION_FILES = [
   {
     src: path.join(NATIVE_SRC, EXTENSION_NAME, 'NavigationLiveActivity.swift'),
     dest: path.join(IOS_DIR, EXTENSION_NAME, 'NavigationLiveActivity.swift'),
+  },
+  {
+    src: path.join(NATIVE_SRC, EXTENSION_NAME, 'DownloadLiveActivity.swift'),
+    dest: path.join(IOS_DIR, EXTENSION_NAME, 'DownloadLiveActivity.swift'),
   },
   {
     src: path.join(NATIVE_SRC, EXTENSION_NAME, 'PolarisMapsLiveActivityBundle.swift'),
@@ -218,8 +226,10 @@ function withLiveActivities(config) {
       };
 
       addExtensionSource(`${EXTENSION_NAME}/NavigationLiveActivity.swift`);
+      addExtensionSource(`${EXTENSION_NAME}/DownloadLiveActivity.swift`);
       addExtensionSource(`${EXTENSION_NAME}/PolarisMapsLiveActivityBundle.swift`);
       addExtensionSource('PolarisMaps/NavigationAttributes.swift');
+      addExtensionSource('PolarisMaps/DownloadAttributes.swift');
       project.addFile(`${EXTENSION_NAME}/Info.plist`, extGroup.uuid);
     }
 

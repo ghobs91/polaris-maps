@@ -21,4 +21,18 @@ RCT_EXTERN_METHOD(updateActivity:(double)etaSeconds
 
 RCT_EXTERN_METHOD(endActivity)
 
+RCT_EXTERN_METHOD(startDownloadActivity:(double)percent
+                  regionCount:(double)regionCount
+                  label:(NSString *)label
+                  stage:(NSString *)stage
+                  isComplete:(BOOL)isComplete)
+
+RCT_EXTERN_METHOD(updateDownloadActivity:(double)percent
+                  regionCount:(double)regionCount
+                  label:(NSString *)label
+                  stage:(NSString *)stage
+                  isComplete:(BOOL)isComplete)
+
+RCT_EXTERN_METHOD(endDownloadActivity:(BOOL)immediate)
+
 @end

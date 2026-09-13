@@ -20,6 +20,21 @@ interface PolarisLiveActivityNative {
     streetName: string | null,
   ): void;
   endActivity(): void;
+  startDownloadActivity(
+    percent: number,
+    regionCount: number,
+    label: string,
+    stage: string,
+    isComplete: boolean,
+  ): void;
+  updateDownloadActivity(
+    percent: number,
+    regionCount: number,
+    label: string,
+    stage: string,
+    isComplete: boolean,
+  ): void;
+  endDownloadActivity(immediate: boolean): void;
 }
 
 const NativeModule: PolarisLiveActivityNative | null =
@@ -74,4 +89,37 @@ export function updateActivity(params: {
 
 export function endActivity(): void {
   NativeModule?.endActivity();
+}
+
+/** Aggregate state mirrored into the offline-download Live Activity. */
+export interface DownloadLiveActivityState {
+  percent: number;
+  regionCount: number;
+  label: string;
+  stage: string;
+  isComplete: boolean;
+}
+
+export function startDownloadActivity(state: DownloadLiveActivityState): void {
+  NativeModule?.startDownloadActivity(
+    state.percent,
+    state.regionCount,
+    state.label,
+    state.stage,
+    state.isComplete,
+  );
+}
+
+export function updateDownloadActivity(state: DownloadLiveActivityState): void {
+  NativeModule?.updateDownloadActivity(
+    state.percent,
+    state.regionCount,
+    state.label,
+    state.stage,
+    state.isComplete,
+  );
+}
+
+export function endDownloadActivity(immediate: boolean): void {
+  NativeModule?.endDownloadActivity(immediate);
 }

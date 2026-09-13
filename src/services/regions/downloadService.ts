@@ -93,6 +93,8 @@ export async function fetchLatestTileVersion(): Promise<string | null> {
 
 export interface DownloadProgress {
   regionId: string;
+  /** Human-readable region name, attached by the download manager for UI labels. */
+  regionName?: string;
   totalBytes: number;
   downloadedBytes: number;
   percent: number;

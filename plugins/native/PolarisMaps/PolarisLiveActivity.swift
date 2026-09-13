@@ -5,6 +5,7 @@ import Foundation
 @objc(PolarisLiveActivity)
 class PolarisLiveActivity: NSObject {
     private var currentActivity: Activity<NavigationAttributes>?
+    private var currentDownloadActivity: Activity<DownloadAttributes>?
 
     @objc static func requiresMainQueueSetup() -> Bool { return true }
 
@@ -92,6 +93,106 @@ class PolarisLiveActivity: NSObject {
         Task {
             await activity.end(finalContent, dismissalPolicy: .immediate)
             currentActivity = nil
+        }
+    }
+
+    // MARK: - Offline download activity
+
+    private func downloadContentState(percent: Double,
+                                      regionCount: Double,
+                                      label: String,
+                                      stage: String,
+                                      isComplete: Bool) -> DownloadAttributes.ContentState {
+        DownloadAttributes.ContentState(
+            percent: max(0, min(100, Int(percent.rounded()))),
+            regionCount: max(0, Int(regionCount)),
+            label: label,
+            stage: stage,
+            isComplete: isComplete
+        )
+    }
+
+    @objc func startDownloadActivity(_ percent: Double,
+                                     regionCount: Double,
+                                     label: String,
+                                     stage: String,
+                                     isComplete: Bool) {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            print("[LiveActivity] Activities not authorized or not supported")
+            return
+        }
+
+        let state = downloadContentState(
+            percent: percent,
+            regionCount: regionCount,
+            label: label,
+            stage: stage,
+            isComplete: isComplete
+        )
+        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(900))
+
+        if let activity = currentDownloadActivity {
+            Task { await activity.update(content) }
+            return
+        }
+
+        do {
+            currentDownloadActivity = try Activity<DownloadAttributes>.request(
+                attributes: DownloadAttributes(),
+                content: content,
+                pushType: nil
+            )
+            print("[LiveActivity] Download activity started")
+        } catch {
+            print("[LiveActivity] Download start error: \(error.localizedDescription)")
+        }
+    }
+
+    @objc func updateDownloadActivity(_ percent: Double,
+                                      regionCount: Double,
+                                      label: String,
+                                      stage: String,
+                                      isComplete: Bool) {
+        let state = downloadContentState(
+            percent: percent,
+            regionCount: regionCount,
+            label: label,
+            stage: stage,
+            isComplete: isComplete
+        )
+        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(900))
+
+        if let activity = currentDownloadActivity {
+            Task { await activity.update(content) }
+            return
+        }
+
+        // A prior start may have been rejected during the foreground
+        // transition; retry the request here so progress is not silently lost.
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        do {
+            currentDownloadActivity = try Activity<DownloadAttributes>.request(
+                attributes: DownloadAttributes(),
+                content: content,
+                pushType: nil
+            )
+            print("[LiveActivity] Download activity started (via update)")
+        } catch {
+            print("[LiveActivity] Download update/start error: \(error.localizedDescription)")
+        }
+    }
+
+    @objc func endDownloadActivity(_ immediate: Bool) {
+        guard let activity = currentDownloadActivity else { return }
+
+        let finalContent = ActivityContent(state: activity.content.state, staleDate: Date())
+        let policy: ActivityUIDismissalPolicy = immediate
+            ? .immediate
+            : .after(Date().addingTimeInterval(4))
+
+        Task {
+            await activity.end(finalContent, dismissalPolicy: policy)
+            currentDownloadActivity = nil
         }
     }
 }

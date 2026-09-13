@@ -52,7 +52,10 @@ export async function startBackgroundDownload(region: Region): Promise<void> {
   controllers.set(region.id, controller);
   running.add(region.id);
 
-  emit({
+  const emitForRegion = (progress: DownloadProgress): void =>
+    emit({ ...progress, regionName: region.name });
+
+  emitForRegion({
     regionId: region.id,
     totalBytes: 0,
     downloadedBytes: 0,
@@ -61,7 +64,7 @@ export async function startBackgroundDownload(region: Region): Promise<void> {
   });
 
   try {
-    await downloadRegion(region, emit, controller.signal);
+    await downloadRegion(region, emitForRegion, controller.signal);
   } finally {
     controllers.delete(region.id);
     running.delete(region.id);
