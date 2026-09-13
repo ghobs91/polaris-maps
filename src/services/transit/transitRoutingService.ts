@@ -363,27 +363,48 @@ export function formatOtp1DateTime(
   dt: Date,
   timeZone?: string,
 ): { dateStr: string; timeStr: string } {
-  const dateParts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    month: '2-digit',
-    day: '2-digit',
-    year: 'numeric',
-  }).formatToParts(dt);
-  const get = (type: string) => dateParts.find((p) => p.type === type)?.value ?? '';
-  const dateStr = `${get('month')}-${get('day')}-${get('year')}`;
+  // Avoid Intl.DateTimeFormat#formatToParts: several JS engines (notably
+  // Hermes on iOS in some RN versions) ship a partial Intl where it throws.
+  // Derive the parts from `.format()` output instead so a formatting quirk
+  // can never abort the whole trip plan.
+  try {
+    const dateFormatted = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+    }).format(dt);
+    const [month, day, year] = dateFormatted.split(/\D+/);
 
-  const timeParts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).formatToParts(dt);
-  const hour = timeParts.find((p) => p.type === 'hour')?.value ?? '';
-  const minute = timeParts.find((p) => p.type === 'minute')?.value ?? '00';
-  const dayPeriod = (timeParts.find((p) => p.type === 'dayPeriod')?.value ?? '').toLowerCase();
-  const timeStr = `${hour}:${minute}${dayPeriod}`;
+    const timeFormatted = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(dt);
+    const [hourRaw, minuteRaw] = timeFormatted.split(/\D+/);
+    const hour24 = Number(hourRaw) % 24;
+    const minute = (minuteRaw ?? '00').padStart(2, '0');
+    const dayPeriod = hour24 >= 12 ? 'pm' : 'am';
+    const hour12 = hour24 % 12 || 12;
 
-  return { dateStr, timeStr };
+    return {
+      dateStr: `${month}-${day}-${year}`,
+      timeStr: `${hour12}:${minute}${dayPeriod}`,
+    };
+  } catch {
+    // Last-resort fallback: device-local wall clock (no timezone support).
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    const hour24 = dt.getHours();
+    const minute = String(dt.getMinutes()).padStart(2, '0');
+    const dayPeriod = hour24 >= 12 ? 'pm' : 'am';
+    const hour12 = hour24 % 12 || 12;
+    return {
+      dateStr: `${month}-${day}-${dt.getFullYear()}`,
+      timeStr: `${hour12}:${minute}${dayPeriod}`,
+    };
+  }
 }
 
 async function planViaOtp1Rest(
@@ -627,8 +648,13 @@ export async function planTransitTrip(options: PlanTransitOptions): Promise<OtpI
         // gtfs-graphql-v2 and unknown styles — use existing GraphQL client
         return await planViaGtfsGraphql(registryEndpoint, options);
       }
-    } catch {
-      // Registry endpoint failed; try user-configured fallback
+    } catch (err) {
+      // Registry endpoint failed; try user-configured fallback. If there is
+      // none, surface the real cause instead of a misleading "no endpoint".
+      if (!OTP_BASE_URL) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(`Transit service unavailable for this region: ${detail}`);
+      }
     }
   }
 
