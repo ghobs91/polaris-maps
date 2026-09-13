@@ -1,5 +1,4 @@
-import { Platform } from 'react-native';
-import { Alert } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import type { LocationObject } from 'expo-location';
@@ -46,11 +45,18 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     const { locations } = data as { locations?: LocationObject[] };
     if (!locations?.length) return;
 
+    // The managed session is the only fix source while it runs (the screen
+    // skips its own watcher when backgroundSessionActive), so fixes delivered
+    // while the app is foregrounded must be treated as foreground fixes —
+    // otherwise deviations are flagged but never rerouted until the session
+    // stops. Only true background delivery skips network I/O (iOS watchdog).
+    const background = AppState.currentState !== 'active';
+
     for (const location of locations) {
       try {
         // Background mode: no network reroutes or haptics (watchdog risk).
-        // Deviations are flagged so the foreground reroutes on return.
-        processFix(location, { background: true });
+        // Deviations are flagged so a foreground fix reroutes on return.
+        processFix(location, { background });
       } catch {
         // One malformed fix must never kill the headless task.
       }

@@ -53,6 +53,12 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: jest.fn().mockReturnValue(true),
 }));
 
+const mockReroute = jest.fn();
+jest.mock('../../src/services/routing/routingService', () => ({
+  __esModule: true,
+  reroute: (...args: unknown[]) => mockReroute(...args),
+}));
+
 const mockMmkvStore = new Map<string, boolean>();
 jest.mock('../../src/services/storage/mmkv', () => ({
   __esModule: true,
@@ -65,11 +71,17 @@ jest.mock('../../src/services/storage/mmkv', () => ({
 }));
 
 let mockPlatformOs = 'ios';
+let mockAppState = 'background';
 jest.mock('react-native', () => ({
   __esModule: true,
   Platform: {
     get OS() {
       return mockPlatformOs;
+    },
+  },
+  AppState: {
+    get currentState() {
+      return mockAppState;
     },
   },
   Alert: { alert: jest.fn() },
@@ -104,10 +116,72 @@ function denied() {
   return { granted: false, status: 'denied', canAskAgain: false };
 }
 
+/** Encode [lng,lat] pairs as a precision-6 polyline (matches utils/polyline). */
+function encodePolyline(coords: [number, number][]): string {
+  let out = '';
+  let prevLat = 0;
+  let prevLng = 0;
+  const enc = (v: number) => {
+    let val = v < 0 ? ~(v << 1) : v << 1;
+    let chunk = '';
+    while (val >= 0x20) {
+      chunk += String.fromCharCode((0x20 | (val & 0x1f)) + 63);
+      val >>= 5;
+    }
+    chunk += String.fromCharCode(val + 63);
+    return chunk;
+  };
+  for (const [lng, lat] of coords) {
+    const latE = Math.round(lat * 1e6);
+    const lngE = Math.round(lng * 1e6);
+    out += enc(latE - prevLat) + enc(lngE - prevLng);
+    prevLat = latE;
+    prevLng = lngE;
+  }
+  return out;
+}
+
+/** A ~1.1 km northward route used by the task-handler tests. */
+function makeTrackedRoute() {
+  return {
+    summary: { distanceMeters: 1112, durationSeconds: 600, hasToll: false, hasFerry: false },
+    legs: [
+      {
+        maneuvers: [
+          {
+            type: 'start' as const,
+            instruction: 'Head north',
+            distanceMeters: 1112,
+            durationSeconds: 600,
+            beginShapeIndex: 0,
+            endShapeIndex: 1,
+          },
+        ],
+        distanceMeters: 1112,
+        durationSeconds: 600,
+      },
+    ],
+    geometry: encodePolyline([
+      [-74.0, 40.7],
+      [-74.0, 40.71],
+    ]),
+    boundingBox: [-74, 40.7, -73.9, 40.8] as [number, number, number, number],
+  };
+}
+
+/** A fix ~850 m east of the route — well past the off-route threshold. */
+function offRouteFix() {
+  return {
+    coords: { latitude: 40.705, longitude: -73.99, speed: 10, heading: 90 },
+    timestamp: Date.now(),
+  };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockMmkvStore.clear();
   mockPlatformOs = 'ios';
+  mockAppState = 'background';
   useNavigationStore.getState().stopNavigation();
   useNavigationTrackingStore.getState().setBackgroundSessionActive(false);
   mockGetForegroundPermissions.mockResolvedValue(granted());
@@ -361,55 +435,7 @@ describe('background navigation task handler', () => {
   });
 
   it('forwards fixes to the pipeline while navigating', async () => {
-    // Encode [lng,lat] pairs as a precision-6 polyline (matches utils/polyline).
-    const encodePolyline = (coords: [number, number][]): string => {
-      let out = '';
-      let prevLat = 0;
-      let prevLng = 0;
-      const enc = (v: number) => {
-        let val = v < 0 ? ~(v << 1) : v << 1;
-        let chunk = '';
-        while (val >= 0x20) {
-          chunk += String.fromCharCode((0x20 | (val & 0x1f)) + 63);
-          val >>= 5;
-        }
-        chunk += String.fromCharCode(val + 63);
-        return chunk;
-      };
-      for (const [lng, lat] of coords) {
-        const latE = Math.round(lat * 1e6);
-        const lngE = Math.round(lng * 1e6);
-        out += enc(latE - prevLat) + enc(lngE - prevLng);
-        prevLat = latE;
-        prevLng = lngE;
-      }
-      return out;
-    };
-
-    const route = {
-      summary: { distanceMeters: 1112, durationSeconds: 600, hasToll: false, hasFerry: false },
-      legs: [
-        {
-          maneuvers: [
-            {
-              type: 'start',
-              instruction: 'Head north',
-              distanceMeters: 1112,
-              durationSeconds: 600,
-              beginShapeIndex: 0,
-              endShapeIndex: 1,
-            },
-          ],
-          distanceMeters: 1112,
-          durationSeconds: 600,
-        },
-      ],
-      geometry: encodePolyline([
-        [-74.0, 40.7],
-        [-74.0, 40.71],
-      ]),
-      boundingBox: [-74, 40.7, -73.9, 40.8],
-    };
+    const route = makeTrackedRoute();
 
     useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
     // The navigation screen activates the shared pipeline on mount/start;
@@ -431,5 +457,45 @@ describe('background navigation task handler', () => {
     const nav = useNavigationStore.getState();
     expect(nav.remainingDistanceMeters).not.toBeNull();
     expect(nav.remainingDistanceMeters!).toBeLessThan(route.summary.distanceMeters);
+  });
+
+  it('reroutes an off-route fix while the app is in the foreground', async () => {
+    mockAppState = 'active';
+    const route = makeTrackedRoute();
+    useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
+    startTracking(route);
+    mockReroute.mockResolvedValue(route);
+
+    const fix = offRouteFix();
+    await getHandler()({ data: { locations: [fix, fix, fix] } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+    // The successful reroute replaced the route and cleared the banner flags.
+    expect(useNavigationStore.getState().isRerouting).toBe(false);
+    expect(useNavigationStore.getState().hasDeviated).toBe(false);
+  });
+
+  it('defers the reroute while the app is backgrounded, then reroutes on return', async () => {
+    mockAppState = 'background';
+    const route = makeTrackedRoute();
+    useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
+    startTracking(route);
+
+    const fix = offRouteFix();
+    await getHandler()({ data: { locations: [fix, fix, fix] } });
+
+    // No network I/O from headless delivery — only the deviation flag.
+    expect(mockReroute).not.toHaveBeenCalled();
+    expect(useNavigationStore.getState().hasDeviated).toBe(true);
+
+    // Back in the foreground, the next fix reroutes immediately (the
+    // off-route counter is already past the threshold).
+    mockAppState = 'active';
+    mockReroute.mockResolvedValue(route);
+    await getHandler()({ data: { locations: [fix] } });
+
+    expect(mockReroute).toHaveBeenCalledTimes(1);
   });
 });
