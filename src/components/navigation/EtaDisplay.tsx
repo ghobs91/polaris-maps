@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { formatDistance } from '../../utils/units';
+import { formatDistance, formatDuration } from '../../utils/units';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { decodePolyline } from '../../utils/polyline';
@@ -160,13 +160,6 @@ export function EtaDisplay({
       </View>
     </View>
   );
-}
-
-function formatDuration(seconds: number): string {
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.ceil((seconds % 3600) / 60);
-  if (hrs > 0) return `${hrs}h ${mins}m`;
-  return `${mins} min`;
 }
 
 const styles = StyleSheet.create({

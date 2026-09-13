@@ -1,20 +1,21 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
-import { NextTurnBanner, EtaDisplay, SpeedLimitSign } from '@/components/navigation';
+import { NextTurnBanner, NavigationHud, SpeedLimitSign } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
-import { useNavigationStore } from '@/stores/navigationStore';
+import { useNavigationStore, type Waypoint } from '@/stores/navigationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { spacing, typography, borderRadius } from '@/constants/theme';
+import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
+import { buildUpcomingStops, moveStop, removeStop } from '@/utils/navigationStops';
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import {
@@ -146,6 +147,7 @@ export default function NavigationScreen() {
   const [followCamera, setFollowCamera] = useState(true);
   const [showAddDestination, setShowAddDestination] = useState(false);
   const [showIncidentReport, setShowIncidentReport] = useState(false);
+  const [hudExpanded, setHudExpanded] = useState(false);
   const mapRef = useRef<MapViewHandle>(null);
   const navPositionRef = useRef<[number, number] | null>(null);
   navPositionRef.current = navPosition;
@@ -177,33 +179,17 @@ export default function NavigationScreen() {
     setFollowCamera(false);
   }, []);
 
-  const handleSelectDestination = useCallback(
-    async (result: UnifiedSearchResult) => {
+  // Recompute the route from the live position through the given pending stops
+  // to the destination, then swap it in. Shared by add/remove/reorder actions.
+  const rerouteFromStops = useCallback(
+    async (pending: Waypoint[]) => {
       const pos = navPositionRef.current;
-      if (!pos || !destination) {
-        setShowAddDestination(false);
-        return;
-      }
-
-      // Build new waypoint list from current position
-      // pending waypoints = waypoints from currentLegIndex onwards
-      const pendingWaypoints = waypoints.slice(currentLegIndex);
-
-      // Insert new destination after the current target (index 1), or append if empty
-      const newWaypoint = { lat: result.lat, lng: result.lng, name: result.name };
-      if (pendingWaypoints.length > 0) {
-        pendingWaypoints.splice(1, 0, newWaypoint);
-      } else {
-        pendingWaypoints.push(newWaypoint);
-      }
-
-      // Compute new route: currentPos -> pendingWaypoints -> original destination
+      if (!pos || !destination) return;
       const routeWaypoints = [
         { lat: pos[1], lng: pos[0] },
-        ...pendingWaypoints,
+        ...pending,
         { lat: destination.lat, lng: destination.lng },
       ];
-
       try {
         const prefs = useSettingsStore.getState().routePreferences;
         const routes = await computeRoute(routeWaypoints, costing, {
@@ -212,16 +198,63 @@ export default function NavigationScreen() {
           avoidFerries: prefs.avoidFerries,
         });
         if (routes.length > 0) {
-          addWaypointAndReplaceRoute(routes[0], pendingWaypoints);
+          addWaypointAndReplaceRoute(routes[0], pending);
         }
       } catch {
-        // Silently fail — user can try again
+        // Keep the existing route when recomputing fails
+      }
+    },
+    [destination, costing, addWaypointAndReplaceRoute],
+  );
+
+  const handleSelectDestination = useCallback(
+    async (result: UnifiedSearchResult) => {
+      // Insert the new stop after the current target (index 1), or append if none
+      const pendingWaypoints = waypoints.slice(currentLegIndex);
+      const newWaypoint = { lat: result.lat, lng: result.lng, name: result.name };
+      if (pendingWaypoints.length > 0) {
+        pendingWaypoints.splice(1, 0, newWaypoint);
+      } else {
+        pendingWaypoints.push(newWaypoint);
       }
 
+      await rerouteFromStops(pendingWaypoints);
       setShowAddDestination(false);
     },
-    [waypoints, currentLegIndex, destination, costing, addWaypointAndReplaceRoute],
+    [waypoints, currentLegIndex, rerouteFromStops],
   );
+
+  const handleRemoveStop = useCallback(
+    (waypointIndex: number) => {
+      const pending = waypoints.slice(currentLegIndex);
+      const offset = waypointIndex - currentLegIndex;
+      if (offset < 0 || offset >= pending.length) return;
+      void rerouteFromStops(removeStop(pending, offset));
+    },
+    [waypoints, currentLegIndex, rerouteFromStops],
+  );
+
+  const handleMoveStop = useCallback(
+    (waypointIndex: number, direction: -1 | 1) => {
+      const pending = waypoints.slice(currentLegIndex);
+      const offset = waypointIndex - currentLegIndex;
+      if (offset < 0 || offset >= pending.length) return;
+      const reordered = moveStop(pending, offset, direction);
+      if (reordered === pending) return;
+      void rerouteFromStops(reordered);
+    },
+    [waypoints, currentLegIndex, rerouteFromStops],
+  );
+
+  const upcomingStops = useMemo(
+    () => buildUpcomingStops(activeRoute, waypoints, currentLegIndex, destination),
+    [activeRoute, waypoints, currentLegIndex, destination],
+  );
+
+  const nextStopName = useMemo(() => {
+    if (currentLegIndex >= waypoints.length) return undefined;
+    return waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`;
+  }, [waypoints, currentLegIndex]);
 
   // Initialize navPosition from the route start so the chevron appears immediately
   useEffect(() => {
@@ -482,67 +515,56 @@ export default function NavigationScreen() {
         </View>
       </View>
 
-      {/* Floating bottom bar pinned above the safe area. */}
+      {/* Expandable bottom HUD pinned above the safe area. */}
       <View style={[styles.etaContainer, { bottom: insets.bottom + spacing.md }]}>
-        {/* Multi-stop: show next stop name */}
-        {waypoints.length > 0 && currentLegIndex < waypoints.length && (
-          <GlassView material="regular" style={styles.nextStopBanner}>
-            <Ionicons name="flag-outline" size={14} color="#fff" />
-            <Text style={styles.nextStopText} numberOfLines={1}>
-              Next: {waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`}
-            </Text>
-            <TouchableOpacity
-              onPress={advanceLeg}
-              style={styles.skipStopBtn}
-              activeOpacity={0.7}
-              accessibilityLabel="Skip stop"
-              accessibilityHint="Skip the next waypoint and continue to the following stop"
-              accessibilityRole="button"
-            >
-              <Text style={styles.skipStopText}>Skip</Text>
-            </TouchableOpacity>
-          </GlassView>
-        )}
-        <EtaDisplay
+        <NavigationHud
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
-          onExit={stopNavigation}
-          onAddDestination={handleOpenAddDestination}
           destinationName={destination?.name}
+          nextStopName={nextStopName}
+          upcomingStops={upcomingStops}
+          onExit={stopNavigation}
+          onAddStop={handleOpenAddDestination}
+          onSkipStop={advanceLeg}
+          onRemoveStop={handleRemoveStop}
+          onMoveStop={handleMoveStop}
+          onExpandedChange={setHudExpanded}
         />
       </View>
 
-      {/* Right-side hovering action stack — Report always visible,
-          Re-center appears below it when the camera is unfollowed. */}
-      <View
-        style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
-        pointerEvents="box-none"
-      >
-        <Pressable
-          style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-          onPress={() => setShowIncidentReport(true)}
-          accessibilityLabel="Report incident"
-          accessibilityHint="Report a traffic incident at your current location"
-          accessibilityRole="button"
+      {/* Right-side hovering action stack — hidden while the stops sheet is
+          expanded. Re-center appears below Report when the camera is unfollowed. */}
+      {!hudExpanded && (
+        <View
+          style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
+          pointerEvents="box-none"
         >
-          <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-            <Ionicons name="alert-circle-outline" size={22} color="#fff" />
-          </GlassView>
-        </Pressable>
-        {!followCamera && (
           <Pressable
             style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-            onPress={handleRecenter}
-            accessibilityLabel="Re-center map"
-            accessibilityHint="Return the map view to your current location"
+            onPress={() => setShowIncidentReport(true)}
+            accessibilityLabel="Report incident"
+            accessibilityHint="Report a traffic incident at your current location"
             accessibilityRole="button"
           >
             <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-              <Ionicons name="navigate" size={22} color="#fff" />
+              <Ionicons name="alert-circle-outline" size={22} color="#fff" />
             </GlassView>
           </Pressable>
-        )}
-      </View>
+          {!followCamera && (
+            <Pressable
+              style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+              onPress={handleRecenter}
+              accessibilityLabel="Re-center map"
+              accessibilityHint="Return the map view to your current location"
+              accessibilityRole="button"
+            >
+              <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+                <Ionicons name="navigate" size={22} color="#fff" />
+              </GlassView>
+            </Pressable>
+          )}
+        </View>
+      )}
 
       {/* Add destination search panel */}
       <AddDestinationPanel
@@ -609,23 +631,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       overflow: 'hidden',
       borderCurve: 'continuous',
     },
-    nextStopBanner: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginBottom: 6,
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: borderRadius.md,
-      overflow: 'hidden',
-      borderCurve: 'continuous',
-    },
-    nextStopText: {
-      flex: 1,
-      color: '#fff',
-      fontSize: 13,
-      fontWeight: '500',
-    },
     rerouteBanner: {
       backgroundColor: 'rgba(64,156,255,0.95)',
       borderRadius: 12,
@@ -635,16 +640,4 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     },
     rerouteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
     rerouteSub: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 1 },
-    skipStopBtn: {
-      paddingVertical: 2,
-      paddingHorizontal: 8,
-      borderRadius: 999,
-      overflow: 'hidden',
-      borderCurve: 'continuous',
-    },
-    skipStopText: {
-      color: '#409CFF',
-      fontSize: 13,
-      fontWeight: '600',
-    },
   });

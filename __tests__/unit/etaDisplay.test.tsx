@@ -1,12 +1,6 @@
-describe('EtaDisplay — formatDuration', () => {
-  // Mirror the private formatDuration function from EtaDisplay.tsx
-  function formatDuration(seconds: number): string {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.ceil((seconds % 3600) / 60);
-    if (hrs > 0) return `${hrs}h ${mins}m`;
-    return `${mins} min`;
-  }
+import { formatDuration } from '../../src/utils/units';
 
+describe('EtaDisplay — formatDuration', () => {
   it('formats minutes only', () => {
     expect(formatDuration(2760)).toBe('46 min');
   });

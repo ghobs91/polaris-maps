@@ -46,6 +46,14 @@ export function kmhToMph(kmh: number): number {
   return kmh / KMH_PER_MPH;
 }
 
+/** Format a duration in seconds for display (e.g. "46 min", "2h 5m"). */
+export function formatDuration(seconds: number): string {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.ceil((seconds % 3600) / 60);
+  if (hrs > 0) return `${hrs}h ${mins}m`;
+  return `${mins} min`;
+}
+
 export function formatDistance(meters: number): string {
   if (useImperial) {
     const miles = meters / METERS_PER_MILE;

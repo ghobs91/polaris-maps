@@ -928,6 +928,23 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 circleStrokeColor: '#fff',
               }}
             />
+            <MapLibreGL.SymbolLayer
+              id="stopSearchMarkersLabel"
+              style={
+                {
+                  textField: ['get', 'name'],
+                  textSize: 11,
+                  textOffset: [0, 1.5],
+                  textAnchor: 'top',
+                  textColor: '#FFFFFF',
+                  textHaloColor: 'rgba(0,0,0,0.8)',
+                  textHaloWidth: 1.5,
+                  textMaxWidth: 12,
+                  textAllowOverlap: true,
+                  textIgnorePlacement: true,
+                } as any
+              }
+            />
           </MapLibreGL.ShapeSource>
         )}
 

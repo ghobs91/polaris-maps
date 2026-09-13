@@ -21,6 +21,7 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useMapStore } from '../../stores/mapStore';
 import { decodePolyline } from '../../utils/polyline';
+import { formatDistance } from '../../utils/units';
 import { spacing } from '../../constants/theme';
 
 function detourKey(r: { lat: number; lng: number }): string {
@@ -261,7 +262,7 @@ export function AddDestinationPanel({
         if (lng > maxLng) maxLng = lng;
         if (lat > maxLat) maxLat = lat;
       }
-      useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat], 'search');
+      useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat]);
     }
     onShowOnMap?.();
   }, [query, performSearch, activeRoute, onShowOnMap, searchCenter]);
@@ -314,6 +315,15 @@ export function AddDestinationPanel({
       cancelled = true;
     };
   }, [submitted, results, activeRoute, waypoints, currentLegIndex, destination, costing]);
+
+  // "Edit Search" from the submitted overview: drop the map pins/overview and
+  // return to the editable list without losing the query or results.
+  const handleEditSearch = useCallback(() => {
+    setSubmitted(false);
+    setDetours({});
+    useMapStore.getState().setStopSearchMarkers([]);
+    inputRef.current?.focus();
+  }, []);
 
   const handleClose = useCallback(() => {
     Keyboard.dismiss();
@@ -376,7 +386,7 @@ export function AddDestinationPanel({
               {item.name}
             </Text>
             <Text style={styles.resultSubtitle} numberOfLines={1}>
-              {item.subtitle}
+              {formatDistance(item.distanceKm * 1000)} · {item.subtitle}
             </Text>
             {label != null && (
               <Text style={styles.resultDetour} numberOfLines={1}>
@@ -430,13 +440,7 @@ export function AddDestinationPanel({
                 selectionColor="#409CFF"
               />
               {query.length > 0 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setQuery('');
-                    setResults([]);
-                  }}
-                  activeOpacity={0.7}
-                >
+                <TouchableOpacity onPress={() => handleChangeText('')} activeOpacity={0.7}>
                   <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.4)" />
                 </TouchableOpacity>
               )}
@@ -458,6 +462,19 @@ export function AddDestinationPanel({
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
+
+          {submitted && results.length > 0 && (
+            <TouchableOpacity
+              style={styles.foundRow}
+              onPress={handleEditSearch}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`${results.length} results found, edit search`}
+            >
+              <Text style={styles.foundText}>{results.length} found</Text>
+              <Text style={styles.editSearchText}>Edit Search</Text>
+            </TouchableOpacity>
+          )}
 
           {isListening && (
             <View style={styles.listeningBanner}>
@@ -588,6 +605,22 @@ const styles = StyleSheet.create({
   emptyText: {
     color: 'rgba(255,255,255,0.4)',
     fontSize: 15,
+  },
+  foundRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+    paddingHorizontal: 4,
+  },
+  foundText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+  },
+  editSearchText: {
+    color: '#409CFF',
+    fontSize: 14,
+    fontWeight: '500',
   },
   resultsList: {
     maxHeight: 380,
