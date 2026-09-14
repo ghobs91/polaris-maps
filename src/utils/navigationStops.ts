@@ -58,6 +58,53 @@ export function buildUpcomingStops(
   return stops;
 }
 
+export interface NextStop {
+  name: string;
+  /** Base seconds left to reach the stop, scaled by how much of the leg remains. */
+  etaSeconds: number;
+  /** Meters left to the stop, or null when the remaining distance isn't known. */
+  distanceMeters: number | null;
+}
+
+/**
+ * Describes the next intermediate stop and the time/distance left to reach it.
+ * Returns null when the next target is the final destination (no pending
+ * waypoints), so callers show the whole-trip ETA instead.
+ *
+ * The remaining distance to the stop is derived by subtracting the untouched
+ * distance of every leg after the current one from the live remaining distance.
+ */
+export function buildNextStop(
+  route: ValhallaRoute | null,
+  waypoints: RouteStop[],
+  currentLegIndex: number,
+  remainingDistanceMeters: number | null,
+): NextStop | null {
+  if (currentLegIndex >= waypoints.length) return null;
+
+  const leg = route?.legs[currentLegIndex];
+  const legDistance = leg?.distanceMeters ?? 0;
+  const legDuration = leg?.durationSeconds ?? 0;
+
+  let distanceMeters: number | null = null;
+  if (remainingDistanceMeters != null && route) {
+    let distanceAfterLeg = 0;
+    for (let i = currentLegIndex + 1; i < route.legs.length; i++) {
+      distanceAfterLeg += route.legs[i].distanceMeters;
+    }
+    distanceMeters = Math.max(0, remainingDistanceMeters - distanceAfterLeg);
+  }
+
+  const fraction =
+    legDistance > 0 && distanceMeters != null ? Math.min(1, distanceMeters / legDistance) : 1;
+
+  return {
+    name: waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`,
+    etaSeconds: Math.round(legDuration * fraction),
+    distanceMeters,
+  };
+}
+
 /** Removes the stop at `index` from a pending-stops list. */
 export function removeStop<T>(stops: T[], index: number): T[] {
   return stops.filter((_, i) => i !== index);

@@ -5,6 +5,7 @@ import { formatDistance, formatDuration } from '../../utils/units';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { decodePolyline } from '../../utils/polyline';
+import type { NextStop } from '../../utils/navigationStops';
 import {
   averageRouteTrafficColor,
   ETA_COLOR_GREEN,
@@ -19,6 +20,9 @@ interface EtaDisplayProps {
   onAddDestination?: () => void;
   /** Destination name for share message */
   destinationName?: string;
+  /** When set, the big ETA counts down to this intermediate stop. */
+  nextStop?: NextStop | null;
+  onSkipStop?: () => void;
 }
 
 export function EtaDisplay({
@@ -29,6 +33,8 @@ export function EtaDisplay({
   isPreviewMode,
   onAddDestination,
   destinationName,
+  nextStop,
+  onSkipStop,
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
   const freeFlowEtaSeconds = useNavigationStore((s) => s.freeFlowEtaSeconds);
@@ -42,6 +48,13 @@ export function EtaDisplay({
     return averageRouteTrafficColor(coords, normalizedSegments);
   }, [activeRoute, normalizedSegments]);
 
+  // Route-wide traffic factor (live ÷ free-flow), reused to adjust the next
+  // leg's ETA with the same data that drives the whole-trip estimate.
+  const trafficScale =
+    trafficEtaSeconds != null && activeRoute != null && activeRoute.summary.durationSeconds > 0
+      ? trafficEtaSeconds / activeRoute.summary.durationSeconds
+      : null;
+
   // trafficEtaSeconds from TomTom is always the full-route value. Scale it
   // by the remaining-distance fraction so it stays in sync with the chevron.
   let scaledTrafficEta: number | null = null;
@@ -52,111 +65,142 @@ export function EtaDisplay({
     scaledTrafficEta = Math.round(progress * trafficEtaSeconds);
   }
 
-  // Use position-scaled traffic ETA when available, otherwise base route ETA
-  const displayEta = scaledTrafficEta ?? etaSeconds;
+  // When an intermediate stop is pending the bar counts down to it; otherwise
+  // (single-destination route, or the stop was skipped) it shows the whole trip.
+  const showingNextStop = nextStop != null;
+  const displayEta = showingNextStop
+    ? trafficScale != null
+      ? Math.round(nextStop.etaSeconds * trafficScale)
+      : nextStop.etaSeconds
+    : (scaledTrafficEta ?? etaSeconds);
+  const displayDistance = showingNextStop ? nextStop.distanceMeters : remainingDistanceMeters;
 
   if (displayEta == null) return null;
 
   const arrival = new Date(Date.now() + displayEta * 1000);
   const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const isTrafficAdjusted = scaledTrafficEta != null;
+  const isTrafficAdjusted = showingNextStop ? trafficScale != null : scaledTrafficEta != null;
   const delaySecs =
-    isTrafficAdjusted && freeFlowEtaSeconds != null
+    !showingNextStop && isTrafficAdjusted && freeFlowEtaSeconds != null
       ? Math.max(0, Math.round(displayEta - freeFlowEtaSeconds))
       : 0;
+
+  const nextStopSuffix = showingNextStop ? ` to ${nextStop.name}` : '';
 
   return (
     <View
       style={styles.container}
       accessibilityRole="summary"
-      accessibilityLabel={`ETA ${formatDuration(displayEta)}${remainingDistanceMeters != null ? `, ${formatDistance(remainingDistanceMeters)}` : ''}, arriving at ${arrivalStr}`}
+      accessibilityLabel={`ETA ${formatDuration(displayEta)}${nextStopSuffix}${displayDistance != null ? `, ${formatDistance(displayDistance)}` : ''}, arriving at ${arrivalStr}`}
     >
-      <View style={styles.info}>
-        <Text
-          style={[styles.eta, { color: etaColor }]}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        >
-          {formatDuration(displayEta)}
-        </Text>
-        <Text
-          style={styles.sub}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        >
-          {remainingDistanceMeters != null ? `${formatDistance(remainingDistanceMeters)} · ` : ''}
-          {arrivalStr}
-          {isTrafficAdjusted ? ' · Live traffic' : ''}
-          {delaySecs > 60 ? ` (+${Math.round(delaySecs / 60)} min delay)` : ''}
-        </Text>
-      </View>
-      <View style={styles.buttons}>
-        {onPreview && (
-          <TouchableOpacity
-            style={[styles.previewBtn, isPreviewMode && styles.previewBtnActive]}
-            onPress={onPreview}
-            activeOpacity={0.85}
+      {showingNextStop && (
+        <View style={styles.nextStopRow}>
+          <Ionicons name="flag-outline" size={14} color="#FF9500" />
+          <Text style={styles.nextStopLabel} numberOfLines={1}>
+            Next · {nextStop.name}
+          </Text>
+          {onSkipStop && (
+            <TouchableOpacity
+              onPress={onSkipStop}
+              style={styles.skipStopBtn}
+              activeOpacity={0.7}
+              accessibilityLabel="Skip stop"
+              accessibilityHint="Skip the next waypoint and continue to the following stop"
+              accessibilityRole="button"
+            >
+              <Text style={styles.skipStopText}>Skip</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+      <View style={styles.mainRow}>
+        <View style={styles.info}>
+          <Text
+            style={[styles.eta, { color: etaColor }]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
           >
-            <Ionicons
-              name={isPreviewMode ? 'pause' : 'play'}
-              size={18}
-              color={isPreviewMode ? '#fff' : 'rgba(255,255,255,0.75)'}
-            />
-          </TouchableOpacity>
-        )}
-        {onAddDestination && (
-          <TouchableOpacity
-            style={styles.addDestBtn}
-            onPress={onAddDestination}
-            activeOpacity={0.85}
-            accessibilityLabel="Add stop"
-            accessibilityHint="Add an intermediate destination to your route"
-            accessibilityRole="button"
+            {formatDuration(displayEta)}
+          </Text>
+          <Text
+            style={styles.sub}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
           >
-            <View style={styles.addDestIconContainer}>
-              <Ionicons name="location-outline" size={18} color="#fff" />
-              <View style={styles.addDestPlusBadge}>
-                <Ionicons name="add" size={10} color="#fff" />
+            {displayDistance != null ? `${formatDistance(displayDistance)} · ` : ''}
+            {arrivalStr}
+            {isTrafficAdjusted ? ' · Live traffic' : ''}
+            {delaySecs > 60 ? ` (+${Math.round(delaySecs / 60)} min delay)` : ''}
+          </Text>
+        </View>
+        <View style={styles.buttons}>
+          {onPreview && (
+            <TouchableOpacity
+              style={[styles.previewBtn, isPreviewMode && styles.previewBtnActive]}
+              onPress={onPreview}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name={isPreviewMode ? 'pause' : 'play'}
+                size={18}
+                color={isPreviewMode ? '#fff' : 'rgba(255,255,255,0.75)'}
+              />
+            </TouchableOpacity>
+          )}
+          {onAddDestination && (
+            <TouchableOpacity
+              style={styles.addDestBtn}
+              onPress={onAddDestination}
+              activeOpacity={0.85}
+              accessibilityLabel="Add stop"
+              accessibilityHint="Add an intermediate destination to your route"
+              accessibilityRole="button"
+            >
+              <View style={styles.addDestIconContainer}>
+                <Ionicons name="location-outline" size={18} color="#fff" />
+                <View style={styles.addDestPlusBadge}>
+                  <Ionicons name="add" size={10} color="#fff" />
+                </View>
               </View>
-            </View>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={styles.shareBtn}
-          onPress={async () => {
-            const dest = destinationName ?? 'destination';
-            const arrival = new Date(Date.now() + (displayEta ?? 0) * 1000);
-            const arrivalStr = arrival.toLocaleTimeString([], {
-              hour: 'numeric',
-              minute: '2-digit',
-            });
-            try {
-              await Share.share({
-                message: `I'm navigating to ${dest} — arriving around ${arrivalStr}`,
-              });
-            } catch {
-              // User cancelled
-            }
-          }}
-          activeOpacity={0.85}
-          accessibilityLabel="Share trip"
-          accessibilityHint="Share your destination and ETA"
-          accessibilityRole="button"
-        >
-          <Ionicons name="share-outline" size={18} color="#fff" />
-        </TouchableOpacity>
-        {onExit && (
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={styles.exitBtn}
-            onPress={onExit}
+            style={styles.shareBtn}
+            onPress={async () => {
+              const dest = destinationName ?? 'destination';
+              const arrival = new Date(Date.now() + (displayEta ?? 0) * 1000);
+              const arrivalStr = arrival.toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+              });
+              try {
+                await Share.share({
+                  message: `I'm navigating to ${dest} — arriving around ${arrivalStr}`,
+                });
+              } catch {
+                // User cancelled
+              }
+            }}
             activeOpacity={0.85}
-            accessibilityLabel="Exit navigation"
-            accessibilityHint="End turn-by-turn navigation"
+            accessibilityLabel="Share trip"
+            accessibilityHint="Share your destination and ETA"
             accessibilityRole="button"
           >
-            <Text style={styles.exitText}>Exit</Text>
+            <Ionicons name="share-outline" size={18} color="#fff" />
           </TouchableOpacity>
-        )}
+          {onExit && (
+            <TouchableOpacity
+              style={styles.exitBtn}
+              onPress={onExit}
+              activeOpacity={0.85}
+              accessibilityLabel="Exit navigation"
+              accessibilityHint="End turn-by-turn navigation"
+              accessibilityRole="button"
+            >
+              <Text style={styles.exitText}>Exit</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </View>
   );
@@ -164,19 +208,38 @@ export function EtaDisplay({
 
 const styles = StyleSheet.create({
   container: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 16,
+  },
+  nextStopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  nextStopLabel: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  skipStopBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    overflow: 'hidden',
+    borderCurve: 'continuous',
+  },
+  skipStopText: {
+    color: '#409CFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  mainRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(17,17,17,0.96)',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 16,
-    borderRadius: 28,
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 12,
   },
   info: {
     flex: 1,

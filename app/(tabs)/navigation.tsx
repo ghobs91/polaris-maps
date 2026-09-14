@@ -15,7 +15,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
-import { buildUpcomingStops, moveStop, removeStop } from '@/utils/navigationStops';
+import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils/navigationStops';
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import {
@@ -251,10 +251,10 @@ export default function NavigationScreen() {
     [activeRoute, waypoints, currentLegIndex, destination],
   );
 
-  const nextStopName = useMemo(() => {
-    if (currentLegIndex >= waypoints.length) return undefined;
-    return waypoints[currentLegIndex]?.name ?? `Stop ${currentLegIndex + 1}`;
-  }, [waypoints, currentLegIndex]);
+  const nextStop = useMemo(
+    () => buildNextStop(activeRoute, waypoints, currentLegIndex, remainingDistanceMeters),
+    [activeRoute, waypoints, currentLegIndex, remainingDistanceMeters],
+  );
 
   // Initialize navPosition from the route start so the chevron appears immediately
   useEffect(() => {
@@ -521,7 +521,7 @@ export default function NavigationScreen() {
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           destinationName={destination?.name}
-          nextStopName={nextStopName}
+          nextStop={nextStop}
           upcomingStops={upcomingStops}
           onExit={stopNavigation}
           onAddStop={handleOpenAddDestination}

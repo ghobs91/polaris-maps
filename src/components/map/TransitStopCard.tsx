@@ -428,10 +428,17 @@ export function TransitStopCard() {
   }, []);
 
   const planRoute = useCallback(
-    async (destLat: number, destLng: number, destName?: string) => {
+    async (
+      destLat: number,
+      destLng: number,
+      destName?: string,
+      // Explicit origin (e.g. right after a swap, before state updates flush).
+      // Defaults to the current originOverride ?? selectedStop.
+      originParam?: { name: string; lat: number; lon: number },
+    ) => {
       if (!selectedStop) return;
 
-      const origin = originOverride ?? selectedStop;
+      const origin = originParam ?? originOverride ?? selectedStop;
 
       Keyboard.dismiss();
       setDirLoading(true);
@@ -503,8 +510,10 @@ export function TransitStopCard() {
     setSelectedItinerary(null);
     setDirError(null);
 
-    // Re-plan with swapped values
-    planRoute(currentOrigin.lat, currentOrigin.lon, currentOrigin.name);
+    // Re-plan with swapped values. State updates are async, so pass the
+    // new origin explicitly; otherwise planRoute reads the stale closure
+    // origin and sends origin == destination (OTP1 TOO_CLOSE).
+    planRoute(currentOrigin.lat, currentOrigin.lon, currentOrigin.name, currentDest);
   }, [selectedStop, originOverride, selectedDest, planRoute]);
 
   const handleStationSelect = useCallback(

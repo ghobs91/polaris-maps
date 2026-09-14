@@ -13,12 +13,14 @@ const upcomingStops: UpcomingStop[] = [
   { waypointIndex: -1, name: 'Grandma', isDestination: true, etaSeconds: 1200 },
 ];
 
+const nextStop = { name: 'Coffee Shop', etaSeconds: 300, distanceMeters: 1000 };
+
 function renderHud(overrides: Partial<React.ComponentProps<typeof NavigationHud>> = {}) {
   const props = {
     etaSeconds: 1200,
     remainingDistanceMeters: 8000,
     destinationName: 'Grandma',
-    nextStopName: 'Coffee Shop',
+    nextStop,
     upcomingStops,
     onExit: jest.fn(),
     onAddStop: jest.fn(),
@@ -33,11 +35,17 @@ function renderHud(overrides: Partial<React.ComponentProps<typeof NavigationHud>
 }
 
 describe('NavigationHud', () => {
-  it('shows the ETA bar and next stop while collapsed', () => {
+  it('shows the ETA to the next stop and its name while collapsed', () => {
     const { screen } = renderHud();
-    expect(screen.getByLabelText(/ETA 20 min/)).toBeTruthy();
-    expect(screen.getByText('Next: Coffee Shop')).toBeTruthy();
+    expect(screen.getByLabelText(/ETA 5 min to Coffee Shop/)).toBeTruthy();
+    expect(screen.getByText('Next · Coffee Shop')).toBeTruthy();
     expect(screen.getByText('Exit')).toBeTruthy();
+  });
+
+  it('shows the whole-trip ETA when the next target is the destination', () => {
+    const { screen } = renderHud({ nextStop: null });
+    expect(screen.getByLabelText(/ETA 20 min/)).toBeTruthy();
+    expect(screen.queryByText('Next · Coffee Shop')).toBeNull();
   });
 
   it('skips the next stop from the collapsed banner', () => {

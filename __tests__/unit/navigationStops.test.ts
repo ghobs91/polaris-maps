@@ -1,4 +1,9 @@
-import { buildUpcomingStops, moveStop, removeStop } from '../../src/utils/navigationStops';
+import {
+  buildNextStop,
+  buildUpcomingStops,
+  moveStop,
+  removeStop,
+} from '../../src/utils/navigationStops';
 import type { ValhallaRoute } from '../../src/models/route';
 
 function makeRoute(legDurations: number[]): ValhallaRoute {
@@ -78,6 +83,74 @@ describe('buildUpcomingStops', () => {
       null,
     );
     expect(stops.map((s) => s.name)).toEqual(['Destination']);
+  });
+});
+
+function makeLegsRoute(legs: { distanceMeters: number; durationSeconds: number }[]): ValhallaRoute {
+  return {
+    summary: {
+      distanceMeters: legs.reduce((sum, leg) => sum + leg.distanceMeters, 0),
+      durationSeconds: legs.reduce((sum, leg) => sum + leg.durationSeconds, 0),
+      hasToll: false,
+      hasFerry: false,
+    },
+    legs: legs.map((leg) => ({
+      maneuvers: [],
+      distanceMeters: leg.distanceMeters,
+      durationSeconds: leg.durationSeconds,
+    })),
+    geometry: '',
+    boundingBox: [0, 0, 0, 0],
+  };
+}
+
+describe('buildNextStop', () => {
+  const waypoints = [
+    { lat: 1, lng: 1, name: 'A' },
+    { lat: 2, lng: 2, name: 'B' },
+  ];
+
+  it('returns null once only the destination remains', () => {
+    const route = makeLegsRoute([{ distanceMeters: 1000, durationSeconds: 200 }]);
+    expect(buildNextStop(route, waypoints, 2, 1000)).toBeNull();
+  });
+
+  it('sizes the ETA to the distance left on the current leg', () => {
+    // origin→A 1000m/200s, A→B 500m/100s, B→destination 500m/100s
+    const route = makeLegsRoute([
+      { distanceMeters: 1000, durationSeconds: 200 },
+      { distanceMeters: 500, durationSeconds: 100 },
+      { distanceMeters: 500, durationSeconds: 100 },
+    ]);
+    // 1200m left overall → 200m left on the first leg (1000m of later legs remain)
+    expect(buildNextStop(route, waypoints, 0, 1200)).toEqual({
+      name: 'A',
+      etaSeconds: 40,
+      distanceMeters: 200,
+    });
+  });
+
+  it('never exceeds the full leg duration when remaining distance is too large', () => {
+    const route = makeLegsRoute([{ distanceMeters: 1000, durationSeconds: 200 }]);
+    expect(buildNextStop(route, waypoints, 0, 5000)).toEqual({
+      name: 'A',
+      etaSeconds: 200,
+      distanceMeters: 5000,
+    });
+  });
+
+  it('labels unnamed stops', () => {
+    const route = makeLegsRoute([{ distanceMeters: 1000, durationSeconds: 200 }]);
+    expect(buildNextStop(route, [{ lat: 1, lng: 1 }], 0, 1000)?.name).toBe('Stop 1');
+  });
+
+  it('falls back to the whole leg when the remaining distance is unknown', () => {
+    const route = makeLegsRoute([{ distanceMeters: 1000, durationSeconds: 200 }]);
+    expect(buildNextStop(route, waypoints, 0, null)).toEqual({
+      name: 'A',
+      etaSeconds: 200,
+      distanceMeters: null,
+    });
   });
 });
 

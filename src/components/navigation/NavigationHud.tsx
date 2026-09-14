@@ -10,8 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { EtaDisplay } from './EtaDisplay';
-import { GlassView } from '../common/GlassView';
-import type { UpcomingStop } from '../../utils/navigationStops';
+import type { NextStop, UpcomingStop } from '../../utils/navigationStops';
 import { spacing, borderRadius } from '../../constants/theme';
 
 const SHEET_MAX_HEIGHT = 320;
@@ -28,8 +27,8 @@ interface NavigationHudProps {
   etaSeconds: number | null;
   remainingDistanceMeters: number | null;
   destinationName?: string;
-  /** Name of the next pending stop; undefined when only the destination remains. */
-  nextStopName?: string;
+  /** The next pending stop; null/undefined when only the destination remains. */
+  nextStop?: NextStop | null;
   upcomingStops: UpcomingStop[];
   onExit: () => void;
   onAddStop: () => void;
@@ -48,7 +47,7 @@ export function NavigationHud({
   etaSeconds,
   remainingDistanceMeters,
   destinationName,
-  nextStopName,
+  nextStop,
   upcomingStops,
   onExit,
   onAddStop,
@@ -195,7 +194,7 @@ export function NavigationHud({
   };
 
   return (
-    <View>
+    <View style={styles.card}>
       {/* Grabber — drag up/down or double-tap to toggle the stops sheet */}
       <View
         style={styles.handleZone}
@@ -235,37 +234,31 @@ export function NavigationHud({
         </TouchableOpacity>
       </Animated.View>
 
-      {!expanded && nextStopName != null && (
-        <GlassView material="regular" style={styles.nextStopBanner}>
-          <Ionicons name="flag-outline" size={14} color="#fff" />
-          <Text style={styles.nextStopText} numberOfLines={1}>
-            Next: {nextStopName}
-          </Text>
-          <TouchableOpacity
-            onPress={onSkipStop}
-            style={styles.skipStopBtn}
-            activeOpacity={0.7}
-            accessibilityLabel="Skip stop"
-            accessibilityHint="Skip the next waypoint and continue to the following stop"
-            accessibilityRole="button"
-          >
-            <Text style={styles.skipStopText}>Skip</Text>
-          </TouchableOpacity>
-        </GlassView>
-      )}
-
       <EtaDisplay
         etaSeconds={etaSeconds}
         remainingDistanceMeters={remainingDistanceMeters}
         onExit={onExit}
         onAddDestination={handleAddStop}
         destinationName={destinationName}
+        nextStop={nextStop}
+        onSkipStop={onSkipStop}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  card: {
+    backgroundColor: 'rgba(17,17,17,0.96)',
+    borderRadius: borderRadius.xxl,
+    overflow: 'hidden',
+    paddingTop: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
   handleZone: {
     height: 22,
     alignItems: 'center',
@@ -278,8 +271,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
   sheet: {
-    backgroundColor: 'rgba(17,17,17,0.96)',
-    borderRadius: borderRadius.xl,
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     paddingTop: 4,
   },
@@ -347,35 +339,6 @@ const styles = StyleSheet.create({
   addStopText: {
     color: '#0A84FF',
     fontSize: 16,
-    fontWeight: '600',
-  },
-  nextStopBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-  },
-  nextStopText: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  skipStopBtn: {
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-  },
-  skipStopText: {
-    color: '#409CFF',
-    fontSize: 13,
     fontWeight: '600',
   },
 });
