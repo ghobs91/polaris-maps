@@ -18,13 +18,13 @@
 
 ## 3. Navigation Arrival Flow
 
-- [ ] 3.1 Implement arrival detection combining GPS radius and route progress with consecutive-fix debouncing in a new `src/services/navigation/arrivalService.ts`
-- [ ] 3.2 Wire waypoint arrival detection into the tracking loop in `app/(tabs)/navigation.tsx`
-- [ ] 3.3 Implement leg auto-advance or arrival prompt based on `navigationAutoAdvanceLegs`
-- [ ] 3.4 Implement destination arrival detection and declaration
-- [ ] 3.5 Build an arrival summary component (destination name, elapsed time, total distance)
-- [ ] 3.6 Implement auto-end (summary dismiss or delay) based on `navigationAutoEnd`
-- [ ] 3.7 Announce arrival via TTS and success haptic
+- [x] 3.1 Implement arrival detection combining GPS radius and route progress with consecutive-fix debouncing in a new `src/services/navigation/arrivalService.ts`
+- [x] 3.2 Wire waypoint arrival detection into the tracking loop in `app/(tabs)/navigation.tsx`
+- [x] 3.3 Implement leg auto-advance or arrival prompt based on `navigationAutoAdvanceLegs`
+- [x] 3.4 Implement destination arrival detection and declaration
+- [x] 3.5 Build an arrival summary component (destination name, elapsed time, total distance)
+- [x] 3.6 Implement auto-end (summary dismiss or delay) based on `navigationAutoEnd`
+- [x] 3.7 Announce arrival via TTS and success haptic
 - [ ] 3.8 Add unit tests for arrival heuristics (radius+progress, near-pass false positive, GPS loss) and integration tests for auto-advance and auto-end
 
 ## 4. Voice Guidance

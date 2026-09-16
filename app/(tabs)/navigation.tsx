@@ -20,6 +20,12 @@ import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import { buildRouteAlternatives } from '@/services/routing/routeAlternatives';
+import {
+  ArrivalDetector,
+  distanceToTargetMeters,
+  targetForLeg,
+} from '@/services/navigation/arrivalService';
+import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
 import { formatDuration } from '@/utils/units';
 import {
   startTracking,
@@ -39,6 +45,7 @@ import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
 import {
+  announceArrival,
   announceManeuver,
   announceNavigationStart,
   announceOffRoute,
@@ -71,6 +78,10 @@ export default function NavigationScreen() {
   const addWaypointAndReplaceRoute = useNavigationStore((s) => s.addWaypointAndReplaceRoute);
   const alternateRoutes = useNavigationStore((s) => s.alternateRoutes);
   const switchToAlternate = useNavigationStore((s) => s.switchToAlternate);
+  const hasArrived = useNavigationStore((s) => s.hasArrived);
+  const setArrived = useNavigationStore((s) => s.setArrived);
+  const navigationAutoAdvanceLegs = useSettingsStore((s) => s.navigationAutoAdvanceLegs);
+  const navigationAutoEnd = useSettingsStore((s) => s.navigationAutoEnd);
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
   useEffect(() => {
@@ -165,11 +176,90 @@ export default function NavigationScreen() {
     }
   }, [isNavigating, isRerouting]);
 
+  // Reset arrival trackers when a navigation session starts or ends.
+  useEffect(() => {
+    if (isNavigating) {
+      startedAtRef.current = Date.now();
+      waypointArrivalRef.current.reset();
+      destinationArrivalRef.current.reset();
+      setShowArrival(false);
+    } else {
+      setShowArrival(false);
+      if (arrivalTimeoutRef.current) {
+        clearTimeout(arrivalTimeoutRef.current);
+        arrivalTimeoutRef.current = null;
+      }
+    }
+  }, [isNavigating]);
+
+  useEffect(
+    () => () => {
+      if (arrivalTimeoutRef.current) clearTimeout(arrivalTimeoutRef.current);
+    },
+    [],
+  );
+
+  // Arrival detection: intermediate waypoints advance (or prompt), and the
+  // final destination declares arrival, announces it, and optionally ends.
+  useEffect(() => {
+    if (!isNavigating || !navPosition) return;
+
+    const onFinalLeg = currentLegIndex >= waypoints.length;
+    if (onFinalLeg) {
+      if (!destination || hasArrived) return;
+      const arrived = destinationArrivalRef.current.update({
+        distanceToTargetMeters: distanceToTargetMeters(navPosition, destination),
+        remainingMetersToTarget: remainingDistanceMeters,
+      });
+      if (!arrived) return;
+
+      setArrived(true);
+      setShowArrival(true);
+      announceArrival(destination.name);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (navigationAutoEnd) {
+        if (arrivalTimeoutRef.current) clearTimeout(arrivalTimeoutRef.current);
+        arrivalTimeoutRef.current = setTimeout(() => stopNavigation(), 8000);
+      }
+      return;
+    }
+
+    const target = targetForLeg(waypoints, destination, currentLegIndex);
+    if (!target) return;
+    const reachedWaypoint = waypointArrivalRef.current.update({
+      distanceToTargetMeters: distanceToTargetMeters(navPosition, target),
+      remainingMetersToTarget: null,
+    });
+    if (!reachedWaypoint) return;
+
+    waypointArrivalRef.current.reset();
+    if (navigationAutoAdvanceLegs) advanceLeg();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  }, [
+    isNavigating,
+    navPosition,
+    currentLegIndex,
+    waypoints,
+    destination,
+    remainingDistanceMeters,
+    hasArrived,
+    navigationAutoAdvanceLegs,
+    navigationAutoEnd,
+    advanceLeg,
+    setArrived,
+    stopNavigation,
+  ]);
+
   // Camera follow state — breaks when user pans/zooms, restored by re-center button
   const [followCamera, setFollowCamera] = useState(true);
   const [showAddDestination, setShowAddDestination] = useState(false);
   const [showIncidentReport, setShowIncidentReport] = useState(false);
   const [hudExpanded, setHudExpanded] = useState(false);
+  const [showArrival, setShowArrival] = useState(false);
+  const waypointArrivalRef = useRef(new ArrivalDetector());
+  const destinationArrivalRef = useRef(new ArrivalDetector());
+  const startedAtRef = useRef<number | null>(null);
+  const arrivalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapViewHandle>(null);
   const navPositionRef = useRef<[number, number] | null>(null);
   navPositionRef.current = navPosition;
@@ -632,6 +722,20 @@ export default function NavigationScreen() {
         onClose={() => setShowIncidentReport(false)}
         position={navPosition ?? [0, 0]}
       />
+
+      {showArrival && destination && (
+        <ArrivalSummary
+          destinationName={destination.name}
+          elapsedSeconds={
+            startedAtRef.current ? Math.floor((Date.now() - startedAtRef.current) / 1000) : 0
+          }
+          distanceMeters={activeRoute?.summary.distanceMeters ?? 0}
+          onDismiss={() => {
+            setShowArrival(false);
+            stopNavigation();
+          }}
+        />
+      )}
     </View>
   );
 }
