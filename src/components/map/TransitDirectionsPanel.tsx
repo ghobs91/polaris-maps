@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { spacing, borderRadius } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import type { OtpItinerary, OtpLeg, TransitMode } from '../../models/transit';
 import TransitTimeSelector from './TransitTimeSelector';
+import { TransitStepThrough } from './TransitStepThrough';
 
 // ── Mode icons ──────────────────────────────────────────────────────
 
@@ -311,6 +312,7 @@ export function TransitDirectionsPanel({ onClose }: TransitDirectionsPanelProps)
   const { isDark } = useTheme();
   const itineraries = useTransitStore((s) => s.itineraries);
   const selectedIndex = useTransitStore((s) => s.selectedItineraryIndex);
+  const [showSteps, setShowSteps] = useState(false);
   const selectItinerary = useTransitStore((s) => s.selectItinerary);
   const isLoading = useTransitStore((s) => s.isLoadingItineraries);
   const error = useTransitStore((s) => s.tripPlanError);
@@ -355,9 +357,21 @@ export function TransitDirectionsPanel({ onClose }: TransitDirectionsPanelProps)
           <Ionicons name="bus" size={20} color="#1A5BA5" />
           <Text style={styles.title}>Transit to {destination?.name ?? 'destination'}</Text>
         </View>
-        <TouchableOpacity onPress={onClose} hitSlop={12}>
-          <Ionicons name="close-circle" size={24} color={subtextColor} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {itineraries.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setShowSteps(true)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="View trip steps"
+            >
+              <Ionicons name="list" size={22} color={subtextColor} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={onClose} hitSlop={12}>
+            <Ionicons name="close-circle" size={24} color={subtextColor} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ModeFilterBar isDark={isDark} />
@@ -405,6 +419,12 @@ export function TransitDirectionsPanel({ onClose }: TransitDirectionsPanelProps)
       <Text style={[styles.coverageText, { color: subtextColor }]}>
         Multi-modal via OpenTripPlanner · includes Amtrak + MBTA where covered
       </Text>
+
+      <TransitStepThrough
+        visible={showSteps}
+        itinerary={itineraries[selectedIndex] ?? null}
+        onClose={() => setShowSteps(false)}
+      />
     </View>
   );
 }
@@ -427,6 +447,11 @@ const createStyles = (isDark: boolean, textColor: string, subtextColor: string) 
       alignItems: 'center',
       gap: 8,
       flex: 1,
+    },
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
     },
     title: {
       fontSize: 16,

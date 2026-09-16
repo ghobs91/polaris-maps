@@ -43,7 +43,7 @@
 - [x] 5.1 Add bicycle to `TransportModeSelector.tsx` and make walk startable as guided navigation
 - [x] 5.2 Route walk/bicycle through the guidance shell with the corresponding costing and tracking
 - [x] 5.3 Gate lane guidance, speed-limit sign, and speed HUD off for pedestrian/bicycle and transit
-- [ ] 5.4 Implement transit step-through from `transitStore` itineraries with transit-appropriate presentation
+- [x] 5.4 Implement transit step-through from `transitStore` itineraries with transit-appropriate presentation
 - [ ] 5.5 Add unit tests for mode gating and integration tests for walk guidance, bicycle guidance, and transit step-through
 
 ## 6. Navigation Safety HUD
