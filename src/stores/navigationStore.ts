@@ -13,6 +13,10 @@ interface NavigationState {
   isNavigating: boolean;
   isRerouting: boolean;
   hasDeviated: boolean;
+  /** In-navigation mute; independent of the global voiceGuidanceEnabled setting. */
+  muted: boolean;
+  /** True once destination arrival has been declared for the current trip. */
+  hasArrived: boolean;
   costing: CostingModel;
   destination: { lat: number; lng: number; name?: string } | null;
 
@@ -56,6 +60,8 @@ interface NavigationState {
   setCurrentStep: (index: number) => void;
   setDeviated: (deviated: boolean) => void;
   setRerouting: (rerouting: boolean) => void;
+  setMuted: (muted: boolean) => void;
+  setArrived: (arrived: boolean) => void;
   updateEta: (etaSeconds: number, remainingMeters: number) => void;
   updateTrafficEta: (trafficEta: number, freeFlowEta: number, matchRatio: number) => void;
   replaceRoute: (route: ValhallaRoute) => void;
@@ -72,6 +78,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   isNavigating: false,
   isRerouting: false,
   hasDeviated: false,
+  muted: false,
+  hasArrived: false,
   costing: 'auto',
   destination: null,
   waypoints: [],
@@ -125,6 +133,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isNavigating: true,
       isRerouting: false,
       hasDeviated: false,
+      muted: false,
+      hasArrived: false,
       costing,
       destination,
       waypoints: waypoints ?? [],
@@ -174,6 +184,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isNavigating: false,
       isRerouting: false,
       hasDeviated: false,
+      muted: false,
+      hasArrived: false,
       destination: null,
       waypoints: [],
       currentLegIndex: 0,
@@ -206,6 +218,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
 
   setDeviated: (hasDeviated) => set({ hasDeviated }),
   setRerouting: (isRerouting) => set({ isRerouting }),
+  setMuted: (muted) => set({ muted }),
+  setArrived: (hasArrived) => set({ hasArrived }),
   updateEta: (etaSeconds, remainingMeters) =>
     set({ etaSeconds, remainingDistanceMeters: remainingMeters }),
   updateTrafficEta: (trafficEta, freeFlowEta, matchRatio) =>
@@ -224,6 +238,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       remainingDistanceMeters: route.summary.distanceMeters,
       isRerouting: false,
       hasDeviated: false,
+      hasArrived: false,
     });
   },
 
@@ -238,6 +253,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       remainingDistanceMeters: route.summary.distanceMeters,
       isRerouting: false,
       hasDeviated: false,
+      hasArrived: false,
       waypoints,
     });
   },

@@ -36,7 +36,13 @@ import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
-import { speakInstruction, stopNavigationSpeech } from '@/services/tts';
+import {
+  announceManeuver,
+  announceNavigationStart,
+  announceOffRoute,
+  announceRerouted,
+  stopNavigationSpeech,
+} from '@/services/tts';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassView } from '@/components/common/GlassView';
 import * as Haptics from 'expo-haptics';
@@ -93,45 +99,28 @@ export default function NavigationScreen() {
   // Manage iOS Live Activity (Dynamic Island) while navigating
   useLiveActivity();
 
-  // Voice guidance: speak turn-by-turn instructions as maneuvers advance.
-  // Skips the initial mount so we don't greet the user on navigation start;
-  // speaks on every subsequent step change (including after reroutes).
+  // Voice guidance: a single "starting navigation" prompt when the session
+  // begins. Advance-distance prompts are driven by the live distance-to-turn
+  // (see the ladder effect below).
+  useEffect(() => {
+    if (isNavigating) announceNavigationStart(destination?.name);
+  }, [isNavigating, destination?.name]);
+
+  // Haptic feedback at turn points — success at the destination, medium on turns.
   const prevStepIndexRef = useRef<number | null>(null);
-  const hasSpokenInitialRef = useRef(false);
   useEffect(() => {
     if (!isNavigating || !currentManeuver) return;
-
-    // On the very first render after navigation starts, record the index
-    // without speaking (the user just saw the route and doesn't need an
-    // immediate prompt). All subsequent step changes are spoken.
-    if (!hasSpokenInitialRef.current) {
-      prevStepIndexRef.current = currentStepIndex;
-      hasSpokenInitialRef.current = true;
-      return;
-    }
-
-    // Only speak when the step index actually changes.
-    if (currentStepIndex !== prevStepIndexRef.current) {
-      prevStepIndexRef.current = currentStepIndex;
-      const text = currentManeuver.verbalPreTransition || currentManeuver.instruction;
-      if (text.trim()) {
-        speakInstruction(text);
-      }
-      // Haptic feedback at turn points — medium impact for turns, light for continues
-      if (currentManeuver.type === 'destination') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }
+    if (prevStepIndexRef.current === currentStepIndex) return;
+    prevStepIndexRef.current = currentStepIndex;
+    if (currentManeuver.type === 'destination') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
   }, [isNavigating, currentStepIndex, currentManeuver]);
 
-  // Reset speech flag when navigation restarts.
   useEffect(() => {
-    if (!isNavigating) {
-      hasSpokenInitialRef.current = false;
-      prevStepIndexRef.current = null;
-    }
+    if (!isNavigating) prevStepIndexRef.current = null;
   }, [isNavigating]);
 
   // Live nav position/bearing/distance-to-turn live in a shared store so the
@@ -143,6 +132,34 @@ export default function NavigationScreen() {
   // True while the managed background location session drives fixes; when
   // false (or until it starts) the screen runs its own foreground watcher.
   const backgroundSessionActive = useNavigationTrackingStore((s) => s.backgroundSessionActive);
+
+  // Advance-distance voice prompt ladder, driven by the snapped distance-to-turn.
+  useEffect(() => {
+    if (!isNavigating || !currentManeuver || distanceToTurn == null) return;
+    const instruction = currentManeuver.verbalPreTransition || currentManeuver.instruction;
+    if (!instruction?.trim()) return;
+    announceManeuver(
+      `${currentStepIndex}:${currentManeuver.instruction ?? ''}`,
+      distanceToTurn,
+      instruction,
+    );
+  }, [isNavigating, currentStepIndex, currentManeuver, distanceToTurn]);
+
+  // Spoken off-route / reroute-complete prompts on transition edges.
+  const wasReroutingRef = useRef(false);
+  useEffect(() => {
+    if (!isNavigating) {
+      wasReroutingRef.current = false;
+      return;
+    }
+    if (isRerouting && !wasReroutingRef.current) {
+      wasReroutingRef.current = true;
+      announceOffRoute();
+    } else if (!isRerouting && wasReroutingRef.current) {
+      wasReroutingRef.current = false;
+      announceRerouted();
+    }
+  }, [isNavigating, isRerouting]);
 
   // Camera follow state — breaks when user pans/zooms, restored by re-center button
   const [followCamera, setFollowCamera] = useState(true);

@@ -16,127 +16,114 @@ export interface RoutePreferences {
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
-interface SettingsState {
+interface PersistedSettings {
   permissions: PermissionPreferences;
   routePreferences: RoutePreferences;
   themeMode: ThemeMode;
-  /** When true, display speeds in km/h instead of mph. Default: false (mph). */
   useMetric: boolean;
-  /** When true, speak turn-by-turn instructions during active navigation. Default: true. */
   voiceGuidanceEnabled: boolean;
+  /** Automatically advance to the next waypoint leg on arrival. */
+  navigationAutoAdvanceLegs: boolean;
+  /** Automatically end navigation shortly after reaching the destination. */
+  navigationAutoEnd: boolean;
+}
+
+interface SettingsState extends PersistedSettings {
   setPermissions: (prefs: Partial<PermissionPreferences>) => void;
   setRoutePreferences: (prefs: Partial<RoutePreferences>) => void;
   setThemeMode: (mode: ThemeMode) => void;
   setUseMetric: (metric: boolean) => void;
   setVoiceGuidanceEnabled: (enabled: boolean) => void;
+  setNavigationAutoAdvanceLegs: (enabled: boolean) => void;
+  setNavigationAutoEnd: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = 'settings';
 
-function loadSettings(): {
-  permissions: PermissionPreferences;
-  routePreferences: RoutePreferences;
-  themeMode: ThemeMode;
-  useMetric: boolean;
-  voiceGuidanceEnabled: boolean;
-} {
+const DEFAULT_SETTINGS: PersistedSettings = {
+  permissions: {
+    locationEnabled: true,
+    trafficTelemetryEnabled: true,
+    poiContributionsEnabled: true,
+    imagerySharingEnabled: false,
+  },
+  routePreferences: {
+    avoidTolls: false,
+    avoidHighways: false,
+    avoidFerries: false,
+  },
+  themeMode: 'system',
+  useMetric: false,
+  voiceGuidanceEnabled: true,
+  navigationAutoAdvanceLegs: true,
+  navigationAutoEnd: true,
+};
+
+function loadSettings(): PersistedSettings {
   const raw = storage.getString(STORAGE_KEY);
   if (raw) {
     try {
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
       return {
-        useMetric: false,
-        voiceGuidanceEnabled: true,
-        routePreferences: { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+        ...DEFAULT_SETTINGS,
         ...parsed,
+        permissions: { ...DEFAULT_SETTINGS.permissions, ...(parsed.permissions ?? {}) },
+        routePreferences: {
+          ...DEFAULT_SETTINGS.routePreferences,
+          ...(parsed.routePreferences ?? {}),
+        },
       };
     } catch {
       // ignore corrupt data
     }
   }
-  return {
-    permissions: {
-      locationEnabled: true,
-      trafficTelemetryEnabled: true,
-      poiContributionsEnabled: true,
-      imagerySharingEnabled: false,
-    },
-    routePreferences: {
-      avoidTolls: false,
-      avoidHighways: false,
-      avoidFerries: false,
-    },
-    themeMode: 'system',
-    useMetric: false,
-    voiceGuidanceEnabled: true,
-  };
-}
-
-function persistSettings(state: {
-  permissions: PermissionPreferences;
-  routePreferences: RoutePreferences;
-  themeMode: ThemeMode;
-  useMetric: boolean;
-  voiceGuidanceEnabled: boolean;
-}) {
-  storage.set(STORAGE_KEY, JSON.stringify(state));
+  return { ...DEFAULT_SETTINGS };
 }
 
 export const useSettingsStore = create<SettingsState>()((set, get) => {
-  const initial = loadSettings();
+  const persist = () => {
+    const state = get();
+    const payload: PersistedSettings = {
+      permissions: state.permissions,
+      routePreferences: state.routePreferences,
+      themeMode: state.themeMode,
+      useMetric: state.useMetric,
+      voiceGuidanceEnabled: state.voiceGuidanceEnabled,
+      navigationAutoAdvanceLegs: state.navigationAutoAdvanceLegs,
+      navigationAutoEnd: state.navigationAutoEnd,
+    };
+    storage.set(STORAGE_KEY, JSON.stringify(payload));
+  };
+
   return {
-    ...initial,
+    ...loadSettings(),
     setPermissions: (prefs) => {
-      const updated = { ...get().permissions, ...prefs };
-      set({ permissions: updated });
-      persistSettings({
-        permissions: updated,
-        routePreferences: get().routePreferences,
-        themeMode: get().themeMode,
-        useMetric: get().useMetric,
-        voiceGuidanceEnabled: get().voiceGuidanceEnabled,
-      });
+      set({ permissions: { ...get().permissions, ...prefs } });
+      persist();
     },
     setRoutePreferences: (prefs) => {
-      const updated = { ...get().routePreferences, ...prefs };
-      set({ routePreferences: updated });
-      persistSettings({
-        permissions: get().permissions,
-        routePreferences: updated,
-        themeMode: get().themeMode,
-        useMetric: get().useMetric,
-        voiceGuidanceEnabled: get().voiceGuidanceEnabled,
-      });
+      set({ routePreferences: { ...get().routePreferences, ...prefs } });
+      persist();
     },
-    setThemeMode: (mode) => {
-      set({ themeMode: mode });
-      persistSettings({
-        permissions: get().permissions,
-        routePreferences: get().routePreferences,
-        themeMode: mode,
-        useMetric: get().useMetric,
-        voiceGuidanceEnabled: get().voiceGuidanceEnabled,
-      });
+    setThemeMode: (themeMode) => {
+      set({ themeMode });
+      persist();
     },
     setUseMetric: (useMetric) => {
       set({ useMetric });
-      persistSettings({
-        permissions: get().permissions,
-        routePreferences: get().routePreferences,
-        themeMode: get().themeMode,
-        useMetric,
-        voiceGuidanceEnabled: get().voiceGuidanceEnabled,
-      });
+      persist();
     },
     setVoiceGuidanceEnabled: (voiceGuidanceEnabled) => {
       set({ voiceGuidanceEnabled });
-      persistSettings({
-        permissions: get().permissions,
-        routePreferences: get().routePreferences,
-        themeMode: get().themeMode,
-        useMetric: get().useMetric,
-        voiceGuidanceEnabled,
-      });
+      persist();
+    },
+    setNavigationAutoAdvanceLegs: (navigationAutoAdvanceLegs) => {
+      set({ navigationAutoAdvanceLegs });
+      persist();
+    },
+    setNavigationAutoEnd: (navigationAutoEnd) => {
+      set({ navigationAutoEnd });
+      persist();
     },
   };
 });

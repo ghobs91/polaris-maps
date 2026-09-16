@@ -1,9 +1,9 @@
 ## 1. Shared Foundations
 
-- [ ] 1.1 Add navigation settings to `src/stores/settingsStore.ts`: `navigationAutoAdvanceLegs` (default on), `navigationAutoEnd` (default on), and voice prompt ladder/alert config, with persistence alongside existing settings
-- [ ] 1.2 Add a `NavigationMode` derivation from `CostingModel` and a mode-capability map (automotive-only widgets) in `src/models/route.ts` or a new `src/utils/navigationMode.ts`
-- [ ] 1.3 Add `muted` (in-navigation) state and arrival state fields to `src/stores/navigationStore.ts` without removing existing fields
-- [ ] 1.4 Add unit tests for settings defaults, mode derivation, and the capability map
+- [x] 1.1 Add navigation settings to `src/stores/settingsStore.ts`: `navigationAutoAdvanceLegs` (default on), `navigationAutoEnd` (default on), and voice prompt ladder/alert config, with persistence alongside existing settings
+- [x] 1.2 Add a `NavigationMode` derivation from `CostingModel` and a mode-capability map (automotive-only widgets) in `src/models/route.ts` or a new `src/utils/navigationMode.ts`
+- [x] 1.3 Add `muted` (in-navigation) state and arrival state fields to `src/stores/navigationStore.ts` without removing existing fields
+- [x] 1.4 Add unit tests for settings defaults, mode derivation, and the capability map
 
 ## 2. Route Alternatives
 
@@ -29,12 +29,12 @@
 
 ## 4. Voice Guidance
 
-- [ ] 4.1 Implement the advance-distance announcement ladder with per-maneuver per-band dedupe in `src/services/tts/ttsService.ts`
-- [ ] 4.2 Reset ladder state on reroute and new maneuver; retain short-range step-change announcement
-- [ ] 4.3 Add a "starting navigation" prompt on navigation start
-- [ ] 4.4 Add spoken off-route and reroute-complete notifications on state edges
+- [x] 4.1 Implement the advance-distance announcement ladder with per-maneuver per-band dedupe in `src/services/tts/ttsService.ts`
+- [x] 4.2 Reset ladder state on reroute and new maneuver; retain short-range step-change announcement
+- [x] 4.3 Add a "starting navigation" prompt on navigation start
+- [x] 4.4 Add spoken off-route and reroute-complete notifications on state edges
 - [ ] 4.5 Add in-navigation mute/unmute and repeat controls to the HUD, gating `ttsService` without mutating the global voice setting
-- [ ] 4.6 Harden TTS interruption handling (single in-flight utterance, dedupe reset on done/error)
+- [x] 4.6 Harden TTS interruption handling (single in-flight utterance, dedupe reset on done/error)
 - [ ] 4.7 Enable a background audio session coordinated with the existing background location session, released on navigation end
 - [ ] 4.8 Add unit tests for ladder band selection and dedupe, and integration tests for mute, repeat, and off-route/reroute prompts
 
