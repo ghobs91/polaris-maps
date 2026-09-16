@@ -79,6 +79,33 @@ function valhallaTypeCode(code: number): ManeuverType {
   }
 }
 
+/** Extract the interchange sign text from one Valhalla maneuver `sign` list. */
+function signListText(sign: Record<string, unknown>, key: string): string | undefined {
+  const elements = sign[key];
+  if (!Array.isArray(elements)) return undefined;
+  const text = elements
+    .map((el) => {
+      const raw = (el as Record<string, unknown>)?.['text'];
+      return typeof raw === 'string' ? raw.trim() : '';
+    })
+    .filter(Boolean)
+    .join(' / ');
+  return text || undefined;
+}
+
+/** Parse the interchange exit info from a Valhalla maneuver's `sign` object. */
+function parseExitSign(
+  sign: Record<string, unknown> | undefined,
+): Pick<ValhallaManeuver, 'exitNumber' | 'exitBranch' | 'exitName' | 'exitToward'> {
+  if (!sign) return {};
+  return {
+    exitNumber: signListText(sign, 'exit_number_elements'),
+    exitBranch: signListText(sign, 'exit_branch_elements'),
+    exitName: signListText(sign, 'exit_name_elements'),
+    exitToward: signListText(sign, 'exit_toward_elements'),
+  };
+}
+
 /** Valhalla turn-lane direction bitmask values (see Valhalla API docs). */
 const LANE_BIT_THROUGH = 2;
 const LANE_BIT_SHARP_LEFT = 4;
@@ -473,6 +500,7 @@ async function computeRouteOnline(
             streetNames: m['street_names'] as string[] | undefined,
             verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
             verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
+            ...parseExitSign(m['sign'] as Record<string, unknown> | undefined),
             speedLimitMph:
               typeof m['speed_limit'] === 'number'
                 ? Math.round((m['speed_limit'] as number) * 0.621371) // km/h → mph

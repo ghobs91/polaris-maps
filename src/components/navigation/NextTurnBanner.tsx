@@ -68,11 +68,16 @@ export function NextTurnBanner({
   // Use live countdown distance when available; fall back to the static route value.
   const displayDistance = distanceToTurnMeters ?? maneuver.distanceMeters;
 
+  // Interchange exit info (number + name/branch) so the exact exit is unambiguous.
+  const exitName = maneuver.exitName ?? maneuver.exitBranch;
+  const hasExitSign = Boolean(maneuver.exitNumber || exitName || maneuver.exitToward);
+  const exitSpoken = maneuver.exitNumber ? `Exit ${maneuver.exitNumber}` : exitName;
+
   return (
     <View
       style={styles.container}
       accessibilityRole="summary"
-      accessibilityLabel={`Next turn: ${instruction}, in ${formatDistance(displayDistance)}`}
+      accessibilityLabel={`Next turn: ${exitSpoken ? `${exitSpoken}, ` : ''}${instruction}, in ${formatDistance(displayDistance)}`}
     >
       {/* Main turn row */}
       <View style={styles.mainRow}>
@@ -104,6 +109,32 @@ export function NextTurnBanner({
           </Text>
         </View>
       </View>
+
+      {/* Interchange exit — exact number + name, made prominent */}
+      {hasExitSign && (
+        <View style={styles.exitRow}>
+          {maneuver.exitNumber ? (
+            <View style={styles.exitBadge}>
+              <Text style={styles.exitBadgeLabel}>EXIT</Text>
+              <Text style={styles.exitBadgeNumber} numberOfLines={1}>
+                {maneuver.exitNumber}
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.exitText}>
+            {exitName ? (
+              <Text style={styles.exitName} numberOfLines={1}>
+                {exitName}
+              </Text>
+            ) : null}
+            {maneuver.exitToward ? (
+              <Text style={styles.exitToward} numberOfLines={1}>
+                toward {maneuver.exitToward}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      )}
 
       {/* "Then" secondary hint */}
       {nextManeuver && nextIcon && (
@@ -170,6 +201,49 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.75)',
     marginTop: 2,
     lineHeight: 20,
+  },
+  exitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  exitBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderCurve: 'continuous',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  exitBadgeLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    color: NAV_BG,
+  },
+  exitBadgeNumber: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: NAV_BG,
+  },
+  exitText: {
+    flex: 1,
+  },
+  exitName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  exitToward: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 1,
   },
   thenRow: {
     flexDirection: 'row',

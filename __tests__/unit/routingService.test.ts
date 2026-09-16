@@ -477,4 +477,76 @@ describe('routingService fallback', () => {
       expect(routes[0].legs[1].maneuvers[0].endShapeIndex).toBe(2);
     });
   });
+
+  // ── interchange exit signs ────────────────────────────────────────────
+
+  describe('interchange exit signs', () => {
+    function mockExitResponse() {
+      mockFetchImpl.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          trip: {
+            legs: [
+              {
+                maneuvers: [
+                  {
+                    type: 20,
+                    instruction: 'Take the exit on the right toward New York',
+                    length: 0.5,
+                    time: 30,
+                    begin_shape_index: 0,
+                    end_shape_index: 1,
+                    sign: {
+                      exit_number_elements: [{ text: '91B' }],
+                      exit_branch_elements: [{ text: 'I 95 North' }],
+                      exit_toward_elements: [{ text: 'New York' }],
+                      exit_name_elements: [{ text: 'Gettysburg Pike' }],
+                    },
+                  },
+                ],
+                summary: { length: 0.5, time: 30 },
+                shape: 'abc',
+              },
+            ],
+            summary: {
+              length: 0.5,
+              time: 30,
+              has_toll: false,
+              has_ferry: false,
+              min_lon: -74.0,
+              min_lat: 40.7,
+              max_lon: -73.9,
+              max_lat: 40.8,
+            },
+          },
+        }),
+      } as unknown as Response);
+    }
+
+    it('parses the exit number, name, branch, and toward from the sign', async () => {
+      const svc = loadRoutingService();
+      mockExitResponse();
+
+      const routes = await svc.computeRoute(waypoints, 'auto');
+      const maneuver = routes[0].legs[0].maneuvers[0];
+
+      expect(maneuver.exitNumber).toBe('91B');
+      expect(maneuver.exitName).toBe('Gettysburg Pike');
+      expect(maneuver.exitBranch).toBe('I 95 North');
+      expect(maneuver.exitToward).toBe('New York');
+    });
+
+    it('leaves exit fields undefined when a maneuver has no sign', async () => {
+      const svc = loadRoutingService();
+      mockOnlineSuccess();
+
+      const routes = await svc.computeRoute(waypoints, 'auto');
+      const maneuver = routes[0].legs[0].maneuvers[0];
+
+      expect(maneuver.exitNumber).toBeUndefined();
+      expect(maneuver.exitBranch).toBeUndefined();
+      expect(maneuver.exitName).toBeUndefined();
+      expect(maneuver.exitToward).toBeUndefined();
+    });
+  });
 });

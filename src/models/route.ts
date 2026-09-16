@@ -71,6 +71,14 @@ export interface ValhallaManeuver {
   streetNames?: string[];
   verbalPreTransition: string;
   verbalPostTransition?: string;
+  /** Highway exit number from the maneuver's interchange sign, e.g. "91B". */
+  exitNumber?: string;
+  /** Exit branch sign text (the road/route after the exit), e.g. "I 95 North". */
+  exitBranch?: string;
+  /** Interchange name from the sign, e.g. "Gettysburg Pike" (rare in the US). */
+  exitName?: string;
+  /** Control city the exit leads toward, e.g. "New York". */
+  exitToward?: string;
   /** Speed limit in mph for the road at the start of this maneuver, if available. */
   speedLimitMph?: number;
   /** Lane guidance for this maneuver, if available from routing engine. */
