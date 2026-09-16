@@ -8,6 +8,7 @@ import {
   fetchReviewsFromAtproto,
   deleteReviewFromAtproto,
 } from '../atproto/atprotoReviewService';
+import { assertPoiContributionEnabled } from './contributionGate';
 import type { Review, PlaceReviewContext } from '../../models/review';
 
 export async function getReviewsForPlace(placeUuid: string, limit: number = 50): Promise<Review[]> {
@@ -62,6 +63,7 @@ export async function createOrUpdateReview(
   text?: string,
   placeContext?: PlaceReviewContext,
 ): Promise<Review> {
+  assertPoiContributionEnabled();
   if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
     throw new Error('Rating must be an integer between 1 and 5');
   }
@@ -197,6 +199,7 @@ export async function createOrUpdateReview(
 }
 
 export async function deleteReview(placeUuid: string): Promise<void> {
+  assertPoiContributionEnabled();
   const session = await getBlueskySession();
   const gun = getGun();
   const db = await getDatabase();

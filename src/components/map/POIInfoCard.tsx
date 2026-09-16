@@ -12,6 +12,7 @@ import {
   Modal as RNModal,
   Image,
   Share,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,6 +24,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
+import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
 import { TripadvisorRatingCard } from './TripadvisorRatingCard';
 import { spacing, typography, borderRadius } from '../../constants/theme';
@@ -578,6 +580,47 @@ export function POIInfoCard() {
     setSelectedPoi(null);
   }, [poi, setPendingDirectionsTarget, setSelectedPoi]);
 
+  const [detailsTarget, setDetailsTarget] = useState<{
+    placeId: string | null;
+    reviewCount: number;
+  } | null>(null);
+
+  const handleOpenDetails = useCallback(async () => {
+    if (!poi) return;
+    const placeId = detailsTarget?.placeId ?? (await findPlaceIdNear(poi.lat, poi.lng, poi.name));
+    if (placeId) {
+      setSelectedPoi(null);
+      router.push(`/poi/${placeId}`);
+      return;
+    }
+    Alert.alert(
+      'Details unavailable',
+      "This place isn't in your local index yet. Download your region to see reviews, edits, and street imagery.",
+    );
+  }, [poi, detailsTarget, router, setSelectedPoi]);
+
+  // Resolve the local place (if any) once per selected POI so the Reviews
+  // affordance can show the on-device review count.
+  useEffect(() => {
+    if (!poi) {
+      setDetailsTarget(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const placeId = await findPlaceIdNear(poi.lat, poi.lng, poi.name).catch(() => null);
+      let reviewCount = 0;
+      if (placeId) {
+        const place = await getPlaceById(placeId).catch(() => null);
+        reviewCount = place?.reviewCount ?? 0;
+      }
+      if (!cancelled) setDetailsTarget({ placeId, reviewCount });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [poi]);
+
   const handleShare = useCallback(async () => {
     if (!poi) return;
     const lines = [poi.name];
@@ -884,6 +927,20 @@ export function POIInfoCard() {
                 icon="bookmark-outline"
                 label="Save"
                 onPress={() => setShowSaveSheet(true)}
+                color={pillSecondaryContent}
+                fillColor={pillSecondaryFill}
+                borderColor={pillSecondaryBorder}
+              />
+              <ActionPill
+                icon="star-outline"
+                label={
+                  detailsTarget && detailsTarget.reviewCount > 0
+                    ? `Reviews (${detailsTarget.reviewCount})`
+                    : 'Reviews'
+                }
+                onPress={() => {
+                  void handleOpenDetails();
+                }}
                 color={pillSecondaryContent}
                 fillColor={pillSecondaryFill}
                 borderColor={pillSecondaryBorder}

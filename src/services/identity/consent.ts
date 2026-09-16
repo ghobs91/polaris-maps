@@ -34,6 +34,17 @@ export function getDefaultConsentChoices(): ConsentChoices {
   return { ...DEFAULT_CHOICES };
 }
 
+/** Current choices from the settings store, for pre-filling re-consent. */
+export function getConsentChoices(): ConsentChoices {
+  const permissions = useSettingsStore.getState().permissions;
+  return {
+    locationEnabled: permissions.locationEnabled,
+    trafficTelemetryEnabled: permissions.trafficTelemetryEnabled,
+    poiContributionsEnabled: permissions.poiContributionsEnabled,
+    imagerySharingEnabled: permissions.imagerySharingEnabled,
+  };
+}
+
 export function resetConsent(): void {
   storage.delete(CONSENT_COMPLETE_KEY);
   storage.delete(CONSENT_VERSION_KEY);

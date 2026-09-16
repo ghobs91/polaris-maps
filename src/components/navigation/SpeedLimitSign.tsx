@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { formatSpeed, mphToKmh } from '../../utils/units';
 
 interface SpeedLimitSignProps {
   /** Speed limit in mph */
@@ -15,12 +16,12 @@ interface SpeedLimitSignProps {
 export function SpeedLimitSign({ speedLimitMph }: SpeedLimitSignProps) {
   const useMetric = useSettingsStore((s) => s.useMetric);
 
-  const displaySpeed = useMetric ? Math.round(speedLimitMph * 1.60934) : speedLimitMph;
+  const displaySpeed = Math.round(useMetric ? mphToKmh(speedLimitMph) : speedLimitMph);
 
   return (
     <View
       style={styles.container}
-      accessibilityLabel={`Speed limit ${displaySpeed} ${useMetric ? 'kilometers' : 'miles'} per hour`}
+      accessibilityLabel={`Speed limit ${formatSpeed(speedLimitMph, useMetric)}`}
       accessibilityRole="text"
     >
       <Text style={styles.label}>SPEED</Text>

@@ -1,13 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  SafeAreaView,
-  Alert,
-  useColorScheme,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert } from 'react-native';
+import { useTheme } from '../../contexts/ThemeContext';
 import { colors, darkColors, spacing, typography, borderRadius } from '../../constants/theme';
 import { DownloadProgressBar } from './DownloadProgressBar';
 import { LoadingSpinner } from '../common';
@@ -37,7 +30,7 @@ interface RegionGateProps {
 }
 
 export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGateProps) {
-  const isDark = useColorScheme() === 'dark';
+  const { isDark } = useTheme();
   const c = isDark ? darkColors : colors;
 
   const [downloading, setDownloading] = useState<string | null>(null);

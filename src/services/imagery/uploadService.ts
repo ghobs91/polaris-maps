@@ -3,6 +3,7 @@ import { getGun } from '../gun/init';
 import { getDatabase } from '../database/init';
 import { blurImage, computeImageHash } from './blurService';
 import { signImageryMetadata, deleteCapture } from './captureService';
+import { useSettingsStore } from '../../stores/settingsStore';
 import type { StreetImagery } from '../../models/imagery';
 
 // Note: Actual Hypercore feed write requires the native bridge from src/native/hypercore.
@@ -12,6 +13,10 @@ export async function uploadImage(
   localUri: string,
   metadata: Parameters<typeof signImageryMetadata>[0],
 ): Promise<StreetImagery> {
+  if (!useSettingsStore.getState().permissions.imagerySharingEnabled) {
+    throw new Error('Imagery sharing is disabled. Enable it in Settings to contribute photos.');
+  }
+
   // 1. Blur faces/plates
   const blurResult = await blurImage(localUri);
 

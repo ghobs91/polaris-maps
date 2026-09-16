@@ -12,6 +12,7 @@ import { useTransitStore } from '../../stores/transitStore';
 import { useMapStore } from '../../stores/mapStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, borderRadius } from '../../constants/theme';
+import { formatDistance } from '../../utils/units';
 import type { OtpItinerary, OtpLeg, TransitMode } from '../../models/transit';
 import TransitTimeSelector from './TransitTimeSelector';
 
@@ -63,11 +64,6 @@ function formatTime(isoOrTimestamp: string | number): string {
   const d =
     typeof isoOrTimestamp === 'number' ? new Date(isoOrTimestamp) : new Date(isoOrTimestamp);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)}m`;
-  return `${(meters / 1000).toFixed(1)}km`;
 }
 
 // ── Leg summary pill ────────────────────────────────────────────────

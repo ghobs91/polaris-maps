@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, Linking, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
@@ -14,6 +15,11 @@ const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
   { label: 'Dark', value: 'dark' },
 ];
 
+const UNIT_OPTIONS: { label: string; metric: boolean }[] = [
+  { label: 'Miles & feet', metric: false },
+  { label: 'Kilometres', metric: true },
+];
+
 interface SettingsContentProps {
   showHeading?: boolean;
 }
@@ -21,13 +27,16 @@ interface SettingsContentProps {
 export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const permissions = useSettingsStore((s) => s.permissions);
   const themeMode = useSettingsStore((s) => s.themeMode);
+  const useMetric = useSettingsStore((s) => s.useMetric);
   const voiceGuidanceEnabled = useSettingsStore((s) => s.voiceGuidanceEnabled);
   const routePreferences = useSettingsStore((s) => s.routePreferences);
   const setPermissions = useSettingsStore((s) => s.setPermissions);
   const setRoutePreferences = useSettingsStore((s) => s.setRoutePreferences);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  const setUseMetric = useSettingsStore((s) => s.setUseMetric);
   const setVoiceGuidanceEnabled = useSettingsStore((s) => s.setVoiceGuidanceEnabled);
   const { colors, isDark } = useTheme();
+  const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
   const bskySession = useAtprotoAuthStore((s) => s.session);
   const bskyError = useAtprotoAuthStore((s) => s.error);
@@ -59,6 +68,31 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                   </Text>
                 </View>
                 {idx < THEME_OPTIONS.length - 1 ? <View style={styles.themeSeparator} /> : null}
+              </React.Fragment>
+            );
+          })}
+        </View>
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="Units"
+        footer="Distance and speed displays use this unit system throughout the app."
+      >
+        <View style={styles.themeRow}>
+          {UNIT_OPTIONS.map((opt, idx) => {
+            const active = useMetric === opt.metric;
+            return (
+              <React.Fragment key={opt.label}>
+                <View style={styles.themeCell}>
+                  <Text
+                    style={[styles.themeCellText, active ? styles.themeCellTextActive : null]}
+                    onPress={() => setUseMetric(opt.metric)}
+                    suppressHighlighting={false}
+                  >
+                    {opt.label}
+                  </Text>
+                </View>
+                {idx < UNIT_OPTIONS.length - 1 ? <View style={styles.themeSeparator} /> : null}
               </React.Fragment>
             );
           })}
@@ -237,6 +271,13 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             />
           }
         />
+        <SettingsRow
+          title="Review Privacy Choices"
+          rightAdornment={
+            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+          }
+          onPress={() => router.push('/onboarding?step=1')}
+        />
       </SettingsGroup>
 
       <SettingsGroup
@@ -247,6 +288,21 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
       </SettingsGroup>
 
       <SettingsGroup header="About">
+        <SettingsRow
+          title="Map Data & Attributions"
+          rightAdornment={
+            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+          }
+          onPress={() =>
+            Alert.alert(
+              'Map Data & Attributions',
+              'Map data © OpenStreetMap contributors (ODbL).\n\n' +
+                'Satellite imagery: USGS The National Map (NAIP, public domain) and Sentinel-2 cloudless by EOX (CC BY-SA).\n\n' +
+                'Places: Overture Maps Foundation (CDLA-Permissive-2.0).\n\n' +
+                'Transit data: respective agencies via GTFS/GTFS-RT.',
+            )
+          }
+        />
         <SettingsRow
           title="Privacy Policy"
           rightAdornment={

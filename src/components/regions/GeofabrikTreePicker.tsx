@@ -6,13 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   Switch,
-  useColorScheme,
   TextInput,
   UIManager,
   findNodeHandle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, darkColors, spacing, typography, borderRadius } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
 import type { GeoNode } from '../../constants/geofabrikCatalog';
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ export function GeofabrikTreePicker({
   seedPeerCounts,
   onToggleSeed,
 }: GeofabrikTreePickerProps) {
-  const isDark = useColorScheme() === 'dark';
+  const { isDark } = useTheme();
   const c = isDark ? darkColors : colors;
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -223,7 +223,8 @@ function SearchResultRow({
   peerCount,
   onToggleSeed,
 }: SearchResultRowProps) {
-  const c = useColorScheme() === 'dark' ? darkColors : colors;
+  const { isDark } = useTheme();
+  const c = isDark ? darkColors : colors;
 
   return (
     <View
@@ -302,7 +303,8 @@ function ContinentRow({
   onToggleSeed,
   suggestedRef,
 }: ContinentRowProps) {
-  const c = useColorScheme() === 'dark' ? darkColors : colors;
+  const { isDark } = useTheme();
+  const c = isDark ? darkColors : colors;
 
   // Auto-expand the continent that contains the suggested path
   const containsSuggested = suggestedPath != null && suggestedPath.startsWith(node.path + '/');
@@ -403,7 +405,8 @@ function CountryRow({
   onToggleSeed,
   suggestedRef,
 }: CountryRowProps) {
-  const c = useColorScheme() === 'dark' ? darkColors : colors;
+  const { isDark } = useTheme();
+  const c = isDark ? darkColors : colors;
 
   const containsSuggested = suggestedPath != null && suggestedPath.startsWith(node.path + '/');
   const isSuggested = node.path === suggestedPath;
@@ -532,7 +535,8 @@ interface SeedToggleProps {
 }
 
 function SeedToggle({ node, isSeeding, peerCount, onToggleSeed, compact }: SeedToggleProps) {
-  const c = useColorScheme() === 'dark' ? darkColors : colors;
+  const { isDark } = useTheme();
+  const c = isDark ? darkColors : colors;
 
   return (
     <View style={styles.seedRow}>
@@ -582,7 +586,8 @@ function LeafRow({
   onToggleSeed,
   suggestedRef,
 }: LeafRowProps) {
-  const c = useColorScheme() === 'dark' ? darkColors : colors;
+  const { isDark } = useTheme();
+  const c = isDark ? darkColors : colors;
 
   const indentBg = indent === 2 ? c.background : c.surface;
   const indentStyle = indent === 2 ? styles.indent2 : indent === 1 ? styles.indent1 : undefined;

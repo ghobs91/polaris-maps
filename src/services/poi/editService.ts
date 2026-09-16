@@ -3,6 +3,7 @@ import { sign, verify, createSigningPayload } from '../identity/signing';
 import { getOrCreateKeypair } from '../identity/keypair';
 import { recordContribution, recordConfirmation, getReputation } from './reputationService';
 import { updatePlace } from './poiService';
+import { assertPoiContributionEnabled } from './contributionGate';
 import type { DataEdit, DataEditEntityType, DataEditStatus } from '../../models/dataEdit';
 
 export async function submitEdit(
@@ -12,6 +13,7 @@ export async function submitEdit(
   oldValue?: string,
   newValue?: string,
 ): Promise<DataEdit> {
+  assertPoiContributionEnabled();
   const keypair = await getOrCreateKeypair();
   const now = Math.floor(Date.now() / 1000);
   const id = `${entityType}:${entityId}:${now}:${keypair.publicKey}`;
@@ -62,6 +64,7 @@ export async function submitEdit(
 }
 
 export async function corroborateEdit(editId: string, entityId: string): Promise<DataEdit> {
+  assertPoiContributionEnabled();
   const edit = await getEditFromGun(editId, entityId);
   if (!edit) throw new Error(`Edit not found: ${editId}`);
   if (edit.status !== 'pending') throw new Error(`Edit is not pending: ${edit.status}`);
@@ -90,6 +93,7 @@ export async function corroborateEdit(editId: string, entityId: string): Promise
 }
 
 export async function disputeEdit(editId: string, entityId: string): Promise<DataEdit> {
+  assertPoiContributionEnabled();
   const edit = await getEditFromGun(editId, entityId);
   if (!edit) throw new Error(`Edit not found: ${editId}`);
   if (edit.status !== 'pending') throw new Error(`Edit is not pending: ${edit.status}`);

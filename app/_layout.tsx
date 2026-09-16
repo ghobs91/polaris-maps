@@ -1,9 +1,11 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { ConnectivityBanner } from '@/components/common';
+import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { hasCompletedConsent } from '@/services/identity/consent';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
 import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
@@ -13,6 +15,15 @@ import {
   suspendTrafficP2P,
   resumeTrafficP2P,
 } from '@/services/traffic/trafficFlowService';
+import {
+  initProbeCollection,
+  disposeProbeCollection,
+} from '@/services/traffic/probeCollectionCoordinator';
+import { initRerouteMonitor, disposeRerouteMonitor } from '@/services/traffic/rerouteCoordinator';
+import {
+  initIncidentExchange,
+  disposeIncidentExchange,
+} from '@/services/traffic/incidentExchangeService';
 import { startMonitoring as startConnectivityMonitoring } from '@/services/regions/connectivityService';
 import { scheduleGeonamesDownload } from '@/services/geocoding/geonamesDownloadScheduler';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
@@ -63,6 +74,16 @@ function RootLayoutInner() {
       if (!cancelled) void initTrafficP2P().catch(() => {});
     });
 
+    // Consent-gated probe contribution. The coordinator owns its own
+    // foreground/background lifecycle and reacts to consent changes.
+    initProbeCollection();
+
+    // Congestion rerouting follows the navigation lifecycle.
+    initRerouteMonitor();
+
+    // Receive, verify, and persist crowd-reported incidents from both transports.
+    initIncidentExchange();
+
     // Suspend/resume the mesh with the app lifecycle to save battery.
     const onAppStateChange = (state: AppStateStatus) => {
       if (state === 'active') resumeTrafficP2P();
@@ -74,6 +95,9 @@ function RootLayoutInner() {
       cancelled = true;
       task.cancel();
       sub.remove();
+      disposeProbeCollection();
+      disposeRerouteMonitor();
+      disposeIncidentExchange();
       disposeTrafficP2P();
     };
   }, []);
@@ -116,7 +140,22 @@ function RootLayoutInner() {
 export default function RootLayout() {
   return (
     <ThemeProvider>
-      <RootLayoutInner />
+      <ConsentGate />
     </ThemeProvider>
   );
+}
+
+/**
+ * Blocks the tab stack (and every map/network effect it owns) until the user
+ * has completed the consent flow, so no collector or P2P mesh starts before
+ * consent exists. Re-consent after a version change re-enters this gate.
+ */
+function ConsentGate() {
+  const [consentComplete, setConsentComplete] = useState(() => hasCompletedConsent());
+
+  if (!consentComplete) {
+    return <OnboardingFlow onComplete={() => setConsentComplete(true)} />;
+  }
+
+  return <RootLayoutInner />;
 }

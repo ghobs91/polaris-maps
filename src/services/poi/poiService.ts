@@ -5,6 +5,7 @@ import { sign, createSigningPayload } from '../identity/signing';
 import { getOrCreateKeypair } from '../identity/keypair';
 import type { Place, PlaceCategory } from '../../models/poi';
 import { PLACE_CATEGORIES } from '../../models/poi';
+import { haversineMeters } from '../../utils/routeSnap';
 
 export async function getPlaceById(uuid: string): Promise<Place | null> {
   const db = await getDatabase();
@@ -12,15 +13,37 @@ export async function getPlaceById(uuid: string): Promise<Place | null> {
   return row ? rowToPlace(row) : null;
 }
 
-export async function searchPlaces(query: string, limit: number = 20): Promise<Place[]> {
-  if (!query.trim()) return [];
+/**
+ * Resolve a map-selected POI to the `places.uuid` the details screen loads.
+ * Matches a local place by name within `radiusMeters` of the coordinates.
+ * Returns null when nothing matches (e.g. an un-cached OSM or dropped pin),
+ * letting the caller show an actionable message instead of a dead link.
+ */
+export async function findPlaceIdNear(
+  lat: number,
+  lng: number,
+  name: string,
+  radiusMeters = 100,
+): Promise<string | null> {
   const db = await getDatabase();
-  // Using the places table with name/category indexes
-  const rows = await db.getAllAsync<PlaceRow>(
-    `SELECT * FROM places WHERE name LIKE ? OR category LIKE ? ORDER BY avg_rating DESC LIMIT ?`,
-    [`%${query}%`, `%${query}%`, limit],
+  const latDelta = radiusMeters / 111_320;
+  const lngDelta = radiusMeters / (111_320 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+
+  const rows = await db.getAllAsync<{ uuid: string; lat: number; lng: number; name: string }>(
+    `SELECT uuid, lat, lng, name FROM places
+     WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`,
+    [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta],
   );
-  return rows.map(rowToPlace);
+
+  const target = name.trim().toLowerCase();
+  let best: { uuid: string; distance: number } | null = null;
+  for (const row of rows) {
+    if (row.name.trim().toLowerCase() !== target) continue;
+    const distance = haversineMeters([lng, lat], [row.lng, row.lat]);
+    if (distance > radiusMeters) continue;
+    if (!best || distance < best.distance) best = { uuid: row.uuid, distance };
+  }
+  return best?.uuid ?? null;
 }
 
 /**

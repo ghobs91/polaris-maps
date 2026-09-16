@@ -3,17 +3,33 @@ import { storage } from '../services/storage/mmkv';
 
 const LAYER_KEY = 'mapLayerToggles';
 
-function loadLayerToggles(): { trafficLayerVisible: boolean } {
+type MapStyle = 'default' | 'satellite' | 'terrain';
+
+function normalizeMapStyle(value: unknown): MapStyle {
+  return value === 'satellite' || value === 'terrain' || value === 'default' ? value : 'default';
+}
+
+export function loadPersistedMapPrefs(): { trafficLayerVisible: boolean; mapStyle: MapStyle } {
   const raw = storage.getString(LAYER_KEY);
   if (raw) {
     try {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      return {
+        trafficLayerVisible: Boolean(parsed?.trafficLayerVisible),
+        mapStyle: normalizeMapStyle(parsed?.mapStyle),
+      };
     } catch {
-      /* ignore */
+      /* ignore corrupt data */
     }
   }
-  return { trafficLayerVisible: false };
+  return { trafficLayerVisible: false, mapStyle: 'default' };
 }
+
+function persistMapPrefs(mapStyle: MapStyle, trafficLayerVisible: boolean): void {
+  storage.set(LAYER_KEY, JSON.stringify({ mapStyle, trafficLayerVisible }));
+}
+
+const persistedMapPrefs = loadPersistedMapPrefs();
 
 interface MapState {
   viewport: {
@@ -62,7 +78,7 @@ interface MapState {
   setSuppressRegionGate: (suppress: boolean) => void;
 }
 
-export const useMapStore = create<MapState>()((set) => ({
+export const useMapStore = create<MapState>()((set, get) => ({
   viewport: {
     lat: 0,
     lng: 0,
@@ -72,8 +88,8 @@ export const useMapStore = create<MapState>()((set) => ({
   },
   isLoadingTiles: false,
   selectedLocation: null,
-  mapStyle: 'default',
-  trafficLayerVisible: loadLayerToggles().trafficLayerVisible,
+  mapStyle: persistedMapPrefs.mapStyle,
+  trafficLayerVisible: persistedMapPrefs.trafficLayerVisible,
   fitBounds: null,
   fitBoundsMode: 'default',
   pendingDirectionsTarget: null,
@@ -91,10 +107,13 @@ export const useMapStore = create<MapState>()((set) => ({
     })),
   setLoading: (isLoadingTiles) => set({ isLoadingTiles }),
   setSelectedLocation: (selectedLocation) => set({ selectedLocation }),
-  setMapStyle: (mapStyle) => set({ mapStyle }),
+  setMapStyle: (mapStyle) => {
+    set({ mapStyle });
+    persistMapPrefs(mapStyle, get().trafficLayerVisible);
+  },
   setTrafficLayerVisible: (trafficLayerVisible) => {
     set({ trafficLayerVisible });
-    storage.set(LAYER_KEY, JSON.stringify({ trafficLayerVisible }));
+    persistMapPrefs(get().mapStyle, trafficLayerVisible);
   },
   setFitBounds: (fitBounds, fitBoundsMode = 'default') => set({ fitBounds, fitBoundsMode }),
   setPendingDirectionsTarget: (pendingDirectionsTarget) => set({ pendingDirectionsTarget }),

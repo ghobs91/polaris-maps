@@ -4,6 +4,7 @@ import { getOrCreateKeypair } from '../identity/keypair';
 import { NativeEventEmitter, NativeModules } from 'react-native';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { recordConfirmation } from './reputationService';
+import { assertPoiContributionEnabled } from './contributionGate';
 
 const ATTESTATION_RADIUS_METERS = 100;
 
@@ -30,6 +31,7 @@ export async function attestPOI(
   placeLat: number,
   placeLng: number,
 ): Promise<POIAttestation> {
+  assertPoiContributionEnabled();
   const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
   const distance = haversineMeters(
     location.coords.latitude,

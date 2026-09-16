@@ -21,7 +21,6 @@ Transit layer toggle ON
 useTransitStops.ts (viewport-based incremental fetch)
     ↓
 transitLineFetcher.ts → OTP / Overpass (spatial tile cache 0.05°)
-transitStopFetcher.ts → OTP / Overpass (mode-tagged stops)
     ↓
 transitStore (Zustand)
     ↓
@@ -44,7 +43,6 @@ Trip planning:
 | File                         | Description                                                                                                                                                                        |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `transitLineFetcher.ts`      | Fetches transit route line geometries from OTP endpoints (primary) or Overpass API (fallback). Spatial tile cache at 0.05° (~5km) granularity — tiles fetched once, never evicted. |
-| `transitStopFetcher.ts`      | Fetches transit stops for map rendering from OTP (if configured) or Overpass OSM. Maps railway/station tags to transit modes. TTL-based cache.                                     |
 | `transitDepartureFetcher.ts` | Provides upcoming departure times for a stop. Uses MBTA real-time predictions where available, estimated headway-based departures elsewhere.                                       |
 | `transitRoutingService.ts`   | Plans multi-modal transit trips via OTP2 GTFS GraphQL queries. Auto-selects correct endpoint from registry based on origin coordinates.                                            |
 | `otpEndpointRegistry.ts`     | Static registry mapping geographic bounding boxes to public OTP deployments — REST v1, GTFS GraphQL v2, Transmodel v3, and MBTA v3.                                                |
