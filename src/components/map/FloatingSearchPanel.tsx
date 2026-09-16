@@ -1374,7 +1374,7 @@ export function FloatingSearchPanel({
   const performDirections = useCallback(
     async (
       dest: { lat: number; lng: number; name: string },
-      costingOverride?: 'auto' | 'pedestrian',
+      costingOverride?: 'auto' | 'pedestrian' | 'bicycle',
     ) => {
       const costing = costingOverride ?? 'auto';
       setSelectedResult((prev) =>
@@ -1638,6 +1638,9 @@ export function FloatingSearchPanel({
           break;
         case 'walk':
           performDirections(dest, 'pedestrian');
+          break;
+        case 'bicycle':
+          performDirections(dest, 'bicycle');
           break;
         case 'transit':
           handleTransitDirections();

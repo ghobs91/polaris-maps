@@ -3,7 +3,7 @@ import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing, borderRadius } from '../../constants/theme';
 
-export type TransportMode = 'drive' | 'transit' | 'walk' | 'park-and-ride';
+export type TransportMode = 'drive' | 'transit' | 'walk' | 'bicycle' | 'park-and-ride';
 
 interface TransportModeSelectorProps {
   selected: TransportMode;
@@ -20,6 +20,7 @@ const MODES: Array<{
   { key: 'drive', icon: 'car', label: 'Drive' },
   { key: 'transit', icon: 'train', label: 'Transit' },
   { key: 'walk', icon: 'walk', label: 'Walk' },
+  { key: 'bicycle', icon: 'bicycle', label: 'Bike' },
   { key: 'park-and-ride', icon: 'swap-horizontal', label: 'Park & Ride' },
 ];
 

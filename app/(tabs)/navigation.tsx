@@ -25,6 +25,7 @@ import {
   distanceToTargetMeters,
   targetForLeg,
 } from '@/services/navigation/arrivalService';
+import { navigationModeCapabilities, navigationModeForCosting } from '@/utils/navigationMode';
 import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
 import { formatDuration } from '@/utils/units';
 import {
@@ -72,6 +73,8 @@ export default function NavigationScreen() {
   const currentLegIndex = useNavigationStore((s) => s.currentLegIndex);
   const advanceLeg = useNavigationStore((s) => s.advanceLeg);
   const costing = useNavigationStore((s) => s.costing);
+  // Automotive-only guidance widgets are hidden for walk/bike/transit modes.
+  const modeCapabilities = navigationModeCapabilities(navigationModeForCosting(costing));
   const destination = useNavigationStore((s) => s.destination);
   const isRerouting = useNavigationStore((s) => s.isRerouting);
   const hasDeviated = useNavigationStore((s) => s.hasDeviated);
@@ -647,10 +650,12 @@ export default function NavigationScreen() {
               maneuver={currentManeuver}
               nextManeuver={nextManeuver}
               distanceToTurnMeters={distanceToTurn ?? undefined}
-              laneGuidance={currentManeuver?.laneGuidance}
+              laneGuidance={
+                modeCapabilities.laneGuidance ? currentManeuver?.laneGuidance : undefined
+              }
             />
           </View>
-          {currentManeuver?.speedLimitMph != null && (
+          {modeCapabilities.speedLimit && currentManeuver?.speedLimitMph != null && (
             <SpeedLimitSign speedLimitMph={currentManeuver.speedLimitMph} />
           )}
         </View>
