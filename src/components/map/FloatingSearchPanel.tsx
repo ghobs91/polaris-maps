@@ -46,6 +46,7 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useParkingStore } from '../../stores/parkingStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
+import { buildRouteAlternatives } from '../../services/routing/routeAlternatives';
 import type { ValhallaRoute } from '../../models/route';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
@@ -649,6 +650,7 @@ export function FloatingSearchPanel({
   const setPendingSearchQuery = useMapStore((s) => s.setPendingSearchQuery);
   const routePreview = useNavigationStore((s) => s.routePreview);
   const setRoutePreview = useNavigationStore((s) => s.setRoutePreview);
+  const routePreviewAlternates = useNavigationStore((s) => s.routePreviewAlternates);
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
   const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
@@ -1448,6 +1450,7 @@ export function FloatingSearchPanel({
             avoidTolls: routePrefs.avoidTolls,
             avoidHighways: routePrefs.avoidHighways,
             avoidFerries: routePrefs.avoidFerries,
+            alternates: 2,
           });
         } catch (routeErr: unknown) {
           // If online routing failed and offline tiles exist but weren't initialized,
@@ -1699,6 +1702,7 @@ export function FloatingSearchPanel({
           avoidTolls: routePrefs.avoidTolls,
           avoidHighways: routePrefs.avoidHighways,
           avoidFerries: routePrefs.avoidFerries,
+          alternates: 2,
         });
         if (!routes.length) {
           setRouteError('No route found');
@@ -1880,6 +1884,26 @@ export function FloatingSearchPanel({
     dismissLocation();
     router.push('/(tabs)/navigation');
   }, [routePreview, startNavigation, dismissLocation, router]);
+
+  // Promote a road alternative to the primary preview route.
+  const handleSelectAlternate = useCallback(
+    (alt: ValhallaRoute) => {
+      const nav = useNavigationStore.getState();
+      const primary = nav.routePreview;
+      if (!primary || !nav.routePreviewDestination) return;
+      const others = [primary, ...nav.routePreviewAlternates].filter((r) => r !== alt);
+      setRoutePreview(
+        alt,
+        others,
+        nav.routePreviewDestination,
+        nav.routePreviewCosting,
+        nav.routePreviewWaypoints,
+      );
+      if (alt.boundingBox) setFitBounds(alt.boundingBox);
+      fetchRouteTrafficImmediate(decodePolyline(alt.geometry));
+    },
+    [setRoutePreview, setFitBounds],
+  );
 
   // ── Favorites shortcuts ──────────────────────
   const homeEntry = favorites.find((f) => f.kind === 'home');
@@ -2254,6 +2278,65 @@ export function FloatingSearchPanel({
               isDark={isDark}
             />
           </View>
+
+          {/* Route alternatives — pick a different path before starting */}
+          {routePreview && routePreviewAlternates.length > 0 && (
+            <View style={{ paddingHorizontal: spacing.md, marginTop: spacing.sm, gap: 6 }}>
+              {buildRouteAlternatives(routePreview, routePreviewAlternates).map((option, idx) => {
+                const isPrimary = option.route === routePreview;
+                const accent = isDark ? '#409CFF' : '#007AFF';
+                return (
+                  <TouchableOpacity
+                    key={`${idx}-${option.durationSeconds}`}
+                    activeOpacity={0.7}
+                    onPress={() => handleSelectAlternate(option.route)}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      isPrimary
+                        ? 'Selected route'
+                        : `Alternative route, ${formatDuration(option.durationSeconds)}, ${
+                            option.delaySeconds > 0
+                              ? `${formatDuration(option.delaySeconds)} slower`
+                              : 'similar time'
+                          }`
+                    }
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingVertical: 8,
+                      paddingHorizontal: 10,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: isPrimary ? accent : subColor + '33',
+                      backgroundColor: isPrimary
+                        ? isDark
+                          ? 'rgba(64,156,255,0.15)'
+                          : 'rgba(0,122,255,0.10)'
+                        : 'transparent',
+                    }}
+                  >
+                    <Ionicons
+                      name={isPrimary ? 'checkmark-circle' : 'git-branch-outline'}
+                      size={16}
+                      color={isPrimary ? accent : subColor}
+                    />
+                    <Text style={[st.routeSummaryText, { color: textColor, flex: 1 }]}>
+                      {formatDuration(option.durationSeconds)} ·{' '}
+                      {formatDistance(option.distanceMeters)}
+                    </Text>
+                    <Text style={[st.routeSummaryText, { color: isPrimary ? accent : subColor }]}>
+                      {isPrimary
+                        ? 'Fastest'
+                        : option.delaySeconds > 0
+                          ? `+${formatDuration(option.delaySeconds)}`
+                          : 'Similar'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {/* Park-and-ride summary */}
           {parkAndRideResult && transportMode === 'park-and-ride' && (
