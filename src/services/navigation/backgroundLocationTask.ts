@@ -38,9 +38,15 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   try {
     if (error) return;
 
-    // Zombie-session guard: if the OS relaunches the app headlessly but
-    // navigation is not active, exit without processing.
-    if (!useNavigationStore.getState().isNavigating) return;
+    // Zombie-session guard: the OS relaunched us (headless) for location
+    // delivery but there is no navigation to serve. Ending the OS session here
+    // is what actually breaks the relaunch loop — the startup reconcile never
+    // runs on a headless launch because the RN root is not mounted. Left
+    // running, iOS relaunches the app for every fix until the user opens it.
+    if (!useNavigationStore.getState().isNavigating) {
+      await stopBackgroundNavSession();
+      return;
+    }
 
     const { locations } = data as { locations?: LocationObject[] };
     if (!locations?.length) return;

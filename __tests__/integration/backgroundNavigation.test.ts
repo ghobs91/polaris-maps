@@ -417,8 +417,9 @@ describe('background navigation task handler', () => {
     useNavigationStore.getState().stopNavigation();
   });
 
-  it('exits early when navigation is not active', async () => {
-    // Not navigating → even valid location data must be ignored.
+  it('stops a zombie session when navigation is not active', async () => {
+    // Not navigating → even valid location data must be ignored, and the OS
+    // session must be ended so iOS stops relaunching the app for fixes.
     await getHandler()({
       data: {
         locations: [
@@ -432,6 +433,28 @@ describe('background navigation task handler', () => {
 
     // No crash and no tracking state created.
     expect(isTracking()).toBe(false);
+    // Zombie self-heal: the running session is stopped.
+    expect(mockStopLocationUpdates).toHaveBeenCalledWith(BACKGROUND_LOCATION_TASK);
+    expect(useNavigationTrackingStore.getState().backgroundSessionActive).toBe(false);
+  });
+
+  it('does not stop the session while navigating', async () => {
+    const route = makeTrackedRoute();
+    useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
+    startTracking(route);
+
+    await getHandler()({
+      data: {
+        locations: [
+          {
+            coords: { latitude: 40.705, longitude: -74.0, speed: 10, heading: 0 },
+            timestamp: Date.now(),
+          },
+        ],
+      },
+    });
+
+    expect(mockStopLocationUpdates).not.toHaveBeenCalled();
   });
 
   it('forwards fixes to the pipeline while navigating', async () => {
