@@ -65,6 +65,8 @@ interface NavigationState {
   updateEta: (etaSeconds: number, remainingMeters: number) => void;
   updateTrafficEta: (trafficEta: number, freeFlowEta: number, matchRatio: number) => void;
   replaceRoute: (route: ValhallaRoute) => void;
+  /** Switch to a precomputed alternative route mid-navigation. */
+  switchToAlternate: (route: ValhallaRoute) => void;
   addWaypointAndReplaceRoute: (route: ValhallaRoute, waypoints: Waypoint[]) => void;
 }
 
@@ -232,10 +234,30 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
     set({
       activeRoute: route,
+      // A recompute/reroute invalidates the previous alternatives.
+      alternateRoutes: [],
       currentStepIndex: 0,
       currentManeuver: firstManeuver,
       etaSeconds: route.summary.durationSeconds,
       remainingDistanceMeters: route.summary.distanceMeters,
+      isRerouting: false,
+      hasDeviated: false,
+      hasArrived: false,
+    });
+  },
+
+  switchToAlternate: (route) => {
+    const { activeRoute, alternateRoutes } = get();
+    if (!activeRoute || route === activeRoute) return;
+    set({
+      activeRoute: route,
+      // Keep the replaced route selectable again.
+      alternateRoutes: [activeRoute, ...alternateRoutes.filter((r) => r !== route)],
+      currentStepIndex: 0,
+      currentManeuver: route.legs[0]?.maneuvers[0] ?? null,
+      etaSeconds: route.summary.durationSeconds,
+      remainingDistanceMeters: route.summary.distanceMeters,
+      currentLegIndex: 0,
       isRerouting: false,
       hasDeviated: false,
       hasArrived: false,

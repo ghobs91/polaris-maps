@@ -19,6 +19,8 @@ import { decodePolyline } from '@/utils/polyline';
 import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils/navigationStops';
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
+import { buildRouteAlternatives } from '@/services/routing/routeAlternatives';
+import { formatDuration } from '@/utils/units';
 import {
   startTracking,
   processFix,
@@ -67,6 +69,8 @@ export default function NavigationScreen() {
   const isRerouting = useNavigationStore((s) => s.isRerouting);
   const hasDeviated = useNavigationStore((s) => s.hasDeviated);
   const addWaypointAndReplaceRoute = useNavigationStore((s) => s.addWaypointAndReplaceRoute);
+  const alternateRoutes = useNavigationStore((s) => s.alternateRoutes);
+  const switchToAlternate = useNavigationStore((s) => s.switchToAlternate);
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
   useEffect(() => {
@@ -519,6 +523,34 @@ export default function NavigationScreen() {
           </View>
         )}
         <IncidentAheadBanner />
+
+        {alternateRoutes.length > 0 && (
+          <View style={styles.alternateRow}>
+            {buildRouteAlternatives(activeRoute, alternateRoutes).map((option, idx) => {
+              if (option.route === activeRoute) return null;
+              return (
+                <Pressable
+                  key={`${idx}-${option.durationSeconds}`}
+                  style={({ pressed }) => [styles.alternateChip, { opacity: pressed ? 0.8 : 1 }]}
+                  onPress={() => {
+                    switchToAlternate(option.route);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Switch to alternate route, ${formatDuration(option.durationSeconds)}${
+                    option.delaySeconds > 0 ? `, ${formatDuration(option.delaySeconds)} slower` : ''
+                  }`}
+                >
+                  <Ionicons name="git-branch-outline" size={14} color="#fff" />
+                  <Text style={styles.alternateChipText}>
+                    {formatDuration(option.durationSeconds)}
+                    {option.delaySeconds > 0 ? ` (+${formatDuration(option.delaySeconds)})` : ''}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
         <View style={styles.bannerRow}>
           <View style={styles.bannerFlex}>
             <NextTurnBanner
@@ -611,6 +643,26 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       position: 'absolute',
       left: spacing.md,
       right: spacing.md,
+    },
+    alternateRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+      marginBottom: 8,
+    },
+    alternateChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: 'rgba(142,142,147,0.9)',
+      borderRadius: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+    },
+    alternateChipText: {
+      color: '#fff',
+      fontSize: 12,
+      fontWeight: '600',
     },
     bannerRow: {
       flexDirection: 'row',

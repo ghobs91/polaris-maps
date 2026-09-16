@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +37,16 @@ export default function MapScreen() {
   const activeRouteGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
   const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
   const routeGeometry = activeRouteGeometry ?? previewRouteGeometry;
+  const isNavigating = useNavigationStore((s) => s.isNavigating);
+  const routePreviewAlternates = useNavigationStore((s) => s.routePreviewAlternates);
+  const activeAlternateRoutes = useNavigationStore((s) => s.alternateRoutes);
+  const alternateRouteGeometries = useMemo(
+    () =>
+      (isNavigating ? activeAlternateRoutes : routePreviewAlternates).map(
+        (route) => route.geometry,
+      ),
+    [isNavigating, activeAlternateRoutes, routePreviewAlternates],
+  );
   const [showNodeDrawer, setShowNodeDrawer] = useState(false);
   const [showMenuPanel, setShowMenuPanel] = useState(false);
 
@@ -116,6 +126,7 @@ export default function MapScreen() {
           <MapView
             ref={mapViewRef}
             routeGeometry={routeGeometry}
+            alternateRouteGeometries={alternateRouteGeometries}
             onMapPress={handleMapPress}
             onMapLongPress={handleMapLongPress}
           />
@@ -188,6 +199,7 @@ export default function MapScreen() {
         <MapView
           ref={mapViewRef}
           routeGeometry={routeGeometry}
+          alternateRouteGeometries={alternateRouteGeometries}
           onMapPress={handleMapPress}
           onMapLongPress={handleMapLongPress}
         />

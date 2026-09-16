@@ -16,6 +16,7 @@ import { fetchOsmPois, fetchNominatimPois } from '../../services/poi/osmFetcher'
 import { getPlacesInBounds } from '../../services/poi/poiService';
 import { fetchOverturePlaces } from '../../services/poi/overtureFetcher';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
+import { decodePolyline } from '../../utils/polyline';
 import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
@@ -143,6 +144,8 @@ export interface MapViewHandle {
 
 interface MapViewProps {
   routeGeometry?: string;
+  /** Encoded polylines for non-selected route alternatives (rendered muted beneath the primary). */
+  alternateRouteGeometries?: string[];
   onMapPress?: (lat: number, lng: number) => void;
   onMapLongPress?: (lat: number, lng: number) => void;
   /** When true, tilts the camera, hides user dot, shows chevron at navPosition */
@@ -160,6 +163,7 @@ interface MapViewProps {
 export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   {
     routeGeometry,
+    alternateRouteGeometries,
     onMapPress,
     onMapLongPress,
     navigationMode,
@@ -172,6 +176,21 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 ) {
   const mapRef = useRef<any>(null);
   const cameraRef = useRef<any>(null);
+
+  // Muted polylines for the non-selected route alternatives.
+  const alternateRoutesShape = useMemo(() => {
+    if (!alternateRouteGeometries || alternateRouteGeometries.length === 0) return null;
+    const features = alternateRouteGeometries
+      .map((geometry) => decodePolyline(geometry))
+      .filter((coordinates) => coordinates.length >= 2)
+      .map((coordinates) => ({
+        type: 'Feature' as const,
+        properties: {},
+        geometry: { type: 'LineString' as const, coordinates },
+      }));
+    if (features.length === 0) return null;
+    return { type: 'FeatureCollection' as const, features };
+  }, [alternateRouteGeometries]);
 
   useImperativeHandle(ref, () => ({
     flyTo(lat: number, lng: number, zoom: number, bottomPadding = 0) {
@@ -812,6 +831,21 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 circleColor: colors.primary,
                 circleStrokeWidth: 3,
                 circleStrokeColor: colors.white,
+              }}
+            />
+          </MapLibreGL.ShapeSource>
+        )}
+
+        {alternateRoutesShape && (
+          <MapLibreGL.ShapeSource id="route-alternates" shape={alternateRoutesShape}>
+            <MapLibreGL.LineLayer
+              id="route-alternates-line"
+              style={{
+                lineColor: '#8E8E93',
+                lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4, 17, 6] as any,
+                lineCap: 'round',
+                lineJoin: 'round',
+                lineOpacity: 0.6,
               }}
             />
           </MapLibreGL.ShapeSource>

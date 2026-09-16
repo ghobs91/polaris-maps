@@ -9,10 +9,10 @@
 
 - [x] 2.1 Thread an `alternates` request (max 2) through `computeRoute` call sites in `FloatingSearchPanel.tsx`, `LocationActionPanel.tsx`, `navigation.tsx`, and `AddDestinationPanel.tsx`, preserving waypoints and route preferences
 - [x] 2.2 Ensure offline/fallback paths degrade to a single route when alternatives are unsupported and never render an empty list
-- [ ] 2.3 Render alternative polylines on the map with the selected route emphasized
+- [x] 2.3 Render alternative polylines on the map with the selected route emphasized
 - [x] 2.4 Add an alternatives card list showing duration, distance, and delay vs. the fastest route
 - [x] 2.5 Implement preview selection that promotes an alternative to primary and updates ETA/distance
-- [ ] 2.6 Implement mid-navigation switching that replaces the active route, re-threads waypoints and `currentLegIndex`, and restarts tracking
+- [x] 2.6 Implement mid-navigation switching that replaces the active route, re-threads waypoints and `currentLegIndex`, and restarts tracking
 - [x] 2.7 Clear stale alternatives after recompute or switch
 - [ ] 2.8 Add unit tests for alternate computation threading and integration tests for preview selection and mid-navigation switching with a waypoint
 
