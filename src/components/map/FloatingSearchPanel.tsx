@@ -695,14 +695,18 @@ export function FloatingSearchPanel({
   const [addingStop, setAddingStop] = useState(false);
   const [stopSearchResults, setStopSearchResults] = useState<UnifiedSearchResult[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const activeCategoryQueryRef = useRef('');
   const searchAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
+  // True while waiting for the camera to settle after a search fit, so the
+  // anchor is captured at the fitted viewport rather than mid-animation.
+  const anchorPendingRef = useRef(false);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const isCategorySearching = useOsmPoiStore((s) => s.isCategorySearching);
   const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
   const setPendingStopSelection = useMapStore((s) => s.setPendingStopSelection);
   const setStopSearchMarkers = useMapStore((s) => s.setStopSearchMarkers);
 
-  const viewport = useMapStore((s) => s.viewport);
+  const viewportBounds = useOsmPoiStore((s) => s.viewportBounds);
 
   const inputRef = useRef<TextInput>(null);
   const stopSearchInputRef = useRef<TextInput>(null);
@@ -788,8 +792,7 @@ export function FloatingSearchPanel({
       useOsmPoiStore.getState().clearCategorySearch();
     }
 
-    const vp = useMapStore.getState().viewport;
-    searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
+    anchorPendingRef.current = true;
   }, []);
 
   const startAuxiliarySearch = useCallback(
@@ -1029,26 +1032,40 @@ export function FloatingSearchPanel({
     }).start();
   }, [mode, fadeAnim]);
 
-  // Show "Search this area" when the map is panned away from the last search location
+  // Show "Search this area" when the map is panned away from the last search location.
+  // The live camera centre comes from viewportBounds (updated on every region change),
+  // since mapStore.viewport only tracks programmatic moves. The anchor is captured
+  // once the camera settles after fitting results, so the fit itself is not a pan.
   useEffect(() => {
-    const anchor = searchAnchorRef.current;
     const hasResults = results.length > 0 || (categorySearchResults?.length ?? 0) > 0;
-    if (!anchor || mode !== 'searching' || !hasResults || minimized || keyboardHeight > 0) {
+    if (mode !== 'searching' || !hasResults || minimized || keyboardHeight > 0) {
       setShowSearchThisArea(false);
       return;
     }
-    const dlat = viewport.lat - anchor.lat;
-    const dlng = viewport.lng - anchor.lng;
+    if (!viewportBounds) return;
+
+    if (anchorPendingRef.current) {
+      const settleTimer = setTimeout(() => {
+        const bounds = useOsmPoiStore.getState().viewportBounds;
+        if (!bounds) return;
+        searchAnchorRef.current = {
+          lat: (bounds.minLat + bounds.maxLat) / 2,
+          lng: (bounds.minLng + bounds.maxLng) / 2,
+        };
+        anchorPendingRef.current = false;
+        setShowSearchThisArea(false);
+      }, 700);
+      return () => clearTimeout(settleTimer);
+    }
+
+    const anchor = searchAnchorRef.current;
+    if (!anchor) return;
+    const lat = (viewportBounds.minLat + viewportBounds.maxLat) / 2;
+    const lng = (viewportBounds.minLng + viewportBounds.maxLng) / 2;
+    const dlat = lat - anchor.lat;
+    const dlng = lng - anchor.lng;
     setShowSearchThisArea(Math.sqrt(dlat * dlat + dlng * dlng) > 0.015); // ~1.5 km
-  }, [
-    viewport.lat,
-    viewport.lng,
-    mode,
-    results.length,
-    categorySearchResults,
-    minimized,
-    keyboardHeight,
-  ]);
+  }, [viewportBounds, mode, results.length, categorySearchResults, minimized, keyboardHeight]);
 
   // ── Search ──────────────────────────────────
 
@@ -1115,15 +1132,108 @@ export function FloatingSearchPanel({
     setResults([]);
     setActiveCategory(null);
     searchAnchorRef.current = null;
+    anchorPendingRef.current = false;
     setShowSearchThisArea(false);
     useOsmPoiStore.getState().clearCategorySearch();
   }, [clearSearch]);
 
+  // Runs (or re-runs) a quick-category POI search against the current viewport.
+  const runCategorySearch = useCallback((categoryId: string, categoryQuery: string) => {
+    setActiveCategory(categoryId);
+    activeCategoryQueryRef.current = categoryQuery;
+    const gen = ++categorySearchGenRef.current;
+    setResults([]);
+    useOsmPoiStore.getState().clearCategorySearch();
+
+    const vp = useMapStore.getState().viewport;
+    const vb = useOsmPoiStore.getState().viewportBounds;
+    const south = vb?.minLat ?? vp.lat - 0.05;
+    const north = vb?.maxLat ?? vp.lat + 0.05;
+    const west = vb?.minLng ?? vp.lng - 0.05;
+    const east = vb?.maxLng ?? vp.lng + 0.05;
+
+    useOsmPoiStore.getState().setIsCategorySearching(true);
+
+    // Resolve category to OSM tags and query Overpass directly
+    const categories = resolveSearchCategories(categoryQuery);
+    if (!categories || categories.length === 0) {
+      useOsmPoiStore.getState().setIsCategorySearching(false);
+      useOsmPoiStore.getState().clearCategorySearch();
+      return;
+    }
+
+    const tagPairs = categories.flatMap(categoryToOverpassTags);
+
+    // Build promises for all data sources
+    const fetches: Promise<OsmPoi[]>[] = [
+      fetchOsmPoisByTags(south, west, north, east, tagPairs, undefined, {
+        requireName: false,
+      }),
+    ];
+
+    // For EV charging, also query Open Charge Map for richer station data
+    if (categories.includes('ev_charging')) {
+      const centerLat = (south + north) / 2;
+      const centerLng = (west + east) / 2;
+      // Approximate viewport diagonal in km
+      const dlat = (north - south) * 111;
+      const dlng = (east - west) * 111 * Math.cos((centerLat * Math.PI) / 180);
+      const radiusKm = Math.max(Math.sqrt(dlat * dlat + dlng * dlng) / 2, 3);
+
+      fetches.push(
+        fetchChargingStations(centerLat, centerLng, radiusKm, 100)
+          .then((stations) => stations.map(chargingStationToOsmPoi))
+          .catch(() => [] as OsmPoi[]),
+      );
+    }
+
+    Promise.all(fetches)
+      .then((results) => {
+        if (categorySearchGenRef.current !== gen) return;
+        useOsmPoiStore.getState().setIsCategorySearching(false);
+
+        // Merge results from all sources — OCM takes priority
+        let pois = results[0]; // OSM results
+        if (results.length > 1) {
+          pois = mergeChargingPois(pois, results[1]);
+        }
+
+        if (pois.length > 0) {
+          useOsmPoiStore.getState().setCategorySearch(
+            categories,
+            pois,
+            false, // not local primary
+          );
+          const fitPois = selectSearchFitPois(pois);
+          const fb = boundsForPois(fitPois);
+          if (fb && fitPois.length >= 2) {
+            useMapStore
+              .getState()
+              .setFitBounds([fb.minLng, fb.minLat, fb.maxLng, fb.maxLat], 'search');
+          }
+          anchorPendingRef.current = true;
+        } else {
+          useOsmPoiStore.getState().clearCategorySearch();
+        }
+      })
+      .catch(() => {
+        if (categorySearchGenRef.current === gen) {
+          useOsmPoiStore.getState().setIsCategorySearching(false);
+          useOsmPoiStore.getState().clearCategorySearch();
+        }
+      });
+  }, []);
+
   const handleSearchThisArea = useCallback(() => {
     setShowSearchThisArea(false);
     searchAnchorRef.current = null;
+    anchorPendingRef.current = false;
+    if (activeCategory && activeCategoryQueryRef.current) {
+      runCategorySearch(activeCategory, activeCategoryQueryRef.current);
+      return;
+    }
     handleQueryChange(query);
-  }, [query, handleQueryChange]);
+  }, [query, handleQueryChange, activeCategory, runCategorySearch]);
 
   // ── Dismiss location / route view ────────────
   const dismissLocation = useCallback(() => {
@@ -2437,95 +2547,14 @@ export function FloatingSearchPanel({
               // Toggle off if already selected
               if (categoryId === activeCategory) {
                 setActiveCategory(null);
+                activeCategoryQueryRef.current = '';
                 ++categorySearchGenRef.current;
                 useOsmPoiStore.getState().setIsCategorySearching(false);
                 useOsmPoiStore.getState().clearCategorySearch();
                 setResults([]);
                 return;
               }
-
-              setActiveCategory(categoryId);
-              const gen = ++categorySearchGenRef.current;
-              setResults([]);
-              useOsmPoiStore.getState().clearCategorySearch();
-
-              const vp = useMapStore.getState().viewport;
-              const vb = useOsmPoiStore.getState().viewportBounds;
-              const south = vb?.minLat ?? vp.lat - 0.05;
-              const north = vb?.maxLat ?? vp.lat + 0.05;
-              const west = vb?.minLng ?? vp.lng - 0.05;
-              const east = vb?.maxLng ?? vp.lng + 0.05;
-
-              useOsmPoiStore.getState().setIsCategorySearching(true);
-
-              // Resolve category to OSM tags and query Overpass directly
-              const categories = resolveSearchCategories(query);
-              if (!categories || categories.length === 0) {
-                useOsmPoiStore.getState().setIsCategorySearching(false);
-                useOsmPoiStore.getState().clearCategorySearch();
-                return;
-              }
-
-              const tagPairs = categories.flatMap(categoryToOverpassTags);
-
-              // Build promises for all data sources
-              const fetches: Promise<OsmPoi[]>[] = [
-                fetchOsmPoisByTags(south, west, north, east, tagPairs, undefined, {
-                  requireName: false,
-                }),
-              ];
-
-              // For EV charging, also query Open Charge Map for richer station data
-              if (categories.includes('ev_charging')) {
-                const centerLat = (south + north) / 2;
-                const centerLng = (west + east) / 2;
-                // Approximate viewport diagonal in km
-                const dlat = (north - south) * 111;
-                const dlng = (east - west) * 111 * Math.cos((centerLat * Math.PI) / 180);
-                const radiusKm = Math.max(Math.sqrt(dlat * dlat + dlng * dlng) / 2, 3);
-
-                fetches.push(
-                  fetchChargingStations(centerLat, centerLng, radiusKm, 100)
-                    .then((stations) => stations.map(chargingStationToOsmPoi))
-                    .catch(() => [] as OsmPoi[]),
-                );
-              }
-
-              Promise.all(fetches)
-                .then((results) => {
-                  if (categorySearchGenRef.current !== gen) return;
-                  useOsmPoiStore.getState().setIsCategorySearching(false);
-
-                  // Merge results from all sources — OCM takes priority
-                  let pois = results[0]; // OSM results
-                  if (results.length > 1) {
-                    pois = mergeChargingPois(pois, results[1]);
-                  }
-
-                  if (pois.length > 0) {
-                    useOsmPoiStore.getState().setCategorySearch(
-                      categories,
-                      pois,
-                      false, // not local primary
-                    );
-                    const fitPois = selectSearchFitPois(pois);
-                    const fb = boundsForPois(fitPois);
-                    if (fb && fitPois.length >= 2) {
-                      useMapStore
-                        .getState()
-                        .setFitBounds([fb.minLng, fb.minLat, fb.maxLng, fb.maxLat], 'search');
-                    }
-                    searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
-                  } else {
-                    useOsmPoiStore.getState().clearCategorySearch();
-                  }
-                })
-                .catch(() => {
-                  if (categorySearchGenRef.current === gen) {
-                    useOsmPoiStore.getState().setIsCategorySearching(false);
-                    useOsmPoiStore.getState().clearCategorySearch();
-                  }
-                });
+              runCategorySearch(categoryId, query);
             }}
           />
         )}
