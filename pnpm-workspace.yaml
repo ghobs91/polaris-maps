@@ -8,3 +8,12 @@ allowBuilds:
 patchedDependencies:
   '@maplibre/maplibre-react-native': patches/@maplibre__maplibre-react-native.patch
   react-native-bare-kit@0.13.3: patches/react-native-bare-kit@0.13.3.patch
+
+# Pin the ExpoModulesJSI xcframework build tooling. 57.0.4 fails to build the
+# prebuilt ExpoModulesJSI.xcframework on newer Xcode toolchains (foreign
+# reference ownership warnings on RuntimeScheduler become fatal; ambiguous
+# `abs` in JavaScriptCodable+Date.swift), which breaks `xcodebuild archive`
+# in CI. 57.0.5 fixed both; 57.0.8 adds the remaining xcframework fixes.
+# Stays within the ~57.0.4 range required by expo-modules-core.
+overrides:
+  expo-modules-jsi: 57.0.8
