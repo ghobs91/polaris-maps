@@ -11,10 +11,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
-  submitIncidentReport,
   INCIDENT_TYPE_LABELS,
   INCIDENT_TYPE_ICONS,
 } from '../../services/traffic/incidentReportService';
+import { reportIncident } from '../../services/traffic/incidentExchangeService';
 import type { IncidentType } from '../../models/traffic';
 
 const INCIDENT_TYPES: IncidentType[] = [
@@ -38,12 +38,14 @@ export function IncidentReportPanel({ visible, onClose, position }: IncidentRepo
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = useCallback(async () => {
     if (!selectedType) return;
     setSubmitting(true);
+    setError(null);
     try {
-      await submitIncidentReport(
+      await reportIncident(
         position[1], // lat
         position[0], // lng
         selectedType,
@@ -57,7 +59,7 @@ export function IncidentReportPanel({ visible, onClose, position }: IncidentRepo
         onClose();
       }, 1500);
     } catch {
-      // Silently fail — user can try again
+      setError('Could not submit the report. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -67,6 +69,7 @@ export function IncidentReportPanel({ visible, onClose, position }: IncidentRepo
     setSelectedType(null);
     setDescription('');
     setSubmitted(false);
+    setError(null);
     onClose();
   }, [onClose]);
 
@@ -137,6 +140,11 @@ export function IncidentReportPanel({ visible, onClose, position }: IncidentRepo
               />
 
               {/* Submit button */}
+              {error ? (
+                <Text style={styles.errorText} accessibilityRole="alert">
+                  {error}
+                </Text>
+              ) : null}
               <TouchableOpacity
                 style={[styles.submitBtn, !selectedType && styles.submitBtnDisabled]}
                 onPress={handleSubmit}
@@ -248,6 +256,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+  },
+  errorText: {
+    fontSize: 13,
+    color: '#FF6B6B',
+    marginTop: 12,
   },
   successContainer: {
     alignItems: 'center',

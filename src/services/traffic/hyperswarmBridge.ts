@@ -3,7 +3,7 @@
  * the Hyperswarm traffic mesh.
  *
  * Uses react-native-bare-kit's Worklet + bare-rpc for communication.
- * Replaces the previous Waku bridge (wakuBridge.ts).
+ * Transport for traffic probes, conditions, tiles, and incidents.
  */
 
 // react-native-bare-kit provides the Worklet class.
@@ -55,6 +55,7 @@ import {
   CMD_SEND_CONDITION_RESPONSE,
   CMD_REQUEST_TILE,
   CMD_SEND_TILE_RESPONSE,
+  CMD_PUBLISH_INCIDENT,
   CMD_INCOMING_PROBE,
   CMD_PEER_COUNT,
   CMD_AGGREGATED_UPDATE,
@@ -62,6 +63,7 @@ import {
   CMD_INCOMING_CONDITION_RESPONSE,
   CMD_INCOMING_TILE_REQUEST,
   CMD_INCOMING_TILE_RESPONSE,
+  CMD_INCOMING_INCIDENT,
   CMD_SUSPEND,
   CMD_RESUME,
 } from './rpcCommands';
@@ -98,6 +100,8 @@ type TileRequestHandler = (req: {
   y: number;
 }) => void;
 type TileResponseHandler = (res: { id: string; tile: WireTilePayload | null }) => void;
+/** A peer broadcast an incident envelope (compact, unverified). */
+type IncidentHandler = (incident: unknown) => void;
 
 let worklet: {
   start(entry: string, bundle: string, args: string[]): void;
@@ -114,6 +118,7 @@ let conditionRequestHandlers: ConditionRequestHandler[] = [];
 let conditionResponseHandlers: ConditionResponseHandler[] = [];
 let tileRequestHandlers: TileRequestHandler[] = [];
 let tileResponseHandlers: TileResponseHandler[] = [];
+let incidentHandlers: IncidentHandler[] = [];
 
 // ── Lifecycle ───────────────────────────────────────────────────────
 
@@ -199,6 +204,15 @@ function handleWorkletRequest(req: RpcRequest): void {
       }
       break;
     }
+    case CMD_INCOMING_INCIDENT: {
+      try {
+        const incident = JSON.parse(text);
+        for (const h of incidentHandlers) h(incident);
+      } catch {
+        /* malformed */
+      }
+      break;
+    }
   }
 }
 
@@ -227,6 +241,7 @@ export function disposeHyperswarmBridge(): void {
   conditionResponseHandlers = [];
   tileRequestHandlers = [];
   tileResponseHandlers = [];
+  incidentHandlers = [];
 }
 
 // ── Commands → Worklet ──────────────────────────────────────────────
@@ -346,6 +361,14 @@ export function sendTileResponse(
   sendCommand(CMD_SEND_TILE_RESPONSE, JSON.stringify({ connId, requestId, tile }));
 }
 
+/**
+ * Broadcast a signed incident envelope to all connected peers.
+ * `incidentJson` is the compact wire format from `incidentWire.ts`.
+ */
+export function publishIncident(incidentJson: string): void {
+  sendCommand(CMD_PUBLISH_INCIDENT, incidentJson);
+}
+
 // ── Event handlers ──────────────────────────────────────────────────
 
 export function onProbe(handler: ProbeHandler): () => void {
@@ -398,6 +421,14 @@ export function onTileResponse(handler: TileResponseHandler): () => void {
   tileResponseHandlers.push(handler);
   return () => {
     tileResponseHandlers = tileResponseHandlers.filter((h) => h !== handler);
+  };
+}
+
+/** A peer broadcast an incident envelope (compact, unverified). */
+export function onIncident(handler: IncidentHandler): () => void {
+  incidentHandlers.push(handler);
+  return () => {
+    incidentHandlers = incidentHandlers.filter((h) => h !== handler);
   };
 }
 

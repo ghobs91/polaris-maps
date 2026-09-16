@@ -32,6 +32,7 @@ const CMD_REQUEST_CONDITIONS = 4; // RN → worklet: broadcast condition request
 const CMD_SEND_CONDITION_RESPONSE = 5; // RN → worklet: reply to a peer
 const CMD_REQUEST_TILE = 6; // RN → worklet: broadcast tile request
 const CMD_SEND_TILE_RESPONSE = 7; // RN → worklet: reply to a peer with a tile
+const CMD_PUBLISH_INCIDENT = 8; // RN → worklet: broadcast an incident envelope
 const CMD_INCOMING_PROBE = 10;
 const CMD_PEER_COUNT = 11;
 const CMD_AGGREGATED_UPDATE = 12;
@@ -39,6 +40,7 @@ const CMD_INCOMING_CONDITION_REQUEST = 13; // worklet → RN
 const CMD_INCOMING_CONDITION_RESPONSE = 14; // worklet → RN
 const CMD_INCOMING_TILE_REQUEST = 15; // worklet → RN
 const CMD_INCOMING_TILE_RESPONSE = 16; // worklet → RN
+const CMD_INCOMING_INCIDENT = 17; // worklet → RN: a peer broadcast an incident
 const CMD_SUSPEND = 20;
 const CMD_RESUME = 21;
 
@@ -111,6 +113,11 @@ function handleRequest(req) {
       }
       case CMD_SEND_TILE_RESPONSE: {
         handleSendTileResponse(req.data);
+        req.reply(b4a.from('ok'));
+        break;
+      }
+      case CMD_PUBLISH_INCIDENT: {
+        broadcastIncident(req.data);
         req.reply(b4a.from('ok'));
         break;
       }
@@ -245,6 +252,13 @@ function handleConnectionData(data, conn, connId) {
     return;
   }
 
+  // Incident envelopes must be handled before the legacy probe decoder so an
+  // incident never produces a traffic probe.
+  if (msg && msg.t === 'i') {
+    notifyIncident(msg);
+    return;
+  }
+
   handleIncomingProbe(data, conn);
 }
 
@@ -282,6 +296,21 @@ function broadcastTileRequest(reqBytes) {
   for (const conn of peerProtocols.keys()) {
     try {
       conn.write(reqBytes);
+    } catch {
+      // Connection may have closed
+    }
+  }
+}
+
+/**
+ * Broadcast a signed incident envelope (raw JSON from RN) to every peer.
+ * The worklet does not decode or validate incidents — signature verification
+ * happens in React Native so peers cannot smuggle data past the check.
+ */
+function broadcastIncident(incidentBytes) {
+  for (const conn of peerProtocols.keys()) {
+    try {
+      conn.write(incidentBytes);
     } catch {
       // Connection may have closed
     }
@@ -511,6 +540,15 @@ function notifyTileResponse(msg) {
   }
 }
 
+function notifyIncident(msg) {
+  try {
+    const req = rpc.request(CMD_INCOMING_INCIDENT);
+    req.send(b4a.from(JSON.stringify(msg)));
+  } catch {
+    // RPC may not be ready
+  }
+}
+
 function broadcastPeerCount() {
   try {
     const count = swarm ? swarm.connections.size : 0;
@@ -545,6 +583,7 @@ export {
   CMD_SEND_CONDITION_RESPONSE,
   CMD_REQUEST_TILE,
   CMD_SEND_TILE_RESPONSE,
+  CMD_PUBLISH_INCIDENT,
   CMD_INCOMING_PROBE,
   CMD_PEER_COUNT,
   CMD_AGGREGATED_UPDATE,
@@ -552,6 +591,7 @@ export {
   CMD_INCOMING_CONDITION_RESPONSE,
   CMD_INCOMING_TILE_REQUEST,
   CMD_INCOMING_TILE_RESPONSE,
+  CMD_INCOMING_INCIDENT,
   CMD_SUSPEND,
   CMD_RESUME,
   encodeProbe,

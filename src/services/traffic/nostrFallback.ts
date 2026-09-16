@@ -15,12 +15,16 @@
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { getOrCreateKeypair } from '../identity/keypair';
-import type { TrafficProbe } from '../../models/traffic';
+import type { TrafficIncident, TrafficProbe } from '../../models/traffic';
+import { encodeIncidentWire } from './incidentWire';
 
 // ── Constants ───────────────────────────────────────────────────────
 
 /** Custom ephemeral event kind for traffic probes (20000-29999 = ephemeral). */
 const TRAFFIC_PROBE_KIND = 20100;
+
+/** Ephemeral event kind for signed incident reports. */
+const INCIDENT_KIND = 20101;
 
 /** Probe TTL in seconds — relays should discard after this. */
 const PROBE_EXPIRATION_S = 300; // 5 minutes
@@ -51,6 +55,7 @@ interface NostrEvent {
 }
 
 type ProbeCallback = (probe: TrafficProbe, eventPubkey: string) => void;
+type IncidentCallback = (incident: unknown, eventPubkey: string) => void;
 
 // ── State ───────────────────────────────────────────────────────────
 
@@ -58,6 +63,7 @@ const sockets = new Map<string, WebSocket>();
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let subscribedGeohashes = new Set<string>();
 let probeCallbacks: ProbeCallback[] = [];
+let incidentCallbacks: IncidentCallback[] = [];
 let privateKey: Uint8Array | null = null;
 let publicKey: string | null = null;
 let disposed = false;
@@ -95,6 +101,7 @@ export function disposeNostrFallback(): void {
   reconnectTimers.clear();
   subscribedGeohashes.clear();
   probeCallbacks = [];
+  incidentCallbacks = [];
 }
 
 // ── Relay connection management ─────────────────────────────────────
@@ -174,7 +181,7 @@ function subscriptionId(geohash4: string): string {
 function sendSubscription(ws: WebSocket, geohash4: string): void {
   // NIP-01 REQ: filter by kind + geohash "g" tag
   const filter = {
-    kinds: [TRAFFIC_PROBE_KIND],
+    kinds: [TRAFFIC_PROBE_KIND, INCIDENT_KIND],
     '#g': [geohash4],
     limit: 50,
   };
@@ -215,6 +222,32 @@ export async function publishProbe(probe: TrafficProbe, geohash4: string): Promi
   }
 }
 
+/**
+ * Publish a signed incident as an ephemeral Nostr event to all connected relays.
+ * The incident's own Schnorr signature is carried in the content so receivers
+ * can verify it independently of the NIP-01 event signature.
+ */
+export async function publishIncident(incident: TrafficIncident, geohash4: string): Promise<void> {
+  if (!privateKey || !publicKey) return;
+
+  const now = Math.floor(Date.now() / 1000);
+  const expiration = String(Math.floor(incident.expiresAt / 1000));
+  const content = encodeIncidentWire(incident);
+  const tags: string[][] = [
+    ['g', geohash4],
+    ['expiration', expiration],
+  ];
+
+  const event = await createSignedEvent(INCIDENT_KIND, content, tags, now);
+
+  const msg = JSON.stringify(['EVENT', event]);
+  for (const ws of sockets.values()) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(msg);
+    }
+  }
+}
+
 // ── Incoming events ─────────────────────────────────────────────────
 
 function handleRelayMessage(raw: string): void {
@@ -237,8 +270,8 @@ function processIncomingEvent(event: NostrEvent): void {
   // Ignore own events
   if (event.pubkey === publicKey) return;
 
-  // Check kind
-  if (event.kind !== TRAFFIC_PROBE_KIND) return;
+  // Only probe and incident kinds are handled here
+  if (event.kind !== TRAFFIC_PROBE_KIND && event.kind !== INCIDENT_KIND) return;
 
   // Verify NIP-01 event ID and Schnorr signature
   if (!verifyEvent(event)) return;
@@ -248,6 +281,18 @@ function processIncomingEvent(event: NostrEvent): void {
   if (expirationTag) {
     const expiry = parseInt(expirationTag[1], 10);
     if (expiry > 0 && expiry < Math.floor(Date.now() / 1000)) return; // Expired
+  }
+
+  if (event.kind === INCIDENT_KIND) {
+    try {
+      const data = JSON.parse(event.content);
+      for (const cb of incidentCallbacks) {
+        cb(data, event.pubkey);
+      }
+    } catch {
+      // Invalid incident content
+    }
+    return;
   }
 
   // Parse probe content
@@ -301,6 +346,14 @@ export function onProbe(handler: ProbeCallback): () => void {
   probeCallbacks.push(handler);
   return () => {
     probeCallbacks = probeCallbacks.filter((h) => h !== handler);
+  };
+}
+
+/** A peer broadcast an incident envelope (compact, unverified). */
+export function onIncident(handler: IncidentCallback): () => void {
+  incidentCallbacks.push(handler);
+  return () => {
+    incidentCallbacks = incidentCallbacks.filter((h) => h !== handler);
   };
 }
 

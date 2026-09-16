@@ -4,11 +4,11 @@ import { encode as geohashEncode } from '../../utils/geohash';
 import type { TrafficIncident, IncidentType } from '../../models/traffic';
 
 /**
- * Submit a traffic incident report.
- * Signs the report with the user's Schnorr keypair and returns the
- * signed incident for broadcast to the P2P network.
+ * Build and Schnorr-sign a traffic incident report. Transport is handled by
+ * `incidentExchangeService`; this function only produces the signed model so
+ * it can stay free of P2P imports and be unit-tested in isolation.
  */
-export async function submitIncidentReport(
+export async function createSignedIncident(
   lat: number,
   lng: number,
   type: IncidentType,
@@ -38,7 +38,7 @@ export async function submitIncidentReport(
     signature[i / 2] = parseInt(signatureHex.substring(i, i + 2), 16);
   }
 
-  const incident: TrafficIncident = {
+  return {
     id,
     reporterPubkey: publicKey,
     lat,
@@ -50,29 +50,7 @@ export async function submitIncidentReport(
     expiresAt: now + 2 * 60 * 60 * 1000, // 2 hours
     signature,
   };
-
-  // Store locally for now — P2P broadcast will be wired when the swarm
-  // incident channel is implemented.
-  // TODO: Broadcast to Hyperswarm incident topic channel
-  return incident;
 }
 
 /** Human-readable labels for incident types. */
-export const INCIDENT_TYPE_LABELS: Record<IncidentType, string> = {
-  accident: 'Accident',
-  road_closure: 'Road Closure',
-  hazard: 'Hazard',
-  construction: 'Construction',
-  police: 'Police',
-  other: 'Other',
-};
-
-/** Icons for incident types (Ionicons names). */
-export const INCIDENT_TYPE_ICONS: Record<IncidentType, string> = {
-  accident: 'car-sport',
-  road_closure: 'ban',
-  hazard: 'warning',
-  construction: 'construct',
-  police: 'shield-checkmark',
-  other: 'alert-circle',
-};
+export { INCIDENT_TYPE_LABELS, INCIDENT_TYPE_ICONS } from './incidentWire';

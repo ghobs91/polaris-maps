@@ -1,10 +1,21 @@
 import { storage } from '../storage/mmkv';
 import { isOnline } from '../regions/connectivityService';
-import { publishProbe } from '../traffic/hyperswarmBridge';
+import {
+  publishProbe,
+  publishIncident as publishIncidentHyperswarm,
+  isStarted,
+} from '../traffic/hyperswarmBridge';
+import {
+  publishIncident as publishIncidentNostr,
+  getConnectedRelayCount,
+} from '../traffic/nostrFallback';
+import { decodeIncidentWire } from '../traffic/incidentWire';
+import { useTrafficStore } from '../../stores/trafficStore';
+import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 
 interface QueueEntry {
   id: string;
-  type: 'traffic_probe' | 'poi_edit' | 'review' | 'attestation';
+  type: 'traffic_probe' | 'incident' | 'poi_edit' | 'review' | 'attestation';
   topic?: string;
   payload: string;
   createdAt: number;
@@ -56,6 +67,16 @@ export async function flushQueue(): Promise<{ flushed: number; failed: number }>
     try {
       if (entry.type === 'traffic_probe' && entry.payload) {
         publishProbe(entry.payload);
+      } else if (entry.type === 'incident' && entry.payload) {
+        const incident = decodeIncidentWire(entry.payload);
+        if (incident) {
+          const peerCount = useTrafficStore.getState().swarmPeerCount;
+          if (isStarted() && peerCount >= MIN_PEER_THRESHOLD) {
+            publishIncidentHyperswarm(entry.payload);
+          } else if (getConnectedRelayCount() > 0) {
+            await publishIncidentNostr(incident, incident.geohash6.slice(0, 4));
+          }
+        }
       }
       // POI edits, reviews, and attestations write to Gun.js which auto-syncs
       // when connectivity resumes, so those are implicitly flushed

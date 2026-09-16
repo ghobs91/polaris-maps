@@ -1,16 +1,25 @@
 import { reroute, updateTrafficSpeeds } from '../routing/routingService';
-import { getTrafficSpeedMap, getAllTrafficStates } from './trafficAggregator';
+import { getRouteCoords } from '../navigation/trackingService';
+import { getTrafficSpeedMap } from './trafficAggregator';
+import { evaluateCongestionAhead, type TrafficObservation } from './congestionAhead';
 import { useNavigationStore } from '../../stores/navigationStore';
-import type { CongestionLevel } from '../../models/traffic';
-
-const CONGESTION_CHECK_INTERVAL_MS = 30_000;
-const SIGNIFICANT_DELAY_FACTOR = 1.25; // 25% slower than expected
+import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { useTrafficStore } from '../../stores/trafficStore';
+import {
+  CONGESTION_CHECK_INTERVAL_MS,
+  isRerouteCoolingDown,
+  isReplacementRouteAcceptable,
+} from './reroutePolicy';
 
 let checkInterval: ReturnType<typeof setInterval> | null = null;
+let lastRerouteAt = 0;
 
 export function startRerouteMonitor(): void {
   if (checkInterval) return;
-  checkInterval = setInterval(checkForReroute, CONGESTION_CHECK_INTERVAL_MS);
+  checkInterval = setInterval(() => {
+    void checkForReroute();
+  }, CONGESTION_CHECK_INTERVAL_MS);
 }
 
 export function stopRerouteMonitor(): void {
@@ -18,69 +27,78 @@ export function stopRerouteMonitor(): void {
     clearInterval(checkInterval);
     checkInterval = null;
   }
+  lastRerouteAt = 0;
+}
+
+function collectTrafficObservations(): TrafficObservation[] {
+  const observations: TrafficObservation[] = [];
+  for (const segment of useTrafficStore.getState().normalizedSegments) {
+    const position = segment.coordinates[0];
+    if (!position) continue;
+    observations.push({
+      position: [position[0], position[1]],
+      congestionRatio: segment.congestionRatio,
+    });
+  }
+  return observations;
 }
 
 async function checkForReroute(): Promise<void> {
   const navState = useNavigationStore.getState();
   if (!navState.isNavigating || !navState.activeRoute || !navState.destination) return;
+  if (navState.isRerouting) return;
 
-  // Push latest traffic data to Valhalla
+  const tracking = useNavigationTrackingStore.getState();
+  const position = tracking.navPosition;
+  if (!position) return; // no GPS fix yet — defer
+
+  const routeCoords = getRouteCoords();
+  const { hasSignificantCongestion } = evaluateCongestionAhead(
+    routeCoords,
+    position,
+    collectTrafficObservations(),
+  );
+  if (!hasSignificantCongestion) return;
+  if (isRerouteCoolingDown(Date.now(), lastRerouteAt)) return;
+
+  const route = navState.activeRoute;
+  const destination = navState.destination;
+  const prefs = useSettingsStore.getState().routePreferences;
+  const remainingWaypoints = navState.waypoints
+    .slice(navState.currentLegIndex)
+    .map(({ lat, lng }) => ({ lat, lng }));
+
+  // Push the latest P2P traffic speeds into the routing engine so the new
+  // route accounts for congestion as well as the reroute decision.
   const speedMap = getTrafficSpeedMap();
   if (Object.keys(speedMap).length > 0) {
     await updateTrafficSpeeds(speedMap);
   }
 
-  // Check if route has significant congestion ahead
-  if (hasSignificantCongestionAhead()) {
-    try {
-      navState.setRerouting(true);
-      // Get current position from the route geometry step
-      const route = navState.activeRoute;
-      const dest = navState.destination;
+  navState.setRerouting(true);
+  try {
+    const newRoute = await reroute(
+      { lat: position[1], lng: position[0], bearing: tracking.navBearing },
+      { lat: destination.lat, lng: destination.lng },
+      navState.costing,
+      {
+        heading: tracking.navBearing,
+        avoidTolls: prefs.avoidTolls,
+        avoidHighways: prefs.avoidHighways,
+        avoidFerries: prefs.avoidFerries,
+        via: remainingWaypoints,
+      },
+    );
 
-      const newRoute = await reroute(
-        { lat: 0, lng: 0, bearing: 0 }, // Would need actual GPS position
-        { lat: dest.lat, lng: dest.lng },
-        navState.costing,
-      );
-
-      // Only replace if new route is significantly better
-      if (
-        newRoute.summary.durationSeconds <
-        route.summary.durationSeconds * SIGNIFICANT_DELAY_FACTOR
-      ) {
-        navState.replaceRoute(newRoute);
-      } else {
-        navState.setRerouting(false);
-      }
-    } catch {
+    if (
+      isReplacementRouteAcceptable(newRoute.summary.durationSeconds, route.summary.durationSeconds)
+    ) {
+      lastRerouteAt = Date.now();
+      navState.replaceRoute(newRoute);
+    } else {
       navState.setRerouting(false);
     }
+  } catch {
+    navState.setRerouting(false);
   }
-}
-
-function hasSignificantCongestionAhead(): boolean {
-  const states = getAllTrafficStates();
-  const congestedSegments = states.filter(
-    (s) => s.congestionLevel === 'congested' || s.congestionLevel === 'stopped',
-  );
-  // If more than 3 segments in the viewport are congested, consider rerouting
-  return congestedSegments.length > 3;
-}
-
-export function getCongestionSummary(): {
-  total: number;
-  byCongestion: Record<CongestionLevel, number>;
-} {
-  const states = getAllTrafficStates();
-  const byCongestion: Record<CongestionLevel, number> = {
-    free_flow: 0,
-    slow: 0,
-    congested: 0,
-    stopped: 0,
-  };
-  for (const s of states) {
-    byCongestion[s.congestionLevel]++;
-  }
-  return { total: states.length, byCongestion };
 }

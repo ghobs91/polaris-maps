@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type {
   AggregatedTrafficState,
   NormalizedTrafficSegment,
+  TrafficIncident,
   TrafficMode,
 } from '../models/traffic';
 
@@ -28,6 +29,9 @@ interface TrafficState {
   /** Bumped when new traffic tiles are seeded — cache-busts the raster source. */
   trafficTileSeedVersion: number;
 
+  /** Accepted, unexpired crowd-reported incidents, newest last. */
+  incidents: TrafficIncident[];
+
   updateSegment: (state: AggregatedTrafficState) => void;
   removeSegment: (segmentId: string) => void;
   bulkUpdateSegments: (states: AggregatedTrafficState[]) => void;
@@ -41,6 +45,9 @@ interface TrafficState {
   setHistoryEntryCount: (count: number) => void;
   setLastResolveSource: (source: string | null) => void;
   bumpTrafficTileSeedVersion: () => void;
+  setIncidents: (incidents: TrafficIncident[]) => void;
+  upsertIncident: (incident: TrafficIncident) => void;
+  pruneExpiredIncidents: (now: number) => void;
   clearAll: () => void;
 }
 
@@ -59,6 +66,7 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   historyEntryCount: 0,
   lastResolveSource: null,
   trafficTileSeedVersion: 0,
+  incidents: [],
 
   updateSegment: (state) =>
     set((prev) => ({
@@ -90,6 +98,17 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   setLastResolveSource: (lastResolveSource) => set({ lastResolveSource }),
   bumpTrafficTileSeedVersion: () =>
     set((s) => ({ trafficTileSeedVersion: s.trafficTileSeedVersion + 1 })),
+  setIncidents: (incidents) => set({ incidents }),
+  upsertIncident: (incident) =>
+    set((prev) => {
+      const existing = prev.incidents.findIndex((i) => i.id === incident.id);
+      if (existing === -1) return { incidents: [...prev.incidents, incident] };
+      const next = [...prev.incidents];
+      next[existing] = incident;
+      return { incidents: next };
+    }),
+  pruneExpiredIncidents: (now) =>
+    set((prev) => ({ incidents: prev.incidents.filter((i) => i.expiresAt > now) })),
   clearAll: () =>
     set({
       segmentTraffic: {},
@@ -99,5 +118,6 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
       lastExternalFetchAt: null,
       swarmPeerCount: 0,
       nostrRelayCount: 0,
+      incidents: [],
     }),
 }));

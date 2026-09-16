@@ -36,6 +36,17 @@ function encodeTrafficProbe(probe: TrafficProbe): string {
   });
 }
 
+/**
+ * Choose the transport for an outbound probe: Hyperswarm once enough peers
+ * are connected, otherwise the Nostr relay fallback.
+ */
+export function selectProbeTransport(
+  swarmStarted: boolean,
+  swarmPeerCount: number,
+): 'hyperswarm' | 'nostr' {
+  return swarmStarted && swarmPeerCount >= MIN_PEER_THRESHOLD ? 'hyperswarm' : 'nostr';
+}
+
 async function collectAndPublish(): Promise<void> {
   const perms = useSettingsStore.getState().permissions;
   if (!perms.trafficTelemetryEnabled) return;
@@ -65,7 +76,7 @@ async function collectAndPublish(): Promise<void> {
     const swarmPeerCount = useTrafficStore.getState().swarmPeerCount;
 
     // Primary: Hyperswarm direct P2P exchange
-    if (isSwarmStarted() && swarmPeerCount >= MIN_PEER_THRESHOLD) {
+    if (selectProbeTransport(isSwarmStarted(), swarmPeerCount) === 'hyperswarm') {
       const probeJson = encodeTrafficProbe(probe);
       hyperswarmPublish(probeJson);
     } else {

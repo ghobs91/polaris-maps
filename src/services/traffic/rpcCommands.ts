@@ -12,6 +12,8 @@ export const CMD_SEND_CONDITION_RESPONSE = 5;
 export const CMD_REQUEST_TILE = 6;
 /** RN → worklet: send a tile response to a specific peer connection. */
 export const CMD_SEND_TILE_RESPONSE = 7;
+/** RN → worklet: broadcast a signed incident envelope to all peers. */
+export const CMD_PUBLISH_INCIDENT = 8;
 export const CMD_INCOMING_PROBE = 10;
 export const CMD_PEER_COUNT = 11;
 export const CMD_AGGREGATED_UPDATE = 12;
@@ -23,5 +25,7 @@ export const CMD_INCOMING_CONDITION_RESPONSE = 14;
 export const CMD_INCOMING_TILE_REQUEST = 15;
 /** worklet → RN: a peer responded to one of our tile requests. */
 export const CMD_INCOMING_TILE_RESPONSE = 16;
+/** worklet → RN: a peer broadcast an incident envelope. */
+export const CMD_INCOMING_INCIDENT = 17;
 export const CMD_SUSPEND = 20;
 export const CMD_RESUME = 21;

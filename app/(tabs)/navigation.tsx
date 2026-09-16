@@ -9,6 +9,7 @@ import type { MapViewHandle } from '@/components/map/MapView';
 import { NextTurnBanner, NavigationHud, SpeedLimitSign } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
+import { IncidentAheadBanner } from '@/components/navigation/IncidentAheadBanner';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import { useNavigationStore, type Waypoint } from '@/stores/navigationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -500,6 +501,7 @@ export default function NavigationScreen() {
             <Text style={styles.rerouteSub}>Using live GPS · auto-reroutes</Text>
           </View>
         )}
+        <IncidentAheadBanner />
         <View style={styles.bannerRow}>
           <View style={styles.bannerFlex}>
             <NextTurnBanner
