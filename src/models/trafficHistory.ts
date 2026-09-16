@@ -47,7 +47,13 @@ export interface WireConditionEntry {
 }
 
 /** Where resolved conditions ultimately came from (per request, highest tier used). */
-export type TrafficResolveSource = 'local-fresh' | 'local-history' | 'p2p' | 'tomtom' | 'none';
+export type TrafficResolveSource =
+  | 'local-fresh'
+  | 'local-history'
+  | 'p2p'
+  | 'open_feed'
+  | 'tomtom'
+  | 'none';
 
 // ── Tunables ─────────────────────────────────────────────────────────
 
@@ -77,6 +83,7 @@ export const SOURCE_CONFIDENCE: Record<TrafficResolveSource, number> = {
   'local-fresh': 0.85,
   'local-history': 0.6,
   p2p: 0.7,
+  open_feed: 0.75,
   tomtom: 0.9,
   none: 0,
 };

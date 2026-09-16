@@ -202,6 +202,75 @@ describe('resolveTrafficConditions cascade order', () => {
     expect(seed).toHaveBeenCalledWith([CELLS[2]]);
     expect(result.source).toBe('tomtom');
   });
+
+  it('uses the open feed before TomTom and skips TomTom when it resolves every cell', async () => {
+    const history = makeHistory();
+    const seed = jest.fn(async () => [] as NormalizedTrafficSegment[]);
+    const openFeed = jest.fn(async (cells: string[]) =>
+      cells.map((c) => makeTomTomSegment(c, 0.5)),
+    );
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      openFeed,
+      seedFromTomTom: seed,
+      indexObservations: async () => {},
+      p2pQuery: async () => [],
+    });
+
+    expect(openFeed).toHaveBeenCalledTimes(1);
+    expect(seed).not.toHaveBeenCalled();
+    expect(result.source).toBe('open_feed');
+    expect(result.unresolvedCells).toHaveLength(0);
+  });
+
+  it('falls through to TomTom for cells the open feed does not resolve', async () => {
+    const history = makeHistory();
+    const openFeed = jest.fn(async (cells: string[]) =>
+      cells.slice(0, 1).map((c) => makeTomTomSegment(c, 0.5)),
+    );
+    const seed = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.5)));
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      openFeed,
+      seedFromTomTom: seed,
+      indexObservations: async () => {},
+      p2pQuery: async () => [],
+    });
+
+    expect(seed).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
+    expect(result.source).toBe('tomtom');
+    expect(result.unresolvedCells).toHaveLength(0);
+  });
+
+  it('treats a failing open feed as no data and still reaches TomTom', async () => {
+    const history = makeHistory();
+    const openFeed = jest.fn(async () => {
+      throw new Error('feed down');
+    });
+    const seed = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.5)));
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      openFeed,
+      seedFromTomTom: seed,
+      indexObservations: async () => {},
+      p2pQuery: async () => [],
+    });
+
+    expect(result.source).toBe('tomtom');
+    expect(result.unresolvedCells).toHaveLength(0);
+  });
 });
 
 describe('observationsFromSegments', () => {

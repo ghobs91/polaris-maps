@@ -10,6 +10,7 @@ import { ParkingSpotCard } from '@/components/map/ParkingSpotCard';
 import { FloatingMenuPanel } from '@/components/map/FloatingMenuPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
+import { TrafficCoverageBadge } from '@/components/map/TrafficCoverageBadge';
 import { TransitStopCard } from '@/components/map/TransitStopCard';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
@@ -152,6 +153,19 @@ export default function MapScreen() {
             </View>
           </View>
 
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.coverageBadgeMount,
+              {
+                top: insets.top + spacing.sm,
+                left: spacing.md + LARGE_FLOATING_PANEL_WIDTH + LARGE_FLOATING_PANEL_GAP,
+              },
+            ]}
+          >
+            <TrafficCoverageBadge />
+          </View>
+
           <POIInfoCard />
           <TransitStopCard />
           <ParkingSpotCard />
@@ -181,6 +195,12 @@ export default function MapScreen() {
           onProfilePress={() => setShowNodeDrawer(true)}
           onLocatePress={handleLocate}
         />
+        <View
+          pointerEvents="box-none"
+          style={[styles.coverageBadgeMount, { top: insets.top + spacing.sm, left: spacing.md }]}
+        >
+          <TrafficCoverageBadge />
+        </View>
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <POIInfoCard />
         <TransitStopCard />
@@ -221,5 +241,9 @@ const styles = StyleSheet.create({
   },
   mapControlsSpacer: {
     // Space between profile button and map controls column
+  },
+  coverageBadgeMount: {
+    position: 'absolute',
+    zIndex: 15,
   },
 });

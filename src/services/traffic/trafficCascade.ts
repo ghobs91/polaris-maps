@@ -15,12 +15,14 @@ import { wireToEntry } from './p2pConditionWire';
  *
  * For each requested geohash5 cell (at a given time bucket) data is resolved
  * in this order — each tier only covers cells the earlier tiers missed, so
- * TomTom is only hit for cells that have no usable local or P2P data:
+ * the optional TomTom cold-start bridge is only hit for cells that have no
+ * usable local, P2P, or open-feed data:
  *
  *   1. local fresh       — observed within the current-fresh window
  *   2. local historical  — enough samples, within retention window
  *   3. p2p               — fresh data from connected Hyperswarm peers
- *   4. tomtom            — API seed (also written back into the index)
+ *   4. open feed         — free open traffic feed (511 / DATEX II / NDW)
+ *   5. tomtom            — optional cold-start seed (also written back into the index)
  */
 
 export interface CascadePoint {
@@ -37,6 +39,12 @@ export interface CascadeRequest {
   /** Sample points used to synthesize route/viewport segments. */
   points: CascadePoint[];
   history: TrafficHistoryService;
+  /**
+   * Optional free open-feed tier (511 / DATEX II / NDW): returns observed
+   * segments for cells still missing. Higher priority than the TomTom
+   * cold-start bridge; failures are treated as no data.
+   */
+  openFeed?: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
   /**
    * Seed function for the TomTom tier: returns observed segments for the
    * cells that still need data (may return segments for other cells too).
@@ -172,11 +180,39 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
       conditions.set(entry.geohash5, entry);
     }
     missing = missing.filter((c) => !conditions.has(c));
-    // P2P is a lower tier than TomTom but higher than local sources.
+    // P2P is a lower tier than the open feed and TomTom cold-start bridge.
     if (entries.length > 0) source = 'p2p';
   }
 
-  // Tier 4: TomTom seed
+  // Tier 4: free open traffic feeds (511 / DATEX II / NDW)
+  if (missing.length > 0 && typeof req.openFeed === 'function') {
+    const segments = await req.openFeed(missing).catch(() => [] as NormalizedTrafficSegment[]);
+    if (segments.length > 0) {
+      const observations = observationsFromSegments(segments, geohash5ForCoord);
+      await req.indexObservations(req.bucket, Array.from(observations.values()));
+
+      let resolvedAny = false;
+      for (const [cell, obs] of observations) {
+        if (!conditions.has(cell)) {
+          conditions.set(cell, {
+            geohash5: cell,
+            dayOfWeek: req.bucket.dayOfWeek,
+            halfHour: req.bucket.halfHour,
+            avgSpeedMph: Math.round(obs.avgSpeedMph * 10) / 10,
+            avgCongestionRatio: obs.avgCongestionRatio,
+            freeFlowSpeedMph: obs.freeFlowSpeedMph,
+            sampleCount: 1,
+            lastUpdated: Math.floor(Date.now() / 1000),
+          });
+          resolvedAny = true;
+        }
+      }
+      if (resolvedAny) source = 'open_feed';
+      missing = missing.filter((c) => !conditions.has(c));
+    }
+  }
+
+  // Tier 5: TomTom cold-start seed (optional)
   if (missing.length > 0) {
     const segments = await req.seedFromTomTom(missing);
     if (segments.length > 0) {

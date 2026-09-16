@@ -106,9 +106,9 @@ iOS local build/release workflow (Fastlane lanes, signing, TestFlight): see `doc
 ## Environment & Secrets
 
 - `.env` is **gitignored** (`.env` and `.env.*`, except `.env.example`). Never commit real keys.
-- Copy `.env.example` to `.env` for local development. Required public vars: `EXPO_PUBLIC_TOMTOM_API_KEY`, `EXPO_PUBLIC_HERE_API_KEY` (optional: `EXPO_PUBLIC_TOMTOM_PROXY_URL`).
-- Other `EXPO_PUBLIC_*` vars used in source: `EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL`, `EXPO_PUBLIC_MBTA_API_KEY`, `EXPO_PUBLIC_WMATA_API_KEY`, `EXPO_PUBLIC_MOBILITY_DB_API_KEY`, `EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN`, `EXPO_PUBLIC_OTP_BASE_URL`, `EXPO_PUBLIC_TRANSITOUS_BASE_URL`, `EXPO_PUBLIC_GEONAMES_DB_URL`, `EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL`, `EXPO_PUBLIC_REGION_CATALOG_URL`, `EXPO_PUBLIC_APPLE_MAPKIT_TOKEN`, `EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN`.
-- Server/script-side secrets (never in app code): `APPLE_KEY_ID`, `APPLE_TEAM_ID`, `APPLE_MAPKIT_PRIVATE_KEY(_PATH)`, `APPLE_MAPKIT_TTL_DAYS` (MapKit token generation); `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_PATH` (Fastlane); `MOBILITY_DATABASE_SERVICE_API_KEY`, `OPEN_CHARGE_MAP_API_KEY`, `VALHALLA_CONFIG_FILE`.
+- Copy `.env.example` to `.env` for local development. No public API key is required; optional: `EXPO_PUBLIC_TOMTOM_API_KEY` (bounded cold-start traffic bridge only) and `EXPO_PUBLIC_OPEN_TRAFFIC_FEEDS` (comma-separated free open feed URLs).
+- Other `EXPO_PUBLIC_*` vars used in source: `EXPO_PUBLIC_MBTA_API_KEY`, `EXPO_PUBLIC_WMATA_API_KEY`, `EXPO_PUBLIC_MOBILITY_DB_API_KEY`, `EXPO_PUBLIC_MOBILITY_DB_REFRESH_TOKEN`, `EXPO_PUBLIC_OTP_BASE_URL`, `EXPO_PUBLIC_TRANSITOUS_BASE_URL`, `EXPO_PUBLIC_GEONAMES_DB_URL`, `EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL`, `EXPO_PUBLIC_REGION_CATALOG_URL`.
+- Server/script-side secrets (never in app code): `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_PATH` (Fastlane); `MOBILITY_DATABASE_SERVICE_API_KEY`, `OPEN_CHARGE_MAP_API_KEY`, `VALHALLA_CONFIG_FILE`.
 - CI stores these as GitHub Actions secrets (see `.github/workflows/ios-testflight.yml`).
 
 ## Git / PR Rules

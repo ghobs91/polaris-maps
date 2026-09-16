@@ -83,7 +83,7 @@ describe('mergeTrafficSources', () => {
       source: 'tomtom',
     });
     const here = makeSegment({
-      id: 'here:overlap',
+      id: 'open_feed:overlap',
       // Nearby coordinates (within 30m)
       coordinates: [
         [-74.006, 40.7128],
@@ -92,7 +92,7 @@ describe('mergeTrafficSources', () => {
       currentSpeedMph: 40,
       freeFlowSpeedMph: 55,
       confidence: 0.85,
-      source: 'here',
+      source: 'open_feed',
     });
     const merged = mergeTrafficSources([tomtom, here]);
     // Overlapping segments should be merged
@@ -101,7 +101,7 @@ describe('mergeTrafficSources', () => {
     expect(merged.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('merges three sources (TomTom + HERE + P2P)', () => {
+  it('merges three sources (TomTom + open feed + P2P)', () => {
     const tomtom = makeSegment({
       id: 'tomtom:seg1',
       coordinates: [
@@ -113,14 +113,14 @@ describe('mergeTrafficSources', () => {
       source: 'tomtom',
     });
     const here = makeSegment({
-      id: 'here:seg1',
+      id: 'open_feed:seg1',
       coordinates: [
         [-74.006, 40.7128],
         [-74.005, 40.7138],
       ],
       currentSpeedMph: 35,
       confidence: 0.85,
-      source: 'here',
+      source: 'open_feed',
     });
     const p2p = makeSegment({
       id: 'p2p:seg1',
@@ -146,13 +146,13 @@ describe('mergeTrafficSources', () => {
       source: 'tomtom',
     });
     const here = makeSegment({
-      id: 'here:far2',
+      id: 'open_feed:far2',
       // Very far away — definitely not overlapping
       coordinates: [
         [-73.9, 40.8],
         [-73.899, 40.801],
       ],
-      source: 'here',
+      source: 'open_feed',
     });
     const merged = mergeTrafficSources([tomtom, here]);
     expect(merged).toHaveLength(2);
@@ -166,13 +166,13 @@ describe('mergeTrafficSources', () => {
       source: 'tomtom',
     });
     const stale = makeSegment({
-      id: 'here:stale',
+      id: 'open_feed:stale',
       timestamp: now - 3600, // 1 hour old
-      source: 'here',
+      source: 'open_feed',
     });
     const merged = mergeTrafficSources([fresh, stale], now - 600);
     // Stale segment (older than previousMergeTimestamp) should be discarded
-    expect(merged.some((s) => s.id === 'here:stale')).toBe(false);
+    expect(merged.some((s) => s.id === 'open_feed:stale')).toBe(false);
     expect(merged.some((s) => s.id === 'tomtom:fresh' || s.id.includes('merged'))).toBe(true);
   });
 });

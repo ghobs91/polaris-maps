@@ -45,21 +45,19 @@ Gun.js sync → other peers
 
 ## Files
 
-| File                       | Description                                                                                                                                                                      |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `osmFetcher.ts`            | Overpass API client — fetches nodes/ways by viewport, name regex, or tags. 5-min TTL bbox cache (max 20 entries). Also provides Nominatim fallback.                              |
-| `poiService.ts`            | Local SQLite queries — `getPlacesInBounds()`, `searchPlacesByCategory()`, `searchPlacesFts()` on the Overture places table.                                                      |
-| `overtureFetcher.ts`       | Client-side Overture PMTiles reader that fetches visible vector tiles directly from Overture's hosted `places.pmtiles` archive.                                                  |
-| `categorySearchService.ts` | Category search orchestrator — resolves query to categories, queries local SQLite first, falls back to Overpass if <5 local results, deduplicates and ranks.                     |
-| `categoryResolver.ts`      | Maps natural-language category terms to `PlaceCategory` enum values with synonym support.                                                                                        |
-| `mapkitFetcher.ts`         | Apple MapKit native iOS bridge for place search and coordinate-based lookups.                                                                                                    |
-| `poiEnricher.ts`           | Enriches selected POIs from MapKit — fills phone, website, formatted address, timezone, hours, logo. OSM fields take priority; only fills missing data. LRU cache (500 entries). |
-| `placeDetailEmbed.ts`      | Builds the URL for the hosted MapKit JS `PlaceDetail` page (Apple's place card with photos & reviews) embedded inline in the POI card via WebView.                               |
-| `websitePhotosService.ts`  | Hybrid website-photo extraction — fetch + OpenGraph parse first, hidden on-device WebView fallback for JS-rendered sites.                                                        |
-| `editService.ts`           | Submits field-level POI edits signed with user's keypair. Published to Gun.js for peer corroboration/dispute. Pending → resolved workflow.                                       |
-| `reviewService.ts`         | POI reviews (1–5 star + text) stored in local SQLite and synced to Gun.js. Keyed by place UUID + author pubkey.                                                                  |
-| `attestationService.ts`    | Cryptographic proof-of-presence — verifies GPS proximity ≤100m, signs attestation with Schnorr keypair.                                                                          |
-| `reputationService.ts`     | Reads/writes user reputation scores from Gun.js with signature verification. Composite of POI contributions, confirmations, and traffic probe accuracy.                          |
+| File                       | Description                                                                                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `osmFetcher.ts`            | Overpass API client — fetches nodes/ways by viewport, name regex, or tags. 5-min TTL bbox cache (max 20 entries). Also provides Nominatim fallback.                                                                                                                 |
+| `poiService.ts`            | Local SQLite queries — `getPlacesInBounds()`, `searchPlacesByCategory()`, `searchPlacesFts()` on the Overture places table.                                                                                                                                         |
+| `overtureFetcher.ts`       | Client-side Overture PMTiles reader that fetches visible vector tiles directly from Overture's hosted `places.pmtiles` archive.                                                                                                                                     |
+| `categorySearchService.ts` | Category search orchestrator — resolves query to categories, queries local SQLite first, falls back to Overpass if <5 local results, deduplicates and ranks.                                                                                                        |
+| `categoryResolver.ts`      | Maps natural-language category terms to `PlaceCategory` enum values with synonym support.                                                                                                                                                                           |
+| `poiEnricher.ts`           | Optional on-device enrichment from native Apple MapKit (iOS) — fills phone, website, formatted address, timezone, hours, logo. OSM fields take priority; only fills missing data. LRU cache (500 entries). Gracefully no-ops when the native module is unavailable. |
+| `websitePhotosService.ts`  | Primary place-media source — fetch + OpenGraph parse first, hidden on-device WebView fallback for JS-rendered sites.                                                                                                                                                |
+| `editService.ts`           | Submits field-level POI edits signed with user's keypair. Published to Gun.js for peer corroboration/dispute. Pending → resolved workflow.                                                                                                                          |
+| `reviewService.ts`         | POI reviews (1–5 star + text) stored in local SQLite and synced to Gun.js. Keyed by place UUID + author pubkey.                                                                                                                                                     |
+| `attestationService.ts`    | Cryptographic proof-of-presence — verifies GPS proximity ≤100m, signs attestation with Schnorr keypair.                                                                                                                                                             |
+| `reputationService.ts`     | Reads/writes user reputation scores from Gun.js with signature verification. Composite of POI contributions, confirmations, and traffic probe accuracy.                                                                                                             |
 
 ## Key Constants
 
@@ -82,7 +80,5 @@ Gun.js sync → other peers
 - [`src/components/map/POILayer.tsx`](../../components/map/POILayer.tsx) — Map pill badge rendering
 - [`src/stores/osmPoiStore.ts`](../../stores/osmPoiStore.ts) — Viewport POIs, selected POI, enrichment, category search
 - [`src/stores/poiStore.ts`](../../stores/poiStore.ts) — Overture/local places, reviews, pending edits
-- [`src/components/map/PlaceDetailEmbed.tsx`](../../components/map/PlaceDetailEmbed.tsx) — Inline "Photos & Reviews" section powered by the MapKit JS PlaceDetail embed
-- [`src/components/map/WebsitePhotosCarousel.tsx`](../../components/map/WebsitePhotosCarousel.tsx) — "From the web" carousel above the embed, sourced from the POI website's OpenGraph metadata
-- [`netlify-deploy/place-detail.html`](../../../netlify-deploy/place-detail.html) — Hosted page that renders Apple's place card (uses a portal-issued MapKit JS token restricted to the Netlify domain)
+- [`src/components/map/WebsitePhotosCarousel.tsx`](../../components/map/WebsitePhotosCarousel.tsx) — Primary place-media carousel, sourced on-device from the POI website's OpenGraph metadata
 - [`app/poi/`](../../../app/poi/) — POI detail, edit, OSM edit, and review screens

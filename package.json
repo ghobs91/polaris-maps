@@ -29,7 +29,6 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "typecheck": "tsc --noEmit",
     "swarm:bundle": "npx bare-pack --host ios --host android --linked --imports backend/imports.cjs backend/traffic-swarm.mjs -o backend/traffic-swarm.bundle.mjs",
-    "mapkit:token": "node scripts/generate-mapkit-token.mjs",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "prebuild": "expo prebuild --clean",
     "postinstall": "node scripts/patch-atproto-oauth.mjs",

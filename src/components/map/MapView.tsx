@@ -15,7 +15,6 @@ import { useParkingStore } from '../../stores/parkingStore';
 import { fetchOsmPois, fetchNominatimPois } from '../../services/poi/osmFetcher';
 import { getPlacesInBounds } from '../../services/poi/poiService';
 import { fetchOverturePlaces } from '../../services/poi/overtureFetcher';
-import { fetchAppleMapsPois } from '../../services/poi/mapkitFetcher';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -28,6 +27,7 @@ import {
 import { onViewportChange } from '../../services/traffic/topicManager';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
+import { IncidentLayer } from './IncidentLayer';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
 import { resolveMapStyle, setLayerVisibilityInStyle } from './mapStyleResolver';
 import {
@@ -525,7 +525,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           // buildings (strip malls, office parks, etc.) that OSM often misses.
           const isStreetLevel = zoom >= 17;
           const skipOnlineOverture = !isStreetLevel && cachedPlaces.length >= 20;
-          const [osmPois, onlineOverture, nominatimPois, applePois] = await Promise.all([
+          const [osmPois, onlineOverture, nominatimPois] = await Promise.all([
             fetchOsmPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
               () => [] as OsmPoi[],
             ),
@@ -539,11 +539,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                   () => [] as OsmPoi[],
                 )
               : ([] as OsmPoi[]),
-            isStreetLevel
-              ? fetchAppleMapsPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
-                  () => [] as OsmPoi[],
-                )
-              : ([] as OsmPoi[]),
           ]);
           if (controller.signal.aborted) {
             if (__DEV__) console.warn('[POI] aborted after phase2');
@@ -552,12 +547,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
           if (__DEV__)
             console.warn(
-              `[POI] phase1=${cachedOverturePois.length} osm=${osmPois.length} overture=${onlineOverture.length} nominatim=${nominatimPois.length} apple=${applePois.length}`,
+              `[POI] phase1=${cachedOverturePois.length} osm=${osmPois.length} overture=${onlineOverture.length} nominatim=${nominatimPois.length}`,
             );
           let merged = deduplicatePois([
             ...cachedOverturePois,
             ...onlineOverture,
-            ...applePois,
             ...osmPois,
             ...nominatimPois,
           ]);
@@ -986,6 +980,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         <TransitLayer />
 
         <POILayer />
+
+        <IncidentLayer />
       </MapLibreGL.MapView>
     </View>
   );

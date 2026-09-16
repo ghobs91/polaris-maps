@@ -40,7 +40,9 @@ describe('buildOfflineStyle', () => {
       sources: {
         satellite: {
           type: 'raster',
-          tiles: ['https://server.arcgisonline.com/.../{z}/{y}/{x}'],
+          tiles: [
+            'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+          ],
           tileSize: 256,
         },
         openmaptiles: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' },

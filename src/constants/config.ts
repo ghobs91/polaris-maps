@@ -18,50 +18,21 @@ export const MAP_STYLE_URL_DARK =
 /** OpenFreeMap TileJSON endpoint for the planet vector tile source. */
 export const OPENFREEMAP_TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
 
-/** TomTom Traffic Flow API base URL. */
+/** TomTom Traffic Flow API base URL (bounded cold-start bridge only). */
 export const TOMTOM_FLOW_BASE_URL =
   'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute';
-
-/** HERE Traffic Flow v7 API base URL. */
-export const HERE_FLOW_BASE_URL = 'https://data.traffic.hereapi.com/v7/flow';
 
 /** TomTom Traffic Flow raster tile base URL. */
 export const TOMTOM_FLOW_TILES_BASE_URL = 'https://api.tomtom.com/traffic/map/4/tile/flow/absolute';
 
-/** TomTom API key — set EXPO_PUBLIC_TOMTOM_API_KEY in .env */
+/**
+ * TomTom API key — set EXPO_PUBLIC_TOMTOM_API_KEY in .env.
+ *
+ * TomTom is an optional, lowest-priority cold-start bridge so traffic works
+ * before the P2P network and free open feeds are dense enough. It is never
+ * required; when absent, higher tiers (P2P, open feeds) serve traffic.
+ */
 export const tomtomApiKey: string = process.env.EXPO_PUBLIC_TOMTOM_API_KEY ?? '';
-
-/** HERE API key — set EXPO_PUBLIC_HERE_API_KEY in .env */
-export const hereApiKey: string = process.env.EXPO_PUBLIC_HERE_API_KEY ?? '';
-
-/** Apple MapKit JS token — set EXPO_PUBLIC_APPLE_MAPKIT_TOKEN in .env */
-export const appleMapkitToken: string = process.env.EXPO_PUBLIC_APPLE_MAPKIT_TOKEN ?? '';
-
-/**
- * URL of the hosted MapKit JS PlaceDetail page that renders Apple's place card
- * (photos & reviews) for inline embedding in the POI card.
- *
- * Set EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL in .env to the deployed location of
- * netlify-deploy/place-detail.html, e.g.
- * `https://polaris-maps-bsky-auth.netlify.app/place-detail.html`.
- */
-export const mapkitPlaceDetailUrl: string = process.env.EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL ?? '';
-
-/**
- * MapKit JS token for the inline PlaceDetail embed.
- *
- * This is a portal-issued token, not the Server API JWT:
- * developer.apple.com/account → Certificates, IDs & Profiles → Services →
- * Maps → Configure → Tokens → + → Token Type: MapKit JS, Restriction Type:
- * Domain, Websites: polaris-maps-bsky-auth.netlify.app.
- *
- * (A self-signed JWT also works if it carries `scope: "mapkit_js"` and an
- * `origin` claim — scripts/generate-mapkit-token.mjs doesn't add those, so
- * the Server API token can't be reused for this.)
- *
- * Set EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN in .env.
- */
-export const mapkitJsEmbedToken: string = process.env.EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN ?? '';
 
 /** Debounce delay (ms) for viewport-triggered traffic fetches. */
 export const TRAFFIC_FETCH_DEBOUNCE_MS = 800;

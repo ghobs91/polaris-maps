@@ -28,7 +28,11 @@ Turn-by-turn directions via [Valhalla](https://github.com/valhalla/valhalla) wit
 
 ### Live Traffic
 
-Color-coded congestion overlays fused from three sources: TomTom, HERE, and crowd-sourced speed probes broadcast by nearby peers. Your phone passively contributes anonymous speed data on geohash topic channels; the network merges it all into a unified picture. When congestion adds 25%+ delay to your route, Polaris reroutes automatically.
+Color-coded congestion overlays fused from TomTom traffic flow and crowd-sourced speed probes broadcast by nearby peers. Once you've completed onboarding and left traffic telemetry on, your phone contributes anonymous speed data on geohash topic channels; the network merges it all into a unified picture. When significant congestion builds up ahead on your route, Polaris reroutes automatically.
+
+### Incident Reporting
+
+Report accidents, road closures, hazards, construction, police, and other incidents. Reports are Schnorr-signed, shared over the peer mesh (with a Nostr relay fallback), verified and de-duplicated by receivers, and shown as map markers plus a non-blocking warning ahead when you're navigating. Offline reports are queued and replayed when connectivity returns.
 
 ### Places & POI
 
@@ -142,28 +146,29 @@ All outbound actions (probes, edits, reviews) are queued in MMKV (capped at 500 
 │  Gun.js          → CRDT sync   (edits, reviews, rep)     │
 ├─────────────────────────────────────────────────────────┤
 │  External APIs (fallback / enrichment)                   │
-│  TomTom · HERE · Valhalla · Overpass · Nominatim         │
-│  Photon · MapKit · OTP · MBTA · Amtrak · Nostr           │
+│  P2P peers · open feeds · TomTom (cold-start)            │
+│  Valhalla · Overpass · Nominatim · Photon · Nostr        │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### Tech Stack
 
-| Layer      | Technology                                                 |
-| ---------- | ---------------------------------------------------------- |
-| Framework  | React Native 0.86.0 + Expo SDK 57 (bare workflow)          |
-| Language   | TypeScript ~6.0.3 (strict)                                 |
-| Navigation | Expo Router (SDK 57) + React Navigation 7                  |
-| Maps       | MapLibre React Native 10 + OpenFreeMap tiles               |
-| State      | Zustand 5                                                  |
-| Storage    | expo-sqlite (FTS5) · react-native-mmkv · expo-secure-store |
-| Identity   | @noble/curves secp256k1 · @noble/hashes SHA-256            |
-| P2P        | Hyperswarm · Hyperdrive · Hypercore · Gun.js               |
-| Traffic    | TomTom Traffic Flow v4 · HERE Traffic Flow v7              |
-| Routing    | Valhalla (online + offline graph tiles)                    |
-| Geocoding  | FTS5 local · Photon · Nominatim                            |
-| Transit    | OpenTripPlanner · MBTA V3 · Amtrak BTS                     |
-| Testing    | Jest 29 · @testing-library/react-native 13                 |
+| Layer      | Technology                                                  |
+| ---------- | ----------------------------------------------------------- |
+| Framework  | React Native 0.86.0 + Expo SDK 57 (bare workflow)           |
+| Language   | TypeScript ~6.0.3 (strict)                                  |
+| Navigation | Expo Router (SDK 57) + React Navigation 7                   |
+| Maps       | MapLibre React Native 10 + OpenFreeMap tiles                |
+| Imagery    | USGS NAIP · Sentinel-2 cloudless (EOX)                      |
+| State      | Zustand 5                                                   |
+| Storage    | expo-sqlite (FTS5) · react-native-mmkv · expo-secure-store  |
+| Identity   | @noble/curves secp256k1 · @noble/hashes SHA-256             |
+| P2P        | Hyperswarm · Hyperdrive · Hypercore · Gun.js                |
+| Traffic    | P2P probes · free open feeds · TomTom (optional cold-start) |
+| Routing    | Valhalla (online + offline graph tiles)                     |
+| Geocoding  | FTS5 local · Photon · Nominatim                             |
+| Transit    | OpenTripPlanner · MBTA V3 · Amtrak BTS                      |
+| Testing    | Jest 29 · @testing-library/react-native 13                  |
 
 ---
 
@@ -199,9 +204,10 @@ pnpm start        # Metro bundler only
 Create a `.env` file in the project root (never commit):
 
 ```env
-EXPO_PUBLIC_TOMTOM_API_KEY=your_tomtom_key
-EXPO_PUBLIC_HERE_API_KEY=your_here_key
-EXPO_PUBLIC_TOMTOM_PROXY_URL=https://your-proxy-server/tomtom   # optional
+# Optional — TomTom is a bounded cold-start traffic bridge only.
+EXPO_PUBLIC_TOMTOM_API_KEY=
+# Optional — free open traffic feeds (comma-separated URLs).
+# EXPO_PUBLIC_OPEN_TRAFFIC_FEEDS=https://example.gov/traffic.json
 ```
 
 ### Testing

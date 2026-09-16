@@ -22,7 +22,11 @@ import {
   getConnectedRelayCount,
 } from './nostrFallback';
 import { ingestProbe } from './trafficAggregator';
-import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../constants/config';
+import {
+  TRAFFIC_FETCH_DEBOUNCE_MS,
+  TRAFFIC_REFRESH_INTERVAL_MS,
+  tomtomApiKey,
+} from '../../constants/config';
 import { getTrafficHistory, geohash5For, geohash5CellsForBounds } from './trafficHistoryIndex';
 import { currentTimeBucket, bucketLabel } from './trafficTimeBuckets';
 import { resolveTrafficConditions, type CascadePoint } from './trafficCascade';
@@ -39,6 +43,7 @@ import {
   pruneTileCache,
 } from './trafficTileService';
 import { tilesForViewport } from './trafficTileMath';
+import { fetchOpenTrafficSegments, type FeedBounds } from './openTrafficFeed';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -148,8 +153,12 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       bucket,
       points,
       history: getTrafficHistory(),
+      openFeed: () => fetchOpenTrafficSegments(viewport),
+      // TomTom is the optional cold-start bridge: only queried when configured.
       seedFromTomTom: () =>
-        fetchTomTomTraffic(viewport).catch(() => [] as NormalizedTrafficSegment[]),
+        tomtomApiKey
+          ? fetchTomTomTraffic(viewport).catch(() => [] as NormalizedTrafficSegment[])
+          : Promise.resolve([] as NormalizedTrafficSegment[]),
       indexObservations: (b, obs) => getTrafficHistory().recordObservations(b, obs),
     });
 
@@ -189,6 +198,22 @@ function viewportToBounds(viewport: { lat: number; lng: number; zoom: number }):
     north: viewport.lat + latSpan / 2,
     zoom: viewport.zoom,
   };
+}
+
+/** Bounding box around a route polyline (degrees). */
+function boundsFromCoords(coords: [number, number][]): FeedBounds {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const [lng, lat] of coords) {
+    if (lng < west) west = lng;
+    if (lng > east) east = lng;
+    if (lat < south) south = lat;
+    if (lat > north) north = lat;
+  }
+  if (!Number.isFinite(west)) return { west: 0, south: 0, east: 0, north: 0 };
+  return { west, south, east, north };
 }
 
 /**
@@ -267,9 +292,10 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       bucket,
       points,
       history: getTrafficHistory(),
-      // TomTom tier: sample colors from the flow raster tiles (same source
-      // as the traffic overlay) instead of the point-based Flow Segment API.
-      seedFromTomTom: () => sampleRouteTileColors(routeCoords),
+      openFeed: () => fetchOpenTrafficSegments(boundsFromCoords(routeCoords)),
+      // TomTom cold-start: only queried when its key is configured.
+      seedFromTomTom: () =>
+        tomtomApiKey ? sampleRouteTileColors(routeCoords) : Promise.resolve([]),
       indexObservations: (b, obs) => getTrafficHistory().recordObservations(b, obs),
     });
 

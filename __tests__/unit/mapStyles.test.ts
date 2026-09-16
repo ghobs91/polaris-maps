@@ -151,11 +151,14 @@ describe('satelliteStyle', () => {
     expect(style.layers.length).toBeGreaterThan(0);
   });
 
-  it('should include a raster satellite source', () => {
+  it('should include a raster satellite source from free providers', () => {
     expect(style.sources.satellite).toBeDefined();
     expect(style.sources.satellite.type).toBe('raster');
-    expect(style.sources.satellite.tiles).toHaveLength(1);
-    expect(style.sources.satellite.tiles[0]).toContain('World_Imagery');
+    expect(style.sources.satellite.tiles).toHaveLength(2);
+    expect(style.sources.satellite.tiles[0]).toContain('nationalmap');
+    expect(style.sources.satellite.tiles[1]).toContain('s2cloudless');
+    expect(style.sources.satellite.attribution).toContain('USGS');
+    expect(style.sources.satellite.attribution).toContain('EOX');
   });
 
   it('should include vector source for labels', () => {

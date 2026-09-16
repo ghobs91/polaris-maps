@@ -2,6 +2,7 @@ import React from 'react';
 import { View as MockView } from 'react-native';
 import { render } from '@testing-library/react-native';
 import { useMapStore } from '../../src/stores/mapStore';
+import { useTrafficStore } from '../../src/stores/trafficStore';
 
 // ── Mock external dependencies ─────────────────────────────────────
 
@@ -13,6 +14,13 @@ jest.mock('../../src/constants/config', () => ({
     return mockTomtomApiKey;
   },
   TOMTOM_FLOW_TILES_BASE_URL: 'https://api.tomtom.com/traffic/map/4/tile/flow/absolute',
+}));
+
+// Control whether the local P2P/disk tile server is up.
+let mockLocalTemplate: string | null = null;
+
+jest.mock('../../src/services/traffic/trafficTileService', () => ({
+  getTrafficTileUrlTemplate: () => mockLocalTemplate,
 }));
 
 jest.mock('@maplibre/maplibre-react-native', () => ({
@@ -30,24 +38,20 @@ jest.mock('@maplibre/maplibre-react-native', () => ({
     tileSize: number;
     minZoomLevel: number;
     maxZoomLevel: number;
-  }) => {
-    return (
-      <MockView
-        testID="tomtom-traffic-source"
-        accessibilityLabel={`src:${id} url:${tileUrlTemplates[0]} size:${tileSize} minz:${minZoomLevel} maxz:${maxZoomLevel}`}
-      >
-        {children}
-      </MockView>
-    );
-  },
-  RasterLayer: ({ id, style }: { id: string; style: Record<string, unknown> }) => {
-    return (
-      <MockView
-        testID="tomtom-traffic-layer"
-        accessibilityLabel={`layer:${id} opacity:${style.rasterOpacity}`}
-      />
-    );
-  },
+  }) => (
+    <MockView
+      testID="traffic-source"
+      accessibilityLabel={`src:${id} url:${tileUrlTemplates[0]} size:${tileSize} minz:${minZoomLevel} maxz:${maxZoomLevel}`}
+    >
+      {children}
+    </MockView>
+  ),
+  RasterLayer: ({ id, style }: { id: string; style: Record<string, unknown> }) => (
+    <MockView
+      testID="traffic-layer"
+      accessibilityLabel={`layer:${id} opacity:${style.rasterOpacity}`}
+    />
+  ),
 }));
 
 // Import after mocks
@@ -59,18 +63,12 @@ function setTrafficVisible(visible: boolean) {
   useMapStore.setState({ trafficLayerVisible: visible });
 }
 
-function setApiKey(key: string) {
-  mockTomtomApiKey = key;
-}
-
-/** Extract a labelled value from the accessibilityLabel of a test instance. */
 function getAccessibilityLabelValue(
   instance: { props: { accessibilityLabel?: string } },
   key: string,
 ): string | undefined {
   const label: string = instance.props.accessibilityLabel ?? '';
-  const regex = new RegExp(`${key}:([^ ]+)`);
-  const match = label.match(regex);
+  const match = label.match(new RegExp(`${key}:([^ ]+)`));
   return match?.[1];
 }
 
@@ -78,91 +76,69 @@ function getAccessibilityLabelValue(
 
 describe('TrafficOverlay', () => {
   beforeEach(() => {
-    // Reset to defaults
-    setApiKey('test-api-key');
+    mockTomtomApiKey = 'test-api-key';
+    mockLocalTemplate = null;
     useMapStore.setState({ trafficLayerVisible: false });
+    useTrafficStore.setState({ trafficTileSeedVersion: 0 });
   });
 
-  describe('when no API key is configured', () => {
-    it('renders nothing (returns null)', () => {
-      setApiKey('');
+  it('renders nothing when no TomTom key is configured and the local server is down', () => {
+    mockTomtomApiKey = '';
 
-      const { queryByTestId } = render(<TrafficOverlay />);
+    const { queryByTestId } = render(<TrafficOverlay />);
 
-      expect(queryByTestId('tomtom-traffic-source')).toBeNull();
-      expect(queryByTestId('tomtom-traffic-layer')).toBeNull();
-    });
+    expect(queryByTestId('traffic-source')).toBeNull();
+    expect(queryByTestId('traffic-layer')).toBeNull();
   });
 
-  describe('when an API key is configured', () => {
-    it('renders the RasterSource and RasterLayer', () => {
-      setTrafficVisible(true);
+  it('renders nothing while the traffic layer is toggled off (no wasted tile fetches)', () => {
+    const { queryByTestId } = render(<TrafficOverlay />);
+    expect(queryByTestId('traffic-source')).toBeNull();
+  });
 
-      const { getByTestId } = render(<TrafficOverlay />);
+  it('renders the TomTom cold-start source and layer when visible', () => {
+    setTrafficVisible(true);
 
-      expect(getByTestId('tomtom-traffic-source')).toBeTruthy();
-      expect(getByTestId('tomtom-traffic-layer')).toBeTruthy();
-    });
+    const { getByTestId } = render(<TrafficOverlay />);
 
-    it('passes the TomTom tile URL to RasterSource', () => {
-      setTrafficVisible(true);
-      setApiKey('my-secret-key');
+    expect(getByTestId('traffic-source')).toBeTruthy();
+    expect(getByTestId('traffic-layer')).toBeTruthy();
+    expect(getAccessibilityLabelValue(getByTestId('traffic-layer'), 'opacity')).toBe('0.7');
+  });
 
-      const { getByTestId } = render(<TrafficOverlay />);
+  it('passes the TomTom cold-start tile URL and tile parameters', () => {
+    setTrafficVisible(true);
+    mockTomtomApiKey = 'my-secret-key';
 
-      const source = getByTestId('tomtom-traffic-source');
-      const url = getAccessibilityLabelValue(source, 'url');
-      expect(url).toContain('key=my-secret-key');
-      expect(url).toContain('tileSize=256');
-      expect(url).toContain('thickness=3');
-    });
+    const { getByTestId } = render(<TrafficOverlay />);
 
-    it('uses tileSize=256, minZoom=6, maxZoom=18', () => {
-      setTrafficVisible(true);
+    const source = getByTestId('traffic-source');
+    const url = getAccessibilityLabelValue(source, 'url') ?? '';
+    expect(url).toContain('key=my-secret-key');
+    expect(url).toContain('tileSize=256');
+    expect(url).toContain('thickness=3');
+    expect(getAccessibilityLabelValue(source, 'size')).toBe('256');
+    expect(getAccessibilityLabelValue(source, 'minz')).toBe('6');
+    expect(getAccessibilityLabelValue(source, 'maxz')).toBe('18');
+  });
 
-      const { getByTestId } = render(<TrafficOverlay />);
+  it('renders nothing when the raster is suppressed', () => {
+    setTrafficVisible(true);
 
-      const source = getByTestId('tomtom-traffic-source');
-      expect(getAccessibilityLabelValue(source, 'size')).toBe('256');
-      expect(getAccessibilityLabelValue(source, 'minz')).toBe('6');
-      expect(getAccessibilityLabelValue(source, 'maxz')).toBe('18');
-    });
+    const { queryByTestId } = render(<TrafficOverlay suppressRaster={true} />);
 
-    it('sets raster opacity to 0.7 when traffic is visible and not suppressed', () => {
-      setTrafficVisible(true);
+    expect(queryByTestId('traffic-source')).toBeNull();
+  });
 
-      const { getByTestId } = render(<TrafficOverlay suppressRaster={false} />);
+  it('prefers the local P2P tile server over TomTom and cache-busts by seed version', () => {
+    setTrafficVisible(true);
+    mockLocalTemplate = 'http://127.0.0.1:51234/traffic';
+    useTrafficStore.setState({ trafficTileSeedVersion: 3 });
 
-      const layer = getByTestId('tomtom-traffic-layer');
-      expect(getAccessibilityLabelValue(layer, 'opacity')).toBe('0.7');
-    });
+    const { getByTestId } = render(<TrafficOverlay />);
 
-    it('sets raster opacity to 0 when traffic is toggled off', () => {
-      setTrafficVisible(false);
-
-      const { getByTestId } = render(<TrafficOverlay />);
-
-      const layer = getByTestId('tomtom-traffic-layer');
-      expect(getAccessibilityLabelValue(layer, 'opacity')).toBe('0');
-    });
-
-    it('sets raster opacity to 0 when suppressRaster is true (even when visible)', () => {
-      setTrafficVisible(true);
-
-      const { getByTestId } = render(<TrafficOverlay suppressRaster={true} />);
-
-      const layer = getByTestId('tomtom-traffic-layer');
-      expect(getAccessibilityLabelValue(layer, 'opacity')).toBe('0');
-    });
-
-    it('still renders (not null) when traffic is off — just at opacity 0', () => {
-      setTrafficVisible(false);
-
-      const { getByTestId } = render(<TrafficOverlay />);
-
-      // Component should still render (not return null) — opacity handles visibility
-      expect(getByTestId('tomtom-traffic-source')).toBeTruthy();
-      expect(getByTestId('tomtom-traffic-layer')).toBeTruthy();
-    });
+    const url = getAccessibilityLabelValue(getByTestId('traffic-source'), 'url') ?? '';
+    expect(url.startsWith('http://127.0.0.1:51234/traffic')).toBe(true);
+    expect(url).toContain('v=3');
   });
 });

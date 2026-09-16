@@ -1,8 +1,11 @@
 /**
  * MapLibre style for satellite/aerial imagery layer.
  *
- * Uses USGS/Esri World Imagery raster tiles. These are freely available
- * for non-commercial and educational use.
+ * Uses free/open imagery only:
+ *   - USGS The National Map orthoimagery (NAIP) for high-resolution US coverage
+ *     (public domain), tried first.
+ *   - EOx Sentinel-2 cloudless for global coverage (CC BY-SA / EOx terms),
+ *     used as the fallback where NAIP has no data.
  *
  * The style overlays OpenFreeMap vector labels on top of raster imagery
  * so road names, places, and boundaries remain readable.
@@ -15,10 +18,11 @@ const style = {
     satellite: {
       type: 'raster' as const,
       tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+        'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',
       ],
       tileSize: 256,
-      attribution: 'Esri, Maxar, Earthstar Geographics',
+      attribution: 'Imagery: USGS The National Map (NAIP) · Sentinel-2 cloudless by EOX',
       maxzoom: 19,
     },
     openmaptiles: {
