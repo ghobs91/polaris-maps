@@ -1,11 +1,8 @@
 import { getDatabase } from '../database/init';
-import { sleepWithAbort, throwIfAborted, withTimeout } from '../search/abortUtils';
+import { throwIfAborted, withTimeout } from '../search/abortUtils';
+import { nominatimThrottle } from '../search/requestThrottle';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { OsmPoi } from '../poi/osmFetcher';
-
-/** Nominatim requires max 1 request per second per their usage policy. */
-const NOMINATIM_MIN_INTERVAL_MS = 1_000;
-let _lastNominatimRequestAt = 0;
 
 export interface GeocodingResult {
   entry: GeocodingEntry;
@@ -31,7 +28,7 @@ export async function searchAddress(
   if (!query.trim()) return [];
 
   // Try local DB first — gracefully fall through to Nominatim on any error
-  const localResults = await searchAddressLocal(query, limit).catch(() => []);
+  const localResults = await searchAddressLocal(query, limit, lat, lng).catch(() => []);
   if (localResults.length > 0 || opts?.localOnly) return localResults;
   throwIfAborted(opts?.signal);
 
@@ -39,31 +36,56 @@ export async function searchAddress(
   return searchAddressNominatim(query, limit, lat, lng, opts?.signal);
 }
 
-async function searchAddressLocal(query: string, limit: number): Promise<GeocodingResult[]> {
-  const db = await getDatabase();
+// ---------------------------------------------------------------------------
+// Structured local address query
+// ---------------------------------------------------------------------------
 
-  // FTS5 match query — add * for prefix matching
-  // Strip double-quotes to prevent FTS5 syntax injection
-  const ftsQuery = query
-    .trim()
-    .split(/\s+/)
-    .map((w) => `"${w.replace(/"/g, '')}"*`)
-    .join(' ');
+export interface StructuredAddressQuery {
+  housenumber?: string;
+  street?: string;
+  city?: string;
+}
 
-  if (!ftsQuery.replace(/["* ]/g, '')) return [];
+/**
+ * Best-effort classification of an address query into structured components.
+ * Handles "350 fifth avenue, new york" and "123 main st brooklyn" shapes.
+ */
+export function classifyAddressQuery(query: string): StructuredAddressQuery {
+  const segments = query
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return {};
 
-  const rows = await db.getAllAsync<GeocodingRow>(
-    `SELECT g.id, g.type, g.housenumber, g.street, g.city, g.state, g.postcode, g.country,
-            g.lat, g.lng, e.rank
-     FROM geocoding_entries e
-     JOIN geocoding_data g ON g.id = e.rowid
-     WHERE geocoding_entries MATCH ?
-     ORDER BY e.rank
-     LIMIT ?`,
-    [ftsQuery, limit],
-  );
+  const result: StructuredAddressQuery = {};
+  const first = segments[0];
+  const houseMatch = first.match(/^(\d+[a-z]?)\s+(.+)$/i);
+  if (houseMatch) {
+    result.housenumber = houseMatch[1].toLowerCase();
+    result.street = houseMatch[2].toLowerCase();
+  } else {
+    result.street = first.toLowerCase();
+  }
+  if (segments[1]) result.city = segments[1].toLowerCase();
+  return result;
+}
 
-  return rows.map((row, i) => ({
+/** Sort rows by squared distance from a reference point (stable when absent). */
+export function sortRowsByDistance<T extends { lat: number; lng: number }>(
+  rows: T[],
+  lat?: number,
+  lng?: number,
+): T[] {
+  if (lat == null || lng == null) return rows;
+  return [...rows].sort((a, b) => {
+    const da = (a.lat - lat) ** 2 + (a.lng - lng) ** 2;
+    const db = (b.lat - lat) ** 2 + (b.lng - lng) ** 2;
+    return da - db;
+  });
+}
+
+function rowToGeocodingResult(row: GeocodingRow, rank: number): GeocodingResult {
+  return {
     entry: {
       id: row.id,
       text: formatEntry(row),
@@ -77,8 +99,122 @@ async function searchAddressLocal(query: string, limit: number): Promise<Geocodi
       lat: row.lat,
       lng: row.lng,
     },
-    rank: row.rank ?? i,
-  }));
+    rank,
+  };
+}
+
+const GEOCODING_SELECT = `SELECT g.id, g.type, g.housenumber, g.street, g.city, g.state,
+        g.postcode, g.country, g.lat, g.lng, e.rank`;
+
+function buildStructuredFtsQuery(structured: StructuredAddressQuery): string | null {
+  const parts: string[] = [];
+  const token = (value: string) =>
+    value
+      .replace(/[^\p{L}\p{N} ]/gu, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((t) => `"${t}"*`)
+      .join(' ');
+
+  if (structured.housenumber && structured.street) {
+    parts.push(`{housenumber}:${token(structured.housenumber)}`);
+    parts.push(`{street}:${token(structured.street)}`);
+  } else if (structured.street) {
+    parts.push(`{street}:${token(structured.street)}`);
+  }
+  if (structured.city) parts.push(`{city}:${token(structured.city)}`);
+  return parts.length > 0 ? parts.join(' ') : null;
+}
+
+async function searchGeocodingTrigram(query: string, limit: number): Promise<GeocodingResult[]> {
+  const text = query
+    .replace(/[^\p{L}\p{N} ]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length < 4) return [];
+
+  try {
+    const db = await getDatabase();
+    const rows = await db.getAllAsync<GeocodingRow>(
+      `SELECT g.id, g.type, g.housenumber, g.street, g.city, g.state, g.postcode, g.country,
+              g.lat, g.lng, 100 AS rank
+       FROM geocoding_trigram t
+       JOIN geocoding_data g ON g.id = t.rowid
+       WHERE geocoding_trigram MATCH ?
+       LIMIT ?`,
+      [`"${text}"`, limit],
+    );
+    return rows.map((row, i) => rowToGeocodingResult(row, 100 + i));
+  } catch {
+    return [];
+  }
+}
+
+async function searchAddressLocal(
+  query: string,
+  limit: number,
+  lat?: number,
+  lng?: number,
+): Promise<GeocodingResult[]> {
+  const db = await getDatabase();
+  const structured = classifyAddressQuery(query);
+
+  // Structured query first: house number + street + city as FTS column
+  // filters, distance-ranked around the reference point.
+  if (structured.street && (structured.housenumber || structured.city)) {
+    const structuredFts = buildStructuredFtsQuery(structured);
+    if (structuredFts) {
+      try {
+        const rows = await db.getAllAsync<GeocodingRow>(
+          `${GEOCODING_SELECT}
+           FROM geocoding_entries e
+           JOIN geocoding_data g ON g.id = e.rowid
+           WHERE geocoding_entries MATCH ?
+           LIMIT 50`,
+          [structuredFts],
+        );
+        if (rows.length > 0) {
+          return sortRowsByDistance(rows, lat, lng)
+            .slice(0, limit)
+            .map((row, i) => rowToGeocodingResult(row, i));
+        }
+      } catch {
+        // Malformed structured query — fall through to free text.
+      }
+    }
+  }
+
+  // FTS5 match query — add * for prefix matching
+  // Strip double-quotes to prevent FTS5 syntax injection
+  const ftsQuery = query
+    .trim()
+    .split(/\s+/)
+    .map((w) => `"${w.replace(/"/g, '')}"*`)
+    .join(' ');
+
+  if (!ftsQuery.replace(/["* ]/g, '')) return [];
+
+  const rows = await db.getAllAsync<GeocodingRow>(
+    `${GEOCODING_SELECT}
+     FROM geocoding_entries e
+     JOIN geocoding_data g ON g.id = e.rowid
+     WHERE geocoding_entries MATCH ?
+     ORDER BY e.rank
+     LIMIT ?`,
+    [ftsQuery, Math.max(limit * 3, 30)],
+  );
+
+  const primary = sortRowsByDistance(rows, lat, lng).slice(0, limit);
+  const results = primary.map((row, i) => rowToGeocodingResult(row, i));
+
+  // Offline typo tolerance: when the primary query is thin, add trigram
+  // matches (lower-ranked) for misspelled street/locality names.
+  if (results.length >= 3) return results;
+  const trigramCandidate = structured.street ?? query;
+  const trigram = await searchGeocodingTrigram(trigramCandidate, limit).catch(() => []);
+  const seen = new Set(results.map((r) => r.entry.id));
+  return [...results, ...trigram.filter((r) => !seen.has(r.entry.id))].slice(0, limit);
 }
 
 /** Client-side timeout for Nominatim requests (previously unbounded). */
@@ -91,15 +227,9 @@ async function searchAddressNominatim(
   lng?: number,
   signal?: AbortSignal,
 ): Promise<GeocodingResult[]> {
-  // Enforce minimum 1 000 ms inter-request gap (Nominatim usage policy).
-  // Abort-aware so a stale keystroke doesn't hold the throttle budget.
-  const now = Date.now();
-  const elapsed = now - _lastNominatimRequestAt;
-  if (elapsed < NOMINATIM_MIN_INTERVAL_MS) {
-    await sleepWithAbort(NOMINATIM_MIN_INTERVAL_MS - elapsed, signal);
-  }
-  throwIfAborted(signal);
-  _lastNominatimRequestAt = Date.now();
+  // Enforce the shared Nominatim rate limit (1 request/second). Abort-aware
+  // so a stale keystroke doesn't hold the throttle budget.
+  await nominatimThrottle.wait(signal);
 
   const { signal: fetchSignal, cleanup } = withTimeout(signal, NOMINATIM_TIMEOUT_MS);
   try {

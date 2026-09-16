@@ -11,14 +11,14 @@
 
 import { Appearance, Platform } from 'react-native';
 import * as CarPlay from '../../native/carplay';
-import type { CarPlaySearchResult, CarPlayStartNavigationData } from '../../native/carplay';
+import type { CarPlayStartNavigationData } from '../../native/carplay';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useMapStore } from '../../stores/mapStore';
 import { buildCarPlayTrafficRanges, trafficRangesSignature } from './carPlayTrafficRanges';
-import { unifiedSearch } from '../search/unifiedSearch';
+import { createSearchSession, type SearchSession } from '../search/searchSession';
 import { computeRoute } from '../routing/routingService';
 import { formatDistance } from '../../utils/units';
 import { resolveMapStyle, setLayerVisibilityInStyle } from '../../components/map/mapStyleResolver';
@@ -38,8 +38,7 @@ let carPlayRouteKey: string | null = null;
 let rerouteAlertShown = false;
 let lastDistanceBucket: number | null = null;
 let lastTrafficSignature = '';
-let searchRequestId = 0;
-let searchAbortController: AbortController | null = null;
+let searchSession: SearchSession | null = null;
 let mapCenterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingMapCenter: { lat: number; lng: number; heading: number } | null = null;
 
@@ -87,9 +86,7 @@ export function teardownCarPlay(): void {
   appearanceSubscription = null;
   lastMapStyleKey = null;
   clearMapCenterUpdate();
-  searchAbortController?.abort();
-  searchAbortController = null;
-  searchRequestId += 1;
+  searchSession?.cancel();
   initialized = false;
   connected = false;
   carPlayRouteKey = null;
@@ -147,9 +144,7 @@ function onDisconnected() {
   mapStyleUnsubscribe = null;
   lastMapStyleKey = null;
   clearMapCenterUpdate();
-  searchAbortController?.abort();
-  searchAbortController = null;
-  searchRequestId += 1;
+  searchSession?.cancel();
   carPlayRouteKey = null;
   rerouteAlertShown = false;
   lastDistanceBucket = null;
@@ -405,37 +400,36 @@ function clearMapCenterUpdate() {
   pendingMapCenter = null;
 }
 
+function getSearchSession(): SearchSession {
+  if (!searchSession) {
+    searchSession = createSearchSession({
+      limit: 12,
+      getContext: () => {
+        const { viewport } = useMapStore.getState();
+        return { lat: viewport.lat, lng: viewport.lng, zoom: viewport.zoom };
+      },
+      onResults: (results) => {
+        if (!connected) return;
+        CarPlay.pushSearchResults(
+          results.slice(0, 12).map((r) => ({
+            name: r.name,
+            subtitle: r.subtitle,
+            lat: r.lat,
+            lng: r.lng,
+          })),
+        );
+      },
+      onError: () => {
+        if (connected) CarPlay.pushSearchResults([]);
+      },
+    });
+  }
+  return searchSession;
+}
+
 async function onSearchQuery({ query }: { query: string }) {
   if (!connected) return;
-
-  const requestId = ++searchRequestId;
-  searchAbortController?.abort();
-  const controller = new AbortController();
-  searchAbortController = controller;
-  const { viewport } = useMapStore.getState();
-  try {
-    const results = await unifiedSearch(query, {
-      lat: viewport.lat,
-      lng: viewport.lng,
-      zoom: viewport.zoom,
-      signal: controller.signal,
-    });
-
-    if (requestId !== searchRequestId || controller.signal.aborted || !connected) return;
-
-    const carPlayResults: CarPlaySearchResult[] = results.slice(0, 12).map((r) => ({
-      name: r.name,
-      subtitle: r.subtitle,
-      lat: r.lat,
-      lng: r.lng,
-    }));
-
-    CarPlay.pushSearchResults(carPlayResults);
-  } catch {
-    if (requestId === searchRequestId && !controller.signal.aborted && connected) {
-      CarPlay.pushSearchResults([]);
-    }
-  }
+  await getSearchSession().submit(query);
 }
 
 async function onSearchResultSelected(result: { name?: string; lat?: number; lng?: number }) {

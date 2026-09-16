@@ -7,6 +7,15 @@ jest.mock('react-native-mmkv', () => ({
     delete: jest.fn(),
   })),
 }));
+jest.mock('../../src/services/storage/mmkv', () => ({
+  storage: {
+    getString: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+    getBoolean: jest.fn(),
+    setBoolean: jest.fn(),
+  },
+}));
 jest.mock('../../src/services/database/init', () => ({
   getDatabase: jest.fn(),
 }));
@@ -44,8 +53,13 @@ jest.mock('../../src/services/poi/overtureFetcher', () => ({
 jest.mock('../../src/services/poi/osmFetcher', () => ({
   fetchOsmPoisByName: jest.fn(),
 }));
+jest.mock('../../src/services/geocoding/globalGeocoderService', () => ({
+  isGeonamesReady: jest.fn(() => false),
+  searchGlobalPlaces: jest.fn(),
+}));
 
 import { unifiedSearch } from '../../src/services/search/unifiedSearch';
+import { clearSearchCache } from '../../src/services/search/searchCache';
 import * as poiService from '../../src/services/poi/poiService';
 import * as categorySearchService from '../../src/services/poi/categorySearchService';
 import * as photonGeocoder from '../../src/services/search/photonGeocoder';
@@ -107,6 +121,7 @@ function makePhotonResult(name: string, isPoi: boolean, lat = 40.749, lng = -73.
 describe('unifiedSearch', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    clearSearchCache();
     // Default: all sources return empty
     (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([]);
     (categorySearchService.searchByCategory as jest.Mock).mockResolvedValue(null);
@@ -376,6 +391,7 @@ describe('unifiedSearch', () => {
 describe('unifiedSearch progressive + cancellation', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    clearSearchCache();
     // Default: all sources return empty
     (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([]);
     (categorySearchService.searchByCategory as jest.Mock).mockResolvedValue(null);

@@ -18,10 +18,10 @@ import type { OsmPoi } from '../poi/osmFetcher';
 import type { Place } from '../../models/poi';
 import type { GeocodingResult } from '../geocoding/geocodingService';
 import { searchPlacesFts } from '../poi/poiService';
-import { searchByCategory } from '../poi/categorySearchService';
+import { searchByCategory, type CategorySearchResult } from '../poi/categorySearchService';
 import { searchAddress } from '../geocoding/geocodingService';
 import { throwIfAborted } from './abortUtils';
-import { searchPhoton } from './photonGeocoder';
+import { searchPhoton, type PhotonResult } from './photonGeocoder';
 import {
   parseSearchQuery,
   fuzzyMatchBrand,
@@ -38,6 +38,48 @@ import {
   type ScoredResult,
 } from './searchRanker';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
+import { cachedFetch, cacheKey, boundsKey } from './searchCache';
+import { getRegionContainingPoint } from '../regions/regionRepository';
+import { isGeonamesReady, searchGlobalPlaces } from '../geocoding/globalGeocoderService';
+import { getPersonalizationBoost } from './searchHistoryService';
+
+// ---------------------------------------------------------------------------
+// Source gating
+// ---------------------------------------------------------------------------
+
+/** Minimum strong local matches before named network sources are skipped. */
+const SUFFICIENT_LOCAL_MATCHES = 8;
+/** Radius (km) within which local matches count toward sufficiency. */
+const LOCAL_MATCH_RADIUS_KM = 15;
+/** Text-match score above which a local result counts as "strong". */
+const STRONG_MATCH_THRESHOLD = 0.72;
+
+/** Count strong local matches around the reference point or user location. */
+function countStrongLocalMatches(
+  pois: OsmPoi[],
+  parsed: ParsedSearchQuery,
+  lat: number,
+  lng: number,
+  userLocation?: { lat: number; lng: number },
+): number {
+  const anchor = userLocation ?? { lat, lng };
+  let count = 0;
+  for (const poi of pois) {
+    if (textMatchScore(poi, parsed) < STRONG_MATCH_THRESHOLD) continue;
+    if (haversineKm(anchor.lat, anchor.lng, poi.lat, poi.lng) <= LOCAL_MATCH_RADIUS_KM) count++;
+  }
+  return count;
+}
+
+/** True when a downloaded offline region covers the point. */
+async function hasOfflineRegionCoverage(lat: number, lng: number): Promise<boolean> {
+  try {
+    const region = await getRegionContainingPoint(lat, lng);
+    return region?.downloadStatus === 'complete';
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -65,8 +107,19 @@ export interface UnifiedSearchResult {
   poi?: OsmPoi;
   /** Brand name if matched. */
   brand?: string;
+  /** Number of matching branches nearby (brand queries only). */
+  brandBranchCount?: number;
   /** Address city. */
   city?: string;
+}
+
+/** Result stages, emitted in this order as each completes. */
+export type SearchStage = 'local' | 'cities' | 'photon' | 'category' | 'remaining';
+
+export interface SearchStageMeta {
+  stage: SearchStage;
+  /** True for the last emission of the query. */
+  final: boolean;
 }
 
 export interface SearchOptions {
@@ -88,9 +141,12 @@ export interface SearchOptions {
   /** Return local-DB results only — skip all network sources (Photon,
    *  Nominatim, Overpass, Overture). Resolves in milliseconds. */
   localOnly?: boolean;
-  /** Called with scored local results as soon as the fast local phase
-   *  completes, before the network phase finishes. Not called when
-   *  `localOnly` is set (the return value already carries those results). */
+  /** Staged result callback: fires after each stage completes, with the
+   *  accumulated, scored, deduplicated results so far. */
+  onStage?: (results: UnifiedSearchResult[], meta: SearchStageMeta) => void;
+  /** @deprecated Use `onStage` (stage `local`) instead. Called with scored
+   *  local results as soon as the fast local phase completes, before the
+   *  network phase finishes. Not called when `localOnly` is set. */
   onPartial?: (partial: UnifiedSearchResult[]) => void;
 }
 
@@ -237,80 +293,135 @@ export async function unifiedSearch(
     limit,
   });
   if (options.localOnly) return partial;
+  options.onStage?.(partial, { stage: 'local', final: false });
   options.onPartial?.(partial);
   throwIfAborted(signal);
 
   // 3b. Phase 2 — network sources in parallel. Local category/address are
   // re-run without localOnly so their Overpass/Nominatim fallbacks execute.
   // For address queries, skip name-based POI sources that would match
-  // street/city name fragments (e.g. "Knights of Columbus" for "columbus pkwy")
+  // street/city name fragments (e.g. "Knights of Columbus" for "columbus pkwy").
+  //
+  // Staged emission: results are emitted as stages complete
+  // (local → photon → category → remaining) so fast sources never wait on
+  // slow ones. The last emission is marked `final: true`.
   const allPois: OsmPoi[] = [...localPois];
 
-  const [
-    photonResults,
-    categoryResult,
-    geocodingResults,
-    overtureResults,
-    overtureUserResults,
-    nameResults,
-  ] = await Promise.allSettled([
-    // Source 3: Photon geocoder (fuzzy, online)
-    (() => {
-      const osmTagFilter =
-        parsed.categories?.length === 1
-          ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
-          : undefined;
-      // For name/brand searches, lower the zoom passed to Photon so it
-      // searches a broader area. Without this, Photon would heavily bias
-      // toward the viewport center and return only nearby matches (e.g.
-      // "Times Square Music" in Garden City instead of the actual Times
-      // Square in Manhattan 40 km away).
-      const photonZoom = parsed.brand || parsed.isNameSearch ? Math.min(zoom, 10) : zoom;
-      return searchPhoton(parsed.originalQuery, lat, lng, photonZoom, limit, 'en', osmTagFilter, {
-        signal,
+  // Gate named network sources when the local phase already answers the query
+  // confidently. Sparse areas still run every source (see specs/search-orchestration).
+  const strongLocalMatches = countStrongLocalMatches(
+    [...localPois, ...(localCategoryResult?.pois ?? [])],
+    parsed,
+    lat,
+    lng,
+    options.userLocation,
+  );
+  const skipCategoryFallback =
+    !!parsed.categories && strongLocalMatches >= SUFFICIENT_LOCAL_MATCHES;
+  const skipNameSearch = !!parsed.brand && strongLocalMatches >= SUFFICIENT_LOCAL_MATCHES;
+  const gateOvertureFetch =
+    strongLocalMatches >= SUFFICIENT_LOCAL_MATCHES && (!!parsed.categories || !!parsed.brand);
+  const hasStructuredAddressHit =
+    addressQuery &&
+    localAddressResults.some((result) => {
+      if (!result.entry.housenumber || !result.entry.street) return false;
+      return normalizeSearchText(query)
+        .toLowerCase()
+        .includes(result.entry.housenumber.toLowerCase());
+    });
+  const photonAddressResults: UnifiedSearchResult[] = [];
+  let addressEntries: GeocodingResult[] = [];
+  let finalResults: UnifiedSearchResult[] | null = null;
+
+  const activeSources = new Set<string>();
+  const pendingSources = new Set<string>();
+  let photonEmitted = false;
+  let categoryEmitted = false;
+
+  const assemble = () =>
+    assembleResults({
+      allPois,
+      photonAddressResults,
+      geocodingResults: addressEntries,
+      parsed,
+      addressQuery,
+      lat,
+      lng,
+      south,
+      north,
+      west,
+      east,
+      viewportBounds: options.viewportBounds,
+      userLocation: options.userLocation,
+      limit,
+    });
+
+  const emitStage = (stage: SearchStage, final: boolean): UnifiedSearchResult[] => {
+    const results = assemble();
+    if (final) finalResults = results;
+    if (!signal?.aborted) options.onStage?.(results, { stage, final });
+    return results;
+  };
+
+  const maybeEmitStages = () => {
+    if (signal?.aborted) return;
+    const photonReady = !activeSources.has('photon') || !pendingSources.has('photon');
+    const categoryReady = !activeSources.has('category') || !pendingSources.has('category');
+
+    if (activeSources.has('photon') && photonReady && !photonEmitted) {
+      photonEmitted = true;
+      emitStage('photon', false);
+    }
+    if (activeSources.has('category') && photonReady && categoryReady && !categoryEmitted) {
+      categoryEmitted = true;
+      emitStage('category', false);
+    }
+    if (pendingSources.size === 0 && photonReady && categoryReady && finalResults === null) {
+      emitStage('remaining', true);
+    }
+  };
+
+  function tracked<T>(name: string, promise: Promise<T>, apply: (value: T) => void): Promise<T> {
+    activeSources.add(name);
+    pendingSources.add(name);
+    return promise
+      .then((value) => {
+        apply(value);
+        return value;
+      })
+      .finally(() => {
+        pendingSources.delete(name);
+        maybeEmitStages();
       });
-    })(),
+  }
 
-    // Source 2 (full): Category search (local + Overpass + Nominatim bounded)
-    parsed.categories
-      ? searchByCategory(parsed.originalQuery, south, west, north, east, limit, { signal })
-      : Promise.resolve(null),
-
-    // Source 4 (full): Address geocoding (local FTS + Nominatim)
-    addressQuery
-      ? searchAddress(parsed.originalQuery, 10, lat, lng, { signal })
-      : parsed.isNameSearch && !parsed.categories
-        ? searchAddress(parsed.coreQuery, 10, lat, lng, { signal })
-        : Promise.resolve([] as GeocodingResult[]),
-
-    // Source 5: Online Overture fetch — populates local DB and returns fresh places
-    // Skip for address queries — same name-matching pollution as Source 1
-    addressQuery
-      ? Promise.resolve([])
-      : fetchOverturePlaces(south, west, north, east, queryContext.viewportFetchLimit, {
-          signal,
-        }),
-
-    // Source 5b: User-location-centered Overture fetch (~10 km radius)
-    // Ensures nearby places surface even when the map has been panned away.
-    !hasUserLocation || addressQuery
-      ? Promise.resolve([])
-      : fetchOverturePlaces(userSouth, userWest, userNorth, userEast, queryContext.userFetchLimit, {
-          signal,
-        }),
-
-    // Source 6: Overpass name search — finds POIs with the search term in their name
-    // Skip for address queries — catches "Knights of Columbus" for "columbus pkwy"
-    addressQuery
-      ? Promise.resolve([])
-      : fetchOsmPoisByName(south, west, north, east, parsed.coreQuery, { signal }),
-  ]);
-  throwIfAborted(signal);
-
-  // Collect category search results (full result: local + network fallbacks).
-  if (categoryResult.status === 'fulfilled' && categoryResult.value) {
-    for (const poi of categoryResult.value.pois) {
-      allPois.push(poi);
+  // Cities stage — offline GeoNames cities resolve in milliseconds, so they
+  // are emitted before any network source completes.
+  if (!addressQuery && isGeonamesReady()) {
+    try {
+      const cities = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
+      if (cities.length > 0 && !signal?.aborted) {
+        for (const city of cities) {
+          allPois.push({
+            id: -Math.abs(city.geonameId),
+            lat: city.lat,
+            lng: city.lng,
+            name: city.name,
+            type: 'place',
+            subtype: 'city',
+            tags: {
+              name: city.name,
+              place: 'city',
+              'addr:city': city.name,
+              ...(city.countryCode ? { 'addr:country': city.countryCode } : {}),
+              'polaris:population': String(city.population),
+            },
+          });
+        }
+        emitStage('cities', false);
+      }
+    } catch {
+      // Missing/corrupt GeoNames DB degrades to no city results.
     }
   }
 
@@ -320,9 +431,8 @@ export async function unifiedSearch(
   // When the query matches a known category (e.g. "deli"), filter out
   // street/road results to prevent "Delile Place" from outranking actual delis.
   // For address queries, house/street results go through the address pipeline.
-  const photonAddressResults: UnifiedSearchResult[] = [];
-  if (photonResults.status === 'fulfilled') {
-    for (const pr of photonResults.value) {
+  const applyPhotonResults = (results: PhotonResult[]) => {
+    for (const pr of results) {
       if (!pr.poi.name) continue;
 
       // For address queries, Photon is restricted to house+street layers.
@@ -381,45 +491,171 @@ export async function unifiedSearch(
       }
       allPois.push(pr.poi);
     }
-  }
+  };
 
-  // Collect Overture online results — these have already been upserted into
-  // the local DB by fetchOverturePlaces, but we also need them in the current
-  // scoring pass since the FTS query ran *before* the upsert completed.
-  if (overtureResults.status === 'fulfilled') {
-    allPois.push(...collectPlacePois(overtureResults.value));
-  }
-
-  // Collect user-location-centered Overture results — nearby places that may
-  // not fall inside the viewport bbox but are still relevant to the user.
-  if (overtureUserResults.status === 'fulfilled') {
-    allPois.push(...collectPlacePois(overtureUserResults.value));
-  }
-
-  // Collect Overpass name-search results — catches POIs with the search term
-  // in their name regardless of how they're tagged in OSM.
-  if (nameResults.status === 'fulfilled') {
-    for (const poi of nameResults.value) {
+  const applyCategoryResult = (value: CategorySearchResult | null) => {
+    if (!value) return;
+    for (const poi of value.pois) {
       allPois.push(poi);
     }
-  }
+  };
 
-  return assembleResults({
-    allPois,
-    photonAddressResults,
-    geocodingResults: geocodingResults.status === 'fulfilled' ? geocodingResults.value : [],
-    parsed,
-    addressQuery,
-    lat,
-    lng,
-    south,
-    north,
-    west,
-    east,
-    viewportBounds: options.viewportBounds,
-    userLocation: options.userLocation,
-    limit,
-  });
+  // Source 3: Photon geocoder (fuzzy, online)
+  const photonPromise = (() => {
+    const osmTagFilter =
+      parsed.categories?.length === 1
+        ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
+        : undefined;
+    // For name/brand searches, lower the zoom passed to Photon so it
+    // searches a broader area. Without this, Photon would heavily bias
+    // toward the viewport center and return only nearby matches (e.g.
+    // "Times Square Music" in Garden City instead of the actual Times
+    // Square in Manhattan 40 km away).
+    const photonZoom = parsed.brand || parsed.isNameSearch ? Math.min(zoom, 10) : zoom;
+    const viewportBounds = { south, north, west, east };
+    return cachedFetch(
+      cacheKey([
+        'photon',
+        parsed.originalQuery,
+        boundsKey(viewportBounds),
+        photonZoom,
+        limit,
+        osmTagFilter,
+      ]),
+      () =>
+        searchPhoton(parsed.originalQuery, lat, lng, photonZoom, limit, 'en', osmTagFilter, {
+          signal,
+        }),
+      { bounds: viewportBounds },
+    );
+  })();
+
+  // Source 2 (full): Category search (local + Overpass + Nominatim bounded)
+  const categoryPromise: Promise<CategorySearchResult | null> = !parsed.categories
+    ? Promise.resolve(null)
+    : skipCategoryFallback
+      ? // Sufficient local matches — reuse the local category pass, skip Overpass.
+        Promise.resolve(localCategoryResult)
+      : cachedFetch(
+          cacheKey([
+            'category',
+            parsed.originalQuery,
+            boundsKey({ south, north, west, east }),
+            limit,
+          ]),
+          () => searchByCategory(parsed.originalQuery, south, west, north, east, limit, { signal }),
+          { bounds: { south, north, west, east } },
+        );
+
+  // Source 4 (full): Address geocoding (local FTS + Nominatim)
+  const isAddressPass = addressQuery || (parsed.isNameSearch && !parsed.categories);
+  const addressQueryText = addressQuery ? parsed.originalQuery : parsed.coreQuery;
+  const addressPromise: Promise<GeocodingResult[]> = (() => {
+    if (!isAddressPass) return Promise.resolve([] as GeocodingResult[]);
+    // An exact structured local hit skips the Nominatim fallback entirely.
+    if (hasStructuredAddressHit) {
+      return searchAddress(addressQueryText, 10, lat, lng, { signal, localOnly: true });
+    }
+    const viewportBounds = { south, north, west, east };
+    return cachedFetch(
+      cacheKey([
+        'address',
+        addressQueryText,
+        boundsKey(viewportBounds),
+        lat.toFixed(2),
+        lng.toFixed(2),
+      ]),
+      () => searchAddress(addressQueryText, 10, lat, lng, { signal }),
+      { bounds: viewportBounds },
+    );
+  })();
+
+  // Source 5: Online Overture fetch — populates local DB and returns fresh places
+  // Skip for address queries — same name-matching pollution as Source 1
+  const overturePromise: Promise<Place[]> = addressQuery
+    ? Promise.resolve([])
+    : (async () => {
+        // With enough strong local matches and a downloaded region covering
+        // the point, local data is authoritative — skip the network fetch.
+        if (gateOvertureFetch && (await hasOfflineRegionCoverage(lat, lng))) return [];
+        return cachedFetch(
+          cacheKey([
+            'overture',
+            boundsKey({ south, north, west, east }),
+            queryContext.viewportFetchLimit,
+          ]),
+          () =>
+            fetchOverturePlaces(south, west, north, east, queryContext.viewportFetchLimit, {
+              signal,
+            }),
+          { bounds: { south, north, west, east } },
+        );
+      })();
+
+  // Source 5b: User-location-centered Overture fetch (~10 km radius)
+  // Ensures nearby places surface even when the map has been panned away.
+  const overtureUserPromise: Promise<Place[]> =
+    !hasUserLocation || addressQuery
+      ? Promise.resolve([])
+      : cachedFetch(
+          cacheKey([
+            'overture-user',
+            boundsKey({ south: userSouth, north: userNorth, west: userWest, east: userEast }),
+            queryContext.userFetchLimit,
+          ]),
+          () =>
+            fetchOverturePlaces(
+              userSouth,
+              userWest,
+              userNorth,
+              userEast,
+              queryContext.userFetchLimit,
+              { signal },
+            ),
+          { bounds: { south: userSouth, north: userNorth, west: userWest, east: userEast } },
+        );
+
+  // Source 6: Overpass name search — finds POIs with the search term in their name
+  // Skip for address queries — catches "Knights of Columbus" for "columbus pkwy"
+  const osmNamePromise: Promise<OsmPoi[]> =
+    addressQuery || skipNameSearch
+      ? Promise.resolve([])
+      : cachedFetch(
+          cacheKey(['osm-name', parsed.coreQuery, boundsKey({ south, north, west, east }), limit]),
+          () => fetchOsmPoisByName(south, west, north, east, parsed.coreQuery, { signal }),
+          { bounds: { south, north, west, east } },
+        );
+
+  const sources: Promise<unknown>[] = [
+    tracked('photon', photonPromise, applyPhotonResults),
+    parsed.categories ? tracked('category', categoryPromise, applyCategoryResult) : categoryPromise,
+    isAddressPass
+      ? tracked('address', addressPromise, (value) => {
+          addressEntries = value;
+        })
+      : addressPromise,
+    addressQuery
+      ? overturePromise
+      : tracked('overture', overturePromise, (value) => {
+          allPois.push(...collectPlacePois(value));
+        }),
+    !hasUserLocation || addressQuery
+      ? overtureUserPromise
+      : tracked('overtureUser', overtureUserPromise, (value) => {
+          allPois.push(...collectPlacePois(value));
+        }),
+    addressQuery
+      ? osmNamePromise
+      : tracked('osmName', osmNamePromise, (value) => {
+          for (const poi of value) allPois.push(poi);
+        }),
+  ];
+
+  maybeEmitStages();
+  await Promise.allSettled(sources);
+  throwIfAborted(signal);
+
+  return finalResults ?? emitStage('remaining', true);
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +686,8 @@ function collectPlacePois(places: Place[]): OsmPoi[] {
     if (place.brandName) poi.tags['polaris:brand'] = place.brandName;
     if (place.avgRating) poi.tags['polaris:avg_rating'] = String(place.avgRating);
     if (place.reviewCount) poi.tags['polaris:review_count'] = String(place.reviewCount);
+    const ftsRelevance = (place as Place & { ftsRelevance?: number }).ftsRelevance;
+    if (ftsRelevance != null) poi.tags['polaris:fts'] = String(ftsRelevance);
     return poi;
   });
 }
@@ -490,6 +728,38 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     scored = promoteNearbyUserMatches(scored, parsed, userLocation);
   }
 
+  // Personalization: bounded boost for results the user has selected before.
+  if (parsed.originalQuery.trim().length >= 2) {
+    scored = scored
+      .map((result) => {
+        const boost = getPersonalizationBoost(parsed.originalQuery, result.poi.name);
+        return boost > 0 ? { ...result, score: Math.min(100, result.score + boost) } : result;
+      })
+      .sort((a, b) => b.score - a.score || a.distanceKm - b.distanceKm);
+  }
+
+  // Brand queries: order branches nearest-first and attach a branch count so
+  // the UI can group multiple locations of the same brand.
+  let brandBranchCount: number | undefined;
+  if (parsed.brand) {
+    const brandLower = normalizeSearchText(parsed.brand).toLowerCase();
+    const isBranch = (poi: OsmPoi) => {
+      const name = normalizeSearchText(poi.name).toLowerCase();
+      const tag = normalizeSearchText(
+        poi.tags['polaris:brand'] ?? poi.tags['brand'] ?? '',
+      ).toLowerCase();
+      return name.includes(brandLower) || tag.includes(brandLower);
+    };
+    brandBranchCount = scored.filter((result) => isBranch(result.poi)).length;
+    scored = [...scored].sort((a, b) => {
+      const aBranch = isBranch(a.poi);
+      const bBranch = isBranch(b.poi);
+      if (aBranch && bBranch) return a.distanceKm - b.distanceKm || b.score - a.score;
+      if (aBranch !== bBranch) return aBranch ? -1 : 1;
+      return b.score - a.score || a.distanceKm - b.distanceKm;
+    });
+  }
+
   // 5. Build geocoding (address) results — from Nominatim + Photon house/street
   const addressResults: UnifiedSearchResult[] = [...photonAddressResults];
   for (const gr of geocodingResults) {
@@ -524,6 +794,7 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     distanceKm: sr.distanceKm,
     poi: sr.poi,
     brand: parsed.brand ?? undefined,
+    brandBranchCount,
     city: sr.poi.tags['addr:city'],
   }));
 

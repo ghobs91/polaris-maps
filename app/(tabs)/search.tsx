@@ -16,8 +16,8 @@ import { useMapStore } from '@/stores/mapStore';
 import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
-import { unifiedSearch, type UnifiedSearchResult } from '@/services/search/unifiedSearch';
-import { isAbortError } from '@/services/search/abortUtils';
+import { usePlaceSearch } from '@/hooks/usePlaceSearch';
+import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import type { GeocodingEntry } from '@/models/geocoding';
 
 // ---------------------------------------------------------------------------
@@ -52,6 +52,10 @@ async function tryDetectPlusCode(input: string): Promise<{ lat: number; lng: num
   }
 }
 
+async function detectCoordinateInput(input: string): Promise<{ lat: number; lng: number } | null> {
+  return (await tryDetectCoordinates(input)) ?? (await tryDetectPlusCode(input));
+}
+
 /** Convert a UnifiedSearchResult into a GeocodingResult for the existing UI. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
@@ -71,18 +75,12 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
 }
 
 export default function SearchScreen() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<GeocodingResult[]>([]);
   const [history, setHistory] = useState<GeocodingResult[]>([]);
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
   const viewport = useMapStore((s) => s.viewport);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const searchAbortRef = useRef<AbortController | null>(null);
-  const searchGenRef = useRef(0);
-  const lastQueryRef = useRef<string>('');
   const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(
     null,
   );
@@ -93,72 +91,45 @@ export default function SearchScreen() {
     setHistory(getSearchHistory());
   }, []);
 
-  const handleSearch = useCallback(
-    async (q: string) => {
-      setQuery(q);
-      lastQueryRef.current = q;
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      // Supersede any in-flight search so it stops consuming network/CPU.
-      searchAbortRef.current?.abort();
-      const gen = ++searchGenRef.current;
-      if (q.length < 2) {
-        setResults([]);
-        return;
-      }
+  const { query, setQuery, results, refetch } = usePlaceSearch({
+    limit: 30,
+    getContext: useCallback(() => {
+      // Capture the bbox used for this search so the viewport-shift effect can
+      // tell when the map has moved far enough to warrant a refetch.
+      const vp = useMapStore.getState().viewport;
+      const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, vp.zoom)) * 2));
+      lastBboxRef.current = {
+        south: vp.lat - delta,
+        north: vp.lat + delta,
+        west: vp.lng - delta,
+        east: vp.lng + delta,
+      };
+      const bounds = useOsmPoiStore.getState().viewportBounds;
+      return {
+        lat: vp.lat,
+        lng: vp.lng,
+        zoom: vp.zoom,
+        viewportBounds: bounds
+          ? {
+              south: bounds.minLat,
+              north: bounds.maxLat,
+              west: bounds.minLng,
+              east: bounds.maxLng,
+            }
+          : undefined,
+      };
+    }, []),
+    transformQuery: detectCoordinateInput,
+    onTransformed: useCallback(
+      (coords) => {
+        setViewport({ lat: coords.lat, lng: coords.lng, zoom: 16 });
+        setSelectedLocation({ lat: coords.lat, lng: coords.lng });
+      },
+      [setViewport, setSelectedLocation],
+    ),
+  });
 
-      // Pre-flight: detect raw coordinates or Plus Codes
-      const coordResult = (await tryDetectCoordinates(q)) ?? (await tryDetectPlusCode(q));
-      if (coordResult) {
-        setViewport({ lat: coordResult.lat, lng: coordResult.lng, zoom: 16 });
-        setSelectedLocation({ lat: coordResult.lat, lng: coordResult.lng });
-        return;
-      }
-
-      debounceTimer.current = setTimeout(async () => {
-        const controller = new AbortController();
-        searchAbortRef.current = controller;
-        try {
-          // Pass the actual map viewport bounds so nearby results get boosted
-          const bounds = useOsmPoiStore.getState().viewportBounds;
-          const unified = await unifiedSearch(q, {
-            lat: viewport.lat,
-            lng: viewport.lng,
-            zoom: viewport.zoom,
-            viewportBounds: bounds
-              ? {
-                  south: bounds.minLat,
-                  north: bounds.maxLat,
-                  west: bounds.minLng,
-                  east: bounds.maxLng,
-                }
-              : undefined,
-            signal: controller.signal,
-            // Render scored local results while the network phase runs.
-            onPartial: (partial) => {
-              if (searchGenRef.current !== gen) return;
-              setResults(partial.map(unifiedToGeocodingResult));
-            },
-          });
-          if (searchGenRef.current !== gen) return;
-
-          // Record the bbox that was used for this search
-          const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, viewport.zoom)) * 2));
-          lastBboxRef.current = {
-            south: viewport.lat - delta,
-            north: viewport.lat + delta,
-            west: viewport.lng - delta,
-            east: viewport.lng + delta,
-          };
-
-          setResults(unified.map(unifiedToGeocodingResult));
-        } catch (err) {
-          if (isAbortError(err)) return;
-          if (searchGenRef.current === gen) setResults([]);
-        }
-      }, 300);
-    },
-    [viewport],
-  );
+  const geocodingResults = useMemo(() => results.map(unifiedToGeocodingResult), [results]);
 
   const navigateToResult = useCallback(
     (result: GeocodingResult) => {
@@ -175,11 +146,11 @@ export default function SearchScreen() {
 
   const handleSelect = useCallback(
     (result: GeocodingResult) => {
-      addSearchHistory(result);
+      addSearchHistory(result, query);
       setHistory(getSearchHistory());
       navigateToResult(result);
     },
-    [navigateToResult],
+    [navigateToResult, query],
   );
 
   const handleRemoveHistory = useCallback((entryId: number) => {
@@ -196,7 +167,7 @@ export default function SearchScreen() {
 
   // Viewport-shift triggered refetch (Fix G)
   useEffect(() => {
-    if (lastQueryRef.current.length < 2 || !lastBboxRef.current || showHistory) return;
+    if (query.length < 2 || !lastBboxRef.current || showHistory) return;
 
     const prev = lastBboxRef.current;
     const prevCenterLat = (prev.south + prev.north) / 2;
@@ -208,14 +179,14 @@ export default function SearchScreen() {
     const lngShift = Math.abs(viewport.lng - prevCenterLng);
 
     if (latShift > prevHeight * 0.3 || lngShift > prevWidth * 0.3) {
-      handleSearch(lastQueryRef.current);
+      refetch();
     }
-  }, [viewport.lat, viewport.lng, viewport.zoom]);
+  }, [viewport.lat, viewport.lng, viewport.zoom, query, showHistory, refetch]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <Text style={styles.title}>Search</Text>
-      <SearchBar onSearch={handleSearch} />
+      <SearchBar onSearch={setQuery} />
       {showHistory ? (
         <SearchHistory
           history={history}
@@ -224,7 +195,7 @@ export default function SearchScreen() {
           onClearAll={handleClearHistory}
         />
       ) : (
-        <SearchResults results={results} onSelect={handleSelect} />
+        <SearchResults results={geocodingResults} onSelect={handleSelect} />
       )}
     </View>
   );

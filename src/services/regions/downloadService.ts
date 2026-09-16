@@ -7,6 +7,7 @@ import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
 import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
+import { invalidateSearchCacheForBbox } from '../search/searchCache';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -412,8 +413,14 @@ export async function deleteRegionData(regionId: string): Promise<void> {
   const db = await getDatabase();
 
   // Read drive_key before nullifying so we can leave the feed
-  const row = await db.getFirstAsync<{ drive_key: string | null }>(
-    'SELECT drive_key FROM regions WHERE id = ?',
+  const row = await db.getFirstAsync<{
+    drive_key: string | null;
+    bounds_min_lat: number;
+    bounds_max_lat: number;
+    bounds_min_lng: number;
+    bounds_max_lng: number;
+  }>(
+    'SELECT drive_key, bounds_min_lat, bounds_max_lat, bounds_min_lng, bounds_max_lng FROM regions WHERE id = ?',
     [regionId],
   );
 
@@ -436,6 +443,17 @@ export async function deleteRegionData(regionId: string): Promise<void> {
     'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, tile_version = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
+
+  // Removing an offline region changes local coverage — drop cached network
+  // results for the affected area so the next search sees current data.
+  if (row) {
+    invalidateSearchCacheForBbox({
+      south: row.bounds_min_lat,
+      north: row.bounds_max_lat,
+      west: row.bounds_min_lng,
+      east: row.bounds_max_lng,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +604,7 @@ async function downloadAndImportGeocodingBundle(
 
     // Rebuild FTS index
     await appDb.execAsync("INSERT INTO geocoding_entries(geocoding_entries) VALUES('rebuild')");
+    await appDb.execAsync("INSERT INTO geocoding_trigram(geocoding_trigram) VALUES('rebuild')");
 
     // Update geocoding_size_bytes for the region
     const fileInfo = await FileSystem.getInfoAsync(gzPath);

@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
-import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
+import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
+import { usePlaceSearch } from '../../hooks/usePlaceSearch';
 import { computeRoute } from '../../services/routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -52,18 +53,34 @@ export function AddDestinationPanel({
   searchCenter,
   onShowOnMap,
 }: AddDestinationPanelProps) {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<UnifiedSearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   /** True after the user hits search — results stay visible with detour times + map pins. */
   const [submitted, setSubmitted] = useState(false);
   const [detours, setDetours] = useState<Record<string, number | null>>({});
   const slideAnim = useRef(new Animated.Value(0)).current;
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
   const detourGenRef = useRef(0);
+  /** Latest search center, read at search time so the session never closes
+   *  over a stale GPS position. */
+  const searchCenterRef = useRef(searchCenter);
+  searchCenterRef.current = searchCenter;
+
+  const {
+    query,
+    setQuery,
+    results,
+    isSearching: loading,
+    submit: submitSearch,
+    clear: clearSearch,
+  } = usePlaceSearch({
+    limit: 8,
+    debounceMs: 350,
+    getContext: useCallback(() => {
+      const center = searchCenterRef.current;
+      return { lat: center.lat, lng: center.lng, zoom: 14, userLocation: center };
+    }, []),
+  });
   /** Route origin snapshotted when the user submits the search. The live
    *  `searchCenter` prop moves with GPS, so the detour effect must NOT
    *  depend on it — otherwise every position tick restarts all detour
@@ -80,8 +97,7 @@ export function AddDestinationPanel({
   // Animate panel in/out
   useEffect(() => {
     if (visible) {
-      setQuery('');
-      setResults([]);
+      clearSearch();
       setSubmitted(false);
       setDetours({});
       Animated.timing(slideAnim, {
@@ -96,7 +112,7 @@ export function AddDestinationPanel({
         useNativeDriver: true,
       }).start();
     }
-  }, [visible, slideAnim]);
+  }, [visible, slideAnim, clearSearch]);
 
   // Track keyboard height and pad the panel above it. (A KeyboardAvoidingView
   // with behavior="padding" doesn't shift this absolutely-positioned bottom
@@ -132,8 +148,7 @@ export function AddDestinationPanel({
   useSpeechRecognitionEvent('result', (event) => {
     const transcript = event.results[0]?.transcript ?? '';
     if (transcript) {
-      setQuery(transcript);
-      performSearch(transcript);
+      void submitSearch(transcript);
     }
     setIsListening(false);
   });
@@ -185,33 +200,6 @@ export function AddDestinationPanel({
     }
   }, [isListening, checkPermissions]);
 
-  const performSearch = useCallback(
-    async (text: string): Promise<UnifiedSearchResult[]> => {
-      if (!text.trim()) {
-        setResults([]);
-        return [];
-      }
-      setLoading(true);
-      try {
-        const searchResults = await unifiedSearch(text, {
-          lat: searchCenter.lat,
-          lng: searchCenter.lng,
-          zoom: 14,
-          limit: 8,
-          userLocation: searchCenter,
-        });
-        setResults(searchResults);
-        return searchResults;
-      } catch {
-        setResults([]);
-        return [];
-      } finally {
-        setLoading(false);
-      }
-    },
-    [searchCenter],
-  );
-
   const handleChangeText = useCallback(
     (text: string) => {
       setQuery(text);
@@ -220,22 +208,14 @@ export function AddDestinationPanel({
       setSubmitted(false);
       setDetours({});
       useMapStore.getState().setStopSearchMarkers([]);
-      if (searchTimeout.current) clearTimeout(searchTimeout.current);
-      searchTimeout.current = setTimeout(() => {
-        void performSearch(text);
-      }, 350);
     },
-    [performSearch],
+    [setQuery],
   );
 
   // User hit search/submit: keep the list visible, drop pins for every result
   // on the map, and zoom out to the full route so they can pick a stop.
   const handleSearchSubmit = useCallback(async () => {
-    if (searchTimeout.current) {
-      clearTimeout(searchTimeout.current);
-      searchTimeout.current = null;
-    }
-    const searchResults = await performSearch(query);
+    const searchResults = await submitSearch(query);
     if (searchResults.length === 0) return;
     Keyboard.dismiss();
     setSubmitted(true);
@@ -265,7 +245,7 @@ export function AddDestinationPanel({
       useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat]);
     }
     onShowOnMap?.();
-  }, [query, performSearch, activeRoute, onShowOnMap, searchCenter]);
+  }, [query, submitSearch, activeRoute, onShowOnMap, searchCenter]);
 
   // Compute the added drive time for each submitted result by routing through
   // it (inserted after the current target, same as onSelect) vs. the current
@@ -350,10 +330,9 @@ export function AddDestinationPanel({
       setSubmitted(false);
       setDetours({});
       onSelect(result);
-      setQuery('');
-      setResults([]);
+      clearSearch();
     },
-    [onSelect, isListening],
+    [onSelect, isListening, clearSearch],
   );
 
   // Tapping a result pin on the map selects that result.

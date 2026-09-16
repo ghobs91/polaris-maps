@@ -3,6 +3,7 @@ import type { OsmPoi } from './osmFetcher';
 import { searchPlacesByCategory } from './poiService';
 import { fetchOsmPoisByTags } from './osmFetcher';
 import { isAbortError, throwIfAborted, withTimeout } from '../search/abortUtils';
+import { nominatimThrottle } from '../search/requestThrottle';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import {
   resolveSearchCategories,
@@ -315,6 +316,8 @@ async function fetchNominatimPoiSingle(
   signal?: AbortSignal,
 ): Promise<OsmPoi[]> {
   throwIfAborted(signal);
+  // Respect the app-wide Nominatim rate limit shared with address geocoding.
+  await nominatimThrottle.wait(signal);
   const params = new URLSearchParams({
     q: queryTerms,
     format: 'jsonv2',

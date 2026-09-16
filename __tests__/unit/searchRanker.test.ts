@@ -219,4 +219,105 @@ describe('deduplicateResults', () => {
   it('returns empty array for empty input', () => {
     expect(deduplicateResults([])).toHaveLength(0);
   });
+
+  it('deduplicates by canonical identifier regardless of distance', () => {
+    const far: ScoredResult = {
+      poi: makePoi({
+        name: 'Corner Cafe',
+        lat: 40.9,
+        lng: -74.2,
+        tags: { name: 'Corner Cafe', 'polaris:uuid': 'ov-123' },
+      }),
+      score: 90,
+      distanceKm: 5,
+    };
+    const near: ScoredResult = {
+      poi: makePoi({
+        name: 'Corner Cafe',
+        lat: 40.748,
+        lng: -73.985,
+        tags: { name: 'Corner Cafe', 'polaris:uuid': 'ov-123' },
+      }),
+      score: 80,
+      distanceKm: 1,
+    };
+    expect(deduplicateResults([far, near])).toHaveLength(1);
+  });
+
+  it('keeps distinct nearby shops with different canonical identifiers', () => {
+    const a: ScoredResult = {
+      poi: makePoi({
+        name: 'Corner Cafe',
+        lat: 40.748,
+        lng: -73.985,
+        tags: { name: 'Corner Cafe', 'polaris:uuid': 'ov-1' },
+      }),
+      score: 90,
+      distanceKm: 0.01,
+    };
+    const b: ScoredResult = {
+      poi: makePoi({
+        name: 'Corner Bakery',
+        lat: 40.7481,
+        lng: -73.9851,
+        tags: { name: 'Corner Bakery', 'polaris:uuid': 'ov-2' },
+      }),
+      score: 85,
+      distanceKm: 0.01,
+    };
+    expect(deduplicateResults([a, b])).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Intent modifiers and score calibration
+// ---------------------------------------------------------------------------
+
+describe('intent modifiers', () => {
+  it('caps scores at 100', () => {
+    const poi = makePoi({
+      name: 'Starbucks',
+      tags: {
+        name: 'Starbucks',
+        'polaris:brand': 'Starbucks',
+        'polaris:avg_rating': '5',
+        'polaris:review_count': '100000',
+      },
+    });
+    const parsed = parseSearchQuery('starbucks');
+    const [result] = scoreAndRank([poi], parsed, 40.748, -73.985, {
+      viewport: { south: 40.7, north: 40.8, west: -74.0, east: -73.9 },
+    });
+    expect(result.score).toBeLessThanOrEqual(100);
+    expect(result.score).toBeGreaterThan(90);
+  });
+
+  it('demotes places proven closed for "open now" but never excludes them', () => {
+    jest.useFakeTimers();
+    // Tuesday 12:00 local — the rules below are closed at that time.
+    jest.setSystemTime(new Date(2026, 8, 15, 12, 0, 0));
+    try {
+      const open = makePoi({
+        name: 'Open Cafe',
+        tags: { name: 'Open Cafe', opening_hours: '24/7' },
+      });
+      const closed = makePoi({
+        name: 'Closed Cafe',
+        tags: { name: 'Closed Cafe', opening_hours: 'Mo-Su 00:00-06:00' },
+      });
+      const parsed = parseSearchQuery('open now cafe');
+      const results = scoreAndRank([closed, open], parsed, 40.748, -73.985);
+      expect(results[0].poi.name).toBe('Open Cafe');
+      expect(results).toHaveLength(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not demote places with unknown hours', () => {
+    const unknown = makePoi({ name: 'Mystery Cafe', tags: { name: 'Mystery Cafe' } });
+    const parsed = parseSearchQuery('open now cafe');
+    const [result] = scoreAndRank([unknown], parsed, 40.748, -73.985);
+    expect(result.score).toBeGreaterThan(0);
+  });
 });

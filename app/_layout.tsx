@@ -14,6 +14,7 @@ import {
   resumeTrafficP2P,
 } from '@/services/traffic/trafficFlowService';
 import { startMonitoring as startConnectivityMonitoring } from '@/services/regions/connectivityService';
+import { scheduleGeonamesDownload } from '@/services/geocoding/geonamesDownloadScheduler';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 import { useICloudSync } from '@/hooks/useICloudSync';
 
@@ -46,6 +47,12 @@ function RootLayoutInner() {
       initCarPlay();
     });
     return () => task.cancel();
+  }, []);
+
+  useEffect(() => {
+    // Download the offline GeoNames city database opportunistically (Wi-Fi
+    // preferred, silent no-op when no URL is configured).
+    return scheduleGeonamesDownload();
   }, []);
 
   useEffect(() => {

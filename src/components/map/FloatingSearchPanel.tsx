@@ -25,8 +25,9 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
-import { unifiedSearch, type UnifiedSearchResult } from '../../services/search/unifiedSearch';
-import { isAbortError } from '../../services/search/abortUtils';
+import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
+import type { SearchStageMeta } from '../../services/search/searchSession';
+import { usePlaceSearch } from '../../hooks/usePlaceSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
@@ -679,7 +680,6 @@ export function FloatingSearchPanel({
   }, [gtfsLoadingAgency]);
 
   const [mode, setMode] = useState<PanelMode>('idle');
-  const [query, setQuery] = useState('');
   const [results, setResults] = useState<GeocodingResult[]>([]);
   const [history, setHistory] = useState<GeocodingResult[]>([]);
   const [favorites, setFavorites] = useState<FavoriteLocation[]>([]);
@@ -693,7 +693,6 @@ export function FloatingSearchPanel({
   const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
   const [showSearchThisArea, setShowSearchThisArea] = useState(false);
   const [addingStop, setAddingStop] = useState(false);
-  const [stopSearchQuery, setStopSearchQuery] = useState('');
   const [stopSearchResults, setStopSearchResults] = useState<UnifiedSearchResult[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const searchAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -707,13 +706,245 @@ export function FloatingSearchPanel({
 
   const inputRef = useRef<TextInput>(null);
   const stopSearchInputRef = useRef<TextInput>(null);
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  /** Aborts the in-flight full search when a newer keystroke supersedes it. */
-  const searchAbortRef = useRef<AbortController | null>(null);
-  /** Incremented on every query change and on explicit clear; in-flight results
-   * compare against this to detect staleness and discard themselves. */
-  const searchGenRef = useRef(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  // ── Unified search (shared session hook) ────────────────────────────────
+  /** Latest staged unified results (local first, then the full merge). */
+  const unifiedResultsRef = useRef<UnifiedSearchResult[]>([]);
+  const stationResultsRef = useRef<GeocodingResult[]>([]);
+  const appleResultsRef = useRef<GeocodingResult[]>([]);
+  /** Query whose auxiliary (OTP + MapKit) search is active. */
+  const auxQueryRef = useRef('');
+  const auxAbortRef = useRef<AbortController | null>(null);
+  /** Generation counter for the direct Overpass category-pill flow. */
+  const categorySearchGenRef = useRef(0);
+
+  const applyMergedResults = useCallback((updateMap: boolean) => {
+    const unifiedResults = unifiedResultsRef.current.map(unifiedToGeocodingResult);
+    const stationResults = stationResultsRef.current;
+    const appleGeoResults = appleResultsRef.current;
+    const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
+    const filteredUnified = unifiedResults.filter(
+      (r) => !stationNames.has(r.entry.text.toLowerCase()),
+    );
+
+    const filteredApple = appleGeoResults.filter((ar) => {
+      return !filteredUnified.some(
+        (ur) =>
+          Math.abs(ur.entry.lat - ar.entry.lat) < 0.0005 &&
+          Math.abs(ur.entry.lng - ar.entry.lng) < 0.0005 &&
+          ur.entry.text.toLowerCase() === ar.entry.text.toLowerCase(),
+      );
+    });
+
+    const displayedResults = [...stationResults, ...filteredApple, ...filteredUnified];
+    setResults(displayedResults);
+
+    if (!updateMap) return;
+
+    const mapPois: OsmPoi[] = displayedResults
+      .filter((result) => result.entry.type !== 'station')
+      .map(
+        (result) =>
+          result.poi ?? {
+            id: result.entry.id,
+            lat: result.entry.lat,
+            lng: result.entry.lng,
+            name: result.entry.text,
+            type: 'amenity',
+            subtype: 'place',
+            tags: {
+              ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
+              ...(result.entry.housenumber ? { 'addr:housenumber': result.entry.housenumber } : {}),
+              ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
+              ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
+              ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
+              ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
+            },
+          },
+      );
+
+    if (mapPois.length > 0) {
+      // Label the closest matches on the map and zoom the camera out to
+      // frame them, matching Apple/Google Maps search behaviour. A small
+      // subset is fitted (selectSearchFitPois) so one distant outlier
+      // can't hijack the camera.
+      const fitPois = selectSearchFitPois(mapPois);
+      useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
+
+      const fitBounds = boundsForPois(fitPois);
+      if (fitBounds) {
+        const vp = useMapStore.getState().viewport;
+        useOsmPoiStore.getState().setZoomAndBounds(vp.zoom, fitBounds);
+        useMapStore
+          .getState()
+          .setFitBounds(
+            [fitBounds.minLng, fitBounds.minLat, fitBounds.maxLng, fitBounds.maxLat],
+            'search',
+          );
+      }
+    } else {
+      useOsmPoiStore.getState().clearCategorySearch();
+    }
+
+    const vp = useMapStore.getState().viewport;
+    searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
+  }, []);
+
+  const startAuxiliarySearch = useCallback(
+    (text: string) => {
+      auxAbortRef.current?.abort();
+      const controller = new AbortController();
+      auxAbortRef.current = controller;
+      const vp = useMapStore.getState().viewport;
+
+      void Promise.all([
+        searchOtpStops(text, vp.lat, vp.lng).catch(
+          () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
+        ),
+        searchNearby(text, vp.lat, vp.lng, 15000).catch(() => [] as NativeMapKitPoi[]),
+      ]).then(([otpStops, appleResults]) => {
+        if (auxAbortRef.current !== controller || controller.signal.aborted) return;
+
+        stationResultsRef.current = otpStops.map((s, i) => ({
+          entry: {
+            id: -(1_000_000 + i),
+            text: s.name,
+            type: 'station' as const,
+            housenumber: null,
+            street: null,
+            city: null,
+            state: null,
+            postcode: null,
+            country: null,
+            lat: s.lat,
+            lng: s.lon,
+            otpStopId: s.id,
+          },
+          rank: 100 + i,
+        }));
+
+        appleResultsRef.current = appleResults.map((r, i) => ({
+          entry: {
+            id: -(2_000_000 + i),
+            text: r.name ?? text,
+            type: 'place' as const,
+            housenumber: r.subThoroughfare ?? null,
+            street: r.thoroughfare ?? null,
+            city: r.locality ?? null,
+            state: r.administrativeArea ?? null,
+            postcode: r.postalCode ?? null,
+            country: r.country ?? null,
+            lat: r.latitude,
+            lng: r.longitude,
+          },
+          rank: 95 - i,
+        }));
+
+        applyMergedResults(true);
+      });
+    },
+    [applyMergedResults],
+  );
+
+  const handleUnifiedEmission = useCallback(
+    (emitted: UnifiedSearchResult[], meta: SearchStageMeta) => {
+      const text = meta.query;
+
+      if (text.length < 2) {
+        unifiedResultsRef.current = [];
+        stationResultsRef.current = [];
+        appleResultsRef.current = [];
+        auxQueryRef.current = '';
+        setResults([]);
+        if (meta.final) applyMergedResults(true);
+        useOsmPoiStore.getState().setIsCategorySearching(false);
+        return;
+      }
+
+      unifiedResultsRef.current = emitted;
+
+      // First emission for a new query starts the auxiliary transit/MapKit
+      // search so it runs alongside the rest of the unified pipeline.
+      if (text !== auxQueryRef.current) {
+        auxQueryRef.current = text;
+        stationResultsRef.current = [];
+        appleResultsRef.current = [];
+        startAuxiliarySearch(text);
+      }
+
+      if (!meta.final) {
+        setResults(emitted.map(unifiedToGeocodingResult));
+        useOsmPoiStore.getState().setIsCategorySearching(true);
+        return;
+      }
+
+      applyMergedResults(true);
+      useOsmPoiStore.getState().setIsCategorySearching(false);
+    },
+    [applyMergedResults, startAuxiliarySearch],
+  );
+
+  const {
+    query,
+    setQuery,
+    submit: submitSearch,
+    clear: clearSearch,
+  } = usePlaceSearch({
+    limit: 20,
+    getContext: () => {
+      const vp = useMapStore.getState().viewport;
+      const vb = useOsmPoiStore.getState().viewportBounds;
+      return {
+        lat: vp.lat,
+        lng: vp.lng,
+        zoom: vp.zoom,
+        viewportBounds: vb
+          ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
+          : undefined,
+        userLocation: userLocationRef.current ?? undefined,
+      };
+    },
+    onResults: handleUnifiedEmission,
+  });
+
+  // ── Stop search (shared session hook; adds debounce + abort) ─────────────
+  const {
+    query: stopSearchQuery,
+    setQuery: setStopSearchQuery,
+    clear: clearStopSearch,
+  } = usePlaceSearch({
+    limit: 8,
+    getContext: () => {
+      const vp = useMapStore.getState().viewport;
+      return { lat: vp.lat, lng: vp.lng, zoom: vp.zoom };
+    },
+    onResults: (emitted) => {
+      // Sort by distance to the route polyline when a preview exists.
+      const preview = useNavigationStore.getState().routePreview;
+      if (preview?.geometry && emitted.length > 0) {
+        const routeCoords = decodePolyline(preview.geometry);
+        // Sample every Nth point for performance
+        const step = Math.max(1, Math.floor(routeCoords.length / 50));
+        const sampled = routeCoords.filter((_, i) => i % step === 0);
+        const withDist = emitted.map((r) => {
+          let minDist = Infinity;
+          for (const [lng, lat] of sampled) {
+            const dlat = r.lat - lat;
+            const dlng = r.lng - lng;
+            const d = dlat * dlat + dlng * dlng;
+            if (d < minDist) minDist = d;
+          }
+          return { r, minDist };
+        });
+        withDist.sort((a, b) => a.minDist - b.minDist);
+        setStopSearchResults(withDist.map((w) => w.r));
+      } else {
+        setStopSearchResults(emitted);
+      }
+    },
+  });
 
   // ── Minimized state (drag-to-collapse, like Google/Apple Maps) ──
   const [minimized, setMinimized] = useState(false);
@@ -820,175 +1051,27 @@ export function FloatingSearchPanel({
   ]);
 
   // ── Search ──────────────────────────────────
-  const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
-  const performSearch = useCallback(async (text: string, gen: number, signal: AbortSignal) => {
-    const vp = useMapStore.getState().viewport;
-    const vb = useOsmPoiStore.getState().viewportBounds;
-
-    if (!userLocationRef.current) {
-      void (async () => {
-        try {
-          const { status } = await Location.getForegroundPermissionsAsync();
-          if (status !== 'granted') return;
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          userLocationRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        } catch {
-          // Ignore GPS failures during search.
-        }
-      })();
-    }
-
-    try {
-      const [unified, otpStops, appleResults] = await Promise.all([
-        unifiedSearch(text, {
-          lat: vp.lat,
-          lng: vp.lng,
-          zoom: vp.zoom,
-          limit: 20,
-          viewportBounds: vb
-            ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
-            : undefined,
-          userLocation: userLocationRef.current ?? undefined,
-          signal,
-          // Render scored local results the moment the fast local phase
-          // finishes; the awaited return replaces them with the full merge.
-          onPartial: (partial) => {
-            if (searchGenRef.current !== gen || signal.aborted) return;
-            setResults(partial.map(unifiedToGeocodingResult));
-          },
-        }),
-        searchOtpStops(text, vp.lat, vp.lng).catch(
-          () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
-        ),
-        searchNearby(text, vp.lat, vp.lng, 15000).catch(() => [] as NativeMapKitPoi[]),
-      ]);
-
-      const stationResults: GeocodingResult[] = otpStops.map((s, i) => ({
-        entry: {
-          id: -(1_000_000 + i),
-          text: s.name,
-          type: 'station' as const,
-          housenumber: null,
-          street: null,
-          city: null,
-          state: null,
-          postcode: null,
-          country: null,
-          lat: s.lat,
-          lng: s.lon,
-          otpStopId: s.id,
-        },
-        rank: 100 + i,
-      }));
-
-      const appleGeoResults: GeocodingResult[] = appleResults.map((r, i) => ({
-        entry: {
-          id: -(2_000_000 + i),
-          text: r.name ?? text,
-          type: 'place' as const,
-          housenumber: r.subThoroughfare ?? null,
-          street: r.thoroughfare ?? null,
-          city: r.locality ?? null,
-          state: r.administrativeArea ?? null,
-          postcode: r.postalCode ?? null,
-          country: r.country ?? null,
-          lat: r.latitude,
-          lng: r.longitude,
-        },
-        rank: 95 - i,
-      }));
-
-      const unifiedResults = unified.map(unifiedToGeocodingResult);
-      const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
-      const filteredUnified = unifiedResults.filter(
-        (r) => !stationNames.has(r.entry.text.toLowerCase()),
-      );
-
-      const filteredApple = appleGeoResults.filter((ar) => {
-        return !filteredUnified.some(
-          (ur) =>
-            Math.abs(ur.entry.lat - ar.entry.lat) < 0.0005 &&
-            Math.abs(ur.entry.lng - ar.entry.lng) < 0.0005 &&
-            ur.entry.text.toLowerCase() === ar.entry.text.toLowerCase(),
-        );
-      });
-
-      const displayedResults = [...stationResults, ...filteredApple, ...filteredUnified];
-      const mapPois: OsmPoi[] = displayedResults
-        .filter((result) => result.entry.type !== 'station')
-        .map(
-          (result) =>
-            result.poi ?? {
-              id: result.entry.id,
-              lat: result.entry.lat,
-              lng: result.entry.lng,
-              name: result.entry.text,
-              type: 'amenity',
-              subtype: 'place',
-              tags: {
-                ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
-                ...(result.entry.housenumber
-                  ? { 'addr:housenumber': result.entry.housenumber }
-                  : {}),
-                ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
-                ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
-                ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
-                ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
-              },
-            },
-        );
-
-      if (searchGenRef.current !== gen) return;
-      setResults(displayedResults);
-
-      if (mapPois.length > 0) {
-        // Label the closest matches on the map and zoom the camera out to
-        // frame them, matching Apple/Google Maps search behaviour. A small
-        // subset is fitted (selectSearchFitPois) so one distant outlier
-        // can't hijack the camera.
-        const fitPois = selectSearchFitPois(mapPois);
-        useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
-
-        const fitBounds = boundsForPois(fitPois);
-        if (fitBounds) {
-          useOsmPoiStore.getState().setZoomAndBounds(vp.zoom, fitBounds);
-          useMapStore
-            .getState()
-            .setFitBounds(
-              [fitBounds.minLng, fitBounds.minLat, fitBounds.maxLng, fitBounds.maxLat],
-              'search',
-            );
-        }
-      } else {
-        useOsmPoiStore.getState().clearCategorySearch();
+  /** Lazily resolve the user's location so nearby places can be promoted. */
+  const ensureUserLocation = useCallback(() => {
+    if (userLocationRef.current) return;
+    void (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        userLocationRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      } catch {
+        // Ignore GPS failures during search.
       }
-
-      searchAnchorRef.current = { lat: vp.lat, lng: vp.lng };
-    } catch (err) {
-      // A superseded search leaves the UI alone — the newer search owns it.
-      if (isAbortError(err)) return;
-      if (searchGenRef.current === gen) {
-        useOsmPoiStore.getState().clearCategorySearch();
-        setResults([]);
-      }
-    } finally {
-      if (searchGenRef.current === gen) {
-        useOsmPoiStore.getState().setIsCategorySearching(false);
-      }
-    }
+    })();
   }, []);
 
   const handleQueryChange = useCallback(
     (text: string) => {
-      setQuery(text);
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      // Supersede any in-flight search so it stops consuming network/CPU.
-      searchAbortRef.current?.abort();
-      const gen = ++searchGenRef.current;
-
+      ensureUserLocation();
       // Clear active category if user manually typed something different
       if (activeCategory && text !== activeCategory) {
         setActiveCategory(null);
@@ -997,59 +1080,28 @@ export function FloatingSearchPanel({
       if (text.length < 2) {
         setResults([]);
         useOsmPoiStore.getState().clearCategorySearch();
+        useOsmPoiStore.getState().setIsCategorySearching(false);
+        setQuery(text);
         return;
       }
 
       setResults([]);
       useOsmPoiStore.getState().clearCategorySearch();
       useOsmPoiStore.getState().setIsCategorySearching(true);
-
-      // Phase A (no debounce): local-DB results render in milliseconds.
-      const vp = useMapStore.getState().viewport;
-      const vb = useOsmPoiStore.getState().viewportBounds;
-      void unifiedSearch(text, {
-        lat: vp.lat,
-        lng: vp.lng,
-        zoom: vp.zoom,
-        limit: 20,
-        viewportBounds: vb
-          ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
-          : undefined,
-        userLocation: userLocationRef.current ?? undefined,
-        localOnly: true,
-      })
-        .then((partial) => {
-          if (searchGenRef.current !== gen) return;
-          setResults(partial.map(unifiedToGeocodingResult));
-        })
-        .catch(() => {
-          // Local failures degrade to empty — the full search still runs.
-        });
-
-      // Phase B (debounced): full multi-source search with live local partials.
-      debounceTimer.current = setTimeout(() => {
-        const controller = new AbortController();
-        searchAbortRef.current = controller;
-        void performSearch(text, gen, controller.signal);
-      }, 300);
+      setQuery(text);
     },
-    [performSearch, activeCategory],
+    [setQuery, activeCategory, ensureUserLocation],
   );
 
   const handleSearchSubmit = useCallback(() => {
     const text = query.trim();
     if (text.length < 2) return;
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    searchAbortRef.current?.abort();
-    const gen = ++searchGenRef.current;
-    setQuery(text);
+    ensureUserLocation();
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
     useOsmPoiStore.getState().setIsCategorySearching(true);
-    const controller = new AbortController();
-    searchAbortRef.current = controller;
-    void performSearch(text, gen, controller.signal);
-  }, [performSearch, query]);
+    void submitSearch(text);
+  }, [query, submitSearch, ensureUserLocation]);
 
   const handleFocus = useCallback(() => {
     if (mode === 'idle') setMode('searching');
@@ -1058,16 +1110,14 @@ export function FloatingSearchPanel({
   const dismissSearch = useCallback(() => {
     Keyboard.dismiss();
     setMode('idle');
-    setQuery('');
+    auxAbortRef.current?.abort();
+    clearSearch();
     setResults([]);
     setActiveCategory(null);
     searchAnchorRef.current = null;
     setShowSearchThisArea(false);
-    // Abort the in-flight search and advance generation to discard stragglers.
-    searchAbortRef.current?.abort();
-    searchGenRef.current++;
     useOsmPoiStore.getState().clearCategorySearch();
-  }, []);
+  }, [clearSearch]);
 
   const handleSearchThisArea = useCallback(() => {
     setShowSearchThisArea(false);
@@ -1158,10 +1208,10 @@ export function FloatingSearchPanel({
         return;
       }
       // Normal search selection — show the place card for the selected result
-      addSearchHistory(result);
+      addSearchHistory(result, query);
       setHistory(getSearchHistory());
       Keyboard.dismiss();
-      setQuery('');
+      clearSearch();
       setResults([]);
 
       // Transit station — open the transit stop card directly
@@ -1205,7 +1255,7 @@ export function FloatingSearchPanel({
       clearRoutePreview();
       setMode('idle');
     },
-    [mode, dismissSearch, navigateToResult, clearRoutePreview],
+    [mode, dismissSearch, navigateToResult, clearRoutePreview, clearSearch, query],
   );
 
   // ── Routing ──────────────────────────────────
@@ -1505,7 +1555,6 @@ export function FloatingSearchPanel({
   useEffect(() => {
     if (!pendingSearchQuery) return;
     setPendingSearchQuery(null);
-    setQuery(pendingSearchQuery);
     setMode('searching');
     handleQueryChange(pendingSearchQuery);
     setTimeout(() => inputRef.current?.focus(), 80);
@@ -1563,9 +1612,9 @@ export function FloatingSearchPanel({
 
   const handleAddStop = useCallback(() => {
     setAddingStop(true);
-    setStopSearchQuery('');
+    clearStopSearch();
     setStopSearchResults([]);
-  }, []);
+  }, [clearStopSearch]);
 
   // Focus stop search input after layout settles (avoids lag from simultaneous re-render + keyboard)
   useEffect(() => {
@@ -1583,42 +1632,6 @@ export function FloatingSearchPanel({
       setStopSearchMarkers([]);
     }
   }, [addingStop, setStopSearchMarkers]);
-
-  const handleStopSearchChange = useCallback((text: string) => {
-    setStopSearchQuery(text);
-    if (text.length < 2) {
-      setStopSearchResults([]);
-      return;
-    }
-    const vp = useMapStore.getState().viewport;
-    unifiedSearch(text, { lat: vp.lat, lng: vp.lng, zoom: vp.zoom, limit: 8 }).then(
-      (results) => {
-        // Sort by distance to route polyline if a route preview exists
-        const preview = useNavigationStore.getState().routePreview;
-        if (preview?.geometry) {
-          const routeCoords = decodePolyline(preview.geometry);
-          // Sample every Nth point for performance
-          const step = Math.max(1, Math.floor(routeCoords.length / 50));
-          const sampled = routeCoords.filter((_, i) => i % step === 0);
-          const withDist = results.map((r) => {
-            let minDist = Infinity;
-            for (const [lng, lat] of sampled) {
-              const dlat = r.lat - lat;
-              const dlng = r.lng - lng;
-              const d = dlat * dlat + dlng * dlng;
-              if (d < minDist) minDist = d;
-            }
-            return { r, minDist };
-          });
-          withDist.sort((a, b) => a.minDist - b.minDist);
-          setStopSearchResults(withDist.map((w) => w.r));
-        } else {
-          setStopSearchResults(results);
-        }
-      },
-      () => {},
-    );
-  }, []);
 
   const handleStopSearchSubmit = useCallback(() => {
     if (stopSearchResults.length > 0) {
@@ -1641,11 +1654,11 @@ export function FloatingSearchPanel({
       const updated = [...routePreviewWaypoints, wp];
       setRoutePreviewWaypoints(updated);
       setAddingStop(false);
-      setStopSearchQuery('');
+      clearStopSearch();
       setStopSearchResults([]);
       if (mode === 'route-preview') rerouteWithWaypoints(updated);
     },
-    [routePreviewWaypoints, setRoutePreviewWaypoints, rerouteWithWaypoints, mode],
+    [routePreviewWaypoints, setRoutePreviewWaypoints, rerouteWithWaypoints, mode, clearStopSearch],
   );
 
   // Handle tap on a stop search marker on the map
@@ -1774,11 +1787,11 @@ export function FloatingSearchPanel({
       // No address set yet — enter set-home search mode so the selected
       // result is saved as the Home address.
       setMode('setting-home');
-      setQuery('');
+      clearSearch();
       setResults([]);
       setTimeout(() => inputRef.current?.focus(), 80);
     }
-  }, [homeEntry, navigateToResult, clearRoutePreview]);
+  }, [homeEntry, navigateToResult, clearRoutePreview, clearSearch]);
 
   const handleWorkTap = useCallback(() => {
     if (workEntry) {
@@ -1791,11 +1804,11 @@ export function FloatingSearchPanel({
       // No address set yet — enter set-work search mode so the selected
       // result is saved as the Work address.
       setMode('setting-work');
-      setQuery('');
+      clearSearch();
       setResults([]);
       setTimeout(() => inputRef.current?.focus(), 80);
     }
-  }, [workEntry, navigateToResult, clearRoutePreview]);
+  }, [workEntry, navigateToResult, clearRoutePreview, clearSearch]);
 
   const handleHomeHold = useCallback(() => {
     if (!homeEntry) return;
@@ -1999,7 +2012,7 @@ export function FloatingSearchPanel({
                   placeholder="Search for a stop…"
                   placeholderTextColor={subColor}
                   value={stopSearchQuery}
-                  onChangeText={handleStopSearchChange}
+                  onChangeText={setStopSearchQuery}
                   ref={stopSearchInputRef}
                   returnKeyType="search"
                   onSubmitEditing={handleStopSearchSubmit}
@@ -2037,7 +2050,7 @@ export function FloatingSearchPanel({
                 <TouchableOpacity
                   onPress={() => {
                     setAddingStop(false);
-                    setStopSearchQuery('');
+                    clearStopSearch();
                     setStopSearchResults([]);
                   }}
                   style={styles.stopCancelBtn}
@@ -2204,7 +2217,7 @@ export function FloatingSearchPanel({
                   placeholder="Search for a stop…"
                   placeholderTextColor={subColor}
                   value={stopSearchQuery}
-                  onChangeText={handleStopSearchChange}
+                  onChangeText={setStopSearchQuery}
                   ref={stopSearchInputRef}
                   returnKeyType="search"
                   onSubmitEditing={handleStopSearchSubmit}
@@ -2242,7 +2255,7 @@ export function FloatingSearchPanel({
                 <TouchableOpacity
                   onPress={() => {
                     setAddingStop(false);
-                    setStopSearchQuery('');
+                    clearStopSearch();
                     setStopSearchResults([]);
                   }}
                   style={styles.stopCancelBtn}
@@ -2424,7 +2437,7 @@ export function FloatingSearchPanel({
               // Toggle off if already selected
               if (categoryId === activeCategory) {
                 setActiveCategory(null);
-                ++searchGenRef.current;
+                ++categorySearchGenRef.current;
                 useOsmPoiStore.getState().setIsCategorySearching(false);
                 useOsmPoiStore.getState().clearCategorySearch();
                 setResults([]);
@@ -2432,7 +2445,7 @@ export function FloatingSearchPanel({
               }
 
               setActiveCategory(categoryId);
-              const gen = ++searchGenRef.current;
+              const gen = ++categorySearchGenRef.current;
               setResults([]);
               useOsmPoiStore.getState().clearCategorySearch();
 
@@ -2480,7 +2493,7 @@ export function FloatingSearchPanel({
 
               Promise.all(fetches)
                 .then((results) => {
-                  if (searchGenRef.current !== gen) return;
+                  if (categorySearchGenRef.current !== gen) return;
                   useOsmPoiStore.getState().setIsCategorySearching(false);
 
                   // Merge results from all sources — OCM takes priority
@@ -2508,7 +2521,7 @@ export function FloatingSearchPanel({
                   }
                 })
                 .catch(() => {
-                  if (searchGenRef.current === gen) {
+                  if (categorySearchGenRef.current === gen) {
                     useOsmPoiStore.getState().setIsCategorySearching(false);
                     useOsmPoiStore.getState().clearCategorySearch();
                   }
@@ -2698,7 +2711,7 @@ export function FloatingSearchPanel({
                     iconBg="#8E8E93"
                     onPress={() => {
                       setMode('setting-pin');
-                      setQuery('');
+                      clearSearch();
                       setResults([]);
                       Keyboard.dismiss();
                       setTimeout(() => inputRef.current?.focus(), 150);

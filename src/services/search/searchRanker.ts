@@ -11,6 +11,7 @@
 import type { OsmPoi } from '../poi/osmFetcher';
 import type { ParsedSearchQuery } from './queryParser';
 import { levenshtein, normalizeSearchText, expandTokenSynonyms } from './queryParser';
+import { parseOpenNow } from './openingHours';
 
 export interface ScoredResult {
   poi: OsmPoi;
@@ -75,6 +76,17 @@ const W_CATEGORY = 15; // Category/cuisine match
 const W_POPULARITY = 15; // Rating + review count
 const W_VIEWPORT = 15; // Bonus for being inside current viewport
 
+/** Intent-modifier adjustments (bounded). */
+const OPEN_NOW_PENALTY = 15;
+const QUALITY_BONUS = 5;
+const CHEAP_PRICE_PENALTY = 1.5;
+
+/** Rating prior used for the "best/top rated" intent. */
+function qualityPrior(poi: OsmPoi): number {
+  const rating = Number.parseFloat(poi.tags['polaris:avg_rating'] ?? '');
+  return Number.isFinite(rating) && rating > 0 ? Math.max(0, (rating - 1) / 4) : 0;
+}
+
 function computeScore(
   poi: OsmPoi,
   parsed: ParsedSearchQuery,
@@ -122,10 +134,31 @@ function computeScore(
   // --- Viewport bonus (0–10) ---
   if (inView) score += W_VIEWPORT;
 
-  return score;
+  // --- Active intent modifiers (bounded) ---
+  if (parsed.wantsOpenNow) {
+    const openNow = parseOpenNow(poi.tags['opening_hours'] ?? poi.tags['hours'] ?? null);
+    // Unknown hours (null) never demote; proven closed does.
+    if (openNow === false) score -= OPEN_NOW_PENALTY;
+  }
+  if (parsed.wantsQuality) score += qualityPrior(poi) * QUALITY_BONUS;
+  if (parsed.wantsCheap) {
+    const price = Number.parseFloat(poi.tags['price_level'] ?? poi.tags['polaris:price'] ?? '');
+    if (Number.isFinite(price)) score -= Math.min(price, 4) * CHEAP_PRICE_PENALTY;
+  }
+
+  return Math.max(0, Math.min(100, score));
 }
 
 export function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
+  const base = baseTextMatchScore(poi, parsed);
+  // Full-text bm25 signal from the local index (name ≫ brand ≫ category ≫ city)
+  // acts as a floor so strong index matches are never under-scored.
+  const ftsSignal = Number.parseFloat(poi.tags['polaris:fts'] ?? '');
+  if (Number.isFinite(ftsSignal) && ftsSignal > base) return Math.min(1, ftsSignal);
+  return base;
+}
+
+function baseTextMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
   const query = normalizeSearchText(parsed.coreQuery).toLowerCase();
   const name = normalizeSearchText(poi.name).toLowerCase();
   const brandTag = normalizeSearchText(
@@ -335,10 +368,24 @@ function popularityScore(poi: OsmPoi): number {
  *  Fuzzy matches only dedup when truly close (<80 m) to avoid collapsing
  *  distinct shops in the same strip mall.
  */
+/** Stable identity for a POI across sources, when one is available. */
+function canonicalId(poi: OsmPoi): string | null {
+  const uuid = poi.tags['polaris:uuid'];
+  if (uuid) return `uuid:${uuid}`;
+  const osmId = poi.tags['osm:id'];
+  if (osmId) return `osm:${osmId}`;
+  return null;
+}
+
 export function deduplicateResults(results: ScoredResult[]): ScoredResult[] {
   const kept: ScoredResult[] = [];
+  const keptCanonical = new Set<string>();
 
   for (const r of results) {
+    // Canonical identity match — the same underlying feature from two sources.
+    const canonical = canonicalId(r.poi);
+    if (canonical && keptCanonical.has(canonical)) continue;
+
     const isDup = kept.some((existing) => {
       // Same source id — definitely the same place.
       if (existing.poi.id === r.poi.id && existing.poi.id !== undefined && r.poi.id !== undefined)
@@ -352,7 +399,10 @@ export function deduplicateResults(results: ScoredResult[]): ScoredResult[] {
       if (Math.min(nameA.length, nameB.length) < 6) return false; // short names need exact
       return levenshtein(nameA, nameB) <= 2;
     });
-    if (!isDup) kept.push(r);
+    if (!isDup) {
+      kept.push(r);
+      if (canonical) keptCanonical.add(canonical);
+    }
   }
 
   return kept;

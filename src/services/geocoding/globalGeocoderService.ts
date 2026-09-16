@@ -53,6 +53,14 @@ export function isGeonamesReady(): boolean {
 }
 
 /**
+ * True when a real GeoNames database URL is configured (the default config
+ * value is a placeholder, in which case city search is silently disabled).
+ */
+export function isGeonamesUrlConfigured(): boolean {
+  return GEONAMES_DB_URL.length > 0 && !GEONAMES_DB_URL.includes('cdn.example.com');
+}
+
+/**
  * Download and prepare the GeoNames database if not already present.
  *
  * - Downloads geonames.sqlite.gz from CDN.

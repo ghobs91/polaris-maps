@@ -159,7 +159,8 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       address_city,
       content='places',
       content_rowid='rowid',
-      tokenize='unicode61 remove_diacritics 2'
+      tokenize='unicode61 remove_diacritics 2',
+      prefix='2 3 4'
     );
 
     -- Triggers to keep places_fts in sync with the places table
@@ -257,6 +258,91 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     } catch {
       // Column already exists
     }
+  }
+
+  await migrateSearchIndexes(database);
+}
+
+const PLACES_FTS_TRIGGERS = `
+  CREATE TRIGGER IF NOT EXISTS places_fts_insert AFTER INSERT ON places BEGIN
+    INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+      VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
+  END;
+  CREATE TRIGGER IF NOT EXISTS places_fts_delete AFTER DELETE ON places BEGIN
+    INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+      VALUES ('delete', OLD.rowid, OLD.name, OLD.brand_name, OLD.category, OLD.address_city);
+  END;
+  CREATE TRIGGER IF NOT EXISTS places_fts_update AFTER UPDATE ON places BEGIN
+    INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+      VALUES ('delete', OLD.rowid, OLD.name, OLD.brand_name, OLD.category, OLD.address_city);
+    INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+      VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
+  END;
+`;
+
+/**
+ * Idempotent search-index migrations.
+ *
+ * - `places_fts` gains prefix indexes (`prefix='2 3 4'`) so short autocomplete
+ *   prefixes don't need a full scan. Detected from `sqlite_master`, so the
+ *   migration runs exactly once per database.
+ * - `geocoding_trigram` provides offline typo/substring matching for street
+ *   and locality names, created from the existing content table.
+ */
+async function migrateSearchIndexes(database: SQLite.SQLiteDatabase): Promise<void> {
+  const placesFts = await database.getFirstAsync<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'places_fts'",
+  );
+  if (placesFts && (placesFts.sql ?? '').length > 0 && !(placesFts.sql ?? '').includes('prefix=')) {
+    await database.execAsync(`
+      DROP TRIGGER IF EXISTS places_fts_insert;
+      DROP TRIGGER IF EXISTS places_fts_delete;
+      DROP TRIGGER IF EXISTS places_fts_update;
+      DROP TABLE IF EXISTS places_fts;
+      CREATE VIRTUAL TABLE places_fts USING fts5(
+        name,
+        brand_name,
+        category,
+        address_city,
+        content='places',
+        content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2',
+        prefix='2 3 4'
+      );
+      INSERT INTO places_fts(places_fts) VALUES('rebuild');
+      ${PLACES_FTS_TRIGGERS}
+    `);
+  }
+
+  const trigram = await database.getFirstAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'geocoding_trigram'",
+  );
+  if (!trigram) {
+    await database.execAsync(`
+      CREATE VIRTUAL TABLE geocoding_trigram USING fts5(
+        text,
+        street,
+        city,
+        content='geocoding_data',
+        content_rowid='id',
+        tokenize='trigram'
+      );
+      INSERT INTO geocoding_trigram(geocoding_trigram) VALUES('rebuild');
+      CREATE TRIGGER IF NOT EXISTS geocoding_trigram_insert AFTER INSERT ON geocoding_data BEGIN
+        INSERT INTO geocoding_trigram(rowid, text, street, city)
+          VALUES (NEW.id, NEW.text, NEW.street, NEW.city);
+      END;
+      CREATE TRIGGER IF NOT EXISTS geocoding_trigram_delete AFTER DELETE ON geocoding_data BEGIN
+        INSERT INTO geocoding_trigram(geocoding_trigram, rowid, text, street, city)
+          VALUES ('delete', OLD.id, OLD.text, OLD.street, OLD.city);
+      END;
+      CREATE TRIGGER IF NOT EXISTS geocoding_trigram_update AFTER UPDATE ON geocoding_data BEGIN
+        INSERT INTO geocoding_trigram(geocoding_trigram, rowid, text, street, city)
+          VALUES ('delete', OLD.id, OLD.text, OLD.street, OLD.city);
+        INSERT INTO geocoding_trigram(rowid, text, street, city)
+          VALUES (NEW.id, NEW.text, NEW.street, NEW.city);
+      END;
+    `);
   }
 }
 

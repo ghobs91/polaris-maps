@@ -11,7 +11,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 20;
 
 /** Client-side timeout for Overpass API requests (ms). */
-const OVERPASS_TIMEOUT_MS = 15_000;
+const OVERPASS_TIMEOUT_MS = 8_000;
 
 interface CacheEntry {
   pois: OsmPoi[];
@@ -80,7 +80,7 @@ export async function fetchOsmPois(
   // Include both node and way elements — shops inside shopping centers are
   // almost always mapped as ways (polygon outlines) in OSM, not nodes.
   // `out center` appends a {lat,lon} centroid to each way element.
-  const query = `[out:json][timeout:25];
+  const query = `[out:json][timeout:8];
 (
   node["amenity"]["name"](${bbox});
   node["shop"]["name"](${bbox});
@@ -182,7 +182,7 @@ export async function fetchOsmPoisByTags(
     `way["${k}"="${v}"]${filterSuffix}${nameSuffix}(${bbox});`,
   ]);
 
-  const query = `[out:json][timeout:25];\n(\n  ${clauses.join('\n  ')}\n);\nout body center;`;
+  const query = `[out:json][timeout:8];\n(\n  ${clauses.join('\n  ')}\n);\nout body center;`;
 
   const data = await overpassFetch<{ elements: any[] }>({
     query,
@@ -257,7 +257,7 @@ export async function fetchOsmPoisByName(
 
   const bbox = `${south},${west},${north},${east}`;
 
-  const query = `[out:json][timeout:25];
+  const query = `[out:json][timeout:8];
 (
   node["name"~"${safe}",i]["amenity"](${bbox});
   node["name"~"${safe}",i]["shop"](${bbox});

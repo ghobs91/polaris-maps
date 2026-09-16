@@ -25,9 +25,20 @@ export async function searchPlaces(query: string, limit: number = 20): Promise<P
 
 /**
  * FTS5-powered text search on the places table.
- * Supports prefix matching, tokenized multi-word queries, and relevance ranking.
- * Falls back to LIKE search if FTS table is empty or query fails.
+ * Supports prefix matching, tokenized multi-word queries, and weighted
+ * bm25 relevance (name ≫ brand ≫ category ≫ city). Falls back to LIKE search
+ * if FTS table is empty or query fails.
  */
+export interface PlaceSearchResult extends Place {
+  /** Normalized full-text relevance (0–1) from bm25 column weights. */
+  ftsRelevance?: number;
+}
+
+/** Map a raw SQLite bm25() value (negative, lower = better) to 0–1. */
+export function normalizeBm25(bm25: number): number {
+  return Math.max(0, Math.min(1, 0.5 + -bm25 / 40));
+}
+
 export async function searchPlacesFts(
   query: string,
   south: number,
@@ -35,7 +46,7 @@ export async function searchPlacesFts(
   north: number,
   east: number,
   limit: number = 50,
-): Promise<Place[]> {
+): Promise<PlaceSearchResult[]> {
   if (!query.trim()) return [];
   const db = await getDatabase();
 
@@ -50,18 +61,24 @@ export async function searchPlacesFts(
   if (!ftsQuery) return [];
 
   try {
-    const rows = await db.getAllAsync<PlaceRow>(
-      `SELECT p.* FROM places p
+    const rows = await db.getAllAsync<PlaceRow & { fts_rank: number }>(
+      `SELECT p.*, bm25(places_fts, 10.0, 6.0, 2.0, 1.0) AS fts_rank
+       FROM places p
        JOIN places_fts ON places_fts.rowid = p.rowid
        WHERE places_fts MATCH ?
          AND p.lat BETWEEN ? AND ?
          AND p.lng BETWEEN ? AND ?
          AND p.status = 'open'
-       ORDER BY places_fts.rank
+       ORDER BY fts_rank
        LIMIT ?`,
       [ftsQuery, south, north, west, east, limit],
     );
-    if (rows.length > 0) return rows.map(rowToPlace);
+    if (rows.length > 0) {
+      return rows.map((row) => ({
+        ...rowToPlace(row),
+        ftsRelevance: normalizeBm25(row.fts_rank),
+      }));
+    }
   } catch {
     // FTS table may not be populated yet — fall through to LIKE
   }

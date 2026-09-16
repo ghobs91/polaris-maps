@@ -47,6 +47,27 @@ export async function sleepWithAbort(ms: number, signal?: AbortSignal | null): P
 }
 
 /**
+ * Resolve with `null` when a source promise does not settle within the
+ * timeout, so callers can treat the timeout as "no results". Rejections
+ * propagate unchanged.
+ */
+export function withSourceTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  return new Promise<T | null>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
  * Combine an external AbortSignal with a timeout. The returned signal aborts
  * when either the outer signal fires or the timeout elapses. Call `cleanup`
  * to clear the timer and listener once the fetch settles.

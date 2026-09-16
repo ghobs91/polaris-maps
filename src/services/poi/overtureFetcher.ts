@@ -7,10 +7,13 @@ import Pbf from 'pbf';
 import type { Place, PlaceCategory } from '../../models/poi';
 import type { OverturePlace, OverturePlaceCollection } from '../../types/overture';
 import type { SQLiteBindValue } from 'expo-sqlite';
-import { throwIfAborted } from '../search/abortUtils';
+import { throwIfAborted, withSourceTimeout } from '../search/abortUtils';
+import { invalidateSearchCacheForBbox } from '../search/searchCache';
 
 const TILE_ZOOM = 15;
 const MAX_TILE_FEATURE_CACHE_ENTRIES = 256;
+/** Upper bound for a single PMTiles tile request (ms). */
+const TILE_FETCH_TIMEOUT_MS = 8_000;
 let pmtilesArchive: PMTiles | null = null;
 const tileFeatureCache = new Map<string, Promise<OverturePlace[]>>();
 
@@ -148,7 +151,9 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
   if (!archive) return [];
 
   const promise = (async () => {
-    const tile = await archive.getZxy(z, x, y);
+    // PMTiles fetches have no built-in timeout; bound them so a single slow
+    // tile cannot hold the whole search open.
+    const tile = await withSourceTimeout(archive.getZxy(z, x, y), TILE_FETCH_TIMEOUT_MS);
     if (!tile?.data) return [];
 
     const bytes = tile.data instanceof Uint8Array ? tile.data : new Uint8Array(tile.data);
@@ -1008,15 +1013,36 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
           status, source, author_pubkey, signature, created_at, updated_at`;
 
+  interface FtsRow {
+    rowid: number;
+    uuid: string;
+    name: string;
+    brand_name: string | null;
+    category: string;
+    address_city: string | null;
+  }
+
   await db.withExclusiveTransactionAsync(async (txn) => {
-    // Temporarily disable FTS triggers during bulk upsert to avoid
-    // O(2n) delete+insert FTS index operations per row. We rebuild
-    // the FTS index once after the transaction completes.
+    // Temporarily disable FTS triggers during the bulk upsert. Instead of a
+    // full `rebuild` afterwards (O(table size) on every search that fetches
+    // Overture tiles), FTS rows are maintained explicitly for exactly the
+    // written rowids below.
     await txn.runAsync('DROP TRIGGER IF EXISTS places_fts_insert');
     await txn.runAsync('DROP TRIGGER IF EXISTS places_fts_update');
 
     for (let i = 0; i < places.length; i += CHUNK_SIZE) {
       const chunk = places.slice(i, i + CHUNK_SIZE);
+
+      // Existing rows are needed to delete their old FTS entries (updates
+      // would otherwise leave duplicate index rows behind).
+      const uuidPlaceholders = chunk.map(() => '?').join(', ');
+      const existing = await txn.getAllAsync<FtsRow>(
+        `SELECT rowid, uuid, name, brand_name, category, address_city
+         FROM places WHERE uuid IN (${uuidPlaceholders})`,
+        chunk.map((p) => p.uuid),
+      );
+      const existingByUuid = new Map(existing.map((row) => [row.uuid, row]));
+
       const rowPlaceholders = `(${Array(colCount).fill('?').join(', ')})`;
       const placeholders = chunk.map(() => rowPlaceholders).join(', ');
       const params: SQLiteBindValue[] = [];
@@ -1049,7 +1075,8 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           p.updatedAt,
         );
       }
-      await txn.runAsync(
+
+      const written = await txn.getAllAsync<FtsRow>(
         `INSERT INTO places (${colList}) VALUES ${placeholders}
         ON CONFLICT(uuid) DO UPDATE SET
           name = excluded.name,
@@ -1065,15 +1092,36 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           emails = COALESCE(excluded.emails, places.emails),
           brand_name = COALESCE(excluded.brand_name, places.brand_name),
           status = excluded.status,
-          updated_at = excluded.updated_at`,
+          updated_at = excluded.updated_at
+        RETURNING rowid, uuid, name, brand_name, category, address_city`,
         params,
       );
+
+      for (const row of written) {
+        const previous = existingByUuid.get(row.uuid);
+        if (previous) {
+          await txn.runAsync(
+            `INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+             VALUES ('delete', ?, ?, ?, ?, ?)`,
+            [
+              previous.rowid,
+              previous.name,
+              previous.brand_name,
+              previous.category,
+              previous.address_city,
+            ],
+          );
+        }
+        await txn.runAsync(
+          `INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
+           VALUES (?, ?, ?, ?, ?)`,
+          [row.rowid, row.name, row.brand_name, row.category, row.address_city],
+        );
+      }
     }
   });
 
-  // Rebuild FTS index in one pass (faster than per-row trigger updates)
-  // then re-create the triggers for single-row inserts/updates.
-  await db.execAsync(`INSERT INTO places_fts(places_fts) VALUES('rebuild')`);
+  // Re-create the triggers for single-row inserts/updates.
   await db.execAsync(`
     CREATE TRIGGER IF NOT EXISTS places_fts_insert AFTER INSERT ON places BEGIN
       INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
@@ -1086,4 +1134,29 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
         VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
     END
   `);
+
+  // Consistency guard: if the external-content index ever diverges (e.g. an
+  // interrupted migration), recover once with a full rebuild.
+  const [placesCount, ftsCount] = await Promise.all([
+    db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM places'),
+    db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM places_fts'),
+  ]);
+  if ((placesCount?.n ?? 0) !== (ftsCount?.n ?? 0)) {
+    await db.execAsync(`INSERT INTO places_fts(places_fts) VALUES('rebuild')`);
+  }
+
+  // New local data invalidates cached network results for the same area.
+  if (places.length > 0) {
+    let south = places[0].lat;
+    let north = places[0].lat;
+    let west = places[0].lng;
+    let east = places[0].lng;
+    for (const place of places) {
+      if (place.lat < south) south = place.lat;
+      if (place.lat > north) north = place.lat;
+      if (place.lng < west) west = place.lng;
+      if (place.lng > east) east = place.lng;
+    }
+    invalidateSearchCacheForBbox({ south, north, west, east });
+  }
 }

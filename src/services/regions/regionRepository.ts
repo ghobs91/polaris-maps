@@ -1,5 +1,6 @@
 import { getDatabase } from '../database/init';
 import type { Region, RegionDownloadStatus } from '../../models/region';
+import { invalidateSearchCacheForBbox } from '../search/searchCache';
 
 export async function getAllRegions(): Promise<Region[]> {
   const db = await getDatabase();
@@ -81,9 +82,32 @@ export async function updateDownloadStatus(
 
 export async function deleteRegion(id: string): Promise<void> {
   const db = await getDatabase();
+
+  // Capture bounds before the row disappears so cached search results for the
+  // region can be invalidated.
+  const bounds = await db.getFirstAsync<{
+    bounds_min_lat: number;
+    bounds_max_lat: number;
+    bounds_min_lng: number;
+    bounds_max_lng: number;
+  }>(
+    'SELECT bounds_min_lat, bounds_max_lat, bounds_min_lng, bounds_max_lng FROM regions WHERE id = ?',
+    [id],
+  );
+
   await db.runAsync('DELETE FROM regions WHERE id = ?', [id]);
   await db.runAsync('DELETE FROM geocoding_data WHERE region_id = ?', [id]);
   await db.runAsync("INSERT INTO geocoding_entries(geocoding_entries) VALUES('rebuild')");
+  await db.runAsync("INSERT INTO geocoding_trigram(geocoding_trigram) VALUES('rebuild')");
+
+  if (bounds) {
+    invalidateSearchCacheForBbox({
+      south: bounds.bounds_min_lat,
+      north: bounds.bounds_max_lat,
+      west: bounds.bounds_min_lng,
+      east: bounds.bounds_max_lng,
+    });
+  }
 }
 
 interface RegionRow {

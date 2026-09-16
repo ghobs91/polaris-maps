@@ -45,6 +45,7 @@ pnpm test:watch              # Jest watch mode
 pnpm test:integration        # Jest integration suite
 pnpm test:contract           # Jest contract suite
 pnpm test:benchmark          # Performance benchmarks
+pnpm search:bench            # Synthetic search index/FTS benchmark (JSON + summary)
 pnpm test:e2e:ios            # Detox e2e (iOS simulator)
 pnpm test:e2e:android        # Detox e2e (Android emulator)
 
