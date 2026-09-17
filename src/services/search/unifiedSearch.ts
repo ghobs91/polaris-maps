@@ -111,6 +111,14 @@ export interface UnifiedSearchResult {
   brandBranchCount?: number;
   /** Address city. */
   city?: string;
+  /** Average community rating (0–5), when known. */
+  rating?: number;
+  /** Whether the place is currently open, when known. */
+  openNow?: boolean;
+  /** Price level (1–4), when known. */
+  priceLevel?: number;
+  /** Thumbnail image URL, when known. */
+  thumbnailUrl?: string;
 }
 
 /** Result stages, emitted in this order as each completes. */

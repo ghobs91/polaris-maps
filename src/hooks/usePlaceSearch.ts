@@ -23,6 +23,16 @@ export type UsePlaceSearchOptions = Omit<SearchSessionOptions, 'onResults'> & {
   onResults?: (results: UnifiedSearchResult[], meta: SearchStageMeta) => void;
 };
 
+/** Number of results revealed per page. */
+const RESULTS_PAGE = 20;
+
+/** Stable identity for a result across re-sorts and re-emissions. */
+function canonicalResultKey(result: UnifiedSearchResult): string {
+  return result.poi?.id != null
+    ? `poi:${result.poi.id}`
+    : `${result.name}:${result.lat.toFixed(5)}:${result.lng.toFixed(5)}`;
+}
+
 export interface UsePlaceSearchResult {
   /** Current raw input value. */
   query: string;
@@ -30,6 +40,12 @@ export interface UsePlaceSearchResult {
   setQuery: (query: string) => void;
   /** Latest results (staged: local first, then the full merge). */
   results: UnifiedSearchResult[];
+  /** The first page of `results`; grows via `loadMore`. */
+  visibleResults: UnifiedSearchResult[];
+  /** Reveal the next page of results (client-side progressive disclosure). */
+  loadMore: () => void;
+  /** True while more results can be revealed. */
+  hasMore: boolean;
   /** True while any phase of the current query is still running. */
   isSearching: boolean;
   /** Run the full search immediately, bypassing the debounce. */
@@ -58,8 +74,25 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
   const results = useMemo(() => {
     const intent = parseSearchQuery(query);
     const effective = mergeFilters(intent, filters);
-    return sortResults(applyFilters(rawResults, effective), sort);
+    const sorted = sortResults(applyFilters(rawResults, effective), sort);
+    // Dedupe by canonical key so staggered stage emissions don't repeat rows.
+    const seen = new Set<string>();
+    return sorted.filter((result) => {
+      const key = canonicalResultKey(result);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [rawResults, filters, sort, query]);
+
+  // Progressive disclosure: reveal results a page at a time; reset on new query.
+  const [visibleCount, setVisibleCount] = useState(RESULTS_PAGE);
+  useEffect(() => {
+    setVisibleCount(RESULTS_PAGE);
+  }, [query]);
+  const visibleResults = useMemo(() => results.slice(0, visibleCount), [results, visibleCount]);
+  const loadMore = useCallback(() => setVisibleCount((count) => count + RESULTS_PAGE), []);
+  const hasMore = visibleCount < results.length;
 
   // Throttle staged emissions to one UI update per animation frame so rapid
   // stage completions (local → photon → category → remaining) don't thrash
@@ -154,5 +187,17 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
     setIsSearching(false);
   }, [cancelPendingEmission]);
 
-  return { query, setQuery, results, isSearching, submit, refetch, cancel, clear };
+  return {
+    query,
+    setQuery,
+    results,
+    visibleResults,
+    loadMore,
+    hasMore,
+    isSearching,
+    submit,
+    refetch,
+    cancel,
+    clear,
+  };
 }

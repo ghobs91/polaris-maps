@@ -1,39 +1,29 @@
 import React, { useCallback } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { colors, spacing, borderRadius } from '../../constants/theme';
 import { GlassView } from '../common/GlassView';
-import type { GeocodingResult } from '../../services/geocoding/geocodingService';
+import { SearchResultRow } from './SearchResultRow';
+import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 
 interface SearchResultsProps {
-  results: GeocodingResult[];
-  onSelect: (result: GeocodingResult) => void;
+  results: UnifiedSearchResult[];
+  onSelect: (result: UnifiedSearchResult) => void;
+  /** Called when the list nears its end and more results are available. */
+  onEndReached?: () => void;
+  /** True while more results can be revealed. */
+  hasMore?: boolean;
 }
 
-export function SearchResults({ results, onSelect }: SearchResultsProps) {
+function canonicalKey(item: UnifiedSearchResult): string {
+  return item.poi?.id != null
+    ? `poi:${item.poi.id}`
+    : `${item.name}:${item.lat.toFixed(5)}:${item.lng.toFixed(5)}`;
+}
+
+export function SearchResults({ results, onSelect, onEndReached, hasMore }: SearchResultsProps) {
   const renderItem = useCallback(
-    ({ item }: { item: GeocodingResult }) => (
-      <Pressable
-        style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
-        onPress={() => onSelect(item)}
-        accessibilityLabel={`${item.entry.text}, match ${Math.min(100, Math.max(0, Math.round(item.rank)))} percent`}
-      >
-        <View style={styles.iconContainer}>
-          <Ionicons name="location-outline" size={20} color={colors.primary} />
-        </View>
-        <View style={styles.textContainer}>
-          <Text style={styles.text} numberOfLines={1}>
-            {item.entry.text}
-          </Text>
-          <Text style={styles.type} numberOfLines={1}>
-            {item.entry.city ? item.entry.city : item.entry.type !== 'place' ? item.entry.type : ''}
-            {typeof item.rank === 'number'
-              ? ` · ${Math.min(100, Math.max(0, Math.round(item.rank)))}% match`
-              : ''}
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-      </Pressable>
+    ({ item }: { item: UnifiedSearchResult }) => (
+      <SearchResultRow result={item} onPress={onSelect} />
     ),
     [onSelect],
   );
@@ -44,10 +34,21 @@ export function SearchResults({ results, onSelect }: SearchResultsProps) {
     <GlassView material="regular" style={styles.list}>
       <FlatList
         data={results}
-        keyExtractor={(item) => String(item.entry.id)}
+        keyExtractor={canonicalKey}
         style={styles.flatList}
         keyboardShouldPersistTaps="handled"
         renderItem={renderItem}
+        onEndReached={hasMore ? onEndReached : undefined}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          hasMore ? (
+            <View style={styles.footer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : results.length > 4 ? (
+            <Text style={styles.endText}>End of results</Text>
+          ) : null
+        }
       />
     </GlassView>
   );
@@ -65,40 +66,14 @@ const styles = StyleSheet.create({
   flatList: {
     flex: 1,
   },
-  item: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md - 2,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border + '40',
-    flexDirection: 'row',
+  footer: {
+    paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  itemPressed: {
-    opacity: 0.7,
-  },
-  iconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-    backgroundColor: `${colors.primary}14`,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.sm,
-  },
-  textContainer: {
-    flex: 1,
-    marginRight: spacing.sm,
-  },
-  text: {
-    ...typography.body,
-    color: colors.text,
-  },
-  type: {
-    ...typography.caption,
+  endText: {
+    textAlign: 'center',
     color: colors.textSecondary,
-    textTransform: 'capitalize',
-    marginTop: 2,
+    paddingVertical: spacing.md,
+    fontSize: 12,
   },
 });

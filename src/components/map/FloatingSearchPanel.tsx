@@ -925,6 +925,15 @@ export function FloatingSearchPanel({
     onResults: handleUnifiedEmission,
   });
 
+  // Progressive disclosure for the results list.
+  const [visibleCount, setVisibleCount] = useState(20);
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [query]);
+  const visibleResults = useMemo(() => results.slice(0, visibleCount), [results, visibleCount]);
+  const loadMoreResults = useCallback(() => setVisibleCount((count) => count + 20), []);
+  const hasMoreResults = visibleCount < results.length;
+
   // ── Stop search (shared session hook; adds debounce + abort) ─────────────
   const {
     query: stopSearchQuery,
@@ -2740,12 +2749,23 @@ export function FloatingSearchPanel({
                             rank: 50,
                             poi,
                           }))
-                        : results
+                        : visibleResults
                   }
                   keyExtractor={(item) => String(item.entry.id)}
                   renderItem={showHistory ? renderHistoryItem : renderResultItem}
                   keyboardShouldPersistTaps="handled"
                   scrollEnabled
+                  onEndReached={hasMoreResults ? loadMoreResults : undefined}
+                  onEndReachedThreshold={0.4}
+                  ListFooterComponent={
+                    hasMoreResults ? (
+                      <ActivityIndicator
+                        color={colors.primary}
+                        size="small"
+                        style={{ paddingVertical: 12 }}
+                      />
+                    ) : null
+                  }
                   style={st.resultList}
                   ListHeaderComponent={
                     showHistory ? (

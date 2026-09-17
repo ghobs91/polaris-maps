@@ -19,11 +19,11 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 ## 2. Rich rows, pagination, and voice search
 
-- [ ] 2.1 Extend the search result model with optional rating, open-now state, price level, distance, category, and thumbnail fields from the ranked result
-- [ ] 2.2 Build a `SearchResultRow` component rendering category icon, thumbnail, rating, open/closed badge, price, and distance with graceful omission of missing fields
+- [x] 2.1 Extend the search result model with optional rating, open-now state, price level, distance, category, and thumbnail fields from the ranked result
+- [x] 2.2 Build a `SearchResultRow` component rendering category icon, thumbnail, rating, open/closed badge, price, and distance with graceful omission of missing fields
 - [ ] 2.3 Adopt the shared row in `SearchResults.tsx` and in the floating panel result list (preserve the transit-station variant)
-- [ ] 2.4 Add cursor-based `loadMore()` pagination to `usePlaceSearch` with dedupe by canonical key across re-sorts
-- [ ] 2.5 Add the scroll-to-load affordance and end-of-results state in both result lists
+- [x] 2.4 Add cursor-based `loadMore()` pagination to `usePlaceSearch` with dedupe by canonical key across re-sorts
+- [x] 2.5 Add the scroll-to-load affordance and end-of-results state in both result lists
 - [ ] 2.6 Create `useVoiceSearch` hook reusing the existing speech implementation from `SearchBar.tsx`, with just-in-time permission and keyboard fallback
 - [ ] 2.7 Add the microphone control to `FloatingSearchPanel.tsx` that fills the input and triggers a search
 - [ ] 2.8 Unit tests: row rendering with full and sparse data; pagination dedupe after a reordering emission; voice-search fallback when permission is denied

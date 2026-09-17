@@ -102,7 +102,7 @@ export default function SearchScreen() {
     setHistory(getSearchHistory());
   }, []);
 
-  const { query, setQuery, results, refetch } = usePlaceSearch({
+  const { query, setQuery, visibleResults, loadMore, hasMore, refetch } = usePlaceSearch({
     limit: 30,
     getContext: useCallback(() => {
       // Capture the bbox used for this search so the viewport-shift effect can
@@ -140,8 +140,6 @@ export default function SearchScreen() {
     ),
   });
 
-  const geocodingResults = useMemo(() => results.map(unifiedToGeocodingResult), [results]);
-
   const navigateToResult = useCallback(
     (result: GeocodingResult) => {
       setViewport({ lat: result.entry.lat, lng: result.entry.lng, zoom: 16 });
@@ -156,6 +154,16 @@ export default function SearchScreen() {
   );
 
   const handleSelect = useCallback(
+    (unified: UnifiedSearchResult) => {
+      const result = unifiedToGeocodingResult(unified);
+      addSearchHistory(result, query);
+      setHistory(getSearchHistory());
+      navigateToResult(result);
+    },
+    [navigateToResult, query],
+  );
+
+  const handleSelectHistory = useCallback(
     (result: GeocodingResult) => {
       addSearchHistory(result, query);
       setHistory(getSearchHistory());
@@ -216,12 +224,17 @@ export default function SearchScreen() {
       {showHistory ? (
         <SearchHistory
           history={history}
-          onSelect={handleSelect}
+          onSelect={handleSelectHistory}
           onRemove={handleRemoveHistory}
           onClearAll={handleClearHistory}
         />
       ) : (
-        <SearchResults results={geocodingResults} onSelect={handleSelect} />
+        <SearchResults
+          results={visibleResults}
+          onSelect={handleSelect}
+          onEndReached={loadMore}
+          hasMore={hasMore}
+        />
       )}
       <SearchFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
