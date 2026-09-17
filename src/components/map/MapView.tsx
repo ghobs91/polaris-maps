@@ -1059,6 +1059,18 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         />
       )}
 
+      {styleLoadFailed && (
+        <View
+          style={[styles.limitedCoverage, { top: insets.top + 8 }]}
+          testID="map-limited-coverage"
+          accessibilityRole="text"
+          accessibilityLabel="Limited map detail. Using the offline-compatible map style."
+        >
+          <View style={styles.limitedCoverageDot} />
+          <Text style={styles.limitedCoverageText}>Limited map detail</Text>
+        </View>
+      )}
+
       <Text style={styles.srSummary} accessibilityRole="text">
         {`Map view. ${poiCount} nearby places visible.${navigationMode ? ' Navigating.' : ''}`}
       </Text>
@@ -1389,6 +1401,29 @@ function buildNavPuckArrowTopGeoJSON(
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  // Visible limited-coverage indicator when imagery/style fails to load.
+  limitedCoverage: {
+    position: 'absolute',
+    left: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(28,28,30,0.82)',
+    borderRadius: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  limitedCoverageDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF9F0A',
+  },
+  limitedCoverageText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   // Visually-hidden screen-reader summary of the map (VoiceOver).
   srSummary: {
     position: 'absolute',
