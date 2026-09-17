@@ -66,7 +66,7 @@ describe('WebsitePhotosCarousel', () => {
     );
   });
 
-  it('shows an explicit empty state when the website yields no photos', async () => {
+  it('renders nothing when the website yields no photos', async () => {
     jest.useFakeTimers();
     fetchWebsitePhotosMock.mockResolvedValue([]);
 
@@ -80,8 +80,7 @@ describe('WebsitePhotosCarousel', () => {
       jest.advanceTimersByTime(16000);
     });
 
-    expect(screen.getByTestId('website-photos-empty')).toBeTruthy();
-    expect(screen.getByText('No photos found on the website')).toBeTruthy();
+    expect(screen.queryByTestId('website-photos-section')).toBeNull();
     expect(screen.queryByTestId('website-photo-strip')).toBeNull();
 
     jest.useRealTimers();

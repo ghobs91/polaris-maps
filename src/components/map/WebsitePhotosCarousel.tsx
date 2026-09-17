@@ -45,7 +45,6 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
   const [needWebView, setNeedWebView] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [settled, setSettled] = useState(false);
   const settledRef = useRef(false);
   const photosRef = useRef<string[]>([]);
   const viewerListRef = useRef<FlatList<string>>(null);
@@ -66,7 +65,6 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
     setNeedWebView(false);
     setViewerVisible(false);
     setViewerIndex(0);
-    setSettled(false);
     if (!pageUrl) return;
     let cancelled = false;
     fetchWebsitePhotos(pageUrl)
@@ -76,7 +74,6 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
         if (countRealPhotos(urls) > 0) {
           // Good enough — skip the headless browser.
           settledRef.current = true;
-          setSettled(true);
         } else {
           // Only logos (or nothing): try the on-device browser for better.
           setNeedWebView(true);
@@ -96,7 +93,6 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
     const timer = setTimeout(() => {
       settledRef.current = true;
       setNeedWebView(false);
-      setSettled(true);
     }, WEBVIEW_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [needWebView, pageUrl, resetKey]);
@@ -135,6 +131,11 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
 
   if (!pageUrl) return null;
 
+  // Hide the whole container when there is nothing to show. Keep it mounted
+  // only while the headless-browser fallback is still trying to find photos.
+  const searchingWebView = needWebView && !settledRef.current;
+  if (visiblePhotos.length === 0 && !searchingWebView) return null;
+
   const hostname = (() => {
     try {
       return new URL(pageUrl).hostname.replace(/^www\./, '');
@@ -171,30 +172,17 @@ export function WebsitePhotosCarousel({ websiteUrl, resetKey }: Props) {
               if (countRealPhotos(photosRef.current) > 0) {
                 settledRef.current = true;
                 setNeedWebView(false);
-                setSettled(true);
               }
             }}
             onError={() => {
               settledRef.current = true;
               setNeedWebView(false);
-              setSettled(true);
             }}
             onHttpError={() => {
               settledRef.current = true;
               setNeedWebView(false);
-              setSettled(true);
             }}
           />
-        </View>
-      )}
-      {settled && visiblePhotos.length === 0 && (
-        <View
-          style={[styles.emptyState, { borderColor: colors.border }]}
-          testID="website-photos-empty"
-        >
-          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-            No photos found on the website
-          </Text>
         </View>
       )}
       {visiblePhotos.length > 0 && (
@@ -311,15 +299,7 @@ const styles = StyleSheet.create({
   strip: {
     gap: spacing.sm,
   },
-  emptyState: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-  },
-  emptyText: {
-    ...typography.caption,
-  },
+
   thumb: {
     width: PHOTO_SIZE,
     height: PHOTO_SIZE,

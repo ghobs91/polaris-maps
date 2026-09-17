@@ -121,7 +121,14 @@ export function createPanoramaxProvider(fetchImpl: FetchLike = fetch): PlaceMedi
   };
 }
 
-/** Default supplementary providers, tried in order after the website scraper. */
+/**
+ * Default supplementary providers, tried in order after the website scraper.
+ *
+ * Panoramax is intentionally NOT included: its assets are equirectangular
+ * 360° street-level panoramas, which look like a distorted skyline when shown
+ * as a place photo. The provider is kept for a future dedicated street-level
+ * surface, but is not mixed into the place photo carousel.
+ */
 export function defaultPlaceMediaSupplements(fetchImpl: FetchLike = fetch): PlaceMediaProvider[] {
-  return [createWikidataCommonsProvider(fetchImpl), createPanoramaxProvider(fetchImpl)];
+  return [createWikidataCommonsProvider(fetchImpl)];
 }
