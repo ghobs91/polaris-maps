@@ -6,6 +6,8 @@ interface PermissionPreferences {
   trafficTelemetryEnabled: boolean;
   poiContributionsEnabled: boolean;
   imagerySharingEnabled: boolean;
+  /** Opt-in: publish review photos to peers by content hash. */
+  reviewPhotoSharingEnabled: boolean;
 }
 
 export interface RoutePreferences {
@@ -46,6 +48,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     trafficTelemetryEnabled: true,
     poiContributionsEnabled: true,
     imagerySharingEnabled: false,
+    reviewPhotoSharingEnabled: false,
   },
   routePreferences: {
     avoidTolls: false,

@@ -257,6 +257,16 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           }
         />
         <SettingsRow
+          title="Review Photo Sharing"
+          rightAdornment={
+            <Switch
+              value={permissions.reviewPhotoSharingEnabled}
+              onValueChange={(v) => setPermissions({ reviewPhotoSharingEnabled: v })}
+              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+            />
+          }
+        />
+        <SettingsRow
           title="Review Privacy Choices"
           rightAdornment={
             <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />

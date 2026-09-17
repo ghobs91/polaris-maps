@@ -1,5 +1,6 @@
 /**
- * Tests for reviewService.ts — dual-backend review system with merged reads.
+ * Tests for reviewService.ts — dual-backend review system with merged reads,
+ * media persistence, and moderation actions.
  */
 
 // Mock Gun.js
@@ -50,10 +51,21 @@ jest.mock('../../src/services/atproto/atprotoReviewService', () => ({
   deleteReviewFromAtproto: jest.fn(),
 }));
 
+// Mock the media transport so the native image/file modules stay out of this suite.
+jest.mock('../../src/services/poi/reviewMediaService', () => ({
+  publishReviewMedia: jest.fn(),
+  removeReviewMediaFiles: jest.fn(),
+  tombstoneReviewMedia: jest.fn(),
+}));
+
 import {
   getReviewsForPlace,
   createOrUpdateReview,
   deleteReview,
+  getReviewMedia,
+  publishReviewMedia,
+  reportReviewMedia,
+  hideReviewMedia,
 } from '../../src/services/poi/reviewService';
 import { getBlueskySession } from '../../src/services/atproto/atprotoAuthService';
 import {
@@ -61,7 +73,12 @@ import {
   fetchReviewsFromAtproto,
   deleteReviewFromAtproto,
 } from '../../src/services/atproto/atprotoReviewService';
-import type { Review } from '../../src/models/review';
+import {
+  publishReviewMedia as publishReviewMediaToPeers,
+  removeReviewMediaFiles,
+  tombstoneReviewMedia,
+} from '../../src/services/poi/reviewMediaService';
+import type { Review, ReviewMedia } from '../../src/models/review';
 
 const mockGetBlueskySession = getBlueskySession as jest.MockedFunction<typeof getBlueskySession>;
 const mockPublishReviewToAtproto = publishReviewToAtproto as jest.MockedFunction<
@@ -73,24 +90,60 @@ const mockFetchReviewsFromAtproto = fetchReviewsFromAtproto as jest.MockedFuncti
 const mockDeleteReviewFromAtproto = deleteReviewFromAtproto as jest.MockedFunction<
   typeof deleteReviewFromAtproto
 >;
+const mockPublishReviewMediaToPeers = publishReviewMediaToPeers as jest.MockedFunction<
+  typeof publishReviewMediaToPeers
+>;
+const mockRemoveReviewMediaFiles = removeReviewMediaFiles as jest.MockedFunction<
+  typeof removeReviewMediaFiles
+>;
+const mockTombstoneReviewMedia = tombstoneReviewMedia as jest.MockedFunction<
+  typeof tombstoneReviewMedia
+>;
 
-// Extract mock db from the jest.mock factory
 const { __mockDb: mockDb } = jest.requireMock('../../src/services/database/init') as {
   __mockDb: { getAllAsync: jest.Mock; getFirstAsync: jest.Mock; runAsync: jest.Mock };
 };
+const { __mockGunPut: mockGunPut } = jest.requireMock('../../src/services/gun/init') as {
+  __mockGunPut: jest.Mock;
+};
+
+let reviewRows: Record<string, unknown>[] = [];
+let mediaRows: Record<string, unknown>[] = [];
+
+function mediaRow(reviewId: string, hash: string, status = 'local') {
+  return {
+    review_id: reviewId,
+    hash,
+    width: 1600,
+    height: 800,
+    mime: 'image/jpeg',
+    status,
+    created_at: 1700000000,
+  };
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
+  reviewRows = [];
+  mediaRows = [];
   mockGetBlueskySession.mockResolvedValue(null);
   mockFetchReviewsFromAtproto.mockResolvedValue([]);
-  mockDb.getAllAsync.mockResolvedValue([]);
-  mockDb.getFirstAsync.mockResolvedValue(null);
+  mockDb.getAllAsync.mockImplementation(async (sql: string) => {
+    if (sql.includes('FROM review_media')) return mediaRows;
+    if (sql.includes('FROM reviews')) return reviewRows;
+    return [];
+  });
+  mockDb.getFirstAsync.mockImplementation(async (sql: string) => {
+    if (sql.includes('AVG(rating)')) return { avg_r: 4, cnt: 1 };
+    if (sql.includes('FROM reviews')) return reviewRows[0] ?? null;
+    return null;
+  });
   mockDb.runAsync.mockResolvedValue(undefined);
 });
 
 describe('getReviewsForPlace', () => {
   it('returns local reviews only when no session', async () => {
-    const localRows = [
+    reviewRows = [
       {
         id: 'place1:pubkey1',
         poi_uuid: 'place1',
@@ -105,8 +158,6 @@ describe('getReviewsForPlace', () => {
         author_handle: null,
       },
     ];
-    mockDb.getAllAsync.mockResolvedValue(localRows);
-    mockFetchReviewsFromAtproto.mockResolvedValue([]);
 
     const result = await getReviewsForPlace('place1');
 
@@ -115,8 +166,31 @@ describe('getReviewsForPlace', () => {
     expect(result[0].source).toBe('anonymous');
   });
 
+  it('attaches media rows to the matching review', async () => {
+    reviewRows = [
+      {
+        id: 'place1:pubkey1',
+        poi_uuid: 'place1',
+        author_pubkey: 'pubkey1',
+        rating: 4,
+        text: 'Nice!',
+        signature: 'sig1',
+        created_at: 1700000000,
+        updated_at: 1700000000,
+        source: 'anonymous',
+        atproto_uri: null,
+        author_handle: null,
+      },
+    ];
+    mediaRows = [mediaRow('place1:pubkey1', 'hash1'), mediaRow('place1:pubkey1', 'hash2')];
+
+    const result = await getReviewsForPlace('place1');
+
+    expect(result[0].media?.map((m) => m.hash)).toEqual(['hash1', 'hash2']);
+  });
+
   it('merges ATProto results and deduplicates by atprotoUri', async () => {
-    const localRows = [
+    reviewRows = [
       {
         id: 'at://did:plc:user/io.polaris.place.review/rec1',
         poi_uuid: 'place1',
@@ -131,7 +205,6 @@ describe('getReviewsForPlace', () => {
         author_handle: 'alice.bsky.social',
       },
     ];
-    mockDb.getAllAsync.mockResolvedValue(localRows);
 
     const atprotoReviews: Review[] = [
       {
@@ -173,10 +246,27 @@ describe('getReviewsForPlace', () => {
   });
 });
 
+describe('getReviewMedia', () => {
+  it('maps media rows into ReviewMedia metadata', async () => {
+    mediaRows = [mediaRow('r1', 'hash1', 'published')];
+
+    const media = await getReviewMedia('r1');
+
+    expect(media).toEqual<ReviewMedia[]>([
+      {
+        hash: 'hash1',
+        width: 1600,
+        height: 800,
+        mime: 'image/jpeg',
+        status: 'published',
+        createdAt: 1700000000,
+      },
+    ]);
+  });
+});
+
 describe('createOrUpdateReview', () => {
   it('uses Nostr keypair with source anonymous when no session', async () => {
-    mockGetBlueskySession.mockResolvedValue(null);
-
     const review = await createOrUpdateReview('place1', 4, 'Good spot');
 
     expect(review.source).toBe('anonymous');
@@ -203,6 +293,28 @@ describe('createOrUpdateReview', () => {
     expect(review.signature).toBe('');
     expect(review.atprotoUri).toBe('at://did:plc:testuser/io.polaris.place.review/new1');
     expect(mockPublishReviewToAtproto).toHaveBeenCalled();
+  });
+
+  it('persists attached media and includes it in the Gun record', async () => {
+    const media: ReviewMedia[] = [
+      {
+        hash: 'hash1',
+        width: 1600,
+        height: 800,
+        mime: 'image/jpeg',
+        status: 'local',
+        createdAt: 1700000000,
+      },
+    ];
+
+    const review = await createOrUpdateReview('place1', 4, 'Good spot', undefined, media);
+
+    expect(review.media).toEqual(media);
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT OR REPLACE INTO review_media'),
+      ['place1:' + 'a'.repeat(64), 'hash1', 1600, 800, 'image/jpeg', 'local', 1700000000],
+    );
+    expect(mockGunPut).toHaveBeenCalledWith(expect.objectContaining({ media }));
   });
 
   it('validates rating is integer 1-5', async () => {
@@ -235,14 +347,58 @@ describe('createOrUpdateReview', () => {
   });
 });
 
+describe('review media moderation', () => {
+  beforeEach(() => {
+    mediaRows = [mediaRow('place1:' + 'a'.repeat(64), 'hash1')];
+  });
+
+  it('reports a photo and tombstones its hash', async () => {
+    await reportReviewMedia('place1:' + 'a'.repeat(64), 'hash1');
+
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      'UPDATE review_media SET status = ? WHERE review_id = ? AND hash = ?',
+      ['reported', 'place1:' + 'a'.repeat(64), 'hash1'],
+    );
+    expect(mockTombstoneReviewMedia).toHaveBeenCalledWith('hash1');
+  });
+
+  it('hides a photo and tombstones its hash', async () => {
+    await hideReviewMedia('place1:' + 'a'.repeat(64), 'hash1');
+
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      'UPDATE review_media SET status = ? WHERE review_id = ? AND hash = ?',
+      ['hidden', 'place1:' + 'a'.repeat(64), 'hash1'],
+    );
+    expect(mockTombstoneReviewMedia).toHaveBeenCalledWith('hash1');
+  });
+
+  it('publishes a local photo through the media transport', async () => {
+    mockPublishReviewMediaToPeers.mockResolvedValue(undefined as never);
+
+    await publishReviewMedia('place1:' + 'a'.repeat(64), 'hash1');
+
+    expect(mockPublishReviewMediaToPeers).toHaveBeenCalledWith(
+      expect.objectContaining({ hash: 'hash1', status: 'local' }),
+    );
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      'UPDATE review_media SET status = ? WHERE review_id = ? AND hash = ?',
+      ['published', 'place1:' + 'a'.repeat(64), 'hash1'],
+    );
+  });
+});
+
 describe('deleteReview', () => {
-  it('deletes anonymous review using Nostr keypair', async () => {
-    mockGetBlueskySession.mockResolvedValue(null);
+  it('deletes anonymous review using Nostr keypair and cleans up media', async () => {
+    mediaRows = [mediaRow('place1:' + 'a'.repeat(64), 'hash1')];
 
     await deleteReview('place1');
 
     expect(mockDeleteReviewFromAtproto).not.toHaveBeenCalled();
-    expect(mockDb.runAsync).toHaveBeenCalled();
+    expect(mockRemoveReviewMediaFiles).toHaveBeenCalledWith('hash1');
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining('DELETE FROM review_media'),
+      ['place1:' + 'a'.repeat(64)],
+    );
   });
 
   it('deletes ATProto review when session exists', async () => {
@@ -252,9 +408,12 @@ describe('deleteReview', () => {
       accessJwt: 'jwt',
       refreshJwt: 'jwt',
     });
-    mockDb.getFirstAsync.mockResolvedValue({
-      atproto_uri: 'at://did:plc:testuser/io.polaris.place.review/rec1',
-    });
+    reviewRows = [
+      {
+        id: 'at://did:plc:testuser/io.polaris.place.review/rec1',
+        atproto_uri: 'at://did:plc:testuser/io.polaris.place.review/rec1',
+      },
+    ];
     mockDeleteReviewFromAtproto.mockResolvedValue(undefined);
 
     await deleteReview('place1');

@@ -2,13 +2,20 @@ import React, { memo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { ReviewPhotoGallery } from './ReviewPhotoGallery';
 import type { Review } from '../../models/review';
 
 interface ReviewCardProps {
   review: Review;
+  onReportPhoto?: (reviewId: string, hash: string) => void;
+  onHidePhoto?: (reviewId: string, hash: string) => void;
 }
 
-export const ReviewCard = memo(function ReviewCard({ review }: ReviewCardProps) {
+export const ReviewCard = memo(function ReviewCard({
+  review,
+  onReportPhoto,
+  onHidePhoto,
+}: ReviewCardProps) {
   const date = new Date(review.createdAt * 1000);
   const dateStr = date.toLocaleDateString(undefined, {
     year: 'numeric',
@@ -32,6 +39,14 @@ export const ReviewCard = memo(function ReviewCard({ review }: ReviewCardProps) 
       </View>
 
       {review.text && <Text style={styles.body}>{review.text}</Text>}
+
+      {review.media && review.media.length > 0 && (
+        <ReviewPhotoGallery
+          media={review.media}
+          onReportPhoto={onReportPhoto ? (hash) => onReportPhoto(review.id, hash) : undefined}
+          onHidePhoto={onHidePhoto ? (hash) => onHidePhoto(review.id, hash) : undefined}
+        />
+      )}
 
       <View style={styles.authorRow}>
         <MaterialCommunityIcons name={authorIcon} size={14} color={authorColor} />

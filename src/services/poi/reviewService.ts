@@ -9,7 +9,12 @@ import {
   deleteReviewFromAtproto,
 } from '../atproto/atprotoReviewService';
 import { assertPoiContributionEnabled } from './contributionGate';
-import type { Review, PlaceReviewContext } from '../../models/review';
+import {
+  publishReviewMedia as publishReviewMediaToPeers,
+  removeReviewMediaFiles,
+  tombstoneReviewMedia,
+} from './reviewMediaService';
+import type { Review, ReviewMedia, PlaceReviewContext } from '../../models/review';
 
 export async function getReviewsForPlace(placeUuid: string, limit: number = 50): Promise<Review[]> {
   const db = await getDatabase();
@@ -18,6 +23,7 @@ export async function getReviewsForPlace(placeUuid: string, limit: number = 50):
     [placeUuid, limit],
   );
   const localReviews = rows.map(rowToReview);
+  await attachMediaToReviews(localReviews);
 
   // Fetch ATProto reviews (returns [] if no session — always safe)
   const atprotoReviews = await fetchReviewsFromAtproto(placeUuid);
@@ -54,7 +60,109 @@ export async function getReviewByAuthor(
     'SELECT * FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?',
     [placeUuid, authorPubkey],
   );
-  return row ? rowToReview(row) : null;
+  if (!row) return null;
+  const review = rowToReview(row);
+  await attachMediaToReviews([review]);
+  return review;
+}
+
+export async function getReviewMedia(reviewId: string): Promise<ReviewMedia[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<ReviewMediaRow>(
+    'SELECT * FROM review_media WHERE review_id = ? ORDER BY created_at ASC',
+    [reviewId],
+  );
+  return rows.map(mediaRowToReviewMedia);
+}
+
+/** Replace the stored media for a review (delete-then-insert). */
+export async function saveReviewMedia(
+  reviewId: string,
+  media: readonly ReviewMedia[],
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM review_media WHERE review_id = ?', [reviewId]);
+  for (const item of media) {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO review_media (
+        review_id, hash, width, height, mime, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [reviewId, item.hash, item.width, item.height, item.mime, item.status, item.createdAt],
+    );
+  }
+}
+
+async function setReviewMediaStatus(
+  reviewId: string,
+  hash: string,
+  status: ReviewMedia['status'],
+): Promise<void> {
+  const db = await getDatabase();
+  await db.runAsync('UPDATE review_media SET status = ? WHERE review_id = ? AND hash = ?', [
+    status,
+    reviewId,
+    hash,
+  ]);
+}
+
+async function findReviewMedia(reviewId: string, hash: string): Promise<ReviewMedia | null> {
+  const media = await getReviewMedia(reviewId);
+  return media.find((item) => item.hash === hash) ?? null;
+}
+
+/** Publish one local photo to peers (opt-in) and record the new status. */
+export async function publishReviewMedia(reviewId: string, hash: string): Promise<void> {
+  const media = await findReviewMedia(reviewId, hash);
+  if (!media) throw new Error(`Review media ${hash} not found`);
+  await publishReviewMediaToPeers(media);
+  await setReviewMediaStatus(reviewId, hash, 'published');
+}
+
+/** Report a photo: hide it locally and tombstone the hash for peers. */
+export async function reportReviewMedia(reviewId: string, hash: string): Promise<void> {
+  await setReviewMediaStatus(reviewId, hash, 'reported');
+  tombstoneReviewMedia(hash);
+}
+
+/** Hide a photo without reporting it. */
+export async function hideReviewMedia(reviewId: string, hash: string): Promise<void> {
+  await setReviewMediaStatus(reviewId, hash, 'hidden');
+  tombstoneReviewMedia(hash);
+}
+
+/** Delete stored media rows and their local files for the given reviews. */
+async function deleteReviewMediaRows(reviewIds: readonly string[]): Promise<void> {
+  if (reviewIds.length === 0) return;
+  const db = await getDatabase();
+  const placeholders = reviewIds.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<{ hash: string }>(
+    `SELECT hash FROM review_media WHERE review_id IN (${placeholders})`,
+    [...reviewIds],
+  );
+  await db.runAsync(`DELETE FROM review_media WHERE review_id IN (${placeholders})`, [
+    ...reviewIds,
+  ]);
+  await Promise.all(rows.map((row) => removeReviewMediaFiles(row.hash)));
+}
+
+async function attachMediaToReviews(reviews: Review[]): Promise<void> {
+  if (reviews.length === 0) return;
+  const db = await getDatabase();
+  const placeholders = reviews.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<ReviewMediaRow>(
+    `SELECT * FROM review_media WHERE review_id IN (${placeholders}) ORDER BY created_at ASC`,
+    reviews.map((review) => review.id),
+  );
+  const byReview = new Map<string, ReviewMedia[]>();
+  for (const row of rows) {
+    const list = byReview.get(row.review_id) ?? [];
+    list.push(mediaRowToReviewMedia(row));
+    byReview.set(row.review_id, list);
+  }
+  for (const review of reviews) {
+    const media = byReview.get(review.id);
+    if (media && media.length > 0) review.media = media;
+  }
 }
 
 export async function createOrUpdateReview(
@@ -62,6 +170,7 @@ export async function createOrUpdateReview(
   rating: number,
   text?: string,
   placeContext?: PlaceReviewContext,
+  media?: ReviewMedia[],
 ): Promise<Review> {
   assertPoiContributionEnabled();
   if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
@@ -86,6 +195,7 @@ export async function createOrUpdateReview(
       createdAt: now,
       updatedAt: now,
       source: 'atproto',
+      media: media && media.length > 0 ? media : undefined,
     };
 
     const context: PlaceReviewContext = placeContext ?? {
@@ -114,6 +224,7 @@ export async function createOrUpdateReview(
         signature: review.signature,
         created_at: review.createdAt,
         updated_at: review.updatedAt,
+        media: review.media ?? null,
       });
 
     await db.runAsync(
@@ -136,6 +247,8 @@ export async function createOrUpdateReview(
       ],
     );
 
+    if (media) await saveReviewMedia(review.id, media);
+
     await recomputeAvgRating(placeUuid);
     return review;
   }
@@ -147,6 +260,7 @@ export async function createOrUpdateReview(
   const payload = createSigningPayload(placeUuid, keypair.publicKey, String(rating), String(now));
   const signature = await sign(payload, keypair.privateKey);
 
+  const resolvedMedia = media ?? existing?.media;
   const review: Review = {
     id: `${placeUuid}:${keypair.publicKey}`,
     poiUuid: placeUuid,
@@ -157,6 +271,7 @@ export async function createOrUpdateReview(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     source: 'anonymous',
+    media: resolvedMedia && resolvedMedia.length > 0 ? resolvedMedia : undefined,
   };
 
   (gun as any)
@@ -172,6 +287,7 @@ export async function createOrUpdateReview(
       signature: review.signature,
       created_at: review.createdAt,
       updated_at: review.updatedAt,
+      media: review.media ?? null,
     });
 
   await db.runAsync(
@@ -194,6 +310,8 @@ export async function createOrUpdateReview(
     ],
   );
 
+  if (media) await saveReviewMedia(review.id, media);
+
   await recomputeAvgRating(placeUuid);
   return review;
 }
@@ -206,8 +324,8 @@ export async function deleteReview(placeUuid: string): Promise<void> {
 
   if (session) {
     // Check for ATProto URI on the local record
-    const existing = await db.getFirstAsync<{ atproto_uri: string | null }>(
-      'SELECT atproto_uri FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?',
+    const existing = await db.getFirstAsync<{ id: string; atproto_uri: string | null }>(
+      'SELECT id, atproto_uri FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?',
       [placeUuid, session.did],
     );
     if (existing?.atproto_uri) {
@@ -217,6 +335,7 @@ export async function deleteReview(placeUuid: string): Promise<void> {
         console.warn('ATProto delete failed:', err);
       }
     }
+    if (existing) await deleteReviewMediaRows([existing.id]);
     (gun as any).get('polaris').get('reviews').get(placeUuid).get(session.did).put(null);
     await db.runAsync('DELETE FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?', [
       placeUuid,
@@ -224,6 +343,7 @@ export async function deleteReview(placeUuid: string): Promise<void> {
     ]);
   } else {
     const keypair = await getOrCreateKeypair();
+    await deleteReviewMediaRows([`${placeUuid}:${keypair.publicKey}`]);
     (gun as any).get('polaris').get('reviews').get(placeUuid).get(keypair.publicKey).put(null);
     await db.runAsync('DELETE FROM reviews WHERE poi_uuid = ? AND author_pubkey = ?', [
       placeUuid,
@@ -282,5 +402,26 @@ function rowToReview(row: ReviewRow): Review {
     source: (row.source as Review['source']) ?? 'anonymous',
     atprotoUri: row.atproto_uri ?? undefined,
     authorHandle: row.author_handle ?? undefined,
+  };
+}
+
+interface ReviewMediaRow {
+  review_id: string;
+  hash: string;
+  width: number;
+  height: number;
+  mime: string;
+  status: string;
+  created_at: number;
+}
+
+function mediaRowToReviewMedia(row: ReviewMediaRow): ReviewMedia {
+  return {
+    hash: row.hash,
+    width: row.width,
+    height: row.height,
+    mime: row.mime,
+    status: (row.status as ReviewMedia['status']) ?? 'local',
+    createdAt: row.created_at,
   };
 }

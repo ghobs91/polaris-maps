@@ -12,7 +12,12 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getReviewsForPlace, createOrUpdateReview } from '../../src/services/poi/reviewService';
+import {
+  getReviewsForPlace,
+  createOrUpdateReview,
+  reportReviewMedia,
+  hideReviewMedia,
+} from '../../src/services/poi/reviewService';
 import { ReviewCard } from '../../src/components/poi/ReviewCard';
 import { RatingWidget } from '../../src/components/poi/RatingWidget';
 import { Button, LoadingSpinner, ErrorBoundary } from '../../src/components/common';
@@ -85,9 +90,35 @@ export default function ReviewsScreen() {
     }
   }, [id, rating, body, loadReviews]);
 
+  const handleReportPhoto = useCallback(
+    async (reviewId: string, hash: string) => {
+      try {
+        await reportReviewMedia(reviewId, hash);
+        await loadReviews();
+      } catch (e) {
+        Alert.alert('Error', (e as Error).message);
+      }
+    },
+    [loadReviews],
+  );
+
+  const handleHidePhoto = useCallback(
+    async (reviewId: string, hash: string) => {
+      try {
+        await hideReviewMedia(reviewId, hash);
+        await loadReviews();
+      } catch (e) {
+        Alert.alert('Error', (e as Error).message);
+      }
+    },
+    [loadReviews],
+  );
+
   const renderReviewItem = useCallback(
-    ({ item }: { item: Review }) => <ReviewCard review={item} />,
-    [],
+    ({ item }: { item: Review }) => (
+      <ReviewCard review={item} onReportPhoto={handleReportPhoto} onHidePhoto={handleHidePhoto} />
+    ),
+    [handleReportPhoto, handleHidePhoto],
   );
 
   return (
