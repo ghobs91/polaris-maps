@@ -31,6 +31,7 @@ import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { IncidentLayer } from './IncidentLayer';
 import { MapChrome } from './MapChrome';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
 import { resolveMapStyle, setLayerVisibilityInStyle } from './mapStyleResolver';
 import {
@@ -249,6 +250,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const insets = useSafeAreaInsets();
   // Live camera state for the compass / scale-bar chrome (updated on settle).
   const [camera, setCamera] = useState({ bearing: 0, pitch: 0, zoom: 17, lat: 0 });
+  const reduceMotion = useReducedMotion();
   const lastZoomRef = useRef(17);
 
   // Sync external followCamera prop into ref
@@ -1041,12 +1043,16 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           lat={camera.lat}
           bottomInset={insets.bottom + 12}
           onReset={() =>
-            cameraRef.current?.setCamera({ heading: 0, pitch: 0, animationDuration: 300 })
+            cameraRef.current?.setCamera({
+              heading: 0,
+              pitch: 0,
+              animationDuration: reduceMotion ? 0 : 300,
+            })
           }
           onTogglePitch={() =>
             cameraRef.current?.setCamera({
               pitch: camera.pitch > 5 ? 0 : 45,
-              animationDuration: 300,
+              animationDuration: reduceMotion ? 0 : 300,
             })
           }
         />

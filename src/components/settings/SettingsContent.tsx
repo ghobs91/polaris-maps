@@ -9,7 +9,7 @@ import {
 } from '../../services/places/placeDetailCache';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
-import { Button, SettingsGroup, SettingsRow, SFSymbol } from '../common';
+import { Button, SettingsGroup, SettingsRow, SFSymbol, SegmentedControl } from '../common';
 import { spacing, typography, iosListGroup } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -64,50 +64,24 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
       {showHeading && <Text style={styles.heading}>Settings</Text>}
 
       <SettingsGroup header="Appearance" footer="Choose how Polaris Maps looks on this device.">
-        <View style={styles.themeRow}>
-          {THEME_OPTIONS.map((opt, idx) => {
-            const active = themeMode === opt.value;
-            return (
-              <React.Fragment key={opt.value}>
-                <View style={styles.themeCell}>
-                  <Text
-                    style={[styles.themeCellText, active ? styles.themeCellTextActive : null]}
-                    onPress={() => setThemeMode(opt.value)}
-                    suppressHighlighting={false}
-                  >
-                    {opt.label}
-                  </Text>
-                </View>
-                {idx < THEME_OPTIONS.length - 1 ? <View style={styles.themeSeparator} /> : null}
-              </React.Fragment>
-            );
-          })}
-        </View>
+        <SegmentedControl
+          options={THEME_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+          value={themeMode}
+          onChange={setThemeMode}
+          label="Appearance theme"
+        />
       </SettingsGroup>
 
       <SettingsGroup
         header="Units"
         footer="Distance and speed displays use this unit system throughout the app."
       >
-        <View style={styles.themeRow}>
-          {UNIT_OPTIONS.map((opt, idx) => {
-            const active = useMetric === opt.metric;
-            return (
-              <React.Fragment key={opt.label}>
-                <View style={styles.themeCell}>
-                  <Text
-                    style={[styles.themeCellText, active ? styles.themeCellTextActive : null]}
-                    onPress={() => setUseMetric(opt.metric)}
-                    suppressHighlighting={false}
-                  >
-                    {opt.label}
-                  </Text>
-                </View>
-                {idx < UNIT_OPTIONS.length - 1 ? <View style={styles.themeSeparator} /> : null}
-              </React.Fragment>
-            );
-          })}
-        </View>
+        <SegmentedControl
+          options={UNIT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.metric }))}
+          value={useMetric}
+          onChange={setUseMetric}
+          label="Units"
+        />
       </SettingsGroup>
 
       <SettingsGroup header="Navigation">
@@ -365,23 +339,6 @@ const createStyles = (isDark: boolean) => {
       marginBottom: spacing.lg,
       marginLeft: spacing.sm,
     },
-    themeRow: {
-      flexDirection: 'row',
-      minHeight: 44,
-    },
-    themeCell: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: spacing.sm + 2,
-    },
-    themeSeparator: {
-      width: StyleSheet.hairlineWidth,
-      alignSelf: 'stretch',
-      backgroundColor: isDark ? 'rgba(84,84,88,0.34)' : 'rgba(60,60,67,0.18)',
-    },
-    themeCellText: { ...typography.body, fontSize: 17, color: captionColor },
-    themeCellTextActive: { color: isDark ? '#0A84FF' : '#007AFF', fontWeight: '600' },
     accountCard: {
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,

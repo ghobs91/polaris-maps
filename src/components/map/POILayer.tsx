@@ -37,7 +37,13 @@ const PoiBadge = memo(function PoiBadge({ poi, showLabel, onPress }: PoiBadgePro
   const { icon, color } = getPoiCategory(poi.type, poi.subtype);
 
   return (
-    <TouchableOpacity onPress={() => onPress(poi)} activeOpacity={0.75} style={styles.hitArea}>
+    <TouchableOpacity
+      onPress={() => onPress(poi)}
+      activeOpacity={0.75}
+      style={styles.hitArea}
+      accessibilityRole="button"
+      accessibilityLabel={`${poi.name}, ${poi.subtype}`}
+    >
       <View style={styles.marker}>
         {showLabel ? (
           <Text

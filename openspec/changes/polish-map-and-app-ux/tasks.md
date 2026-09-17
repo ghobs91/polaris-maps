@@ -35,13 +35,13 @@
 
 ## 4. Accessibility
 
-- [ ] 4.1 Add accessibilityLabel, accessibilityRole, and state to all map controls (CtrlBtn and new chrome) with hit targets of at least 44 by 44 points
-- [ ] 4.2 Replace the Settings theme picker with an accessible segmented or radio control exposing role and selected state
+- [x] 4.1 Add accessibilityLabel, accessibilityRole, and state to all map controls (CtrlBtn and new chrome) with hit targets of at least 44 by 44 points
+- [x] 4.2 Replace the Settings theme picker with an accessible segmented or radio control exposing role and selected state
 - [ ] 4.3 Audit fixed-height text containers, replace them with minimum heights or scrollable content, and define Dynamic Type caps for dense map overlays
 - [ ] 4.4 Add a VoiceOver summary to the map container and per-marker labels for POIs and clusters
 - [ ] 4.5 Measure contrast in both themes and fix any palette values that fail WCAG AA
-- [ ] 4.6 Respect the Reduce Motion preference for camera and sheet animations
-- [ ] 4.7 Add tests asserting accessibility props on map controls and a Dynamic Type rendering check
+- [x] 4.6 Respect the Reduce Motion preference for camera and sheet animations
+- [x] 4.7 Add tests asserting accessibility props on map controls and a Dynamic Type rendering check
 
 ## 5. Map chrome
 

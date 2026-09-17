@@ -7,3 +7,4 @@ export { GlassView } from './GlassView';
 export { SFSymbol } from './SFSymbol';
 export { SettingsGroup } from './SettingsGroup';
 export { SettingsRow } from './SettingsRow';
+export { SegmentedControl } from './SegmentedControl';

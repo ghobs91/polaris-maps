@@ -441,17 +441,26 @@ function CtrlBtn({
   onPress,
   isDark,
   active,
+  label,
 }: {
   icon: string;
   onPress: () => void;
   isDark: boolean;
   active?: boolean;
+  label: string;
 }) {
   const { colors } = useTheme();
   const iconColor = active ? '#0A84FF' : isDark ? '#EBEBF5' : colors.text;
   return (
     <GlassView material="regular" isInteractive style={ctrlStyles.btn}>
-      <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={ctrlStyles.btnInner}>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.7}
+        style={ctrlStyles.btnInner}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ selected: !!active }}
+      >
         <Ionicons name={icon as any} size={20} color={iconColor} />
       </TouchableOpacity>
     </GlassView>
@@ -501,14 +510,20 @@ export function MapControlsColumn({
       )}
 
       {/* Stacked floating glass buttons */}
-      <CtrlBtn isDark={isDark} icon="layers" onPress={() => setLayersOpen((v) => !v)} />
+      <CtrlBtn
+        isDark={isDark}
+        icon="layers"
+        label="Map layers and type"
+        onPress={() => setLayersOpen((v) => !v)}
+      />
       <CtrlBtn
         isDark={isDark}
         icon={parkingSpot ? 'car-sport' : 'car-outline'}
         active={!!parkingSpot}
+        label={parkingSpot ? 'Clear saved parking spot' : 'Save parking spot'}
         onPress={handleParkingPress}
       />
-      <CtrlBtn isDark={isDark} icon="locate" onPress={() => onLocatePress?.()} />
+      <CtrlBtn isDark={isDark} icon="locate" label="Locate me" onPress={() => onLocatePress?.()} />
     </View>
   );
 }
