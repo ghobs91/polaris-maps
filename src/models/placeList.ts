@@ -11,6 +11,10 @@ export interface SavedPlace {
   googleMapsUrl?: string;
   poiUuid?: string;
   addedAt: number;
+  /** Last-write timestamp used when merging shared lists (falls back to addedAt). */
+  updatedAt?: number;
+  /** Tombstone: when true, the place is deleted and must not be resurrected. */
+  deleted?: boolean;
 }
 
 export interface PlaceList {

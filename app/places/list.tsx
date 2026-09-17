@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Modal,
   ActivityIndicator,
+  Share,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -20,6 +21,7 @@ import { searchPlaceAll } from '../../src/native/mapkit';
 import type { NativeMapKitPoi } from '../../src/native/mapkit';
 import { SavedPlaceRow } from '../../src/components/places';
 import { SaveToListSheet } from '../../src/components/places/SaveToListSheet';
+import { exportFilename, toCSV, toGeoJSON } from '../../src/services/places/exportService';
 import { Button, ErrorBoundary } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -236,6 +238,26 @@ export default function PlaceListDetailScreen() {
     [handlePlacePress, handleRemovePlace],
   );
 
+  const handleExport = useCallback(() => {
+    if (!list) return;
+    const filename = exportFilename(list);
+    Alert.alert('Export list', 'Choose a format to share', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'CSV',
+        onPress: () => {
+          void Share.share({ title: `${filename}.csv`, message: toCSV(list) });
+        },
+      },
+      {
+        text: 'GeoJSON',
+        onPress: () => {
+          void Share.share({ title: `${filename}.geojson`, message: toGeoJSON(list) });
+        },
+      },
+    ]);
+  }, [list]);
+
   return (
     <ErrorBoundary>
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -268,6 +290,14 @@ export default function PlaceListDetailScreen() {
           </View>
           <TouchableOpacity onPress={cycleSortMode} style={styles.sortButton}>
             <Text style={styles.sortText}>{sortMode === 'recent' ? '↕ Recent' : '↕ A-Z'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleExport}
+            style={styles.sortButton}
+            accessibilityRole="button"
+            accessibilityLabel="Export and share this list"
+          >
+            <Text style={styles.sortText}>⤴ Share</Text>
           </TouchableOpacity>
         </View>
 
