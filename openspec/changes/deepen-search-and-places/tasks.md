@@ -31,16 +31,16 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 ## 3. Place media (website scraping plus open supplements) and menus
 
-- [ ] 3.1 Define `PlaceMediaItem` with source, license, license URL, author, and attribution fields; define the provider interface and mark the retained website scraper as the primary source
-- [ ] 3.2 Implement `src/services/poi/placeMediaService.ts` layering a supplementary Wikimedia Commons provider (Wikidata QID plus Commons geosearch, reusing `commonsThumbUrl`) on top of the retained `websitePhotosService.ts` scraper
-- [ ] 3.3 Add a supplementary Panoramax STAC provider with attribution metadata, layered on top of the retained website scraper
+- [x] 3.1 Define `PlaceMediaItem` with source, license, license URL, author, and attribution fields; define the provider interface and mark the retained website scraper as the primary source
+- [x] 3.2 Implement `src/services/poi/placeMediaService.ts` layering a supplementary Wikimedia Commons provider (Wikidata QID plus Commons geosearch, reusing `commonsThumbUrl`) on top of the retained `websitePhotosService.ts` scraper
+- [x] 3.3 Add a supplementary Panoramax STAC provider with attribution metadata, layered on top of the retained website scraper
 - [ ] 3.4 Add an optional Mapillary provider gated on a configured token and acceptable license (or record the decision to omit it)
-- [ ] 3.5 Merge and de-duplicate scraped and open-provider results by content key (scraper output primary) and cache metadata with its attribution
+- [x] 3.5 Merge and de-duplicate scraped and open-provider results by content key (scraper output primary) and cache metadata with its attribution
 - [ ] 3.6 Render media with visible attribution and a license link for open-source items in `POIInfoCard.tsx` and in result-row thumbnails
 - [ ] 3.7 Add offline-safe media behaviour: cached thumbnails when offline, deliberate empty state otherwise
-- [ ] 3.8 Render the parsed `menuUrl` in `POIInfoCard.tsx` with a viewer handling web pages and documents, plus an unreachable-menu state
-- [ ] 3.9 Unit tests: provider normalization, attribution presence, dedupe, empty-provider result, unreachable menu handling
-- [ ] 3.10 Integration test: open a place with media and a menu and confirm attribution and menu controls render
+- [x] 3.8 Render the parsed `menuUrl` in `POIInfoCard.tsx` with a viewer handling web pages and documents, plus an unreachable-menu state
+- [x] 3.9 Unit tests: provider normalization, attribution presence, dedupe, empty-provider result, unreachable menu handling
+- [x] 3.10 Integration test: open a place with media and a menu and confirm attribution and menu controls render
 
 ## 4. Reviews: photos, merged ratings, sort/filter/helpful
 

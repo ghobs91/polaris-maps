@@ -623,6 +623,15 @@ export function POIInfoCard() {
     }
   }, [parsed?.website]);
 
+  const handleMenu = useCallback(() => {
+    const menuUrl = parsed?.menuUrl;
+    if (!menuUrl) return;
+    const url = menuUrl.startsWith('http') ? menuUrl : `https://${menuUrl}`;
+    Linking.openURL(url).catch(() =>
+      Alert.alert('Menu unavailable', "We couldn't open the menu for this place."),
+    );
+  }, [parsed?.menuUrl]);
+
   const handleEmail = useCallback(() => {
     if (parsed?.email) Linking.openURL(`mailto:${parsed.email}`);
   }, [parsed?.email]);
@@ -1055,6 +1064,16 @@ export function POIInfoCard() {
                   icon="globe"
                   label="Website"
                   onPress={handleWebsite}
+                  color={pillSecondaryContent}
+                  fillColor={pillSecondaryFill}
+                  borderColor={pillSecondaryBorder}
+                />
+              )}
+              {parsed.menuUrl && (
+                <ActionPill
+                  icon="restaurant-outline"
+                  label="Menu"
+                  onPress={handleMenu}
                   color={pillSecondaryContent}
                   fillColor={pillSecondaryFill}
                   borderColor={pillSecondaryBorder}
