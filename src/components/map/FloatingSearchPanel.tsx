@@ -704,6 +704,7 @@ export function FloatingSearchPanel({
   const clearRoutePreview = useNavigationStore((s) => s.clearRoutePreview);
   const startNavigation = useNavigationStore((s) => s.startNavigation);
   const routePreviewTrafficEta = useNavigationStore((s) => s.routePreviewTrafficEta);
+  const routePreviewCosting = useNavigationStore((s) => s.routePreviewCosting);
   const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
 
   const routePreviewEtaColor = useMemo(() => {
@@ -1523,12 +1524,15 @@ export function FloatingSearchPanel({
           .then((result) => setShowParkAndRide(result.offered))
           .catch(() => setShowParkAndRide(false));
 
-        // Fetch traffic-adjusted ETA in background
-        fetchRouteTrafficEta(routes[0].geometry).then((result) => {
-          if (result) {
-            useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
-          }
-        });
+        // Fetch the traffic-adjusted ETA in the background — car only, since
+        // TomTom traffic is meaningless for walking/cycling.
+        if (costing === 'auto') {
+          fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+            if (result) {
+              useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+            }
+          });
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         setRouteError(msg || 'Could not compute route');
@@ -2243,9 +2247,13 @@ export function FloatingSearchPanel({
   // ── Route preview view ────────────────────────
   if (mode === 'route-preview' && routePreview && selectedResult) {
     const entry = selectedResult.entry;
+    // The TomTom traffic ETA is car-only; walking/cycling/transit must use the
+    // mode's own duration instead.
     const displayEtaSeconds = parkAndRideResult
       ? parkAndRideResult.totalDurationSeconds
-      : (routePreviewTrafficEta ?? routePreview.summary.durationSeconds);
+      : routePreviewCosting === 'auto'
+        ? (routePreviewTrafficEta ?? routePreview.summary.durationSeconds)
+        : routePreview.summary.durationSeconds;
 
     return (
       <View style={rootStyle} pointerEvents="box-none">
