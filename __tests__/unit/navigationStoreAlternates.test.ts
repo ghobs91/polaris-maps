@@ -66,4 +66,16 @@ describe('navigation alternatives', () => {
     useNavigationStore.getState().stopNavigation();
     expect(useNavigationStore.getState().alternateRoutes).toEqual([]);
   });
+
+  it('preserves waypoints when switching to an alternate mid-trip', () => {
+    const waypoint = { lat: 39.5, lng: -75.0, name: 'Stop' };
+    useNavigationStore.getState().startNavigation(primary, [alt], destination, 'auto', [waypoint]);
+
+    useNavigationStore.getState().switchToAlternate(alt);
+
+    const state = useNavigationStore.getState();
+    expect(state.activeRoute).toBe(alt);
+    expect(state.waypoints).toEqual([waypoint]);
+    expect(state.currentLegIndex).toBe(0);
+  });
 });

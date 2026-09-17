@@ -14,7 +14,7 @@
 - [x] 2.5 Implement preview selection that promotes an alternative to primary and updates ETA/distance
 - [x] 2.6 Implement mid-navigation switching that replaces the active route, re-threads waypoints and `currentLegIndex`, and restarts tracking
 - [x] 2.7 Clear stale alternatives after recompute or switch
-- [ ] 2.8 Add unit tests for alternate computation threading and integration tests for preview selection and mid-navigation switching with a waypoint
+- [x] 2.8 Add unit tests for alternate computation threading and integration tests for preview selection and mid-navigation switching with a waypoint
 
 ## 3. Navigation Arrival Flow
 
