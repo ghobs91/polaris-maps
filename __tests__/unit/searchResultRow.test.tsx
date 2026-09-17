@@ -70,6 +70,17 @@ describe('SearchResultRow', () => {
     expect(getByText('Closed')).toBeTruthy();
   });
 
+  it('falls back to the subtitle and omits an unknown distance', () => {
+    const { getByText, queryByText } = render(
+      <SearchResultRow
+        result={{ ...sparse, distanceKm: 0, subtitle: 'Main St, Springfield' }}
+        onPress={() => {}}
+      />,
+    );
+    expect(getByText('Main St, Springfield')).toBeTruthy();
+    expect(queryByText('0.2 mi')).toBeNull();
+  });
+
   it('invokes onPress with the result', () => {
     const onPress = jest.fn();
     const { getByText } = render(<SearchResultRow result={full} onPress={onPress} />);

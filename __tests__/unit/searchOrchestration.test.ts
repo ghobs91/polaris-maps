@@ -381,6 +381,23 @@ describe('unifiedSearch orchestration', () => {
     expect(overtureFetcher.fetchOverturePlaces).toHaveBeenCalledTimes(1);
   });
 
+  it('runs the category source when only a filter selects the category', async () => {
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([]);
+
+    await unifiedSearch('main street', { ...defaultOpts, categories: ['cafe'] });
+
+    // Text is not a category, but the filter folds into the parsed intent.
+    expect(categorySearchService.searchByCategory).toHaveBeenCalled();
+  });
+
+  it('ignores unrecognized category filter keys', async () => {
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([]);
+
+    await unifiedSearch('main street', { ...defaultOpts, categories: ['not-a-category'] });
+
+    expect(categorySearchService.searchByCategory).not.toHaveBeenCalled();
+  });
+
   it('skips the Overpass name search for a brand query with sufficient local matches', async () => {
     const localPlaces = Array.from({ length: 8 }, (_, i) =>
       makePlace(`Starbucks ${i}`, 40.748 + i * 0.001, -73.985 + i * 0.001),

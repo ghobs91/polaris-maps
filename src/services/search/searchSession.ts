@@ -42,6 +42,9 @@ export interface SearchSessionOptions {
   localFirst?: boolean;
   /** Queries shorter than this clear results without searching. Default 2. */
   minQueryLength?: number;
+  /** Current user-selected category filters, read at search time so a filter
+   *  change is reflected in source gating on the next run. */
+  getCategoryFilters?: () => string[] | undefined;
   /** Optional pre-flight (e.g. coordinate/Plus Code detection). When it
    *  returns coordinates, the search is skipped and `onTransformed` fires. */
   transformQuery?: (query: string) => Promise<{ lat: number; lng: number } | null>;
@@ -72,6 +75,7 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
     limit = 30,
     localFirst = true,
     minQueryLength = 2,
+    getCategoryFilters,
     transformQuery,
     onTransformed,
   } = options;
@@ -106,6 +110,7 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
       zoom: context.zoom,
       viewportBounds: context.viewportBounds,
       userLocation: context.userLocation,
+      categories: getCategoryFilters?.(),
       limit,
       signal,
       onStage,

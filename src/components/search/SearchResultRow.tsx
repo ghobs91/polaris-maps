@@ -34,7 +34,8 @@ export const SearchResultRow = memo(function SearchResultRow({
   if (isStation) subtitleParts.push('Transit Station');
   if (result.brand && result.brand !== result.name) subtitleParts.push(result.brand);
   if (result.city) subtitleParts.push(result.city);
-  const subtitle = subtitleParts.join(' · ');
+  const subtitle = subtitleParts.length > 0 ? subtitleParts.join(' · ') : result.subtitle;
+  const hasDistance = result.distanceKm > 0;
 
   return (
     <Pressable
@@ -46,7 +47,7 @@ export const SearchResultRow = memo(function SearchResultRow({
         subtitle,
         result.rating != null ? `${result.rating.toFixed(1)} stars` : null,
         result.openNow === false ? 'closed' : result.openNow === true ? 'open' : null,
-        `${formatDistance(result.distanceKm * 1000)} away`,
+        hasDistance ? `${formatDistance(result.distanceKm * 1000)} away` : null,
       ]
         .filter(Boolean)
         .join(', ')}
@@ -87,7 +88,9 @@ export const SearchResultRow = memo(function SearchResultRow({
           {result.priceLevel != null ? (
             <Text style={styles.metaText}>{priceLabel(result.priceLevel)}</Text>
           ) : null}
-          <Text style={styles.metaText}>{formatDistance(result.distanceKm * 1000)}</Text>
+          {hasDistance ? (
+            <Text style={styles.metaText}>{formatDistance(result.distanceKm * 1000)}</Text>
+          ) : null}
         </View>
       </View>
 

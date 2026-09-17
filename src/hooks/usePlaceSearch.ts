@@ -139,6 +139,8 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
       limit: optionsRef.current.limit,
       localFirst: optionsRef.current.localFirst,
       minQueryLength: optionsRef.current.minQueryLength,
+      // Read fresh at search time so a category-filter change re-gates sources.
+      getCategoryFilters: () => useSearchViewStore.getState().filters.categories,
       transformQuery: optionsRef.current.transformQuery
         ? (q) => optionsRef.current.transformQuery!(q)
         : undefined,
@@ -172,6 +174,21 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
   const refetch = useCallback(() => {
     sessionRef.current?.refetch();
   }, []);
+
+  // Non-category filters re-apply locally (the `results` memo above). A category
+  // change alters source gating/radii, so it must re-run the search; the memo
+  // still filters the current results instantly for a responsive UI.
+  const categoryKey = useMemo(() => (filters.categories ?? []).join(','), [filters.categories]);
+  const lastCategoryKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastCategoryKeyRef.current === null) {
+      lastCategoryKeyRef.current = categoryKey;
+      return;
+    }
+    if (lastCategoryKeyRef.current === categoryKey) return;
+    lastCategoryKeyRef.current = categoryKey;
+    if (query.trim().length >= 2) refetch();
+  }, [categoryKey, query, refetch]);
 
   const cancel = useCallback(() => {
     sessionRef.current?.cancel();

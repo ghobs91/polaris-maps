@@ -15,7 +15,7 @@
  */
 
 import type { OsmPoi } from '../poi/osmFetcher';
-import type { Place } from '../../models/poi';
+import { PLACE_CATEGORIES, type Place, type PlaceCategory } from '../../models/poi';
 import type { GeocodingResult } from '../geocoding/geocodingService';
 import { searchPlacesFts } from '../poi/poiService';
 import { searchByCategory, type CategorySearchResult } from '../poi/categorySearchService';
@@ -53,6 +53,32 @@ const SUFFICIENT_LOCAL_MATCHES = 8;
 const LOCAL_MATCH_RADIUS_KM = 15;
 /** Text-match score above which a local result counts as "strong". */
 const STRONG_MATCH_THRESHOLD = 0.72;
+
+/** Filter-sheet keys that differ from the canonical `PlaceCategory` value. */
+const FILTER_CATEGORY_ALIASES: Partial<Record<string, PlaceCategory>> = {
+  fuel: 'gas_station',
+  gas: 'gas_station',
+  ev: 'ev_charging',
+  charging: 'ev_charging',
+};
+
+/**
+ * Map user-selected category filter keys onto canonical place categories,
+ * dropping anything unrecognized so a stale/free-form filter can't corrupt the
+ * parsed intent.
+ */
+function normalizeFilterCategories(categories?: string[]): PlaceCategory[] {
+  if (!categories || categories.length === 0) return [];
+  const valid = new Set<string>(PLACE_CATEGORIES);
+  const out: PlaceCategory[] = [];
+  for (const raw of categories) {
+    const key = raw.toLowerCase();
+    const mapped =
+      FILTER_CATEGORY_ALIASES[key] ?? (valid.has(key) ? (key as PlaceCategory) : undefined);
+    if (mapped) out.push(mapped);
+  }
+  return out;
+}
 
 /** Count strong local matches around the reference point or user location. */
 function countStrongLocalMatches(
@@ -149,6 +175,10 @@ export interface SearchOptions {
   /** Return local-DB results only — skip all network sources (Photon,
    *  Nominatim, Overpass, Overture). Resolves in milliseconds. */
   localOnly?: boolean;
+  /** User-selected category filter keys (from the filter sheet). Folded into
+   *  the parsed category intent so source gating and fetch radii stay coherent
+   *  when only the filter (not the text) selects a category. */
+  categories?: string[];
   /** Staged result callback: fires after each stage completes, with the
    *  accumulated, scored, deduplicated results so far. */
   onStage?: (results: UnifiedSearchResult[], meta: SearchStageMeta) => void;
@@ -188,6 +218,14 @@ export async function unifiedSearch(
 
   // 1. Parse the query into structured intent
   const parsed = parseSearchQuery(query);
+
+  // Fold user-selected category filters into the parsed intent so fetch radii
+  // (`deriveQueryContext`), the local FTS fan-out, and source gating all agree
+  // when the category comes from the filter sheet rather than the text.
+  const filterCategories = normalizeFilterCategories(options.categories);
+  if (filterCategories.length > 0) {
+    parsed.categories = Array.from(new Set([...(parsed.categories ?? []), ...filterCategories]));
+  }
 
   // Also check for fuzzy brand matches (handles typos like "starbuks")
   if (!parsed.brand) {
