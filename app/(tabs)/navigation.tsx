@@ -55,6 +55,7 @@ import {
   announceNavigationStart,
   announceOffRoute,
   announceRerouted,
+  repeatLastAnnouncement,
   stopNavigationSpeech,
 } from '@/services/tts';
 import { Ionicons } from '@expo/vector-icons';
@@ -85,6 +86,8 @@ export default function NavigationScreen() {
   const addWaypointAndReplaceRoute = useNavigationStore((s) => s.addWaypointAndReplaceRoute);
   const alternateRoutes = useNavigationStore((s) => s.alternateRoutes);
   const switchToAlternate = useNavigationStore((s) => s.switchToAlternate);
+  const muted = useNavigationStore((s) => s.muted);
+  const setMuted = useNavigationStore((s) => s.setMuted);
   const hasArrived = useNavigationStore((s) => s.hasArrived);
   const setArrived = useNavigationStore((s) => s.setArrived);
   const navigationAutoAdvanceLegs = useSettingsStore((s) => s.navigationAutoAdvanceLegs);
@@ -723,6 +726,26 @@ export default function NavigationScreen() {
           style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
           pointerEvents="box-none"
         >
+          <Pressable
+            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => setMuted(!muted)}
+            accessibilityLabel={muted ? 'Unmute voice guidance' : 'Mute voice guidance'}
+            accessibilityRole="button"
+          >
+            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+              <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={22} color="#fff" />
+            </GlassView>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => repeatLastAnnouncement()}
+            accessibilityLabel="Repeat last instruction"
+            accessibilityRole="button"
+          >
+            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+              <Ionicons name="refresh" size={22} color="#fff" />
+            </GlassView>
+          </Pressable>
           <Pressable
             style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
             onPress={() => setShowSteps(true)}

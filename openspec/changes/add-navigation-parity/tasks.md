@@ -33,9 +33,9 @@
 - [x] 4.2 Reset ladder state on reroute and new maneuver; retain short-range step-change announcement
 - [x] 4.3 Add a "starting navigation" prompt on navigation start
 - [x] 4.4 Add spoken off-route and reroute-complete notifications on state edges
-- [ ] 4.5 Add in-navigation mute/unmute and repeat controls to the HUD, gating `ttsService` without mutating the global voice setting
+- [x] 4.5 Add in-navigation mute/unmute and repeat controls to the HUD, gating `ttsService` without mutating the global voice setting
 - [x] 4.6 Harden TTS interruption handling (single in-flight utterance, dedupe reset on done/error)
-- [ ] 4.7 Enable a background audio session coordinated with the existing background location session, released on navigation end
+- [x] 4.7 Enable a background audio session coordinated with the existing background location session, released on navigation end
 - [ ] 4.8 Add unit tests for ladder band selection and dedupe, and integration tests for mute, repeat, and off-route/reroute prompts
 
 ## 5. All-Mode Navigation
