@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Dimensions, InteractionManager } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useParkingStore } from '../../stores/parkingStore';
@@ -29,6 +30,7 @@ import { onViewportChange } from '../../services/traffic/topicManager';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { IncidentLayer } from './IncidentLayer';
+import { MapChrome } from './MapChrome';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
 import { resolveMapStyle, setLayerVisibilityInStyle } from './mapStyleResolver';
 import {
@@ -244,6 +246,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Default to 17 because the puck only renders in navigation mode, where the
   // camera is locked to zoom 17 until a region event updates this value.
   const [currentZoom, setCurrentZoom] = useState(17);
+  const insets = useSafeAreaInsets();
+  // Live camera state for the compass / scale-bar chrome (updated on settle).
+  const [camera, setCamera] = useState({ bearing: 0, pitch: 0, zoom: 17, lat: 0 });
   const lastZoomRef = useRef(17);
 
   // Sync external followCamera prop into ref
@@ -390,6 +395,16 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         lastZoomRef.current = zoom;
         setCurrentZoom(zoom);
       }
+
+      // Track live camera orientation for the compass / scale-bar chrome.
+      const props = event?.properties ?? {};
+      const center = props.center as [number, number] | undefined;
+      setCamera((prev) => ({
+        bearing: typeof props.heading === 'number' ? props.heading : prev.bearing,
+        pitch: typeof props.pitch === 'number' ? props.pitch : prev.pitch,
+        zoom: zoom > 0 ? zoom : prev.zoom,
+        lat: center ? center[1] : prev.lat,
+      }));
 
       if (navigationMode) return;
       const rawBounds: [[number, number], [number, number]] | undefined =
@@ -1017,6 +1032,25 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
         <IncidentLayer />
       </MapLibreGL.MapView>
+
+      {!navigationMode && (
+        <MapChrome
+          bearing={camera.bearing}
+          pitch={camera.pitch}
+          zoom={camera.zoom}
+          lat={camera.lat}
+          bottomInset={insets.bottom + 12}
+          onReset={() =>
+            cameraRef.current?.setCamera({ heading: 0, pitch: 0, animationDuration: 300 })
+          }
+          onTogglePitch={() =>
+            cameraRef.current?.setCamera({
+              pitch: camera.pitch > 5 ? 0 : 45,
+              animationDuration: 300,
+            })
+          }
+        />
+      )}
     </View>
   );
 });

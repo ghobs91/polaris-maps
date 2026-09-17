@@ -45,12 +45,12 @@
 
 ## 5. Map chrome
 
-- [ ] 5.1 Add a compass overlay driven by map bearing that resets heading and pitch on tap
-- [ ] 5.2 Add a scale bar computed from latitude and zoom and updated on region events
+- [x] 5.1 Add a compass overlay driven by map bearing that resets heading and pitch on tap
+- [x] 5.2 Add a scale bar computed from latitude and zoom and updated on region events
 - [ ] 5.3 Add a heading-aware location indicator for non-navigation mode with a fallback dot
-- [ ] 5.4 Add rotate-reset and 2D/3D pitch affordances
-- [ ] 5.5 Ensure chrome respects safe-area insets and does not intercept map gestures
-- [ ] 5.6 Add unit tests for scale-bar distance math and compass heading normalization
+- [x] 5.4 Add rotate-reset and 2D/3D pitch affordances
+- [x] 5.5 Ensure chrome respects safe-area insets and does not intercept map gestures
+- [x] 5.6 Add unit tests for scale-bar distance math and compass heading normalization
 
 ## 6. Terrain
 
