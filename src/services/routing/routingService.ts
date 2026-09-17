@@ -240,7 +240,7 @@ function maskForDirectionString(direction: string): number {
  * `valid` = usable). `maneuverType` only breaks ties for multi-direction
  * lanes with no active/valid hint.
  */
-function parseLaneGuidance(
+export function parseLaneGuidance(
   lanes: Array<Record<string, unknown>> | undefined,
   maneuverType?: ManeuverType,
 ): LaneGuidance | undefined {

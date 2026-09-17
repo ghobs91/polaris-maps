@@ -54,6 +54,12 @@ export interface NativeMapKitRoute {
       begin_shape_index: number;
       end_shape_index: number;
       verbal_pre_transition: string;
+      street_names?: string[];
+      verbal_post_transition?: string;
+      /** Posted speed limit in km/h, when available. */
+      speed_limit?: number;
+      /** Lane records (bitmask form), when available. */
+      lanes?: Array<Record<string, unknown>>;
     }>;
     distance_meters: number;
     duration_seconds: number;

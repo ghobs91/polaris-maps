@@ -1,12 +1,7 @@
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
+import { mapNativeManeuver } from '../routeMapping';
 import type { NativeMapKitPoi, NativeMapKitRoute } from './NativePolarisMapKit';
-import type {
-  ValhallaRoute,
-  ValhallaLeg,
-  ValhallaManeuver,
-  CostingModel,
-  ManeuverType,
-} from '../../models/route';
+import type { ValhallaRoute, ValhallaLeg, CostingModel } from '../../models/route';
 
 export type { NativeMapKitPoi };
 
@@ -110,17 +105,7 @@ function mapNativeRoute(native: NativeMapKitRoute): ValhallaRoute {
       (leg): ValhallaLeg => ({
         distanceMeters: leg.distance_meters,
         durationSeconds: leg.duration_seconds,
-        maneuvers: leg.maneuvers.map(
-          (m): ValhallaManeuver => ({
-            type: m.type as ManeuverType,
-            instruction: m.instruction,
-            distanceMeters: m.distance_meters,
-            durationSeconds: m.duration_seconds,
-            beginShapeIndex: m.begin_shape_index,
-            endShapeIndex: m.end_shape_index,
-            verbalPreTransition: m.verbal_pre_transition,
-          }),
-        ),
+        maneuvers: leg.maneuvers.map((m) => mapNativeManeuver(m)),
       }),
     ),
     geometry: native.geometry,

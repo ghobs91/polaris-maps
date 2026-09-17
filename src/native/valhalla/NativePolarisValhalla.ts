@@ -56,6 +56,10 @@ export interface NativeValhallaRoute {
       street_names?: string[];
       verbal_pre_transition: string;
       verbal_post_transition?: string;
+      /** Posted speed limit in km/h, when the engine provides it. */
+      speed_limit?: number;
+      /** Valhalla lane records (bitmask form), when the engine provides them. */
+      lanes?: Array<Record<string, unknown>>;
     }>;
     distance_meters: number;
     duration_seconds: number;

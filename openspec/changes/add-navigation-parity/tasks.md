@@ -59,9 +59,9 @@
 - [ ] 7.1 Extend the Swift maneuver mapping in `plugins/native/PolarisMaps/PolarisValhalla.swift` to emit `speed_limit` and `lanes`
 - [ ] 7.2 Extend `plugins/native/PolarisMaps/PolarisMapKit.swift` to emit `street_names`, `verbal_post_transition`, and any available speed/lane data
 - [ ] 7.3 Mirror the Swift changes into `ios/PolarisMaps/` for local builds and confirm `plugins/withValhalla.js` copies them
-- [ ] 7.4 Extend `NativePolarisValhalla.ts` and `NativePolarisMapKit.ts` types and map the new fields in `src/native/valhalla/index.ts` and `src/native/mapkit/index.ts` using `parseLaneGuidance`
+- [x] 7.4 Extend `NativePolarisValhalla.ts` and `NativePolarisMapKit.ts` types and map the new fields in `src/native/valhalla/index.ts` and `src/native/mapkit/index.ts` using `parseLaneGuidance`
 - [ ] 7.5 Add `audio` to `UIBackgroundModes` in `app.json` and document the background audio usage
-- [ ] 7.6 Add unit tests asserting native route payloads with lanes/speed limits map through, and absent payloads omit the fields
+- [x] 7.6 Add unit tests asserting native route payloads with lanes/speed limits map through, and absent payloads omit the fields
 
 ## 8. Verification And Documentation
 

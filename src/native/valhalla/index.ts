@@ -5,13 +5,8 @@ import NativePolarisValhalla, {
   type ReroutePosition,
   type NativeValhallaRoute,
 } from './NativePolarisValhalla';
-import type {
-  ValhallaRoute,
-  ValhallaLeg,
-  ValhallaManeuver,
-  CostingModel,
-  ManeuverType,
-} from '../../models/route';
+import { mapNativeManeuver } from '../routeMapping';
+import type { ValhallaRoute, ValhallaLeg, CostingModel } from '../../models/route';
 
 export type { ValhallaConfig };
 
@@ -27,19 +22,7 @@ function mapNativeRoute(native: NativeValhallaRoute): ValhallaRoute {
       (leg): ValhallaLeg => ({
         distanceMeters: leg.distance_meters,
         durationSeconds: leg.duration_seconds,
-        maneuvers: leg.maneuvers.map(
-          (m): ValhallaManeuver => ({
-            type: m.type as ManeuverType,
-            instruction: m.instruction,
-            distanceMeters: m.distance_meters,
-            durationSeconds: m.duration_seconds,
-            beginShapeIndex: m.begin_shape_index,
-            endShapeIndex: m.end_shape_index,
-            streetNames: m.street_names,
-            verbalPreTransition: m.verbal_pre_transition,
-            verbalPostTransition: m.verbal_post_transition,
-          }),
-        ),
+        maneuvers: leg.maneuvers.map((m) => mapNativeManeuver(m)),
       }),
     ),
     geometry: native.geometry,
