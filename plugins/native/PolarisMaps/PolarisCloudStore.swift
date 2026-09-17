@@ -65,6 +65,9 @@ class PolarisCloudStore: RCTEventEmitter {
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
+    // Force a refresh so a fresh install sees remotely-synced values instead
+    // of the empty in-memory cache.
+    store.synchronize()
     resolve(store.string(forKey: filename))
   }
 

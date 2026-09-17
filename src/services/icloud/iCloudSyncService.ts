@@ -74,8 +74,9 @@ export function utf8ByteLength(value: string): number {
 async function writeKey(key: string, value: unknown): Promise<boolean> {
   if (!CloudStore) return false;
   try {
-    const available = await CloudStore.isAvailable();
-    if (!available) return false;
+    // Attempt the write even when `isAvailable()` is false: `ubiquityIdentityToken`
+    // can transiently be nil while KVS still holds/will-sync data, and gating on
+    // it silently disabled sync for otherwise-valid iCloud accounts.
     const json = JSON.stringify(value);
     if (utf8ByteLength(json) > MAX_KVS_VALUE_BYTES) {
       console.warn(
@@ -93,8 +94,8 @@ async function writeKey(key: string, value: unknown): Promise<boolean> {
 async function readKey<T>(key: string): Promise<T | null> {
   if (!CloudStore) return null;
   try {
-    const available = await CloudStore.isAvailable();
-    if (!available) return null;
+    // Same reasoning as writeKey: read regardless of `isAvailable()` so a
+    // fresh install can restore remotely-synced data.
     const raw = await CloudStore.read(key);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
