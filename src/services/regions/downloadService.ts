@@ -8,6 +8,7 @@ import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
 import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
+import { importRegionOverturePlaces } from './overtureImporter';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -288,6 +289,19 @@ export async function prefetchOverturePlaces(
     percent: 0,
     stage: 'places',
   });
+
+  // Region packs may bundle an `overture-places.geojson` extract. Import it
+  // into the local `places` table so offline place details, reviews, and edits
+  // resolve for downloaded regions. Packs without the extract are a no-op.
+  try {
+    const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
+    const imported = await importRegionOverturePlaces(regionDir);
+    if (imported > 0) {
+      console.warn(`[regions] imported ${imported} Overture places for ${region.id}`);
+    }
+  } catch {
+    // Missing/invalid extract — offline place details simply stay unavailable.
+  }
 
   onProgress?.({
     regionId: region.id,

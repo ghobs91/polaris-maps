@@ -76,6 +76,8 @@ const MKPOI_LABELS: Record<string, string> = {
   MKPOICategoryBakery: 'Bakery',
   MKPOICategoryNightlife: 'Nightlife',
   MKPOICategoryGasStation: 'Gas Station',
+  MKPOICategoryEVCharger: 'EV Charger',
+  MKPOICategoryFoodMarket: 'Food Market',
   MKPOICategoryParking: 'Parking',
   MKPOICategoryHospital: 'Hospital',
   MKPOICategoryPharmacy: 'Pharmacy',
@@ -101,9 +103,24 @@ const MKPOI_LABELS: Record<string, string> = {
   MKPOICategoryMovieTheater: 'Cinema',
 };
 
+/** Humanize an unknown `MKPOICategoryXyz` value (e.g. "FoodMarket" → "Food Market"). */
+function humanizeMkCategory(rawCategory: string): string {
+  return rawCategory
+    .replace(/^MKPOICategory/, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .trim();
+}
+
 /** Return a clean human-readable category label, handling both MKPOI raw strings and OSM subtypes. */
 function formatPoiCategory(rawCategory: string): string {
-  return MKPOI_LABELS[rawCategory] ?? capitalise(rawCategory);
+  const known = MKPOI_LABELS[rawCategory];
+  if (known) return known;
+  if (rawCategory.startsWith('MKPOICategory')) {
+    const humanized = humanizeMkCategory(rawCategory);
+    if (humanized) return humanized;
+  }
+  return capitalise(rawCategory);
 }
 
 /** Return human-readable list from semicolon-separated OSM values */
@@ -393,6 +410,9 @@ export function POIInfoCard() {
   }, [selectedPoi]);
 
   const poi = selectedPoi;
+  // Charging stations are usually labelled generically ("Charging Station");
+  // prefer the network/operator name (EVgo, ChargePoint, …) when OCM has it.
+  const poiDisplayName = chargingData?.operator ?? poi?.name ?? '';
   const enrichedData = useOsmPoiStore((s) => s.enrichedData);
   const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
@@ -590,15 +610,23 @@ export function POIInfoCard() {
   const handleOpenDetails = useCallback(async () => {
     if (!poi) return;
     const placeId = detailsTarget?.placeId ?? (await findPlaceIdNear(poi.lat, poi.lng, poi.name));
+    setSelectedPoi(null);
     if (placeId) {
-      setSelectedPoi(null);
       router.push(`/poi/${placeId}`);
       return;
     }
-    Alert.alert(
-      'Details unavailable',
-      "This place isn't in your local index yet. Download your region to see reviews, edits, and street imagery.",
-    );
+    // Not in the local index — still open the reviews surface using a stable
+    // identifier derived from the POI so the user isn't dead-ended.
+    router.push({
+      pathname: '/poi/reviews',
+      params: {
+        id: `osm:${poi.type}/${poi.id}`,
+        osmId: String(poi.id),
+        name: poi.name,
+        lat: String(poi.lat),
+        lng: String(poi.lng),
+      },
+    });
   }, [poi, detailsTarget, router, setSelectedPoi]);
 
   // Resolve the local place (if any) once per selected POI so the Reviews
@@ -843,9 +871,9 @@ export function POIInfoCard() {
                 style={[styles.name, { color: textColor }]}
                 numberOfLines={1}
                 accessibilityRole="header"
-                accessibilityLabel={poi.name}
+                accessibilityLabel={poiDisplayName}
               >
-                {poi.name}
+                {poiDisplayName}
               </Text>
               <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
                 {category

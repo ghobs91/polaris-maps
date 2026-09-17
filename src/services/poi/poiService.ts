@@ -36,14 +36,28 @@ export async function findPlaceIdNear(
   );
 
   const target = name.trim().toLowerCase();
-  let best: { uuid: string; distance: number } | null = null;
+  let exact: { uuid: string; distance: number } | null = null;
+  let partial: { uuid: string; distance: number } | null = null;
+  let nearest: { uuid: string; distance: number } | null = null;
+
   for (const row of rows) {
-    if (row.name.trim().toLowerCase() !== target) continue;
     const distance = haversineMeters([lng, lat], [row.lng, row.lat]);
     if (distance > radiusMeters) continue;
-    if (!best || distance < best.distance) best = { uuid: row.uuid, distance };
+    if (!nearest || distance < nearest.distance) nearest = { uuid: row.uuid, distance };
+
+    const rowName = row.name.trim().toLowerCase();
+    if (!rowName) continue;
+    if (rowName === target) {
+      if (!exact || distance < exact.distance) exact = { uuid: row.uuid, distance };
+    } else if (rowName.includes(target) || target.includes(rowName)) {
+      if (!partial || distance < partial.distance) partial = { uuid: row.uuid, distance };
+    }
   }
-  return best?.uuid ?? null;
+
+  // Prefer an exact name match, then a containment match, then the nearest
+  // place in range (so a tapped POI is rarely a dead end when the local index
+  // has a near-equivalent entry).
+  return (exact ?? partial ?? nearest)?.uuid ?? null;
 }
 
 /**
