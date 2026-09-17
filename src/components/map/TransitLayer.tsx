@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { useTransitStore } from '../../stores/transitStore';
 import { hasAuthoritativeStops } from '../../services/transit/transitLineFetcher';
+import { TransitousTileLayer } from './TransitousTileLayer';
 
 import type { TransitRouteLine, OtpItinerary, SelectedTransitStop } from '../../models/transit';
 
@@ -469,6 +470,9 @@ export function TransitLayer() {
         onStopPress={handleStopPress}
       />
       {selectedItinerary && <ItineraryLayer itinerary={selectedItinerary} />}
+      {/* Global MOTIS vector tiles — only mounted while the layer is on so no
+          tiles are fetched when transit is hidden. */}
+      {transitLayerVisible ? <TransitousTileLayer visible /> : null}
     </>
   );
 }

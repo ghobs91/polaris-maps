@@ -12,9 +12,26 @@ import {
   type MotisPlanResponse,
   type MotisLeg,
 } from './transitousClient';
+import { decodePolyline, encodePolyline } from '../../utils/polyline';
 import type { OtpItinerary, LegMode, TransitMode } from '../../models/transit';
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+/**
+ * MOTIS returns Google-encoded polylines at precision 6 (since MOTIS 2.0.60;
+ * `/api/v5` inherits this), while the app's OTP-shaped `legGeometry.points`
+ * field is decoded at precision 5. Normalise by decoding at MOTIS precision and
+ * re-encoding at 5 so `TransitLayer`'s decoder renders the geometry correctly.
+ */
+export const MOTIS_POLYLINE_PRECISION = 6;
+export const OTP_POLYLINE_PRECISION = 5;
+
+export function normalizeMotisGeometry(encoded: string | undefined): string {
+  if (!encoded) return '';
+  const coords = decodePolyline(encoded, MOTIS_POLYLINE_PRECISION);
+  if (coords.length === 0) return '';
+  return encodePolyline(coords, OTP_POLYLINE_PRECISION);
+}
 
 function mapMotisLeg(leg: MotisLeg): OtpItinerary['legs'][number] {
   const mode = motisLegMode(leg.mode) as LegMode;
@@ -56,7 +73,7 @@ function mapMotisLeg(leg: MotisLeg): OtpItinerary['legs'][number] {
     route: transit,
     headsign: leg.transit?.headSign,
     intermediateStops,
-    legGeometry: { points: leg.geometry ?? '' },
+    legGeometry: { points: normalizeMotisGeometry(leg.geometry) },
     realTime: leg.realTime ?? false,
   };
 }

@@ -15,6 +15,7 @@ import {
   type Otp1StopTime,
   type Otp1TripStopTime,
 } from './otpEndpointRegistry';
+import { fetchTransitousDepartures } from './transitousDepartures';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -398,6 +399,14 @@ export async function fetchDepartures(
         }
       }
     }
+  } catch {
+    // Fall through to Transitous / headway estimation
+  }
+
+  // Global coverage: Transitous MOTIS departures (real-time where available).
+  try {
+    const transitous = await fetchTransitousDepartures(stopName, _lat, _lon);
+    if (transitous && transitous.departures.length > 0) return transitous;
   } catch {
     // Fall through to headway estimation
   }

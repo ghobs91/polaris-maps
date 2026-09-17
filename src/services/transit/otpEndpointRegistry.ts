@@ -183,17 +183,15 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
   // Each feed is a consolidated GTFS ZIP containing all transit agencies
   // for that country. All modes included (bus, rail, tram, metro, ferry).
 
+  // Ordering matters: `findEndpointForCoords` returns the first bbox match, so
+  // smaller countries that sit inside a larger neighbour's bbox must come first
+  // (Luxembourg before Germany; Sweden before Norway), and Germany/Norway are
+  // last so they don't shadow the smaller feeds.
   {
     label: 'Switzerland GTFS',
     bbox: [45.8, 5.9, 47.8, 10.5],
     url: 'https://data.public-transport.earth/gtfs/ch',
     apiStyle: 'ch-gtfs-v1',
-  },
-  {
-    label: 'Deutschland GTFS',
-    bbox: [47.2, 5.8, 55.1, 15.1],
-    url: 'https://data.public-transport.earth/gtfs/de',
-    apiStyle: 'de-gtfs-v1',
   },
   {
     label: 'Denmark GTFS',
@@ -232,16 +230,23 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
     apiStyle: 'nl-gtfs-v1',
   },
   {
+    // Sweden's bbox starts at lon 11.5 so Oslo (10.75) falls through to Norway.
+    label: 'Sweden GTFS',
+    bbox: [55.3, 11.5, 69.1, 24.2],
+    url: 'https://data.public-transport.earth/gtfs/se',
+    apiStyle: 'se-gtfs-v1',
+  },
+  {
+    label: 'Deutschland GTFS',
+    bbox: [47.2, 5.8, 55.1, 15.1],
+    url: 'https://data.public-transport.earth/gtfs/de',
+    apiStyle: 'de-gtfs-v1',
+  },
+  {
     label: 'Norway GTFS',
     bbox: [57.5, 4.0, 71.2, 31.5],
     url: 'https://data.public-transport.earth/gtfs/no',
     apiStyle: 'no-gtfs-v1',
-  },
-  {
-    label: 'Sweden GTFS',
-    bbox: [55.3, 10.5, 69.1, 24.2],
-    url: 'https://data.public-transport.earth/gtfs/se',
-    apiStyle: 'se-gtfs-v1',
   },
 
   {

@@ -726,7 +726,7 @@ async function fetchOtpLines(ep: OtpEndpoint): Promise<TransitRouteLine[]> {
 
 // ── Per-city GTFS fetcher configs ────────────────────────────────────
 
-const GTFS_CONFIGS: Record<string, GtfsFetcherConfig> = {
+export const GTFS_CONFIGS: Record<string, GtfsFetcherConfig> = {
   'cta-gtfs-v1': {
     label: 'CTA Chicago L',
     routeTypeFilter: [1],
