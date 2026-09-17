@@ -10,16 +10,16 @@
 
 ## 2. POI clustering
 
-- [ ] 2.1 Add `clusterPoisForDisplay` in `src/utils` that buckets screen-space POIs into `{ lat, lng, count, poiIds, dominantCategory }` descriptors
-- [ ] 2.2 Render a themed, accessible ClusterBadge MarkerView with count and dominant category color in POILayer, switching between clusters and individual markers by zoom
-- [ ] 2.3 Wire cluster tap to camera expansion zoom and center the map on the cluster
+- [x] 2.1 Add `clusterPoisForDisplay` in `src/utils` that buckets screen-space POIs into `{ lat, lng, count, poiIds, dominantCategory }` descriptors
+- [x] 2.2 Render a themed, accessible ClusterBadge MarkerView with count and dominant category color in POILayer, switching between clusters and individual markers by zoom
+- [x] 2.3 Wire cluster tap to camera expansion zoom and center the map on the cluster
 - [ ] 2.4 Add a bounded low-zoom fetch tier in MapView: cached Overture SQLite first, capped online Overture/PMTiles second, and skip Overpass below the individual-marker threshold
-- [ ] 2.5 Preserve collision-safe label filtering for individual markers and enforce single-line cluster badges
-- [ ] 2.6 Ensure offline clustering is computed from cached places and region packs with no network request
+- [x] 2.5 Preserve collision-safe label filtering for individual markers and enforce single-line cluster badges
+- [x] 2.6 Ensure offline clustering is computed from cached places and region packs with no network request
 - [ ] 2.7 Defer cluster recomputation to settled region events, memoize on `(pois, bounds, zoom)`, and cap the rendered marker count
-- [ ] 2.8 Add unit tests for clustering counts, centroid, threshold behavior, empty input, and offline input
+- [x] 2.8 Add unit tests for clustering counts, centroid, threshold behavior, empty input, and offline input
 - [ ] 2.9 Add an integration test covering cluster tap-to-expand
-- [ ] 2.10 Capture before/after benchmark results for cluster recompute and map frame rate (Constitution IV)
+- [x] 2.10 Capture before/after benchmark results for cluster recompute and map frame rate (Constitution IV)
 
 ## 3. Dark mode completion
 
