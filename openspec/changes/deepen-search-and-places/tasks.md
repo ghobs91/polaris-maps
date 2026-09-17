@@ -8,7 +8,7 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 1.2 Implement `src/services/search/resultFilter.ts`: pure `applyFilters(results, filters)` covering open now, min rating, max price, max distance, categories
 - [x] 1.3 Implement `src/services/search/resultSort.ts`: pure comparators for relevance, distance, rating, price, with distance tie-break
 - [x] 1.4 Seed default filters from parsed intent (`wantsOpenNow` / `wantsQuality` / `wantsCheap`) and let explicit user selections override them
-- [ ] 1.5 Apply filters and sort inside `usePlaceSearch` after each staged emission; keep canonical keys stable and throttle re-sorts to one per frame
+- [x] 1.5 Apply filters and sort inside `usePlaceSearch` after each staged emission; keep canonical keys stable and throttle re-sorts to one per frame
 - [ ] 1.6 Re-apply non-category filter changes locally over accumulated results without a refetch; route category changes through `deriveQueryContext` for source gating
 - [ ] 1.7 Build the filter/sort sheet component under `src/components/search/` and wire it into `app/(tabs)/search.tsx`
 - [ ] 1.8 Wire the same filter/sort sheet into `src/components/map/FloatingSearchPanel.tsx`

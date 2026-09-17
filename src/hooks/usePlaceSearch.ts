@@ -6,13 +6,16 @@
  * consumers should use this so keystroke handling stays consistent.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSearchSession,
   type SearchSession,
   type SearchStageMeta,
   type SearchSessionOptions,
 } from '../services/search/searchSession';
+import { parseSearchQuery } from '../services/search/queryParser';
+import { applyFilters, mergeFilters, sortResults } from '../services/search/searchFilters';
+import { useSearchViewStore } from '../stores/searchViewStore';
 import type { UnifiedSearchResult } from '../services/search/unifiedSearch';
 
 export type UsePlaceSearchOptions = Omit<SearchSessionOptions, 'onResults'> & {
@@ -44,8 +47,19 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
   optionsRef.current = options;
 
   const [query, setQueryState] = useState('');
-  const [results, setResults] = useState<UnifiedSearchResult[]>([]);
+  const [rawResults, setRawResults] = useState<UnifiedSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Filters + sort are a pure view layer over the accumulated results: changing
+  // them re-applies locally without a refetch (category changes are handled by
+  // the caller re-running the search).
+  const filters = useSearchViewStore((s) => s.filters);
+  const sort = useSearchViewStore((s) => s.sort);
+  const results = useMemo(() => {
+    const intent = parseSearchQuery(query);
+    const effective = mergeFilters(intent, filters);
+    return sortResults(applyFilters(rawResults, effective), sort);
+  }, [rawResults, filters, sort, query]);
 
   // Throttle staged emissions to one UI update per animation frame so rapid
   // stage completions (local → photon → category → remaining) don't thrash
@@ -72,7 +86,7 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
       const pending = pendingEmissionRef.current;
       pendingEmissionRef.current = null;
       if (!pending) return;
-      setResults(pending.results);
+      setRawResults(pending.results);
       setIsSearching(!pending.meta.final);
       optionsRef.current.onResults?.(pending.results, pending.meta);
     }
@@ -136,7 +150,7 @@ export function usePlaceSearch(options: UsePlaceSearchOptions): UsePlaceSearchRe
     sessionRef.current?.cancel();
     cancelPendingEmission();
     setQueryState('');
-    setResults([]);
+    setRawResults([]);
     setIsSearching(false);
   }, [cancelPendingEmission]);
 
