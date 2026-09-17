@@ -27,6 +27,9 @@ import {
 } from '@/services/navigation/arrivalService';
 import { navigationModeCapabilities, navigationModeForCosting } from '@/utils/navigationMode';
 import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
+import { CurrentSpeedBadge } from '@/components/navigation/CurrentSpeedBadge';
+import { NavigationStepsList } from '@/components/navigation/NavigationStepsList';
+import { OverSpeedMonitor } from '@/services/navigation/speedAlerts';
 import { formatDuration } from '@/utils/units';
 import {
   startTracking,
@@ -39,6 +42,7 @@ import {
   isWrongWayDriving,
   isOffRouteActive,
   getGpsCourse,
+  getGpsSpeed,
   setTrackingRoutePreferences,
 } from '@/services/navigation/trackingService';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
@@ -253,12 +257,43 @@ export default function NavigationScreen() {
     stopNavigation,
   ]);
 
+  // Current speed + over-speed alert (driving only), sampled once a second.
+  useEffect(() => {
+    if (!isNavigating || !modeCapabilities.speedometer) {
+      setCurrentSpeedMph(null);
+      setIsOverSpeed(false);
+      overSpeedRef.current.reset();
+      wasOverSpeedRef.current = false;
+      return;
+    }
+    const tick = () => {
+      const mps = getGpsSpeed();
+      const mph = Number.isFinite(mps) ? mps * 2.23694 : 0;
+      setCurrentSpeedMph(mph >= 1 ? mph : null);
+      const limit = useNavigationStore.getState().currentManeuver?.speedLimitMph ?? null;
+      const over = overSpeedRef.current.update(mph, limit);
+      if (over && !wasOverSpeedRef.current) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      }
+      wasOverSpeedRef.current = over;
+      setIsOverSpeed(over);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [isNavigating, modeCapabilities.speedometer]);
+
   // Camera follow state — breaks when user pans/zooms, restored by re-center button
   const [followCamera, setFollowCamera] = useState(true);
   const [showAddDestination, setShowAddDestination] = useState(false);
   const [showIncidentReport, setShowIncidentReport] = useState(false);
   const [hudExpanded, setHudExpanded] = useState(false);
   const [showArrival, setShowArrival] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
+  const [currentSpeedMph, setCurrentSpeedMph] = useState<number | null>(null);
+  const [isOverSpeed, setIsOverSpeed] = useState(false);
+  const overSpeedRef = useRef(new OverSpeedMonitor());
+  const wasOverSpeedRef = useRef(false);
   const waypointArrivalRef = useRef(new ArrivalDetector());
   const destinationArrivalRef = useRef(new ArrivalDetector());
   const startedAtRef = useRef<number | null>(null);
@@ -655,6 +690,9 @@ export default function NavigationScreen() {
               }
             />
           </View>
+          {modeCapabilities.speedometer && (
+            <CurrentSpeedBadge speedMph={currentSpeedMph} over={isOverSpeed} />
+          )}
           {modeCapabilities.speedLimit && currentManeuver?.speedLimitMph != null && (
             <SpeedLimitSign speedLimitMph={currentManeuver.speedLimitMph} />
           )}
@@ -685,6 +723,17 @@ export default function NavigationScreen() {
           style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
           pointerEvents="box-none"
         >
+          <Pressable
+            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => setShowSteps(true)}
+            accessibilityLabel="Show steps"
+            accessibilityHint="Show the full list of directions for this route"
+            accessibilityRole="button"
+          >
+            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+              <Ionicons name="list" size={22} color="#fff" />
+            </GlassView>
+          </Pressable>
           <Pressable
             style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
             onPress={() => setShowIncidentReport(true)}
@@ -741,6 +790,13 @@ export default function NavigationScreen() {
           }}
         />
       )}
+
+      <NavigationStepsList
+        visible={showSteps}
+        route={activeRoute}
+        currentStepIndex={currentStepIndex}
+        onClose={() => setShowSteps(false)}
+      />
     </View>
   );
 }
