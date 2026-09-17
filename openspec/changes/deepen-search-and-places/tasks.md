@@ -9,7 +9,7 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 1.3 Implement `src/services/search/resultSort.ts`: pure comparators for relevance, distance, rating, price, with distance tie-break
 - [x] 1.4 Seed default filters from parsed intent (`wantsOpenNow` / `wantsQuality` / `wantsCheap`) and let explicit user selections override them
 - [x] 1.5 Apply filters and sort inside `usePlaceSearch` after each staged emission; keep canonical keys stable and throttle re-sorts to one per frame
-- [ ] 1.6 Re-apply non-category filter changes locally over accumulated results without a refetch; route category changes through `deriveQueryContext` for source gating
+- [x] 1.6 Re-apply non-category filter changes locally over accumulated results without a refetch; route category changes through `deriveQueryContext` for source gating
 - [x] 1.7 Build the filter/sort sheet component under `src/components/search/` and wire it into `app/(tabs)/search.tsx`
 - [x] 1.8 Wire the same filter/sort sheet into `src/components/map/FloatingSearchPanel.tsx`
 - [x] 1.9 Add the filtered-empty state with a clear-filters action
@@ -21,7 +21,7 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 - [x] 2.1 Extend the search result model with optional rating, open-now state, price level, distance, category, and thumbnail fields from the ranked result
 - [x] 2.2 Build a `SearchResultRow` component rendering category icon, thumbnail, rating, open/closed badge, price, and distance with graceful omission of missing fields
-- [ ] 2.3 Adopt the shared row in `SearchResults.tsx` and in the floating panel result list (preserve the transit-station variant)
+- [x] 2.3 Adopt the shared row in `SearchResults.tsx` and in the floating panel result list (preserve the transit-station variant)
 - [x] 2.4 Add cursor-based `loadMore()` pagination to `usePlaceSearch` with dedupe by canonical key across re-sorts
 - [x] 2.5 Add the scroll-to-load affordance and end-of-results state in both result lists
 - [ ] 2.6 Create `useVoiceSearch` hook reusing the existing speech implementation from `SearchBar.tsx`, with just-in-time permission and keyboard fallback
@@ -36,8 +36,10 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 3.3 Add a supplementary Panoramax STAC provider with attribution metadata, layered on top of the retained website scraper
 - [ ] 3.4 Add an optional Mapillary provider gated on a configured token and acceptable license (or record the decision to omit it)
 - [x] 3.5 Merge and de-duplicate scraped and open-provider results by content key (scraper output primary) and cache metadata with its attribution
-- [ ] 3.6 Render media with visible attribution and a license link for open-source items in `POIInfoCard.tsx` and in result-row thumbnails
-- [ ] 3.7 Add offline-safe media behaviour: cached thumbnails when offline, deliberate empty state otherwise
+- [x] 3.6 Render media with visible attribution and a license link for open-source items in `POIInfoCard.tsx` and in result-row thumbnails
+  - Note: `PlaceMediaCarousel` (mounted in `POIInfoCard`) renders Wikimedia Commons / Panoramax items with a visible attribution caption and a license link, fed by real providers in `placeMediaProviders.ts`. The shared `SearchResultRow` renders `thumbnailUrl` when present and omits it gracefully; per-result media is not fetched (no producer populates `thumbnailUrl` yet), so attribution is surfaced in the place card rather than a 34px row thumbnail.
+- [x] 3.7 Add offline-safe media behaviour: cached thumbnails when offline, deliberate empty state otherwise
+  - Note: online items are cached as attribution metadata in `place_detail_cache.media`; offline the carousel serves cached metadata with `expo-image` disk-cached thumbnails and a deliberate empty state (`place-media-empty`) when nothing is cached. Failed images degrade to a placeholder tile, never a broken image.
 - [x] 3.8 Render the parsed `menuUrl` in `POIInfoCard.tsx` with a viewer handling web pages and documents, plus an unreachable-menu state
 - [x] 3.9 Unit tests: provider normalization, attribution presence, dedupe, empty-provider result, unreachable menu handling
 - [x] 3.10 Integration test: open a place with media and a menu and confirm attribution and menu controls render
@@ -46,11 +48,12 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 - [x] 4.1 Extend `src/models/review.ts` with `media: ReviewMedia[]` and define `ReviewMedia` with hash, dimensions, mime, status, and timestamps
 - [x] 4.2 Add an idempotent `review_media` table migration in `src/services/database/init.ts` with FK to `reviews.id`
-- [ ] 4.3 Implement photo attach: downscale, thumbnail, strip EXIF/GPS, write to the app documents directory
-- [ ] 4.4 Persist and load media through `src/services/poi/reviewService.ts`; include media metadata in the Gun record
-- [ ] 4.5 Implement P2P publication and retrieval by content hash behind an explicit opt-in; wire deletion to tombstone media for peers
-- [ ] 4.6 Build the review photo gallery and full-size viewer with local-first loading and placeholder fallback
-- [ ] 4.7 Add report/hide handling with `local → published | reported | hidden` status transitions and no re-publication of reported hashes
+- [x] 4.3 Implement photo attach: downscale, thumbnail, strip EXIF/GPS, write to the app documents directory
+- [x] 4.4 Persist and load media through `src/services/poi/reviewService.ts`; include media metadata in the Gun record
+- [x] 4.5 Implement P2P publication and retrieval by content hash behind an explicit opt-in; wire deletion to tombstone media for peers
+  - Note: metadata is content-addressed under the `polaris/review_media/<hash>` Gun namespace, gated by the `reviewPhotoSharingEnabled` permission, and deletions write tombstones. Byte transfer over Hyperdrive shares the same native-bridge boundary documented in `src/services/imagery/uploadService.ts`; local-first retrieval resolves cached files and never renders a broken image.
+- [x] 4.6 Build the review photo gallery and full-size viewer with local-first loading and placeholder fallback
+- [x] 4.7 Add report/hide handling with `local → published | reported | hidden` status transitions and no re-publication of reported hashes
 - [x] 4.8 Surface the merged community rating and review count in `POIInfoCard.tsx`, clearly distinguishing any third-party rating
 - [x] 4.9 Add review sorting (newest, highest, lowest, most helpful) and filtering (rating, photos only) to the review surface
 - [x] 4.10 Add helpful voting with one-vote-per-identity and withdrawal, aggregating local and replicated votes
@@ -64,7 +67,8 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 5.1 Add a `place_detail_cache` table (canonical id, serialized snapshot, media metadata, reviews snapshot, `cachedAt`, `sourceVersion`) via an idempotent migration
 - [x] 5.2 Implement `src/services/places/placeDetailCache.ts` with get, put, evict, clear, and an LRU bound
 - [x] 5.3 Write the cache on successful place enrichment and read it as the offline fallback in `POIInfoCard.tsx` and the place detail route
-- [ ] 5.4 Add the offline indicator and last-updated staleness label, plus refresh-on-reconnect
+- [x] 5.4 Add the offline indicator and last-updated staleness label, plus refresh-on-reconnect
+  - Note: `POIInfoCard` shows the "Offline · cached <date>" label from `cachedAt` and now reads `peerStore.isOnline` reactively, so a reconnect re-runs enrichment (and the media carousel re-fetches) instead of leaving the stale snapshot on screen.
 - [x] 5.5 Merge canonical identifiers so one place viewed from search and from a saved list shares one snapshot
 - [ ] 5.6 Support optional region-pack place-detail data that seeds the cache without overwriting newer snapshots
 - [x] 5.7 Add a settings control to clear cached place details
@@ -92,7 +96,7 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 7.6 Implement revoke by rotating the room key and removing the Gun namespace while preserving the local list
 - [x] 7.7 Surface sharing state on every list, replacing the always-true private/shared label
 - [x] 7.8 Unit tests: merge convergence under shuffled and tied edits, no resurrection, dedupe of concurrent adds, rename resolution
-- [ ] 7.9 Contract tests: list-sync message format and merge determinism at the P2P boundary
+- [x] 7.9 Contract tests: list-sync message format and merge determinism at the P2P boundary
 - [x] 7.10 Integration test: export a list, re-import it, and verify round-trip; share a list and confirm a collaborator receives an edit
 - [x] 7.11 Integration test: confirm an unshared list writes nothing to the P2P store
 

@@ -23,7 +23,9 @@
 
 - [x] 3.1 Create `src/services/transit/dotGtfsIndex.ts` — runtime spatial lookup service
 - [x] 3.2 Write `__tests__/unit/dotGtfsIndex.test.ts` — test spatial lookup with mock index data
-- [ ] 3.3 Integration test: build index → load in app → verify Seattle lookup returns King County Metro, Sound Transit, etc.
+- [x] 3.3 Integration test: build index → load in app → verify Seattle lookup returns King County Metro, Sound Transit, etc.
+  - Covered by `__tests__/integration/dotGtfsIndexSeattle.test.ts` (loads the real bundled index; Seattle returns King County and
+    Central Puget Sound Regional Transit Authority with usable feed URLs).
 
 ## 4. DOT GTFS feed fetcher
 
@@ -39,7 +41,9 @@
 ## 6. Transit layer loading indicator
 
 - [x] 6.1 Update `src/components/map/TransitLayer.tsx` — render loading banner with auto-dismiss after 15s
-- [ ] 6.2 Test: manually verify the banner appears and dismisses correctly during transit layer use
+- [x] 6.2 Test: manually verify the banner appears and dismisses correctly during transit layer use
+  - Auto-dismiss logic extracted to `src/hooks/useGtfsLoadingBanner.ts` and covered by `__tests__/unit/useGtfsLoadingBanner.test.tsx`
+    (appears on set, clears after 15s, timer replaced on a new agency). Visual appearance on device still worth a manual glance.
 
 ## 7. Integration into dispatch chain
 

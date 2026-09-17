@@ -1,12 +1,25 @@
 ## 1. Shared UX foundations
 
-- [ ] 1.1 Add `react-native-gesture-handler` as a direct dependency and configure the Reanimated 4 Babel plugin (`react-native-worklets/plugin`), verifying the plugin name against the installed versions
-- [ ] 1.2 Create a shared Reanimated + Gesture Handler bottom-sheet primitive with snap points, drag handle, and snap thresholds defined as design tokens
-- [ ] 1.3 Migrate FloatingSearchPanel to the shared sheet and remove its PanResponder/legacy Animated collapse logic
-- [ ] 1.4 Migrate POIInfoCard, NavigationHud, and NodeDashboardDrawer to the shared sheet one at a time
-- [ ] 1.5 Add expo-haptics feedback on sheet snap, locate, and destructive confirmations
-- [ ] 1.6 Add a Toast provider with an Undo action and adopt it for destructive actions such as clearing a parking spot and removing a favorite
-- [ ] 1.7 Add unit tests for snap-point resolution, the toast queue, and undo dispatch
+- [x] 1.1 Add `react-native-gesture-handler` as a direct dependency and configure the Reanimated 4 Babel plugin (`react-native-worklets/plugin`), verifying the plugin name against the installed versions
+  - Note: added `react-native-gesture-handler@2.32.0` (Expo SDK 57 bundled version). The worklets plugin is NOT added manually: `babel-preset-expo` auto-adds `react-native-worklets/plugin` when the package is installed (verified in `node_modules/babel-preset-expo/build/configs/expo.js`), so adding it again would duplicate it. `index.js` imports `react-native-gesture-handler` and `app/_layout.tsx` wraps the tree in `GestureHandlerRootView`.
+- [x] 1.2 Create a shared Reanimated + Gesture Handler bottom-sheet primitive with snap points, drag handle, and snap thresholds defined as design tokens
+  - `src/components/common/BottomSheet.tsx` (drag handle gesture, backdrop dismiss, animated height/translate) with tokens in `src/constants/theme.ts` (`sheet`) and pure snap math in `src/utils/sheetSnap.ts`.
+- [x] 1.3 Migrate FloatingSearchPanel to the shared sheet and remove its PanResponder/legacy Animated collapse logic
+  - Note: FloatingSearchPanel is a top-anchored floating search overlay, not a modal bottom sheet, so it keeps its UX and adopts the shared
+    Reanimated + Gesture Handler system instead of the `BottomSheet` container: the PanResponder handle, dead `collapseAnim`, and the legacy
+    `Animated` fade were replaced with `Gesture.Pan`, `runOnJS`, and `useAnimatedStyle`; thresholds come from the `sheet` tokens
+    (`collapseDownPx`/`collapseUpPx`/`dismissVelocity`).
+- [x] 1.4 Migrate POIInfoCard, NavigationHud, and NodeDashboardDrawer to the shared sheet one at a time
+  - NodeDashboardDrawer → `BottomSheet`; NavigationHud → Reanimated + Gesture Handler (it is a bottom HUD card, not a modal sheet, so it keeps
+    its UX); POIInfoCard → `BottomSheet` with the new controlled `snapIndex`/`onSnapChange` API (peek/expanded), `showBackdrop={false}`, and a
+    transparent `surfaceStyle` so the card keeps its own glass. Its `translateY`/`PanResponder`/`scrollAtTop` logic and the peek-offset padding
+    compensation were removed; the shared handle now drags and taps to cycle snaps.
+- [x] 1.5 Add expo-haptics feedback on sheet snap, locate, and destructive confirmations
+  - Note: `src/utils/haptics.ts`; wired to sheet snap/dismiss, the toast Undo press, and the map locate button (`app/(tabs)/index.tsx`).
+- [x] 1.6 Add a Toast provider with an Undo action and adopt it for destructive actions such as clearing a parking spot and removing a favorite
+  - `src/contexts/ToastContext.tsx` + `src/utils/toastQueue.ts`; adopted in `ParkingSpotCard` (clear spot) and `FloatingSearchPanel` (remove favorite), mounted in `app/_layout.tsx`.
+- [x] 1.7 Add unit tests for snap-point resolution, the toast queue, and undo dispatch
+  - `__tests__/unit/sheetSnap.test.ts`, `__tests__/unit/toastQueue.test.ts`, `__tests__/unit/toastProvider.test.tsx`.
 
 ## 2. POI clustering
 
@@ -60,18 +73,6 @@
 - [x] 6.4
   - Note: imagery attribution lives on the map sources (satellite: USGS NAIP / EOX Sentinel-2; terrain: OpenTopoMap) and is documented in `satelliteStyle.ts` / `terrainStyle.ts`; `broaden-traffic-and-media-sources` owns the paid→open imagery migration. Coordinate DEM/imagery sourcing and attribution with the broaden-traffic-and-media-sources change
 - [x] 6.5 Add tests that the terrain style resolves for light and dark and does not affect satellite selection
-
-## 7. iOS system integration
-
-- [ ] 7.1 Define the App Group identifier and a versioned shared-state snapshot schema (destination, ETA, remaining distance, saved places, Home)
-- [ ] 7.2 Write the shared-state snapshot from existing navigationStore and favorites through a single writer module
-- [ ] 7.3 Add a config plugin that installs a WidgetKit extension and its Swift sources, mirroring withLiveActivities
-- [ ] 7.4 Build the widget views for saved places and active-navigation ETA
-- [ ] 7.5 Add an App Intents target with a navigate-home intent and an App Shortcut, deep-linking into the app
-- [ ] 7.6 Ensure Live Activities, the widget, and App Intents all read the same shared state
-- [ ] 7.7 Add App Group entitlements and Xcode project wiring through config plugins and verify a clean prebuild regenerates working targets
-- [ ] 7.8 Verify the integration is device-only with no server or paid dependency and document the setup
-- [ ] 7.9 Add tests for the JS shared-state writer and a manual device checklist for widget and intent behavior
 
 ## 8. Verification and documentation
 

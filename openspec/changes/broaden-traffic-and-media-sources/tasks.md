@@ -31,14 +31,15 @@
 - [x] 4.2 Surface the coverage status in the traffic overlay/legend with iconography and short labels
 - [x] 4.3 Render an explicit no-data state when no tier resolves the viewport, with no raw error text
 - [x] 4.4 Ensure degraded (stale/no-data) and cold-start states are visually distinguishable from full P2P coverage per the UX consistency principle
-- [ ] 4.5 Add integration/component tests covering P2P, open-feed, cold-start, and no-data states
+- [x] 4.5 Add integration/component tests covering P2P, open-feed, cold-start, and no-data states
 
 ## 5. Free satellite imagery
 
 - [x] 5.1 Replace the Esri World Imagery source in `src/constants/satelliteStyle.ts` with Sentinel-2 cloudless (global) and USGS NAIP (US) raster sources
 - [x] 5.2 Set the required provider attribution on each imagery source and surface it via the map attribution
 - [x] 5.3 Verify the style has no `server.arcgisonline.com` source or Esri attribution
-- [ ] 5.4 Ensure imagery unavailability degrades to a visible limited-coverage state rather than an empty or errored map
+- [x] 5.4 Ensure imagery unavailability degrades to a visible limited-coverage state rather than an empty or errored map
+  - Note: `MapView` renders a "Limited map detail" chip (`map-limited-coverage`) whenever the style/tile load fails or times out and it falls back to the compatibility raster style, so degradation is visible instead of an empty map.
 - [x] 5.5 Update `src/services/map/offlineStyle.ts` handling if it assumes the removed Esri raster source
 - [x] 5.6 Update `__tests__/unit/offlineStyle.test.ts` (or equivalent) for the new imagery sources
 
@@ -47,7 +48,7 @@
 - [x] 6.1 Delete `src/services/poi/placeDetailEmbed.ts`, `src/components/map/PlaceDetailEmbed.tsx`, `netlify-deploy/place-detail.html`, `scripts/generate-mapkit-token.mjs`, and `scripts/test-mapkit.js`
 - [x] 6.2 Delete the paid Apple Maps Server API client `src/services/poi/mapkitFetcher.ts` and its callers, and remove the MapKit embed/server token plumbing
 - [x] 6.3 Keep `src/services/poi/websitePhotosService.ts` and `src/components/map/WebsitePhotosCarousel.tsx` as the primary place-media source (on-device OpenGraph/`<img>` scraping); do not replace them with Wikimedia Commons or another third-party provider
-- [ ] 6.4 Ensure the place card shows an explicit empty media state when the website scrape returns no photos
+- [x] 6.4 Ensure the place card shows an explicit empty media state when the website scrape returns no photos
 - [x] 6.5 Keep the native MapKit enrichment (`src/native/mapkit/`, `src/services/poi/poiEnricher.ts`) optional on iOS with graceful degradation
 - [x] 6.6 Update `src/components/map/POIInfoCard.tsx` to remove the paid MapKit JS embed mount while retaining the `WebsitePhotosCarousel`
 - [x] 6.7 Confirm the place card shows scraped media or an empty state and performs no paid web request; keep `react-native-webview` because the website-photo carousel still depends on it

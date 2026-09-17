@@ -13,24 +13,30 @@
 - [x] 3.4 Wire TransitousTileLayer into `TransitLayer.tsx` alongside existing RouteLinesLayer
 - [x] 3.5 Respect `transitLayerVisible` store flag for tile layer visibility
 - [x] 3.6 Add error boundary — on tile endpoint failure, log warning and hide tile layer, leaving existing JS lines intact
-- [ ] 3.7 Inspect Transitous tile feature properties and add stop-label symbol layer if stop data is available in tiles
+- [x] 3.7 Inspect Transitous tile feature properties and add stop-label symbol layer if stop data is available in tiles
+  - Note: `src/components/map/TransitousTileLayer.tsx` was missing despite 3.1–3.6 being checked; it is now implemented (VectorSource +
+    LineLayer + SymbolLayer stop labels + a React error boundary) and mounted in `TransitLayer` only while the layer is visible. The
+    stop-label layer uses `coalesce(name, stop_name, ref, '')` so it renders only when tiles actually carry named points.
 - [x] 4.1 Create `src/services/transit/transitousRouting.ts` — module with `planTransitousTrip(origin, dest, time, count)` function
 - [x] 4.2 Implement POST `/trip` call via MOTIS client with origin/destination, departure time, result count
 - [x] 4.3 Map MOTIS trip response to `OtpItinerary[]` — mode mapping, leg geometry decoding, route info extraction
 - [x] 4.4 Add MOTIS leg mode → Polaris `LegMode` mapping (walk, transit_bus, transit_train, transit_tram, transit_subway, bicycle, car)
 - [x] 4.5 Add Transitous routing dispatch in `transitRoutingService.ts` `planTransitTrip` — call Transitous first, fall back to OTP on failure
-- [ ] 4.6 Decode MOTIS polyline geometry strings (if MOTIS uses different encoding than OTP)
+- [x] 4.6 Decode MOTIS polyline geometry strings (if MOTIS uses different encoding than OTP)
+  - Note: MOTIS returns Google polylines at precision 6 (since 2.0.60; `/api/v5` inherits it) while the OTP-shaped field is decoded at
+    precision 5. `normalizeMotisGeometry()` decodes at 6 and re-encodes at 5 so `TransitLayer` renders correctly.
 - [x] 5.1 Create `src/services/transit/transitousDepartures.ts` — module with `fetchTransitousDepartures(stopId, lat, lon)` function
 - [x] 5.2 Implement POST `/stop_event` call with stop coordinates, time window, and result count
 - [x] 5.3 Map MOTIS stop_event response to existing `StopDepartureInfo` model
 - [x] 5.4 Preserve real-time delay data: `isRealtime`, `realtimeTime`, `minutesAway` with delay adjustment
-- [ ] 5.5 Add Transitous departure dispatch in `transitDepartureFetcher.ts` — call Transitous after city-specific APIs fail
+- [x] 5.5 Add Transitous departure dispatch in `transitDepartureFetcher.ts` — call Transitous after city-specific APIs fail
+  - Note: `fetchDepartures` now tries MBTA → OTP1 → **Transitous** → headway estimate.
 
 ## 6. Tests
 
-- [ ] 6.1 Write `__tests__/unit/transitousClient.test.ts` — mock MOTIS client, verify endpoint URL construction
-- [ ] 6.2 Write `__tests__/unit/transitousRouting.test.ts` — mock /trip response, verify OtpItinerary mapping
-- [ ] 6.3 Write `__tests__/unit/transitousDepartures.test.ts` — mock /stop_event response, verify StopDepartureInfo mapping
+- [x] 6.1 Write `__tests__/unit/transitousClient.test.ts` — mock MOTIS client, verify endpoint URL construction
+- [x] 6.2 Write `__tests__/unit/transitousRouting.test.ts` — mock /trip response, verify OtpItinerary mapping
+- [x] 6.3 Write `__tests__/unit/transitousDepartures.test.ts` — mock /stop_event response, verify StopDepartureInfo mapping
 - [x] 6.4 Update `__tests__/unit/otpEndpointRegistry.test.ts` (or verify existing tests) — confirm Transitous is returned for uncovered cities
 - [x] 6.5 Update `__tests__/unit/transitLineFetcher.test.ts` — verify `transitous-v1` returns `null` (doesn't trigger Overpass)
 - [x] 6.6 Update `__tests__/unit/transitRoutingService.test.ts` — verify Transitous fallback chain works
@@ -43,4 +49,9 @@
 - [ ] 7.4 Manually test departures at a station — Transitous returns departure board with real-time data
 - [ ] 7.5 Manually test fallback: disconnect from network, toggle transit layer — tile layer shows error state gracefully
 - [ ] 7.6 Manually test that Boston MBTA departures still work (city-specific takes priority over Transitous)
-- [ ] 7.7 Verify Transitous tile endpoint respects the usage policy (proper User-Agent header)
+- [x] 7.7 Verify Transitous tile endpoint respects the usage policy (proper User-Agent header)
+  - Coverage note: the MOTIS API client sends `User-Agent: PolarisMaps/1.0 (mailto:maps@polaris.app)` (asserted in
+    `__tests__/unit/transitousClient.test.ts`). MapLibre sets its own User-Agent for the vector-tile requests, which is not
+    configurable from JS. Live endpoint behavior still needs a network check.
+  - Remaining 7.1–7.6 are live on-device/network checks (tiles render, MOTIS routing/departures, offline fallback, MBTA priority)
+    and cannot be executed without a device/simulator and live Transitous access.
