@@ -50,7 +50,7 @@
 
 - [x] 6.1 Display current speed from `getGpsSpeed()` in the user's units, hidden when unavailable
 - [x] 6.2 Detect speed-limit changes and implement debounced/hysteretic over-speed alerts
-- [ ] 6.3 Implement along-route corridor search reusing distance-to-polyline utilities and surface results as stops
+- [x] 6.3 Implement along-route corridor search reusing distance-to-polyline utilities and surface results as stops
 - [x] 6.4 Add an in-navigation steps list highlighting the current maneuver, updating on route replacement
 - [ ] 6.5 Add unit tests for speed/limit alert thresholds and corridor ranking, and integration tests for the steps list and along-route search
 
