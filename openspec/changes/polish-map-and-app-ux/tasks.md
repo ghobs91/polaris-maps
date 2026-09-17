@@ -38,8 +38,8 @@
 - [x] 4.1 Add accessibilityLabel, accessibilityRole, and state to all map controls (CtrlBtn and new chrome) with hit targets of at least 44 by 44 points
 - [x] 4.2 Replace the Settings theme picker with an accessible segmented or radio control exposing role and selected state
 - [ ] 4.3 Audit fixed-height text containers, replace them with minimum heights or scrollable content, and define Dynamic Type caps for dense map overlays
-- [ ] 4.4 Add a VoiceOver summary to the map container and per-marker labels for POIs and clusters
-- [ ] 4.5 Measure contrast in both themes and fix any palette values that fail WCAG AA
+- [x] 4.4 Add a VoiceOver summary to the map container and per-marker labels for POIs and clusters
+- [x] 4.5 Measure contrast in both themes and fix any palette values that fail WCAG AA
 - [x] 4.6 Respect the Reduce Motion preference for camera and sheet animations
 - [x] 4.7 Add tests asserting accessibility props on map controls and a Dynamic Type rendering check
 
@@ -57,7 +57,8 @@
 - [x] 6.1 Implement the terrain branch in mapStyleResolver with a free/open DEM hillshade for light and dark variants
 - [x] 6.2 Add a Terrain chip to the map-type selector
 - [x] 6.3 Degrade gracefully to the base style when Terrain is selected offline or on a weak link
-- [ ] 6.4 Coordinate DEM/imagery sourcing and attribution with the broaden-traffic-and-media-sources change
+- [x] 6.4
+  - Note: imagery attribution lives on the map sources (satellite: USGS NAIP / EOX Sentinel-2; terrain: OpenTopoMap) and is documented in `satelliteStyle.ts` / `terrainStyle.ts`; `broaden-traffic-and-media-sources` owns the paid→open imagery migration. Coordinate DEM/imagery sourcing and attribution with the broaden-traffic-and-media-sources change
 - [x] 6.5 Add tests that the terrain style resolves for light and dark and does not affect satellite selection
 
 ## 7. iOS system integration

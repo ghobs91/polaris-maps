@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
-import { StyleSheet, View, Dimensions, InteractionManager } from 'react-native';
+import { StyleSheet, View, Text, Dimensions, InteractionManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
@@ -251,6 +251,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Live camera state for the compass / scale-bar chrome (updated on settle).
   const [camera, setCamera] = useState({ bearing: 0, pitch: 0, zoom: 17, lat: 0 });
   const reduceMotion = useReducedMotion();
+  const poiCount = useOsmPoiStore((s) => s.pois.length);
   const lastZoomRef = useRef(17);
 
   // Sync external followCamera prop into ref
@@ -1057,6 +1058,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }
         />
       )}
+
+      <Text style={styles.srSummary} accessibilityRole="text">
+        {`Map view. ${poiCount} nearby places visible.${navigationMode ? ' Navigating.' : ''}`}
+      </Text>
     </View>
   );
 });
@@ -1384,4 +1389,14 @@ function buildNavPuckArrowTopGeoJSON(
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  // Visually-hidden screen-reader summary of the map (VoiceOver).
+  srSummary: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0.01,
+    overflow: 'hidden',
+    left: 0,
+    bottom: 0,
+  },
 });
