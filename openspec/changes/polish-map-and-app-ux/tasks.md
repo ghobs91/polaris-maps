@@ -47,18 +47,18 @@
 
 - [x] 5.1 Add a compass overlay driven by map bearing that resets heading and pitch on tap
 - [x] 5.2 Add a scale bar computed from latitude and zoom and updated on region events
-- [ ] 5.3 Add a heading-aware location indicator for non-navigation mode with a fallback dot
+- [x] 5.3 Add a heading-aware location indicator for non-navigation mode with a fallback dot
 - [x] 5.4 Add rotate-reset and 2D/3D pitch affordances
 - [x] 5.5 Ensure chrome respects safe-area insets and does not intercept map gestures
 - [x] 5.6 Add unit tests for scale-bar distance math and compass heading normalization
 
 ## 6. Terrain
 
-- [ ] 6.1 Implement the terrain branch in mapStyleResolver with a free/open DEM hillshade for light and dark variants
-- [ ] 6.2 Add a Terrain chip to the map-type selector
-- [ ] 6.3 Degrade gracefully to the base style when Terrain is selected offline or on a weak link
+- [x] 6.1 Implement the terrain branch in mapStyleResolver with a free/open DEM hillshade for light and dark variants
+- [x] 6.2 Add a Terrain chip to the map-type selector
+- [x] 6.3 Degrade gracefully to the base style when Terrain is selected offline or on a weak link
 - [ ] 6.4 Coordinate DEM/imagery sourcing and attribution with the broaden-traffic-and-media-sources change
-- [ ] 6.5 Add tests that the terrain style resolves for light and dark and does not affect satellite selection
+- [x] 6.5 Add tests that the terrain style resolves for light and dark and does not affect satellite selection
 
 ## 7. iOS system integration
 

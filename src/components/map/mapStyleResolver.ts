@@ -1,6 +1,7 @@
 import { DARK_MAP_STYLE_JSON } from '../../constants/darkMapStyle';
 import { LIGHT_MAP_STYLE_JSON } from '../../constants/lightMapStyle';
 import { SATELLITE_STYLE_JSON } from '../../constants/satelliteStyle';
+import { TERRAIN_DARK_STYLE_JSON, TERRAIN_STYLE_JSON } from '../../constants/terrainStyle';
 
 type MapStylePreference = 'default' | 'satellite' | 'terrain';
 
@@ -72,11 +73,12 @@ export function resolveMapStyle({
     return isDark ? IOS26_COMPAT_DARK_STYLE_JSON : IOS26_COMPAT_LIGHT_STYLE_JSON;
   }
 
-  return mapStylePref === 'satellite'
-    ? SATELLITE_STYLE_JSON
-    : isDark
-      ? DARK_MAP_STYLE_JSON
-      : LIGHT_MAP_STYLE_JSON;
+  if (mapStylePref === 'satellite') return SATELLITE_STYLE_JSON;
+  // Terrain is a free/open topographic raster; when it cannot load, the
+  // styleLoadFailed fallback above (and the offline style path) degrade to the
+  // base vector style rather than an empty map.
+  if (mapStylePref === 'terrain') return isDark ? TERRAIN_DARK_STYLE_JSON : TERRAIN_STYLE_JSON;
+  return isDark ? DARK_MAP_STYLE_JSON : LIGHT_MAP_STYLE_JSON;
 }
 
 /** Set the visibility of a layer in a serialised style JSON. */

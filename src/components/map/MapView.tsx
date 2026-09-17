@@ -822,7 +822,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }}
         />
 
-        <MapLibreGL.UserLocation visible={!navigationMode} />
+        <MapLibreGL.UserLocation visible={!navigationMode} showsUserHeadingIndicator />
 
         {/* Suppress raster overlay when traffic is shown on the route line instead */}
         <TrafficOverlay suppressRaster={!!routeGeometry} />

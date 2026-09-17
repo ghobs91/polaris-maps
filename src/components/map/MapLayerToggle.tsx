@@ -163,6 +163,20 @@ function CardContent({
             Satellite
           </Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chip, { backgroundColor: mapStyle === 'terrain' ? chipActiveBg : chipBg }]}
+          onPress={() => onMapStyleChange('terrain')}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="trail-sign-outline"
+            size={16}
+            color={mapStyle === 'terrain' ? '#FFF' : textColor}
+          />
+          <Text style={[styles.chipLabel, { color: mapStyle === 'terrain' ? '#FFF' : textColor }]}>
+            Terrain
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Traffic toggle */}
