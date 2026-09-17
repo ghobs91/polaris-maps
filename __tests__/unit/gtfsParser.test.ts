@@ -137,9 +137,9 @@ describe('parseGtfsFeed', () => {
     return new Map(Object.entries({ ...defaults, ...overrides }));
   }
 
-  it('parses a complete GTFS feed', () => {
+  it('parses a complete GTFS feed', async () => {
     const files = makeFiles();
-    const feed = parseGtfsFeed(files, 'test-id', 'Test Agency');
+    const feed = await parseGtfsFeed(files, 'test-id', 'Test Agency');
     expect(feed).not.toBeNull();
     expect(feed!.routes).toHaveLength(2);
     expect(feed!.stops).toHaveLength(1);
@@ -149,31 +149,31 @@ describe('parseGtfsFeed', () => {
     expect(feed!.feedName).toBe('Test Agency');
   });
 
-  it('returns null when routes.txt is empty', () => {
+  it('returns null when routes.txt is empty', async () => {
     const files = makeFiles({ 'routes.txt': 'route_id\n' });
-    const feed = parseGtfsFeed(files, 'id', 'provider');
+    const feed = await parseGtfsFeed(files, 'id', 'provider');
     expect(feed).toBeNull();
   });
 
-  it('filters routes by routeTypeFilter', () => {
+  it('filters routes by routeTypeFilter', async () => {
     const files = makeFiles();
-    const feed = parseGtfsFeed(files, 'id', 'provider', { routeTypeFilter: [1] });
+    const feed = await parseGtfsFeed(files, 'id', 'provider', { routeTypeFilter: [1] });
     expect(feed).not.toBeNull();
     expect(feed!.routes).toHaveLength(2); // all routes parsed, filtered in convertFeedToLines
   });
 
-  it('builds correct shape maps with [lng, lat] ordering', () => {
+  it('builds correct shape maps with [lng, lat] ordering', async () => {
     const files = makeFiles();
-    const feed = parseGtfsFeed(files, 'id', 'provider');
+    const feed = await parseGtfsFeed(files, 'id', 'provider');
     const shape = feed!.shapes.get('shape1')!;
     expect(shape).toHaveLength(2);
     expect(shape[0]).toEqual([-74.0, 40.7]);
     expect(shape[1]).toEqual([-74.01, 40.71]);
   });
 
-  it('returns null when routes.txt is missing', () => {
+  it('returns null when routes.txt is missing', async () => {
     const files = new Map([['stops.txt', 'stop_id\n']]);
-    const feed = parseGtfsFeed(files, 'id', 'provider');
+    const feed = await parseGtfsFeed(files, 'id', 'provider');
     expect(feed).toBeNull();
   });
 });

@@ -132,6 +132,39 @@ export function parseCsv(text: string): Record<string, string>[] {
   return rows;
 }
 
+/**
+ * Chunked, cooperative CSV parser. Large GTFS files (shapes.txt especially)
+ * can be tens of MB; parsing them in one synchronous pass freezes the JS
+ * thread and makes the map unresponsive. This yields to the UI every
+ * `chunkLines` rows while producing the same result as `parseCsv`.
+ */
+export async function parseCsvAsync(
+  text: string,
+  chunkLines = 2000,
+): Promise<Record<string, string>[]> {
+  const lines = text.split('\n').filter((l) => l.trim());
+  if (lines.length < 2) return [];
+
+  const headers = parseCsvLine(lines[0]);
+  const rows: Record<string, string>[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCsvLine(lines[i]);
+    if (values.length >= headers.length) {
+      const row: Record<string, string> = {};
+      for (let j = 0; j < headers.length; j++) {
+        row[headers[j]] = values[j];
+      }
+      rows.push(row);
+    }
+    if (i % chunkLines === 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  return rows;
+}
+
 export function parseCsvLine(line: string): string[] {
   const values: string[] = [];
   let current = '';
@@ -282,14 +315,14 @@ interface ParseGtfsFeedOptions {
  * @param provider  Provider/agency label
  * @param options  Optional filtering
  */
-export function parseGtfsFeed(
+export async function parseGtfsFeed(
   files: Map<string, string>,
   feedId: string,
   provider: string,
   options?: ParseGtfsFeedOptions,
-): GtfsFeedData | null {
+): Promise<GtfsFeedData | null> {
   // Parse routes (small, fast)
-  const allRoutes: GtfsRoute[] = parseCsv(files.get('routes.txt') ?? '').map((r) => ({
+  const allRoutes: GtfsRoute[] = (await parseCsvAsync(files.get('routes.txt') ?? '')).map((r) => ({
     route_id: r.route_id,
     route_short_name: r.route_short_name,
     route_long_name: r.route_long_name,
@@ -314,7 +347,7 @@ export function parseGtfsFeed(
   // This excludes bus stops (location_type=0) and platform-level entries.
   // Agencies that don't use location_type will get no stops — acceptable trade-off
   // since we skip the 100MB+ stop_times.txt for performance.
-  const stops: GtfsStop[] = parseCsv(files.get('stops.txt') ?? '')
+  const stops: GtfsStop[] = (await parseCsvAsync(files.get('stops.txt') ?? ''))
     .map((s) => ({
       stop_id: s.stop_id,
       stop_name: s.stop_name,
@@ -327,7 +360,7 @@ export function parseGtfsFeed(
     .filter((s) => s.location_type === 1);
 
   // Parse trips — only keep trips for routes we care about
-  const allTrips: GtfsTrip[] = parseCsv(files.get('trips.txt') ?? '')
+  const allTrips: GtfsTrip[] = (await parseCsvAsync(files.get('trips.txt') ?? ''))
     .filter((t) => routeIds.has(t.route_id))
     .map((t) => ({
       trip_id: t.trip_id,
@@ -344,7 +377,7 @@ export function parseGtfsFeed(
   const stopTimesRaw = files.get('stop_times.txt');
   let stopTimes: GtfsStopTime[] = [];
   if (stopTimesRaw) {
-    stopTimes = parseCsv(stopTimesRaw)
+    stopTimes = (await parseCsvAsync(stopTimesRaw))
       .filter((st) => tripIds.has(st.trip_id))
       .map((st) => ({
         trip_id: st.trip_id,
@@ -357,7 +390,7 @@ export function parseGtfsFeed(
 
   // Parse shapes
   const shapeIds = new Set(allTrips.map((t) => t.shape_id).filter(Boolean));
-  const shapePointRows = parseCsv(files.get('shapes.txt') ?? '').filter((sp) =>
+  const shapePointRows = (await parseCsvAsync(files.get('shapes.txt') ?? '')).filter((sp) =>
     shapeIds.has(sp.shape_id),
   );
 
@@ -399,7 +432,7 @@ export function parseGtfsFeed(
   }
 
   // Agency name
-  const agencyRow = parseCsv(files.get('agency.txt') ?? '')[0];
+  const agencyRow = (await parseCsvAsync(files.get('agency.txt') ?? ''))[0];
 
   return {
     feedId,
@@ -556,8 +589,8 @@ export async function convertFeedToLines(
       stops: routeStops,
     });
 
-    // Yield every 2 routes to keep UI responsive
-    if ((i + 1) % 2 === 0 && i < filteredRoutes.length - 1) {
+    // Yield every route to keep UI responsive on large feeds
+    if (i < filteredRoutes.length - 1) {
       await yieldToUI();
     }
   }

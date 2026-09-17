@@ -174,7 +174,7 @@ async function fetchAndParseMobilityFeed(feed: TransitFeed): Promise<GtfsFeedDat
 
     const agencyRow = parseCsv(files.get('agency.txt') ?? '')[0];
 
-    const data = parseGtfsFeed(
+    const data = await parseGtfsFeed(
       files,
       feed.id,
       feed.feed_name ?? agencyRow?.agency_name ?? feed.provider,
@@ -292,7 +292,7 @@ async function fetchFeedFromUrl(
       `[gtfs-static] ${label} extracted files: ${[...files.keys()].join(', ') || '(none)'}`,
     );
 
-    const feed = parseGtfsFeed(files, `direct:${label}`, label);
+    const feed = await parseGtfsFeed(files, `direct:${label}`, label);
     if (feed) {
       console.warn(
         `[gtfs-static] ${label} parsed: ${feed.routes.length} routes, ${feed.shapes.size} shapes`,

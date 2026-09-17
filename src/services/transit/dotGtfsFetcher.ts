@@ -218,7 +218,7 @@ async function fetchAndCacheDotFeed(feed: DotGtfsFeedEntry): Promise<void> {
       return;
     }
 
-    const data = parseGtfsFeed(files, `dot:${feed.ntdId}`, feed.agencyName);
+    const data = await parseGtfsFeed(files, `dot:${feed.ntdId}`, feed.agencyName);
     if (!data) return;
 
     // Cache it (keyed by original URL, not API-key-augmented URL)

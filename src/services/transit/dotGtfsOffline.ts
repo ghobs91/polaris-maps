@@ -136,7 +136,7 @@ async function downloadAndCacheOffline(feed: DotGtfsFeedEntry, regionId: string)
 
     if (!files.has('routes.txt')) return;
 
-    const data = parseGtfsFeed(files, `dot:${feed.ntdId}`, feed.agencyName);
+    const data = await parseGtfsFeed(files, `dot:${feed.ntdId}`, feed.agencyName);
     if (!data) return;
 
     offlineFeedCache.set(url, {
