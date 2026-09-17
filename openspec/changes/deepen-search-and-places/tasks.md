@@ -63,7 +63,7 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 - [x] 5.1 Add a `place_detail_cache` table (canonical id, serialized snapshot, media metadata, reviews snapshot, `cachedAt`, `sourceVersion`) via an idempotent migration
 - [x] 5.2 Implement `src/services/places/placeDetailCache.ts` with get, put, evict, clear, and an LRU bound
-- [ ] 5.3 Write the cache on successful place enrichment and read it as the offline fallback in `POIInfoCard.tsx` and the place detail route
+- [x] 5.3 Write the cache on successful place enrichment and read it as the offline fallback in `POIInfoCard.tsx` and the place detail route
 - [ ] 5.4 Add the offline indicator and last-updated staleness label, plus refresh-on-reconnect
 - [x] 5.5 Merge canonical identifiers so one place viewed from search and from a saved list shares one snapshot
 - [ ] 5.6 Support optional region-pack place-detail data that seeds the cache without overwriting newer snapshots

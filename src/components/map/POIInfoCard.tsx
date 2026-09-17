@@ -23,6 +23,12 @@ import { useMapStore } from '../../stores/mapStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
+import { getConnectivity } from '../../services/regions/connectivityService';
+import {
+  canonicalPlaceKey,
+  getPlaceDetail,
+  putPlaceDetail,
+} from '../../services/places/placeDetailCache';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
@@ -462,20 +468,76 @@ export function POIInfoCard() {
   const enrichedData = useOsmPoiStore((s) => s.enrichedData);
   const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
 
-  // Trigger Apple Maps enrichment when a POI is selected
+  // Trigger Apple Maps enrichment when a POI is selected. When offline, fall
+  // back to the cached place-detail snapshot and flag it as cached.
   useEffect(() => {
     if (!poi || isMapSelectionPoi(poi)) {
       setEnrichedData(null);
       setIsEnriching(false);
+      setCachedAt(null);
       return;
     }
     let cancelled = false;
+    const targetPoi = poi as unknown as OsmPoi;
+    const key = {
+      osmId: String(targetPoi.id),
+      placeId: targetPoi.tags['polaris:place_uuid'] ?? null,
+      lat: targetPoi.lat,
+      lng: targetPoi.lng,
+      name: targetPoi.name,
+    };
     setIsEnriching(true);
-    enrichPoi(poi)
+
+    if (!getConnectivity().isConnected) {
+      getPlaceDetail(key)
+        .then((row) => {
+          if (cancelled) return;
+          if (row) {
+            try {
+              setEnrichedData(JSON.parse(row.snapshot));
+              setCachedAt(row.cachedAt);
+            } catch {
+              setEnrichedData(null);
+              setCachedAt(null);
+            }
+          } else {
+            setEnrichedData(null);
+            setCachedAt(null);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setEnrichedData(null);
+        })
+        .finally(() => {
+          if (!cancelled) setIsEnriching(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    enrichPoi(targetPoi)
       .then((data) => {
-        if (!cancelled) setEnrichedData(data);
+        if (cancelled) return;
+        setEnrichedData(data);
+        setCachedAt(null);
+        if (data) {
+          void putPlaceDetail({
+            canonicalId: canonicalPlaceKey(key),
+            placeId: key.placeId,
+            osmId: key.osmId,
+            name: targetPoi.name,
+            lat: targetPoi.lat,
+            lng: targetPoi.lng,
+            snapshot: JSON.stringify(data),
+            media: null,
+            reviews: null,
+            sourceVersion: 1,
+          });
+        }
       })
       .catch(() => {
         /* enrichment is best-effort */
@@ -891,6 +953,25 @@ export function POIInfoCard() {
                 style={styles.heroImage}
                 resizeMode="cover"
               />
+            )}
+
+            {cachedAt != null && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingHorizontal: spacing.md,
+                  paddingTop: spacing.sm,
+                }}
+                accessibilityRole="text"
+                accessibilityLabel="Showing cached place details, offline"
+              >
+                <Ionicons name="cloud-offline-outline" size={13} color={subtextColor} />
+                <Text style={{ color: subtextColor, fontSize: 12 }}>
+                  Offline · cached {new Date(cachedAt).toLocaleDateString()}
+                </Text>
+              </View>
             )}
 
             {/* ── Action pill buttons ────────────────────────────────────── */}
