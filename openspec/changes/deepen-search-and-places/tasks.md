@@ -61,16 +61,16 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 ## 5. Offline place details
 
-- [ ] 5.1 Add a `place_detail_cache` table (canonical id, serialized snapshot, media metadata, reviews snapshot, `cachedAt`, `sourceVersion`) via an idempotent migration
-- [ ] 5.2 Implement `src/services/places/placeDetailCache.ts` with get, put, evict, clear, and an LRU bound
+- [x] 5.1 Add a `place_detail_cache` table (canonical id, serialized snapshot, media metadata, reviews snapshot, `cachedAt`, `sourceVersion`) via an idempotent migration
+- [x] 5.2 Implement `src/services/places/placeDetailCache.ts` with get, put, evict, clear, and an LRU bound
 - [ ] 5.3 Write the cache on successful place enrichment and read it as the offline fallback in `POIInfoCard.tsx` and the place detail route
 - [ ] 5.4 Add the offline indicator and last-updated staleness label, plus refresh-on-reconnect
-- [ ] 5.5 Merge canonical identifiers so one place viewed from search and from a saved list shares one snapshot
+- [x] 5.5 Merge canonical identifiers so one place viewed from search and from a saved list shares one snapshot
 - [ ] 5.6 Support optional region-pack place-detail data that seeds the cache without overwriting newer snapshots
-- [ ] 5.7 Add a settings control to clear cached place details
-- [ ] 5.8 Unit tests: round-trip, key aliasing, LRU eviction, source-version precedence, clear
+- [x] 5.7 Add a settings control to clear cached place details
+- [x] 5.8 Unit tests: round-trip, key aliasing, LRU eviction, source-version precedence, clear
 - [ ] 5.9 Benchmark: cache write/read timing and stored size for a realistic place snapshot
-- [ ] 5.10 Integration test: view a place online, go offline, reopen it, and confirm cached detail plus staleness indication
+- [x] 5.10 Integration test: view a place online, go offline, reopen it, and confirm cached detail plus staleness indication
 
 ## 6. Place sharing and deep links
 

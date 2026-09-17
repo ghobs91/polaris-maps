@@ -1,8 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Switch, Linking, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
+import {
+  clearPlaceDetailCache,
+  countPlaceDetailCache,
+} from '../../services/places/placeDetailCache';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { Button, SettingsGroup, SettingsRow, SFSymbol } from '../common';
@@ -38,6 +42,13 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const { colors, isDark } = useTheme();
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
+  const [cachedPlaceCount, setCachedPlaceCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    countPlaceDetailCache()
+      .then(setCachedPlaceCount)
+      .catch(() => setCachedPlaceCount(null));
+  }, []);
   const bskySession = useAtprotoAuthStore((s) => s.session);
   const bskyError = useAtprotoAuthStore((s) => s.error);
   const bskyIsLoading = useAtprotoAuthStore((s) => s.isLoading);
@@ -285,6 +296,24 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
         footer="Navigation state, maneuvers, and search forward to CarPlay automatically when connected. No setup needed."
       >
         <SettingsRow title="CarPlay Mirroring" value="Automatic when connected" />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="Storage"
+        footer="Place details you've viewed are cached for offline use."
+      >
+        <SettingsRow
+          title="Clear Cached Place Details"
+          value={cachedPlaceCount != null ? `${cachedPlaceCount} cached` : undefined}
+          onPress={() => {
+            clearPlaceDetailCache()
+              .then(() => {
+                setCachedPlaceCount(0);
+                Alert.alert('Cleared', 'Cached place details were removed.');
+              })
+              .catch(() => {});
+          }}
+        />
       </SettingsGroup>
 
       <SettingsGroup header="About">

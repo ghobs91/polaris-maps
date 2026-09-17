@@ -209,6 +209,23 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     );
     CREATE INDEX IF NOT EXISTS idx_imagery_geohash ON street_imagery (geohash8, bearing);
     CREATE INDEX IF NOT EXISTS idx_imagery_author ON street_imagery (author_pubkey);
+
+    CREATE TABLE IF NOT EXISTS place_detail_cache (
+      canonical_id TEXT PRIMARY KEY,
+      place_id TEXT,
+      osm_id TEXT,
+      name TEXT NOT NULL DEFAULT '',
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      snapshot TEXT NOT NULL,
+      media TEXT,
+      reviews TEXT,
+      source_version INTEGER NOT NULL DEFAULT 1,
+      cached_at INTEGER NOT NULL,
+      last_accessed INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_place_detail_osm ON place_detail_cache (osm_id);
+    CREATE INDEX IF NOT EXISTS idx_place_detail_lru ON place_detail_cache (last_accessed);
   `);
 
   // Migrations for existing databases
