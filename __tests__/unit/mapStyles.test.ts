@@ -151,14 +151,18 @@ describe('satelliteStyle', () => {
     expect(style.layers.length).toBeGreaterThan(0);
   });
 
-  it('should include a raster satellite source from free providers', () => {
-    expect(style.sources.satellite).toBeDefined();
-    expect(style.sources.satellite.type).toBe('raster');
-    expect(style.sources.satellite.tiles).toHaveLength(2);
-    expect(style.sources.satellite.tiles[0]).toContain('nationalmap');
-    expect(style.sources.satellite.tiles[1]).toContain('s2cloudless');
-    expect(style.sources.satellite.attribution).toContain('USGS');
-    expect(style.sources.satellite.attribution).toContain('EOX');
+  it('should include separate global and NAIP raster satellite sources', () => {
+    // Two separate sources (not one multi-URL source) so MapLibre can't serve
+    // the blurry global tiles inside NAIP-covered areas.
+    expect(style.sources['satellite-global']).toBeDefined();
+    expect(style.sources['satellite-global'].type).toBe('raster');
+    expect(style.sources['satellite-global'].tiles[0]).toContain('s2cloudless');
+    expect(style.sources['satellite-global'].attribution).toContain('EOX');
+
+    expect(style.sources['satellite-naip']).toBeDefined();
+    expect(style.sources['satellite-naip'].type).toBe('raster');
+    expect(style.sources['satellite-naip'].tiles[0]).toContain('nationalmap');
+    expect(style.sources['satellite-naip'].attribution).toContain('USGS');
   });
 
   it('should include vector source for labels', () => {
@@ -166,10 +170,14 @@ describe('satelliteStyle', () => {
     expect(style.sources.openmaptiles.type).toBe('vector');
   });
 
-  it('should render satellite tiles as first layer', () => {
-    expect(style.layers[0].id).toBe('satellite-tiles');
+  it('should render the global base then the NAIP overlay as the first layers', () => {
+    expect(style.layers[0].id).toBe('satellite-global-tiles');
     expect(style.layers[0].type).toBe('raster');
-    expect(style.layers[0].source).toBe('satellite');
+    expect(style.layers[0].source).toBe('satellite-global');
+
+    expect(style.layers[1].id).toBe('satellite-naip-tiles');
+    expect(style.layers[1].type).toBe('raster');
+    expect(style.layers[1].source).toBe('satellite-naip');
   });
 
   it('should overlay road and place labels on top of satellite', () => {
@@ -178,7 +186,7 @@ describe('satelliteStyle', () => {
     );
     expect(labelLayers.length).toBeGreaterThan(0);
     // All label layers should come after the raster layer
-    const satIndex = style.layers.findIndex((l: any) => l.id === 'satellite-tiles');
+    const satIndex = style.layers.findIndex((l: any) => l.id === 'satellite-naip-tiles');
     for (const label of labelLayers) {
       const labelIndex = style.layers.indexOf(label);
       expect(labelIndex).toBeGreaterThan(satIndex);

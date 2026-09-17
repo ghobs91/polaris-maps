@@ -15,14 +15,28 @@ const style = {
   version: 8 as const,
   name: 'Polaris Satellite',
   sources: {
-    satellite: {
+    // Global low-resolution base (10 m Sentinel-2). Always present so non-US
+    // areas still get imagery.
+    'satellite-global': {
       type: 'raster' as const,
       tiles: [
-        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
         'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',
       ],
       tileSize: 256,
-      attribution: 'Imagery: USGS The National Map (NAIP) · Sentinel-2 cloudless by EOX',
+      attribution: 'Sentinel-2 cloudless by EOX',
+      maxzoom: 19,
+    },
+    // High-resolution US orthoimagery (1 m NAIP) drawn on top of the global
+    // base. Tiles outside NAIP coverage 404 and fall through to the base.
+    // Keeping these in separate sources (rather than one multi-URL source)
+    // prevents MapLibre from serving the blurry global tiles in the US.
+    'satellite-naip': {
+      type: 'raster' as const,
+      tiles: [
+        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      attribution: 'Imagery: USGS The National Map (NAIP)',
       maxzoom: 19,
     },
     openmaptiles: {
@@ -34,9 +48,18 @@ const style = {
   layers: [
     // ───────────────────── Satellite Imagery ─────────────────────
     {
-      id: 'satellite-tiles',
+      id: 'satellite-global-tiles',
       type: 'raster',
-      source: 'satellite',
+      source: 'satellite-global',
+      paint: {
+        'raster-opacity': 1,
+        'raster-brightness-min': 0.05,
+      },
+    },
+    {
+      id: 'satellite-naip-tiles',
+      type: 'raster',
+      source: 'satellite-naip',
       paint: {
         'raster-opacity': 1,
         'raster-brightness-min': 0.05,
