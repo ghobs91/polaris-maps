@@ -74,12 +74,12 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 ## 6. Place sharing and deep links
 
-- [ ] 6.1 Implement `src/services/places/shareService.ts` building a universal link for a place, falling back to coordinates/name when no canonical id exists
+- [x] 6.1 Implement `src/services/places/shareService.ts` building a universal link for a place, falling back to coordinates/name when no canonical id exists
 - [ ] 6.2 Add the `withUniversalLinks` config plugin writing the Associated Domains entitlement and register it in `app.json` (iOS scope)
 - [ ] 6.3 Add Expo Router deep-link handling for `https://polarismaps.com/p/...` and the `polaris-maps://place/...` fallback, resolving to the place detail
-- [ ] 6.4 Replace the plain-text `Share.share` in `POIInfoCard.tsx` with the link payload
+- [x] 6.4 Replace the plain-text `Share.share` in `POIInfoCard.tsx` with the link payload
 - [ ] 6.5 Document the out-of-repo `apple-app-site-association` requirement and defer Android App Links with a recorded decision
-- [ ] 6.6 Unit tests: link construction with and without a canonical id; link parsing and resolution
+- [x] 6.6 Unit tests: link construction with and without a canonical id; link parsing and resolution
 - [ ] 6.7 Integration test: open a inbound place link and confirm the correct place detail is shown
 
 ## 7. List export and collaborative sharing

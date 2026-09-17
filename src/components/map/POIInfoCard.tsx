@@ -31,6 +31,7 @@ import {
 } from '../../services/places/placeDetailCache';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
+import { buildPlaceLink } from '../../services/places/shareService';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
 import { TripadvisorRatingCard } from './TripadvisorRatingCard';
 import { spacing, typography, borderRadius } from '../../constants/theme';
@@ -691,6 +692,15 @@ export function POIInfoCard() {
       const url = parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`;
       lines.push(url);
     }
+    // Include a shareable deep link so recipients can open the place in Polaris.
+    lines.push(
+      buildPlaceLink({
+        canonicalId: poi.tags['polaris:place_uuid'] ?? null,
+        lat: poi.lat,
+        lng: poi.lng,
+        name: poi.name,
+      }),
+    );
     try {
       await Share.share({ message: lines.join('\n') });
     } catch {
