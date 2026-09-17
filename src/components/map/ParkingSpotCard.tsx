@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useParkingStore } from '../../stores/parkingStore';
 import { useMapStore } from '../../stores/mapStore';
+import { useToast } from '../../contexts/ToastContext';
 import { GlassView } from '../common/GlassView';
 import { spacing } from '../../constants/theme';
 
@@ -20,8 +21,10 @@ export function ParkingSpotCard(): React.ReactElement | null {
   const insets = useSafeAreaInsets();
   const spot = useParkingStore((s) => s.spot);
   const clearSpot = useParkingStore((s) => s.clearSpot);
+  const saveSpot = useParkingStore((s) => s.saveSpot);
   const locateTo = useMapStore((s) => s.locateTo);
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
+  const { showToast } = useToast();
 
   const subtitle = spot ? formatParkedDuration(spot.savedAt) : '';
 
@@ -55,7 +58,15 @@ export function ParkingSpotCard(): React.ReactElement | null {
           accessibilityRole="button"
           style={styles.clearBtn}
           activeOpacity={0.7}
-          onPress={() => clearSpot()}
+          onPress={() => {
+            const previous = spot;
+            clearSpot();
+            showToast({
+              message: 'Parking spot cleared',
+              actionLabel: 'Undo',
+              onAction: () => saveSpot(previous.lat, previous.lng, previous.label),
+            });
+          }}
         >
           <Ionicons name="close" size={16} color="#8E8E93" />
         </TouchableOpacity>

@@ -1,14 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Animated,
   Linking,
   ScrollView,
-  Dimensions,
-  PanResponder,
   Modal as RNModal,
   Image,
   Share,
@@ -18,12 +15,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassView } from '../common/GlassView';
+import { BottomSheet } from '../common/BottomSheet';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useMapStore } from '../../stores/mapStore';
+import { usePeerStore } from '../../stores/peerStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
-import { getConnectivity } from '../../services/regions/connectivityService';
 import {
   canonicalPlaceKey,
   getPlaceDetail,
@@ -35,6 +33,7 @@ import { getReviewsForPlace } from '../../services/poi/reviewService';
 import { mergeRatings, type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
+import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
 import { TripadvisorRatingCard } from './TripadvisorRatingCard';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
@@ -44,13 +43,8 @@ import {
   type ChargingStation,
   type ChargingConnection,
 } from '../../services/poi/openChargeMapService';
-
-const SCREEN_H = Dimensions.get('window').height;
-// Two snap points: peek (55%) and expanded (85%)
-const PEEK_H = SCREEN_H * 0.55;
-const FULL_H = SCREEN_H * 0.85;
-// Height of the card hidden below the screen edge in peek (non-expanded) mode.
-const PEEK_OFFSET = FULL_H - PEEK_H;
+// Two sheet snap points: peek (55%) and expanded (85%).
+const POI_SHEET_SNAPS = [0.55, 0.85] as const;
 
 // ---------------------------------------------------------------------------
 // Tag parsing helpers
@@ -388,89 +382,22 @@ export function POIInfoCard() {
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
   const [showSaveSheet, setShowSaveSheet] = useState(false);
-  // Reactive expanded flag (mirrors expandedRef) so the ScrollView's bottom
-  // padding can compensate for the portion of the card hidden in peek mode.
-  const [expanded, setExpanded] = useState(false);
-  // Use a ref so PanResponder closures always read the latest value
-  const expandedRef = useRef(false);
+  // Controlled sheet snap: 0 = peek, 1 = expanded.
+  const [snapIndex, setSnapIndex] = useState(0);
   // EV charging station data from Open Charge Map
   const [chargingData, setChargingData] = useState<ChargingStation | null>(null);
 
-  // Single translateY drives everything — fully native-driver-compatible.
-  // Card is always FULL_H tall; translateY controls how much peeks above the bottom edge:
-  //   hidden   → FULL_H   (completely off-screen)
-  //   peeking  → FULL_H − PEEK_H
-  //   expanded → 0
-  const translateY = useRef(new Animated.Value(FULL_H)).current;
-
-  const animateTo = useCallback(
-    (toValue: number, spring = true) => {
-      if (spring) {
-        Animated.spring(translateY, {
-          toValue,
-          useNativeDriver: true,
-          tension: 60,
-          friction: 10,
-        }).start();
-      } else {
-        Animated.timing(translateY, {
-          toValue,
-          duration: 250,
-          useNativeDriver: true,
-        }).start();
-      }
-    },
-    [translateY],
-  );
-
-  const setExpandedBoth = useCallback((next: boolean) => {
-    expandedRef.current = next;
-    setExpanded(next);
-  }, []);
-
-  // Slide in/out when POI selection changes
+  // Reset to peek whenever a new POI is selected.
   useEffect(() => {
-    setExpandedBoth(false);
-    animateTo(selectedPoi ? FULL_H - PEEK_H : FULL_H, !!selectedPoi);
-  }, [selectedPoi, animateTo, setExpandedBoth]);
-
-  // Toggle between peek and expanded
-  const toggleExpanded = useCallback(() => {
-    const next = !expandedRef.current;
-    setExpandedBoth(next);
-    animateTo(next ? 0 : FULL_H - PEEK_H);
-  }, [animateTo, setExpandedBoth]);
-
-  // Track scroll position so we know when to allow collapse on downward drag
-  const scrollAtTop = useRef(true);
-
-  const pan = useRef(
-    PanResponder.create({
-      // Only claim the gesture when on the handle bar
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_e, gs) =>
-        Math.abs(gs.dy) > 8 && Math.abs(gs.dy) > Math.abs(gs.dx),
-      onPanResponderRelease: (_e, gs) => {
-        if (gs.dy < -30) {
-          // Swipe up → expand
-          setExpandedBoth(true);
-          animateTo(0);
-        } else if (gs.dy > 30) {
-          if (expandedRef.current) {
-            setExpandedBoth(false);
-            animateTo(FULL_H - PEEK_H);
-          } else {
-            setSelectedPoi(null);
-          }
-        }
-      },
-    }),
-  ).current;
+    setSnapIndex(0);
+  }, [selectedPoi]);
 
   const poi = selectedPoi;
   const enrichedData = useOsmPoiStore((s) => s.enrichedData);
   const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
+  // Reactive so a reconnect re-runs enrichment while a cached snapshot is shown.
+  const isOnline = usePeerStore((s) => s.isOnline);
   const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [communityRating, setCommunityRating] = useState<MergedRating | null>(null);
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
@@ -495,7 +422,7 @@ export function POIInfoCard() {
     };
     setIsEnriching(true);
 
-    if (!getConnectivity().isConnected) {
+    if (!isOnline) {
       getPlaceDetail(key)
         .then((row) => {
           if (cancelled) return;
@@ -552,7 +479,7 @@ export function POIInfoCard() {
     return () => {
       cancelled = true;
     };
-  }, [poi, setEnrichedData, setIsEnriching]);
+  }, [poi, isOnline, setEnrichedData, setIsEnriching]);
 
   // Fetch EV charging data from Open Charge Map when a charging station is selected
   useEffect(() => {
@@ -886,107 +813,69 @@ export function POIInfoCard() {
   const infoRows = rawInfoRows.filter((row): row is InfoRowData => !!row);
 
   return (
-    <Animated.View
-      style={[
-        styles.card,
-        {
-          bottom: 0,
-          height: FULL_H,
-          transform: [{ translateY }],
-        },
-      ]}
+    <BottomSheet
+      visible={!!selectedPoi}
+      onClose={() => setSelectedPoi(null)}
+      snapPoints={POI_SHEET_SNAPS}
+      snapIndex={snapIndex}
+      onSnapChange={setSnapIndex}
+      showBackdrop={false}
+      surfaceStyle={styles.sheetSurface}
+      testID="poi-info-sheet"
     >
       <GlassView material="regular" style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
-        {/* Grabber + share/close — attach PanResponder here so it doesn't conflict with scroll.
-            Name is centered between the corner circular buttons (Apple Maps-style). */}
-        <View {...pan.panHandlers}>
-          <View style={styles.topBar}>
+        {/* Share/close with the name centered between them (Apple Maps-style).
+            The sheet's own handle sits above this row. */}
+        {poi && (
+          <View style={styles.actionRow}>
             <TouchableOpacity
-              onPress={toggleExpanded}
-              style={styles.handleWrap}
-              hitSlop={{ top: 16, bottom: 16, left: 80, right: 80 }}
+              onPress={handleShare}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Share place"
+              accessibilityRole="button"
             >
-              <View style={[styles.handle, { backgroundColor: borderColor }]} />
+              <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                <Ionicons name="share-outline" size={18} color={subtextColor} />
+              </GlassView>
+            </TouchableOpacity>
+            <View style={styles.topTitle}>
+              <Text
+                style={[styles.name, { color: textColor }]}
+                numberOfLines={1}
+                accessibilityRole="header"
+                accessibilityLabel={poi.name}
+              >
+                {poi.name}
+              </Text>
+              <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
+                {category
+                  ? enrichedData?.poiCategory
+                    ? formatPoiCategory(enrichedData.poiCategory)
+                    : capitalise(poi.subtype)
+                  : capitalise(String(poi.type))}
+                {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
+                {parsed?.stars ? ` · ${parsed.stars}` : ''}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setSelectedPoi(null)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Close place details"
+              accessibilityRole="button"
+            >
+              <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                <Ionicons name="close" size={18} color={subtextColor} />
+              </GlassView>
             </TouchableOpacity>
           </View>
-          {poi && (
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                onPress={handleShare}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Share place"
-                accessibilityRole="button"
-              >
-                <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                  <Ionicons name="share-outline" size={18} color={subtextColor} />
-                </GlassView>
-              </TouchableOpacity>
-              <View style={styles.topTitle}>
-                <Text
-                  style={[styles.name, { color: textColor }]}
-                  numberOfLines={1}
-                  accessibilityRole="header"
-                  accessibilityLabel={poi.name}
-                >
-                  {poi.name}
-                </Text>
-                <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
-                  {category
-                    ? enrichedData?.poiCategory
-                      ? formatPoiCategory(enrichedData.poiCategory)
-                      : capitalise(poi.subtype)
-                    : capitalise(String(poi.type))}
-                  {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
-                  {parsed?.stars ? ` · ${parsed.stars}` : ''}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setSelectedPoi(null)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Close place details"
-                accessibilityRole="button"
-              >
-                <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                  <Ionicons name="close" size={18} color={subtextColor} />
-                </GlassView>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+        )}
 
         {poi && parsed && category && (
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={[
-              styles.scrollContent,
-              {
-                // In peek mode the card's lower portion sits below the screen
-                // edge; add that hidden amount as bottom padding so the last
-                // content stays reachable. Expanded mode only needs breathing
-                // room.
-                paddingBottom: spacing.xxl + insets.bottom + (expanded ? 0 : PEEK_OFFSET),
-              },
-            ]}
+            contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             scrollEnabled
-            onScrollBeginDrag={() => {
-              scrollAtTop.current = false;
-            }}
-            onScroll={(e) => {
-              scrollAtTop.current = e.nativeEvent.contentOffset.y <= 0;
-            }}
-            scrollEventThrottle={100}
-            onScrollEndDrag={(e) => {
-              // If dragging down from top while peeking, collapse the card
-              if (
-                scrollAtTop.current &&
-                e.nativeEvent.velocity &&
-                e.nativeEvent.velocity.y > 0.5 &&
-                !expandedRef.current
-              ) {
-                setSelectedPoi(null);
-              }
-            }}
           >
             {/* ── Hero image ────────────────────────────────────────────── */}
             {parsed.imageUrl && (
@@ -1105,6 +994,17 @@ export function POIInfoCard() {
 
             {/* ── Website photos (on-device headless browse of POI website) ─── */}
             <WebsitePhotosCarousel websiteUrl={parsed.website} resetKey={poi.id} />
+
+            {/* ── Open-licensed supplements (Wikimedia Commons / Panoramax) ─── */}
+            <PlaceMediaCarousel
+              lat={poi.lat}
+              lng={poi.lng}
+              name={poi.name}
+              osmId={String(poi.id)}
+              tags={poi.tags}
+              resetKey={poi.id}
+              online={isOnline}
+            />
 
             {/* ── External TripAdvisor rating (on-device headless browse) ───── */}
             <TripadvisorRatingCard poi={poi} resetKey={poi.id} />
@@ -1265,15 +1165,17 @@ export function POIInfoCard() {
           </ScrollView>
         )}
       </GlassView>
-    </Animated.View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+  // The shared BottomSheet provides the surface; the card draws its own glass.
+  sheetSurface: {
+    backgroundColor: 'transparent',
+    paddingBottom: 0,
+    borderTopLeftRadius: borderRadius.xxl,
+    borderTopRightRadius: borderRadius.xxl,
   },
   cardGlass: {
     ...StyleSheet.absoluteFill,
@@ -1281,15 +1183,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: borderRadius.xxl,
     borderCurve: 'continuous',
     overflow: 'hidden',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.sm,
-    paddingHorizontal: spacing.md,
-    minHeight: 40,
   },
   actionRow: {
     flexDirection: 'row',
@@ -1304,16 +1197,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minWidth: 0,
     paddingHorizontal: spacing.xs,
-  },
-  handleWrap: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    borderCurve: 'continuous',
   },
   closeCircle: {
     width: 36,

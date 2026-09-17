@@ -3,6 +3,9 @@
 // implement crypto.getRandomValues natively).
 import 'react-native-get-random-values';
 
+// Gesture Handler must be imported before any gesture-using module is loaded.
+import 'react-native-gesture-handler';
+
 // URL polyfill — required by @atproto/oauth-client-expo on React Native.
 import 'react-native-url-polyfill/auto';
 

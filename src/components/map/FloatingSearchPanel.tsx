@@ -10,27 +10,35 @@ import {
   Platform,
   Alert,
   Keyboard,
-  Animated,
   ActivityIndicator,
   Switch,
-  PanResponder,
   InteractionManager,
 } from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useTheme } from '../../contexts/ThemeContext';
-import { spacing, typography, borderRadius } from '../../constants/theme';
+import { useToast } from '../../contexts/ToastContext';
+import { spacing, typography, borderRadius, sheet as sheetTokens } from '../../constants/theme';
 import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { SearchFilterSheet } from '../search/SearchFilterSheet';
+import { SearchResultRow } from '../search/SearchResultRow';
 import { useSearchViewStore } from '../../stores/searchViewStore';
 import { isFilterEmpty } from '../../services/search/searchFilters';
 import type { SearchStageMeta } from '../../services/search/searchSession';
 import { usePlaceSearch } from '../../hooks/usePlaceSearch';
+import { useGtfsLoadingBanner } from '../../hooks/useGtfsLoadingBanner';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
@@ -84,7 +92,11 @@ import {
 } from '../../services/traffic/routeTrafficService';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
-import { destinationToGeocodingResult, isSameDestination } from './floatingSearchPanelHelpers';
+import {
+  destinationToGeocodingResult,
+  geocodingResultToSearchResult,
+  isSameDestination,
+} from './floatingSearchPanelHelpers';
 
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
@@ -676,6 +688,7 @@ export function FloatingSearchPanel({
   embedded = false,
 }: FloatingSearchPanelProps) {
   const { colors, isDark } = useTheme();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const setViewport = useMapStore((s) => s.setViewport);
@@ -701,22 +714,10 @@ export function FloatingSearchPanel({
   const routePreviewWaypoints = useNavigationStore((s) => s.routePreviewWaypoints);
   const setRoutePreviewWaypoints = useNavigationStore((s) => s.setRoutePreviewWaypoints);
   const transitDirectionsActive = useTransitStore((s) => s.directionsActive);
-  const gtfsLoadingAgency = useTransitStore((s) => s.gtfsLoadingAgency);
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const isLoadingLines = useTransitStore((s) => s.isLoadingLines);
-
-  // Auto-dismiss loading banner after 15 seconds
-  const loadingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (gtfsLoadingAgency) {
-      loadingTimer.current = setTimeout(() => {
-        useTransitStore.getState().setGtfsLoadingAgency(null);
-      }, 15_000);
-    }
-    return () => {
-      if (loadingTimer.current) clearTimeout(loadingTimer.current);
-    };
-  }, [gtfsLoadingAgency]);
+  // Transit GTFS loading banner, auto-dismissed after 15s.
+  const gtfsLoadingAgency = useGtfsLoadingBanner();
 
   const [mode, setMode] = useState<PanelMode>('idle');
   const [results, setResults] = useState<GeocodingResult[]>([]);
@@ -757,7 +758,7 @@ export function FloatingSearchPanel({
 
   const inputRef = useRef<TextInput>(null);
   const stopSearchInputRef = useRef<TextInput>(null);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useSharedValue(0);
   const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // ── Unified search (shared session hook) ────────────────────────────────
@@ -1007,54 +1008,32 @@ export function FloatingSearchPanel({
 
   // ── Minimized state (drag-to-collapse, like Google/Apple Maps) ──
   const [minimized, setMinimized] = useState(false);
-  const collapseAnim = useRef(new Animated.Value(1)).current; // 1 = expanded, 0 = collapsed
-  // Stable refs so PanResponder (created once) can call latest versions
-  const collapsePanelRef = useRef<() => void>(() => {});
-  const expandPanelRef = useRef<() => void>(() => {});
 
   const expandPanel = useCallback(() => {
     setMinimized(false);
-    Animated.spring(collapseAnim, {
-      toValue: 1,
-      useNativeDriver: false,
-      tension: 80,
-      friction: 12,
-    }).start();
-  }, [collapseAnim]);
+  }, []);
 
   const collapsePanel = useCallback(() => {
     Keyboard.dismiss();
     setMinimized(true);
-    Animated.spring(collapseAnim, {
-      toValue: 0,
-      useNativeDriver: false,
-      tension: 80,
-      friction: 12,
-    }).start();
-  }, [collapseAnim]);
+  }, []);
 
-  // Keep refs up to date
-  useEffect(() => {
-    collapsePanelRef.current = collapsePanel;
-  }, [collapsePanel]);
-  useEffect(() => {
-    expandPanelRef.current = expandPanel;
-  }, [expandPanel]);
-
-  // Pan responder on the handle: swipe down > ~30px collapses, swipe up expands
-  const handlePanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 30) {
-          collapsePanelRef.current();
-        } else if (g.dy < -20) {
-          expandPanelRef.current();
+  // Shared Reanimated + Gesture Handler collapse (replaces the legacy
+  // PanResponder). Thresholds come from the sheet design tokens.
+  const collapseGesture = useMemo(
+    () =>
+      Gesture.Pan().onEnd((event) => {
+        if (
+          event.translationY > sheetTokens.collapseDownPx ||
+          event.velocityY > sheetTokens.dismissVelocity
+        ) {
+          runOnJS(collapsePanel)();
+        } else if (event.translationY < -sheetTokens.collapseUpPx) {
+          runOnJS(expandPanel)();
         }
-      },
-    }),
-  ).current;
+      }),
+    [collapsePanel, expandPanel],
+  );
 
   // Track keyboard height so the panel stays above the keyboard
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -1081,12 +1060,10 @@ export function FloatingSearchPanel({
 
   // Animate results list in/out
   useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: mode !== 'idle' ? 1 : 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
+    fadeAnim.value = withTiming(mode !== 'idle' ? 1 : 0, { duration: 200 });
   }, [mode, fadeAnim]);
+
+  const fadeStyle = useAnimatedStyle(() => ({ opacity: fadeAnim.value }));
 
   // Show "Search this area" when the map is panned away from the last search location.
   // The live camera centre comes from viewportBounds (updated on every region change),
@@ -2057,38 +2034,13 @@ export function FloatingSearchPanel({
   const showHistory = mode === 'searching' && query.length < 2 && history.length > 0;
 
   const renderResultItem = useCallback(
-    ({ item }: { item: GeocodingResult }) => {
-      const isStation = item.entry.type === 'station';
-      return (
-        <TouchableOpacity
-          style={st.resultRow}
-          onPress={() => handleSelectResult(item)}
-          activeOpacity={0.65}
-        >
-          <View style={st.resultIconWrap}>
-            <Ionicons
-              name={isStation ? 'train' : 'location-outline'}
-              size={18}
-              color={isStation ? '#007AFF' : colors.primary}
-            />
-          </View>
-          <View style={st.resultText}>
-            <Text style={[st.resultName, { color: textColor }]} numberOfLines={1}>
-              {item.entry.text}
-            </Text>
-            <Text style={[st.resultSub, { color: subColor }]} numberOfLines={1}>
-              {isStation
-                ? 'Transit Station'
-                : [item.entry.city, item.entry.state, item.entry.country]
-                    .filter(Boolean)
-                    .join(', ')}
-            </Text>
-          </View>
-          <Ionicons name="arrow-back" size={15} color={subColor} />
-        </TouchableOpacity>
-      );
-    },
-    [st, colors, textColor, subColor, handleSelectResult],
+    ({ item }: { item: GeocodingResult }) => (
+      <SearchResultRow
+        result={geocodingResultToSearchResult(item)}
+        onPress={() => handleSelectResult(item)}
+      />
+    ),
+    [handleSelectResult],
   );
 
   const renderHistoryItem = useCallback(
@@ -2607,42 +2559,44 @@ export function FloatingSearchPanel({
             <Text style={styles.gtfsLoadingText}>Loading transit...</Text>
           </View>
         )}
-        <View {...handlePanResponder.panHandlers}>
-          {/* Subtle handle above the pill */}
-          <View style={styles.miniHandleRow}>
-            <View style={styles.miniHandle} />
+        <GestureDetector gesture={collapseGesture}>
+          <View>
+            {/* Subtle handle above the pill */}
+            <View style={styles.miniHandleRow}>
+              <View style={styles.miniHandle} />
+            </View>
+            <TouchableOpacity activeOpacity={0.85} onPress={expandPanel}>
+              <GlassPanel style={styles.miniPill}>
+                <Ionicons name="search" size={18} color={subColor} style={styles.miniSearchIcon} />
+                <Text style={[styles.miniPlaceholder, { color: subColor }]}>Search</Text>
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    (onProfilePress ?? (() => router.push('/(tabs)/profile')))();
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.miniProfileBtn}
+                >
+                  <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
+                    <Ionicons name="person" size={16} color="#EBEBF0" />
+                  </GlassView>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    router.push('/(tabs)/places');
+                  }}
+                  activeOpacity={0.7}
+                  style={styles.miniProfileBtn}
+                >
+                  <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
+                    <Ionicons name="bookmark" size={16} color="#EBEBF0" />
+                  </GlassView>
+                </TouchableOpacity>
+              </GlassPanel>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity activeOpacity={0.85} onPress={expandPanel}>
-            <GlassPanel style={styles.miniPill}>
-              <Ionicons name="search" size={18} color={subColor} style={styles.miniSearchIcon} />
-              <Text style={[styles.miniPlaceholder, { color: subColor }]}>Search</Text>
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  (onProfilePress ?? (() => router.push('/(tabs)/profile')))();
-                }}
-                activeOpacity={0.7}
-                style={styles.miniProfileBtn}
-              >
-                <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
-                  <Ionicons name="person" size={16} color="#EBEBF0" />
-                </GlassView>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  router.push('/(tabs)/places');
-                }}
-                activeOpacity={0.7}
-                style={styles.miniProfileBtn}
-              >
-                <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
-                  <Ionicons name="bookmark" size={16} color="#EBEBF0" />
-                </GlassView>
-              </TouchableOpacity>
-            </GlassPanel>
-          </TouchableOpacity>
-        </View>
+        </GestureDetector>
       </View>
     );
   }
@@ -2702,13 +2656,11 @@ export function FloatingSearchPanel({
         <GlassPanel style={[st.panel, embedded && st.embeddedPanel]}>
           {/* ── Handle bar — drag down to minimize, drag up / tap to expand ── */}
           {!embedded && (
-            <View
-              {...handlePanResponder.panHandlers}
-              style={styles.handleZone}
-              hitSlop={{ top: 8, bottom: 8 }}
-            >
-              <View style={styles.handle} />
-            </View>
+            <GestureDetector gesture={collapseGesture}>
+              <View style={styles.handleZone} hitSlop={{ top: 8, bottom: 8 }}>
+                <View style={styles.handle} />
+              </View>
+            </GestureDetector>
           )}
 
           {/* ── Search row ── */}
@@ -2759,7 +2711,7 @@ export function FloatingSearchPanel({
           <>
             {/* ── Results / history ── */}
             {(showResults || showHistory) && (
-              <Animated.View style={{ opacity: fadeAnim }}>
+              <Animated.View style={fadeStyle}>
                 <View style={st.divider} />
                 <FlatList
                   data={
@@ -2926,6 +2878,14 @@ export function FloatingSearchPanel({
                             onPress: () => {
                               removeFavorite(fav.id);
                               setFavorites(getFavorites());
+                              showToast({
+                                message: `Removed "${fav.label}"`,
+                                actionLabel: 'Undo',
+                                onAction: () => {
+                                  setFavorite(fav);
+                                  setFavorites(getFavorites());
+                                },
+                              });
                             },
                           },
                         ]);
@@ -3012,7 +2972,7 @@ export function FloatingSearchPanel({
             {/* Setting-home/work/pin header when no results yet */}
             {(mode === 'setting-home' || mode === 'setting-work' || mode === 'setting-pin') &&
               !showResults && (
-                <Animated.View style={{ opacity: fadeAnim }}>
+                <Animated.View style={fadeStyle}>
                   <View style={st.divider} />
                   <Text style={[st.settingHint, { color: subColor }]}>
                     {mode === 'setting-home'

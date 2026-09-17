@@ -2,9 +2,11 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ConnectivityBanner } from '@/components/common';
 import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 import { hasCompletedConsent } from '@/services/identity/consent';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
@@ -139,9 +141,13 @@ function RootLayoutInner() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <ConsentGate />
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <ToastProvider>
+          <ConsentGate />
+        </ToastProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 

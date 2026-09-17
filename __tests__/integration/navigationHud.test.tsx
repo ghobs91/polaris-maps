@@ -1,5 +1,28 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
+
+// The HUD now uses Reanimated + Gesture Handler, whose native worklets are not
+// available under Jest. Rendering only needs the JS surface.
+jest.mock('react-native-reanimated', () => {
+  const { View, Text, ScrollView, Image } = jest.requireActual('react-native');
+  const AnimatedMock = { View, Text, ScrollView, Image };
+  return {
+    __esModule: true,
+    default: AnimatedMock,
+    useSharedValue: (initial: unknown) => ({ value: initial }),
+    useAnimatedStyle: (factory: () => object) => factory(),
+    withSpring: (value: unknown) => value,
+    withTiming: (value: unknown) => value,
+    runOnJS: (fn: unknown) => fn,
+    interpolate: (value: unknown) => value,
+    Extrapolation: { CLAMP: 'clamp' },
+  };
+});
+jest.mock('react-native-gesture-handler', () => ({
+  GestureDetector: ({ children }: { children: React.ReactNode }) => children,
+  Gesture: { Pan: () => ({ onEnd: () => ({}) }) },
+}));
+
 import { NavigationHud } from '../../src/components/navigation/NavigationHud';
 import type { UpcomingStop } from '../../src/utils/navigationStops';
 

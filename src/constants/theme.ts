@@ -165,6 +165,29 @@ export const iosListGroup = {
   destructive: '#FF453A',
 } as const;
 
+/**
+ * Shared bottom-sheet design tokens. Snap points are fractions of the screen
+ * height (ascending), used by every migrated sheet for consistent thresholds.
+ */
+export const sheet = {
+  snapSmall: 0.35,
+  snapMedium: 0.6,
+  snapLarge: 0.92,
+  /** Downward velocity (px/s) past which a drag dismisses the sheet. */
+  dismissVelocity: 900,
+  /** How far below the lowest snap the sheet must be dragged to dismiss. */
+  dismissFraction: 0.25,
+  /** Velocity projection window (s) used to pick a snap target on release. */
+  projectionSeconds: 0.15,
+  /** Downward drag (px) past which a floating panel collapses to its pill. */
+  collapseDownPx: 30,
+  /** Upward drag (px) past which a collapsed pill re-expands. */
+  collapseUpPx: 20,
+  spring: { damping: 22, stiffness: 220, mass: 1 },
+  handle: { width: 36, height: 5, borderRadius: 3 },
+  backdropOpacity: 0.4,
+} as const;
+
 export const shadow = {
   sm: {
     shadowColor: '#000',

@@ -1,17 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  PanResponder,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { EtaDisplay } from './EtaDisplay';
 import type { NextStop, UpcomingStop } from '../../utils/navigationStops';
-import { spacing, borderRadius } from '../../constants/theme';
+import { spacing, borderRadius, sheet as sheetTokens } from '../../constants/theme';
 
 const SHEET_MAX_HEIGHT = 320;
 const LIST_MAX_HEIGHT = 240;
@@ -58,57 +57,44 @@ export function NavigationHud({
 }: NavigationHudProps) {
   const [expanded, setExpanded] = useState(false);
   const expandedRef = useRef(false);
-  const expandAnim = useRef(new Animated.Value(0)).current;
+  const expand = useSharedValue(0);
 
   const setExpansion = useCallback(
     (value: boolean) => {
       expandedRef.current = value;
       setExpanded(value);
       onExpandedChange?.(value);
-      Animated.spring(expandAnim, {
-        toValue: value ? 1 : 0,
-        useNativeDriver: false,
-        tension: 80,
-        friction: 12,
-      }).start();
+      expand.value = withSpring(value ? 1 : 0, sheetTokens.spring);
     },
-    [expandAnim, onExpandedChange],
+    [expand, onExpandedChange],
   );
 
-  const setExpansionRef = useRef(setExpansion);
-  useEffect(() => {
-    setExpansionRef.current = setExpansion;
-  }, [setExpansion]);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dy) > 5,
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dy > 30) {
-          setExpansionRef.current(false);
-        } else if (gesture.dy < -20) {
-          setExpansionRef.current(true);
-        } else if (Math.abs(gesture.dy) < 6) {
-          setExpansionRef.current(!expandedRef.current);
+  // Grabber gesture (replaces PanResponder): drag down collapses, drag up
+  // expands, a tap toggles. Thresholds come from the shared sheet tokens.
+  const expandGesture = useMemo(
+    () =>
+      Gesture.Pan().onEnd((event) => {
+        if (event.translationY > sheetTokens.collapseDownPx) {
+          runOnJS(setExpansion)(false);
+        } else if (event.translationY < -sheetTokens.collapseUpPx) {
+          runOnJS(setExpansion)(true);
+        } else if (Math.abs(event.translationY) < 6) {
+          runOnJS(setExpansion)(!expandedRef.current);
         }
-      },
-    }),
-  ).current;
+      }),
+    [setExpansion],
+  );
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    maxHeight: expand.value * SHEET_MAX_HEIGHT,
+    marginBottom: expand.value * 8,
+    opacity: expand.value,
+  }));
 
   const handleAddStop = useCallback(() => {
     setExpansion(false);
     onAddStop();
   }, [onAddStop, setExpansion]);
-
-  const sheetHeight = expandAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, SHEET_MAX_HEIGHT],
-  });
-  const sheetSpacing = expandAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 8],
-  });
 
   const stopIndices = upcomingStops.filter((s) => !s.isDestination).map((s) => s.waypointIndex);
   const firstStopIndex = stopIndices[0] ?? -1;
@@ -196,24 +182,22 @@ export function NavigationHud({
   return (
     <View style={styles.card}>
       {/* Grabber — drag up/down or double-tap to toggle the stops sheet */}
-      <View
-        style={styles.handleZone}
-        {...panResponder.panHandlers}
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel={expanded ? 'Collapse stops' : 'Expand stops'}
-        accessibilityHint="Drag up or double tap to show all destinations"
-        onAccessibilityTap={() => setExpansion(!expandedRef.current)}
-      >
-        <View style={styles.handleBar} />
-      </View>
+      <GestureDetector gesture={expandGesture}>
+        <View
+          style={styles.handleZone}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Collapse stops' : 'Expand stops'}
+          accessibilityHint="Drag up or double tap to show all destinations"
+          onAccessibilityTap={() => setExpansion(!expandedRef.current)}
+        >
+          <View style={styles.handleBar} />
+        </View>
+      </GestureDetector>
 
       {/* Upcoming stops + destination */}
       <Animated.View
-        style={[
-          styles.sheet,
-          { maxHeight: sheetHeight, marginBottom: sheetSpacing, opacity: expandAnim },
-        ]}
+        style={[styles.sheet, sheetStyle]}
         pointerEvents={expanded ? 'auto' : 'none'}
         accessibilityElementsHidden={!expanded}
         importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}

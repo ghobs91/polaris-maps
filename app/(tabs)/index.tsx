@@ -25,6 +25,7 @@ import { ErrorBoundary } from '@/components/common';
 import { useIsLargeDisplay } from '@/hooks/useIsLargeDisplay';
 import { useTheme } from '@/contexts/ThemeContext';
 import { spacing } from '@/constants/theme';
+import { hapticImpact } from '@/utils/haptics';
 
 const LARGE_FLOATING_PANEL_WIDTH = 380;
 const LARGE_FLOATING_PANEL_GAP = spacing.md;
@@ -79,6 +80,7 @@ export default function MapScreen() {
   const longPressRequestRef = useRef(0);
 
   const handleLocate = useCallback(async () => {
+    hapticImpact();
     // Large displays use floating overlays, so the camera does not need extra offset.
     const { height } = Dimensions.get('window');
     const panelOffset = isLarge ? 0 : Math.round(height * 0.52);
