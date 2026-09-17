@@ -31,6 +31,8 @@ import {
 } from '../../services/places/placeDetailCache';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
+import { getReviewsForPlace } from '../../services/poi/reviewService';
+import { mergeRatings, type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
 import { TripadvisorRatingCard } from './TripadvisorRatingCard';
@@ -470,6 +472,7 @@ export function POIInfoCard() {
   const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
   const [cachedAt, setCachedAt] = useState<number | null>(null);
+  const [communityRating, setCommunityRating] = useState<MergedRating | null>(null);
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
 
   // Trigger Apple Maps enrichment when a POI is selected. When offline, fall
@@ -683,6 +686,26 @@ export function POIInfoCard() {
       cancelled = true;
     };
   }, [poi]);
+
+  // Merge community ratings from local/ATProto reviews for the resolved place.
+  useEffect(() => {
+    const placeId = detailsTarget?.placeId;
+    if (!placeId) {
+      setCommunityRating(null);
+      return;
+    }
+    let cancelled = false;
+    getReviewsForPlace(placeId)
+      .then((reviews) => {
+        if (!cancelled) setCommunityRating(mergeRatings(reviews));
+      })
+      .catch(() => {
+        if (!cancelled) setCommunityRating(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailsTarget]);
 
   const handleShare = useCallback(async () => {
     if (!poi) return;
@@ -963,6 +986,29 @@ export function POIInfoCard() {
                 style={styles.heroImage}
                 resizeMode="cover"
               />
+            )}
+
+            {communityRating && communityRating.count > 0 && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingHorizontal: spacing.md,
+                  paddingTop: spacing.sm,
+                }}
+                accessibilityRole="text"
+                accessibilityLabel={`Community rating ${communityRating.average.toFixed(1)} from ${communityRating.count} reviews`}
+              >
+                <Ionicons name="star" size={14} color="#FFB300" />
+                <Text style={{ color: textColor, fontWeight: '600' }}>
+                  {communityRating.average.toFixed(1)}
+                </Text>
+                <Text style={{ color: subtextColor, fontSize: 12 }}>
+                  · {communityRating.count} community review
+                  {communityRating.count === 1 ? '' : 's'}
+                </Text>
+              </View>
             )}
 
             {cachedAt != null && (

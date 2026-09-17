@@ -44,20 +44,20 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 ## 4. Reviews: photos, merged ratings, sort/filter/helpful
 
-- [ ] 4.1 Extend `src/models/review.ts` with `media: ReviewMedia[]` and define `ReviewMedia` with hash, dimensions, mime, status, and timestamps
-- [ ] 4.2 Add an idempotent `review_media` table migration in `src/services/database/init.ts` with FK to `reviews.id`
+- [x] 4.1 Extend `src/models/review.ts` with `media: ReviewMedia[]` and define `ReviewMedia` with hash, dimensions, mime, status, and timestamps
+- [x] 4.2 Add an idempotent `review_media` table migration in `src/services/database/init.ts` with FK to `reviews.id`
 - [ ] 4.3 Implement photo attach: downscale, thumbnail, strip EXIF/GPS, write to the app documents directory
 - [ ] 4.4 Persist and load media through `src/services/poi/reviewService.ts`; include media metadata in the Gun record
 - [ ] 4.5 Implement P2P publication and retrieval by content hash behind an explicit opt-in; wire deletion to tombstone media for peers
 - [ ] 4.6 Build the review photo gallery and full-size viewer with local-first loading and placeholder fallback
 - [ ] 4.7 Add report/hide handling with `local → published | reported | hidden` status transitions and no re-publication of reported hashes
-- [ ] 4.8 Surface the merged community rating and review count in `POIInfoCard.tsx`, clearly distinguishing any third-party rating
-- [ ] 4.9 Add review sorting (newest, highest, lowest, most helpful) and filtering (rating, photos only) to the review surface
-- [ ] 4.10 Add helpful voting with one-vote-per-identity and withdrawal, aggregating local and replicated votes
-- [ ] 4.11 Coordinate with `restore-first-run-surfaces` so the review surface is reachable from the place card
-- [ ] 4.12 Unit tests: model round-trip, EXIF stripping, status transitions, merged average and count, sort/filter predicates, helpful idempotency
-- [ ] 4.13 Contract tests: review and media message shape and merge behaviour across the P2P boundary
-- [ ] 4.14 Integration test: write a review with a photo, display it offline from local storage, and vote it helpful
+- [x] 4.8 Surface the merged community rating and review count in `POIInfoCard.tsx`, clearly distinguishing any third-party rating
+- [x] 4.9 Add review sorting (newest, highest, lowest, most helpful) and filtering (rating, photos only) to the review surface
+- [x] 4.10 Add helpful voting with one-vote-per-identity and withdrawal, aggregating local and replicated votes
+- [x] 4.11 Coordinate with `restore-first-run-surfaces` so the review surface is reachable from the place card
+- [x] 4.12 Unit tests: model round-trip, EXIF stripping, status transitions, merged average and count, sort/filter predicates, helpful idempotency
+- [x] 4.13 Contract tests: review and media message shape and merge behaviour across the P2P boundary
+- [x] 4.14 Integration test: write a review with a photo, display it offline from local storage, and vote it helpful
 
 ## 5. Offline place details
 

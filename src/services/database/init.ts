@@ -191,6 +191,28 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       FOREIGN KEY (poi_uuid) REFERENCES places(uuid)
     );
 
+    CREATE TABLE IF NOT EXISTS review_media (
+      review_id TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      mime TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'local',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (review_id, hash),
+      FOREIGN KEY (review_id) REFERENCES reviews(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_media_review ON review_media (review_id);
+
+    CREATE TABLE IF NOT EXISTS review_helpful (
+      review_id TEXT NOT NULL,
+      voter_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (review_id, voter_id),
+      FOREIGN KEY (review_id) REFERENCES reviews(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_helpful_review ON review_helpful (review_id);
+
     CREATE TABLE IF NOT EXISTS street_imagery (
       id TEXT PRIMARY KEY,
       author_pubkey TEXT NOT NULL,

@@ -1,3 +1,13 @@
+export interface ReviewMedia {
+  /** Content hash — the stable identity shared across peers. */
+  hash: string;
+  width: number;
+  height: number;
+  mime: string;
+  status: 'local' | 'published' | 'reported' | 'hidden';
+  createdAt: number;
+}
+
 export interface Review {
   id: string; // {poi_uuid}:{author_pubkey} for anonymous; at:// URI for ATProto
   poiUuid: string;
@@ -10,6 +20,10 @@ export interface Review {
   source: 'anonymous' | 'atproto';
   atprotoUri?: string; // at:// record URI, only set for ATProto reviews
   authorHandle?: string; // e.g. 'alice.bsky.social', only for ATProto reviews
+  /** Attached photos (metadata only; blobs resolved separately). */
+  media?: ReviewMedia[];
+  /** Aggregated helpful votes (one per identity). */
+  helpfulCount?: number;
 }
 
 export interface PlaceReviewContext {
