@@ -66,6 +66,27 @@ describe('WebsitePhotosCarousel', () => {
     );
   });
 
+  it('shows an explicit empty state when the website yields no photos', async () => {
+    jest.useFakeTimers();
+    fetchWebsitePhotosMock.mockResolvedValue([]);
+
+    const screen = render(
+      <WebsitePhotosCarousel websiteUrl="https://example.com" resetKey="place-empty" />,
+    );
+
+    // Flush the fetch promise so the hidden WebView fallback is scheduled.
+    await act(async () => {});
+    await act(async () => {
+      jest.advanceTimersByTime(16000);
+    });
+
+    expect(screen.getByTestId('website-photos-empty')).toBeTruthy();
+    expect(screen.getByText('No photos found on the website')).toBeTruthy();
+    expect(screen.queryByTestId('website-photo-strip')).toBeNull();
+
+    jest.useRealTimers();
+  });
+
   it('reserves the thumbnail viewport height in the parent scroll view', async () => {
     const screen = render(
       <WebsitePhotosCarousel websiteUrl="https://example.com" resetKey="place-1" />,
