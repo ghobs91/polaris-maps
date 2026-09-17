@@ -2,7 +2,9 @@ import React, { useState, useCallback } from 'react';
 import { TextInput, View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
-import { colors, spacing, typography } from '../../constants/theme';
+import { spacing, typography } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import { GlassView } from '../common/GlassView';
 
 interface SearchBarProps {
@@ -11,6 +13,8 @@ interface SearchBarProps {
 }
 
 export function SearchBar({ onSearch, placeholder = 'Search for an address...' }: SearchBarProps) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const [query, setQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
 
@@ -108,40 +112,41 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 999,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-    paddingHorizontal: spacing.sm,
-  },
-  searchIcon: {
-    paddingLeft: spacing.md,
-  },
-  input: {
-    ...typography.body,
-    flex: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm + 2,
-    color: colors.text,
-  },
-  micButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.xs,
-  },
-  micButtonActive: {
-    backgroundColor: 'rgba(239,68,68,0.12)',
-  },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    container: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    inputContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      paddingHorizontal: spacing.sm,
+    },
+    searchIcon: {
+      paddingLeft: spacing.md,
+    },
+    input: {
+      ...typography.body,
+      flex: 1,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm + 2,
+      color: colors.text,
+    },
+    micButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 999,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: spacing.xs,
+    },
+    micButtonActive: {
+      backgroundColor: 'rgba(239,68,68,0.12)',
+    },
+  });

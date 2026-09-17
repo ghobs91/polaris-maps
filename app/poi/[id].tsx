@@ -25,7 +25,9 @@ import { ReviewCard } from '../../src/components/poi/ReviewCard';
 import { RatingWidget } from '../../src/components/poi/RatingWidget';
 import { Button, LoadingSpinner, ErrorBoundary, Modal } from '../../src/components/common';
 import { SaveToListSheet } from '../../src/components/places';
-import { colors, spacing, typography, borderRadius } from '../../src/constants/theme';
+import { spacing, typography, borderRadius } from '../../src/constants/theme';
+import { useTheme } from '../../src/contexts/ThemeContext';
+import { useThemedStyles, type Theme } from '../../src/hooks/useThemedStyles';
 import { placeToOsmTags } from '../../src/utils/placeToOsmPoi';
 import { checkPoiExistsInOsm } from '../../src/services/poi/osmFetcher';
 import { submitOsmNodeCreate } from '../../src/services/osm/osmEditService';
@@ -60,6 +62,8 @@ function dedupKey(lat: number, lng: number, name: string): string {
 }
 
 export default function POIDetailScreen() {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
@@ -526,115 +530,120 @@ export default function POIDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  name: { ...typography.h1, color: colors.text, marginBottom: spacing.xs },
-  brandName: {
-    ...typography.body,
-    color: colors.textSecondary,
-    fontStyle: 'italic',
-    marginBottom: spacing.xs,
-  },
-  category: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textTransform: 'capitalize',
-    marginBottom: spacing.sm,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  ratingLabel: { ...typography.body, color: colors.textSecondary },
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.xs },
-  open: { backgroundColor: colors.success },
-  closed: { backgroundColor: colors.error },
-  statusText: { ...typography.body, textTransform: 'capitalize', color: colors.textSecondary },
-  section: { marginTop: spacing.lg },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  sectionTitle: { ...typography.subtitle, color: colors.text, marginBottom: spacing.sm },
-  sectionBody: { ...typography.body, color: colors.text },
-  chargeConnector: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  link: { color: colors.primary },
-  actions: { marginTop: spacing.lg, gap: spacing.sm, flexDirection: 'row', alignItems: 'center' },
-  editCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  editDiff: {
-    ...typography.caption,
-    fontFamily: 'monospace',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  editMeta: { ...typography.caption, color: colors.textSecondary },
-  attestHint: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
-  photoStrip: { gap: spacing.sm, paddingVertical: spacing.xs },
-  photoThumb: {
-    width: 80,
-    height: 80,
-    borderRadius: borderRadius.sm,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  photoThumbIcon: { fontSize: 24 },
-  photoThumbBearing: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
-  osmAddButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: '#7EBC6F',
-    paddingVertical: 14,
-    borderRadius: borderRadius.lg,
-    marginTop: spacing.sm,
-  },
-  osmAddButtonPressed: {
-    opacity: 0.7,
-  },
-  osmAddButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  seedBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: '#f0f8ed',
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#7EBC6F',
-  },
-  seedBannerSuccess: {
-    backgroundColor: '#7EBC6F',
-  },
-  seedBannerText: {
-    ...typography.bodySmall,
-    color: '#2d6a4f',
-    fontWeight: '600',
-  },
-  seedBannerTextSuccess: {
-    color: '#fff',
-  },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    content: { padding: spacing.lg },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    name: { ...typography.h1, color: colors.text, marginBottom: spacing.xs },
+    brandName: {
+      ...typography.body,
+      color: colors.textSecondary,
+      fontStyle: 'italic',
+      marginBottom: spacing.xs,
+    },
+    category: {
+      ...typography.body,
+      color: colors.textSecondary,
+      textTransform: 'capitalize',
+      marginBottom: spacing.sm,
+    },
+    ratingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.sm,
+      gap: spacing.sm,
+    },
+    ratingLabel: { ...typography.body, color: colors.textSecondary },
+    statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
+    statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.xs },
+    open: { backgroundColor: colors.success },
+    closed: { backgroundColor: colors.error },
+    statusText: { ...typography.body, textTransform: 'capitalize', color: colors.textSecondary },
+    section: { marginTop: spacing.lg },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    sectionTitle: { ...typography.subtitle, color: colors.text, marginBottom: spacing.sm },
+    sectionBody: { ...typography.body, color: colors.text },
+    chargeConnector: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: spacing.sm,
+      paddingVertical: spacing.xs,
+    },
+    link: { color: colors.primary },
+    actions: { marginTop: spacing.lg, gap: spacing.sm, flexDirection: 'row', alignItems: 'center' },
+    editCard: {
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.md,
+      padding: spacing.sm,
+      marginBottom: spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    editDiff: {
+      ...typography.caption,
+      fontFamily: 'monospace',
+      color: colors.text,
+      marginBottom: spacing.xs,
+    },
+    editMeta: { ...typography.caption, color: colors.textSecondary },
+    attestHint: { ...typography.caption, color: colors.textSecondary, marginTop: spacing.xs },
+    photoStrip: { gap: spacing.sm, paddingVertical: spacing.xs },
+    photoThumb: {
+      width: 80,
+      height: 80,
+      borderRadius: borderRadius.sm,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    photoThumbIcon: { fontSize: 24 },
+    photoThumbBearing: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginTop: spacing.xs,
+    },
+    osmAddButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+      backgroundColor: '#7EBC6F',
+      paddingVertical: 14,
+      borderRadius: borderRadius.lg,
+      marginTop: spacing.sm,
+    },
+    osmAddButtonPressed: {
+      opacity: 0.7,
+    },
+    osmAddButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    seedBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: '#f0f8ed',
+      paddingVertical: 12,
+      paddingHorizontal: spacing.md,
+      borderRadius: borderRadius.md,
+      marginBottom: spacing.sm,
+      borderWidth: 1,
+      borderColor: '#7EBC6F',
+    },
+    seedBannerSuccess: {
+      backgroundColor: '#7EBC6F',
+    },
+    seedBannerText: {
+      ...typography.bodySmall,
+      color: '#2d6a4f',
+      fontWeight: '600',
+    },
+    seedBannerTextSuccess: {
+      color: '#fff',
+    },
+  });

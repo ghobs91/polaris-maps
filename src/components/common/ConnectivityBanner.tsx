@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { usePeerStore } from '@/stores/peerStore';
 import { getQueueSize } from '@/services/sync/offlineQueue';
-import { colors, spacing, typography } from '@/constants/theme';
+import { spacing, typography } from '@/constants/theme';
+import { useThemedStyles, type Theme } from '@/hooks/useThemedStyles';
 
 export function ConnectivityBanner() {
   const isOnline = usePeerStore((s) => s.isOnline);
   const [queued, setQueued] = useState(0);
+  const styles = useThemedStyles(createStyles);
 
   useEffect(() => {
     if (!isOnline) {
@@ -33,16 +35,17 @@ export function ConnectivityBanner() {
   );
 }
 
-const styles = StyleSheet.create({
-  banner: {
-    backgroundColor: colors.warning,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  text: {
-    ...typography.caption,
-    color: colors.white,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    banner: {
+      backgroundColor: colors.warning,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    text: {
+      ...typography.caption,
+      color: colors.white,
+      textAlign: 'center',
+      fontWeight: '600',
+    },
+  });

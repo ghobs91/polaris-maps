@@ -1,7 +1,9 @@
 import React, { useCallback } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import { GlassView } from '../common/GlassView';
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
 
@@ -13,6 +15,8 @@ interface SearchHistoryProps {
 }
 
 export function SearchHistory({ history, onSelect, onRemove, onClearAll }: SearchHistoryProps) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const renderItem = useCallback(
     ({ item }: { item: GeocodingResult }) => (
       <Pressable
@@ -67,69 +71,70 @@ export function SearchHistory({ history, onSelect, onRemove, onClearAll }: Searc
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.xs,
-    borderCurve: 'continuous',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-    paddingHorizontal: 2,
-  },
-  headerTitle: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontWeight: '600',
-  },
-  clearAll: {
-    ...typography.caption,
-    color: colors.primary,
-  },
-  list: {
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-  },
-  item: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md - 2,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border + '40',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  itemPressed: {
-    opacity: 0.7,
-  },
-  iconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-    backgroundColor: colors.border + '60',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.sm,
-  },
-  textContainer: {
-    flex: 1,
-    marginRight: spacing.sm,
-  },
-  text: {
-    ...typography.body,
-    color: colors.text,
-  },
-  type: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textTransform: 'capitalize',
-    marginTop: 2,
-  },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    wrapper: {
+      marginHorizontal: spacing.md,
+      marginTop: spacing.xs,
+      borderCurve: 'continuous',
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+      paddingHorizontal: 2,
+    },
+    headerTitle: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      fontWeight: '600',
+    },
+    clearAll: {
+      ...typography.caption,
+      color: colors.primary,
+    },
+    list: {
+      borderRadius: borderRadius.lg,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+    },
+    item: {
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md - 2,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border + '40',
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    itemPressed: {
+      opacity: 0.7,
+    },
+    iconContainer: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      backgroundColor: colors.border + '60',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: spacing.sm,
+    },
+    textContainer: {
+      flex: 1,
+      marginRight: spacing.sm,
+    },
+    text: {
+      ...typography.body,
+      color: colors.text,
+    },
+    type: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      textTransform: 'capitalize',
+      marginTop: 2,
+    },
+  });
