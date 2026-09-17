@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { storage } from '../services/storage/mmkv';
+import { mergeList } from '../services/places/placeListMerge';
 import type { PlaceList, SavedPlace } from '../models/placeList';
 
 interface PlaceListState {
@@ -22,6 +23,12 @@ interface PlaceListState {
   movePlace: (fromListId: string, toListId: string, placeId: string) => void;
   /** Import an entire list (from file import). */
   importList: (list: PlaceList) => void;
+  /** Toggle a list's shared/private state. */
+  setListPrivate: (id: string, isPrivate: boolean) => void;
+  /** Merge a replica received from a peer (no-op when unchanged). */
+  applyRemoteList: (remote: PlaceList) => void;
+  /** Tombstone a place so the deletion replicates to peers. */
+  markPlaceDeleted: (listId: string, placeId: string) => void;
   /** Delete every list and all saved places. */
   clearAllLists: () => void;
   /** Get all lists a specific place is saved in. */
@@ -172,6 +179,37 @@ export const usePlaceListStore = create<PlaceListState>()((set, get) => ({
 
   importList: (list) => {
     const updated = [...get().lists, list];
+    set({ lists: updated });
+    persistLists(updated);
+  },
+
+  setListPrivate: (id, isPrivate) => {
+    get().updateList(id, { isPrivate });
+  },
+
+  applyRemoteList: (remote) => {
+    const lists = get().lists;
+    const local = lists.find((l) => l.id === remote.id);
+    const merged = local ? mergeList(local, remote) : remote;
+    const updated = local
+      ? lists.map((l) => (l.id === remote.id ? merged : l))
+      : [...lists, merged];
+    set({ lists: updated });
+    persistLists(updated);
+  },
+
+  markPlaceDeleted: (listId, placeId) => {
+    const updated = get().lists.map((l) =>
+      l.id === listId
+        ? {
+            ...l,
+            places: l.places.map((p) =>
+              p.id === placeId ? { ...p, deleted: true, updatedAt: Date.now() } : p,
+            ),
+            updatedAt: Date.now(),
+          }
+        : l,
+    );
     set({ lists: updated });
     persistLists(updated);
   },

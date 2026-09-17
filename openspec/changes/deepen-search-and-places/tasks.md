@@ -86,11 +86,11 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 - [x] 7.1 Add list export to CSV and GeoJSON in `src/services/places/`, reusing the existing import field expectations
 - [x] 7.2 Add an export action and share sheet to `app/places/list.tsx` and the list card
-- [ ] 7.3 Implement `listSyncService.ts`: Gun namespace per shared list, signed invite carrying list id and room key, membership over P2P
+- [x] 7.3 Implement `listSyncService.ts`: Gun namespace per shared list, signed invite carrying list id and room key, membership over P2P
 - [x] 7.4 Implement the pure `mergeList(local, remote)` function with LWW metadata, place tombstones, and deterministic tie-breaks
-- [ ] 7.5 Wire the owner sharing toggle into `placeListStore.ts` and the list UI, keeping `isPrivate: true` until explicitly enabled
-- [ ] 7.6 Implement revoke by rotating the room key and removing the Gun namespace while preserving the local list
-- [ ] 7.7 Surface sharing state on every list, replacing the always-true private/shared label
+- [x] 7.5 Wire the owner sharing toggle into `placeListStore.ts` and the list UI, keeping `isPrivate: true` until explicitly enabled
+- [x] 7.6 Implement revoke by rotating the room key and removing the Gun namespace while preserving the local list
+- [x] 7.7 Surface sharing state on every list, replacing the always-true private/shared label
 - [x] 7.8 Unit tests: merge convergence under shuffled and tied edits, no resurrection, dedupe of concurrent adds, rename resolution
 - [ ] 7.9 Contract tests: list-sync message format and merge determinism at the P2P boundary
 - [x] 7.10 Integration test: export a list, re-import it, and verify round-trip; share a list and confirm a collaborator receives an edit

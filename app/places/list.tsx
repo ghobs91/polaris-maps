@@ -22,6 +22,7 @@ import type { NativeMapKitPoi } from '../../src/native/mapkit';
 import { SavedPlaceRow } from '../../src/components/places';
 import { SaveToListSheet } from '../../src/components/places/SaveToListSheet';
 import { exportFilename, toCSV, toGeoJSON } from '../../src/services/places/exportService';
+import { setListShared } from '../../src/services/places/listSyncService';
 import { Button, ErrorBoundary } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -258,6 +259,12 @@ export default function PlaceListDetailScreen() {
     ]);
   }, [list]);
 
+  const handleToggleShare = useCallback(() => {
+    if (!list) return;
+    // Currently private → start sharing; currently shared → make private.
+    setListShared(list, list.isPrivate);
+  }, [list]);
+
   return (
     <ErrorBoundary>
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -283,10 +290,17 @@ export default function PlaceListDetailScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            <Text style={styles.meta}>
-              {list.isPrivate ? 'Private' : 'Shared'} · {list.places.length}{' '}
-              {list.places.length === 1 ? 'place' : 'places'}
-            </Text>
+            <TouchableOpacity
+              onPress={handleToggleShare}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: !list.isPrivate }}
+              accessibilityLabel={list.isPrivate ? 'Make list shared' : 'Make list private'}
+            >
+              <Text style={styles.meta}>
+                {list.isPrivate ? 'Private · tap to share' : 'Shared · tap to make private'} ·{' '}
+                {list.places.length} {list.places.length === 1 ? 'place' : 'places'}
+              </Text>
+            </TouchableOpacity>
           </View>
           <TouchableOpacity onPress={cycleSortMode} style={styles.sortButton}>
             <Text style={styles.sortText}>{sortMode === 'recent' ? '↕ Recent' : '↕ A-Z'}</Text>
