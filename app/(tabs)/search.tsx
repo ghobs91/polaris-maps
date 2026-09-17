@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SearchBar } from '@/components/search/SearchBar';
 import { SearchResults } from '@/components/search/SearchResults';
 import { SearchHistory } from '@/components/search/SearchHistory';
+import { SearchFilterSheet } from '@/components/search/SearchFilterSheet';
+import { useSearchViewStore } from '@/stores/searchViewStore';
 import type { GeocodingResult } from '@/services/geocoding/geocodingService';
 import {
   getSearchHistory,
@@ -76,6 +79,14 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
 
 export default function SearchScreen() {
   const [history, setHistory] = useState<GeocodingResult[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const searchFilters = useSearchViewStore((s) => s.filters);
+  const activeFilterCount =
+    (searchFilters.openNow != null ? 1 : 0) +
+    (searchFilters.minRating != null ? 1 : 0) +
+    (searchFilters.maxPriceLevel != null ? 1 : 0) +
+    (searchFilters.maxDistanceKm != null ? 1 : 0) +
+    ((searchFilters.categories?.length ?? 0) > 0 ? 1 : 0);
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
   const viewport = useMapStore((s) => s.viewport);
@@ -187,6 +198,21 @@ export default function SearchScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <Text style={styles.title}>Search</Text>
       <SearchBar onSearch={setQuery} />
+      {!showHistory && (
+        <View style={styles.filterRow}>
+          <TouchableOpacity
+            style={styles.filterBtn}
+            onPress={() => setShowFilters(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Filters and sort${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+          >
+            <Ionicons name="options-outline" size={16} color={colors.textSecondary} />
+            <Text style={[styles.filterText, { color: colors.textSecondary }]}>
+              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {showHistory ? (
         <SearchHistory
           history={history}
@@ -197,6 +223,7 @@ export default function SearchScreen() {
       ) : (
         <SearchResults results={geocodingResults} onSelect={handleSelect} />
       )}
+      <SearchFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
     </View>
   );
 }
@@ -213,5 +240,23 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
       paddingBottom: spacing.xs,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    filterBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+    },
+    filterText: {
+      fontSize: 13,
+      fontWeight: '600',
     },
   });

@@ -10,9 +10,9 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 1.4 Seed default filters from parsed intent (`wantsOpenNow` / `wantsQuality` / `wantsCheap`) and let explicit user selections override them
 - [x] 1.5 Apply filters and sort inside `usePlaceSearch` after each staged emission; keep canonical keys stable and throttle re-sorts to one per frame
 - [ ] 1.6 Re-apply non-category filter changes locally over accumulated results without a refetch; route category changes through `deriveQueryContext` for source gating
-- [ ] 1.7 Build the filter/sort sheet component under `src/components/search/` and wire it into `app/(tabs)/search.tsx`
-- [ ] 1.8 Wire the same filter/sort sheet into `src/components/map/FloatingSearchPanel.tsx`
-- [ ] 1.9 Add the filtered-empty state with a clear-filters action
+- [x] 1.7 Build the filter/sort sheet component under `src/components/search/` and wire it into `app/(tabs)/search.tsx`
+- [x] 1.8 Wire the same filter/sort sheet into `src/components/map/FloatingSearchPanel.tsx`
+- [x] 1.9 Add the filtered-empty state with a clear-filters action
 - [x] 1.10 Unit tests: each predicate, unknown-data pass-through, comparator ordering and tie-breaks, intent-seeded defaults, explicit override
 - [x] 1.11 Unit tests: filters re-applied on a later stage emission; results never reappear unfiltered; scores unchanged by filtering
 - [x] 1.12 Integration test: apply filters plus sort in the search tab and confirm the rendered list order and membership

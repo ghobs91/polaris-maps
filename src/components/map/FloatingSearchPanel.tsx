@@ -26,6 +26,9 @@ import { spacing, typography, borderRadius } from '../../constants/theme';
 import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
+import { SearchFilterSheet } from '../search/SearchFilterSheet';
+import { useSearchViewStore } from '../../stores/searchViewStore';
+import { isFilterEmpty } from '../../services/search/searchFilters';
 import type { SearchStageMeta } from '../../services/search/searchSession';
 import { usePlaceSearch } from '../../hooks/usePlaceSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
@@ -696,6 +699,14 @@ export function FloatingSearchPanel({
   const [showSearchThisArea, setShowSearchThisArea] = useState(false);
   const [addingStop, setAddingStop] = useState(false);
   const [stopSearchResults, setStopSearchResults] = useState<UnifiedSearchResult[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const searchFilters = useSearchViewStore((s) => s.filters);
+  const activeFilterCount =
+    (searchFilters.openNow != null ? 1 : 0) +
+    (searchFilters.minRating != null ? 1 : 0) +
+    (searchFilters.maxPriceLevel != null ? 1 : 0) +
+    (searchFilters.maxDistanceKm != null ? 1 : 0) +
+    ((searchFilters.categories?.length ?? 0) > 0 ? 1 : 0);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const activeCategoryQueryRef = useRef('');
   const searchAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -2739,7 +2750,38 @@ export function FloatingSearchPanel({
                   ListHeaderComponent={
                     showHistory ? (
                       <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
-                    ) : null
+                    ) : (
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'flex-end',
+                          paddingHorizontal: 4,
+                          paddingBottom: 6,
+                        }}
+                      >
+                        <TouchableOpacity
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                            paddingVertical: 4,
+                            paddingHorizontal: 10,
+                            borderRadius: 12,
+                            backgroundColor: 'rgba(142,142,147,0.18)',
+                          }}
+                          onPress={() => setShowFilters(true)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Filters and sort${
+                            activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''
+                          }`}
+                        >
+                          <Ionicons name="options-outline" size={15} color={subColor} />
+                          <Text style={{ color: subColor, fontSize: 13, fontWeight: '600' }}>
+                            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )
                   }
                   ListEmptyComponent={
                     !showHistory && isCategorySearching ? (
@@ -2749,11 +2791,28 @@ export function FloatingSearchPanel({
                           Searching nearby...
                         </Text>
                       </View>
+                    ) : !showHistory && !isFilterEmpty(searchFilters) ? (
+                      <View style={styles.searchLoadingRow}>
+                        <Text style={[styles.searchLoadingText, { color: textColor }]}>
+                          No results match your filters
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => useSearchViewStore.getState().clearFilters()}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear filters"
+                        >
+                          <Text style={{ color: colors.primary, fontWeight: '600' }}>
+                            Clear filters
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     ) : null
                   }
                 />
               </Animated.View>
             )}
+
+            <SearchFilterSheet visible={showFilters} onClose={() => setShowFilters(false)} />
 
             {/* ── Idle: Favorites + Recents ── */}
             {mode === 'idle' && (
