@@ -23,11 +23,11 @@
 
 ## 3. Dark mode completion
 
-- [ ] 3.1 Add a `useThemedStyles` / memoized `createStyles(isDark)` helper and document the migration pattern
-- [ ] 3.2 Remove the hard-coded `#F2F2F7` background in `app/(tabs)/index.tsx`
+- [x] 3.1 Add a `useThemedStyles` / memoized `createStyles(isDark)` helper and document the migration pattern
+- [x] 3.2 Remove the hard-coded `#F2F2F7` background in `app/(tabs)/index.tsx`
 - [ ] 3.3 Migrate `app/poi/[id].tsx` and `app/regions/offline.tsx` to the theme
 - [ ] 3.4 Migrate `src/components/search/*` and `src/components/regions/*` to the theme
-- [ ] 3.5 Replace `useColorScheme()` with ThemeContext in RegionGate and GeofabrikTreePicker
+- [x] 3.5 Replace `useColorScheme()` with ThemeContext in RegionGate and GeofabrikTreePicker
 - [ ] 3.6 Migrate the remaining static `colors` imports across user-facing files and common chrome
 - [ ] 3.7 Verify the map style, including offline and slow-link fallbacks, follows the theme for default, satellite, and terrain
 - [ ] 3.8 Add a lint guard or allowlist to prevent new static light-color imports in user-facing code

@@ -3,7 +3,9 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { formatDistance } from '../../utils/units';
-import { colors, spacing, typography } from '../../constants/theme';
+import { spacing, typography } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 
 interface SearchResultRowProps {
@@ -23,6 +25,8 @@ export const SearchResultRow = memo(function SearchResultRow({
   result,
   onPress,
 }: SearchResultRowProps) {
+  const styles = useThemedStyles(createStyles);
+  const { colors } = useTheme();
   const isStation = result.osmType === 'railway' || result.osmSubtype === 'station';
   const { icon, color } = getPoiCategory(result.osmType ?? '', result.osmSubtype ?? '');
 
@@ -92,32 +96,33 @@ export const SearchResultRow = memo(function SearchResultRow({
   );
 });
 
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md - 2,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border + '40',
-  },
-  rowPressed: { opacity: 0.7 },
-  iconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm,
-  },
-  thumbnail: { width: 34, height: 34 },
-  body: { flex: 1, marginRight: spacing.sm },
-  name: { ...typography.body, color: colors.text },
-  subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  metaText: { ...typography.caption, color: colors.textSecondary },
-  open: { color: '#2E7D32', fontWeight: '600' },
-  closed: { color: '#C62828', fontWeight: '600' },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.md - 2,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border + '40',
+    },
+    rowPressed: { opacity: 0.7 },
+    iconWrap: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: spacing.sm,
+    },
+    thumbnail: { width: 34, height: 34 },
+    body: { flex: 1, marginRight: spacing.sm },
+    name: { ...typography.body, color: colors.text },
+    subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
+    metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
+    metaItem: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+    metaText: { ...typography.caption, color: colors.textSecondary },
+    open: { color: '#2E7D32', fontWeight: '600' },
+    closed: { color: '#C62828', fontWeight: '600' },
+  });

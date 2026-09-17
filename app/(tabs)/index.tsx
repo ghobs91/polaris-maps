@@ -30,7 +30,7 @@ const LARGE_FLOATING_PANEL_WIDTH = 380;
 const LARGE_FLOATING_PANEL_GAP = spacing.md;
 
 export default function MapScreen() {
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const isLarge = useIsLargeDisplay();
   const setViewport = useMapStore((s) => s.setViewport);
@@ -122,7 +122,7 @@ export default function MapScreen() {
   if (isLarge) {
     return (
       <ErrorBoundary>
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
           <MapView
             ref={mapViewRef}
             routeGeometry={routeGeometry}
@@ -195,7 +195,7 @@ export default function MapScreen() {
   // ── Small display: original overlay layout ──
   return (
     <ErrorBoundary>
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <MapView
           ref={mapViewRef}
           routeGeometry={routeGeometry}
@@ -223,7 +223,7 @@ export default function MapScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F2F7' },
+  container: { flex: 1 },
   searchOverlay: {
     position: 'absolute',
     width: LARGE_FLOATING_PANEL_WIDTH,

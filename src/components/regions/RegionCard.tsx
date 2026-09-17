@@ -1,6 +1,8 @@
 import React, { memo } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
-import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import type { Region } from '../../models/region';
 
 interface RegionCardProps {
@@ -21,6 +23,7 @@ export const RegionCard = memo(function RegionCard({
   onDelete,
   updateAvailable,
 }: RegionCardProps) {
+  const styles = useThemedStyles(createStyles);
   const toMb = (b?: number | null) =>
     ((b ?? 0) / (1024 * 1024)).toFixed(b && b >= 10 * 1024 * 1024 ? 0 : 1);
   const sizeMb = region.tilesSizeBytes
@@ -128,6 +131,8 @@ export const RegionCard = memo(function RegionCard({
 });
 
 function StatusBadge({ status }: { status: Region['downloadStatus'] }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const color =
     status === 'complete'
       ? colors.success
@@ -153,55 +158,56 @@ function StatusBadge({ status }: { status: Region['downloadStatus'] }) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  cardBody: {
-    padding: spacing.md,
-    paddingBottom: 0,
-  },
-  pressed: { opacity: 0.7 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  name: { ...typography.subtitle, color: colors.text, flex: 1 },
-  badges: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
-  size: { ...typography.caption, color: colors.textSecondary, marginBottom: 2 },
-  contents: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
-    fontSize: 11,
-  },
-  badge: { borderRadius: borderRadius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
-  badgeText: { ...typography.caption, fontWeight: '600' },
-  updateBadge: { backgroundColor: colors.warning + '20' },
-  updateText: { color: colors.warning },
-  actions: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm },
-  actionBtn: {
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  actionPressed: { opacity: 0.7 },
-  actionText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
-  retryBtn: { borderColor: colors.warning },
-  retryText: { color: colors.warning },
-  updateBtn: { borderColor: colors.warning },
-  updateActionText: { color: colors.warning },
-  dangerBtn: { borderColor: colors.error },
-  dangerText: { color: colors.error },
-  cancelBtn: { borderColor: colors.textSecondary },
-  cancelText: { color: colors.textSecondary },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.md,
+      marginBottom: spacing.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: 'hidden',
+    },
+    cardBody: {
+      padding: spacing.md,
+      paddingBottom: 0,
+    },
+    pressed: { opacity: 0.7 },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+    },
+    name: { ...typography.subtitle, color: colors.text, flex: 1 },
+    badges: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
+    size: { ...typography.caption, color: colors.textSecondary, marginBottom: 2 },
+    contents: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginBottom: spacing.sm,
+      fontSize: 11,
+    },
+    badge: { borderRadius: borderRadius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+    badgeText: { ...typography.caption, fontWeight: '600' },
+    updateBadge: { backgroundColor: colors.warning + '20' },
+    updateText: { color: colors.warning },
+    actions: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm },
+    actionBtn: {
+      borderWidth: 1,
+      borderColor: colors.primary,
+      borderRadius: borderRadius.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+    },
+    actionPressed: { opacity: 0.7 },
+    actionText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
+    retryBtn: { borderColor: colors.warning },
+    retryText: { color: colors.warning },
+    updateBtn: { borderColor: colors.warning },
+    updateActionText: { color: colors.warning },
+    dangerBtn: { borderColor: colors.error },
+    dangerText: { color: colors.error },
+    cancelBtn: { borderColor: colors.textSecondary },
+    cancelText: { color: colors.textSecondary },
+  });

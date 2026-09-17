@@ -1,6 +1,8 @@
 import React, { useCallback } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, borderRadius } from '../../constants/theme';
+import { spacing, borderRadius } from '../../constants/theme';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import { GlassView } from '../common/GlassView';
 import { SearchResultRow } from './SearchResultRow';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
@@ -21,6 +23,8 @@ function canonicalKey(item: UnifiedSearchResult): string {
 }
 
 export function SearchResults({ results, onSelect, onEndReached, hasMore }: SearchResultsProps) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const renderItem = useCallback(
     ({ item }: { item: UnifiedSearchResult }) => (
       <SearchResultRow result={item} onPress={onSelect} />
@@ -54,26 +58,27 @@ export function SearchResults({ results, onSelect, onEndReached, hasMore }: Sear
   );
 }
 
-const styles = StyleSheet.create({
-  list: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.xs,
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
-    borderCurve: 'continuous',
-    flex: 1,
-  },
-  flatList: {
-    flex: 1,
-  },
-  footer: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  endText: {
-    textAlign: 'center',
-    color: colors.textSecondary,
-    paddingVertical: spacing.md,
-    fontSize: 12,
-  },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    list: {
+      marginHorizontal: spacing.md,
+      marginTop: spacing.xs,
+      borderRadius: borderRadius.lg,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      flex: 1,
+    },
+    flatList: {
+      flex: 1,
+    },
+    footer: {
+      paddingVertical: spacing.md,
+      alignItems: 'center',
+    },
+    endText: {
+      textAlign: 'center',
+      color: colors.textSecondary,
+      paddingVertical: spacing.md,
+      fontSize: 12,
+    },
+  });

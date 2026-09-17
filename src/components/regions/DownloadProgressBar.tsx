@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, spacing, typography, borderRadius } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
+import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import type { DownloadProgress } from '../../services/regions/downloadService';
 
 interface DownloadProgressBarProps {
@@ -8,6 +9,7 @@ interface DownloadProgressBarProps {
 }
 
 export function DownloadProgressBar({ progress }: DownloadProgressBarProps) {
+  const styles = useThemedStyles(createStyles);
   const stageLabel =
     progress.stage === 'tiles'
       ? 'Downloading map tiles…'
@@ -36,16 +38,17 @@ export function DownloadProgressBar({ progress }: DownloadProgressBarProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { marginVertical: spacing.sm },
-  labelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
-  label: { ...typography.caption, color: colors.textSecondary },
-  percent: { ...typography.caption, color: colors.primary, fontWeight: '600' },
-  barBackground: {
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: borderRadius.round,
-    overflow: 'hidden',
-  },
-  barFill: { height: '100%', backgroundColor: colors.primary, borderRadius: borderRadius.round },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    container: { marginVertical: spacing.sm },
+    labelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
+    label: { ...typography.caption, color: colors.textSecondary },
+    percent: { ...typography.caption, color: colors.primary, fontWeight: '600' },
+    barBackground: {
+      height: 6,
+      backgroundColor: colors.border,
+      borderRadius: borderRadius.round,
+      overflow: 'hidden',
+    },
+    barFill: { height: '100%', backgroundColor: colors.primary, borderRadius: borderRadius.round },
+  });

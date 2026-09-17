@@ -6,10 +6,12 @@ import { deleteRegionData } from '../../src/services/regions/downloadService';
 import { checkForRegionUpdates } from '../../src/services/regions/updateService';
 import { RegionCard } from '../../src/components/regions';
 import { ErrorBoundary, LoadingSpinner } from '../../src/components/common';
-import { colors, spacing, typography } from '../../src/constants/theme';
+import { spacing, typography } from '../../src/constants/theme';
+import { useThemedStyles, type Theme } from '../../src/hooks/useThemedStyles';
 import type { Region } from '../../src/models/region';
 
 export default function OfflineRegionsScreen() {
+  const styles = useThemedStyles(createStyles);
   const [regions, setRegions] = useState<Region[]>([]);
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -111,11 +113,12 @@ export default function OfflineRegionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  heading: { ...typography.h2, color: colors.text, marginBottom: spacing.xs },
-  storageInfo: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.md },
-  list: { paddingBottom: spacing.xl },
-  emptyText: { ...typography.body, color: colors.textSecondary },
-});
+const createStyles = ({ colors }: Theme) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    heading: { ...typography.h2, color: colors.text, marginBottom: spacing.xs },
+    storageInfo: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.md },
+    list: { paddingBottom: spacing.xl },
+    emptyText: { ...typography.body, color: colors.textSecondary },
+  });
