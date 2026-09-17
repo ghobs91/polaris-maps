@@ -48,18 +48,19 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 
 ### Search (`src/services/search/`)
 
-| File                      | Description                                                                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, merges/caches/deduplicates/ranks. Entry point for all search. |
-| `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                       |
-| `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                        |
-| `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                      |
-| `searchRanker.ts`         | Scores results 0–100: bm25 + text match, distance, category, popularity, viewport, intent modifiers (open now / quality / cheap), canonical dedup.                       |
-| `openingHours.ts`         | Minimal `parseOpenNow` for common OSM hours syntax; returns null (unknown) when unparseable.                                                                             |
-| `photonGeocoder.ts`       | Komoot Photon API client — fuzzy, typo-tolerant OSM-based geocoding.                                                                                                     |
-| `requestThrottle.ts`      | Shared abort-aware request throttles (Nominatim 1 req/s across all call sites).                                                                                          |
-| `searchHistoryService.ts` | MMKV-persisted last 10 selections (query + result); personalization boost lookups.                                                                                       |
-| `abortUtils.ts`           | Abort helpers (`throwIfAborted`, `sleepWithAbort`, `withTimeout`, `withSourceTimeout`).                                                                                  |
+| File                      | Description                                                                                                                                                                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, merges/caches/deduplicates/ranks. Entry point for all search.                                                           |
+| `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                                                                                 |
+| `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                                                                                  |
+| `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                                                                                |
+| `searchRanker.ts`         | Scores results 0–100: bm25 + text match, distance, category, popularity, viewport, intent modifiers (open now / quality / cheap), canonical dedup.                                                                                 |
+| `searchFilters.ts`        | Pure filter/sort view layer over ranked results: open-now, min rating, max price, max distance, categories; sorts by relevance/distance/rating/price; intent-seeded defaults with explicit override (unknown data passes through). |
+| `openingHours.ts`         | Minimal `parseOpenNow` for common OSM hours syntax; returns null (unknown) when unparseable.                                                                                                                                       |
+| `photonGeocoder.ts`       | Komoot Photon API client — fuzzy, typo-tolerant OSM-based geocoding.                                                                                                                                                               |
+| `requestThrottle.ts`      | Shared abort-aware request throttles (Nominatim 1 req/s across all call sites).                                                                                                                                                    |
+| `searchHistoryService.ts` | MMKV-persisted last 10 selections (query + result); personalization boost lookups.                                                                                                                                                 |
+| `abortUtils.ts`           | Abort helpers (`throwIfAborted`, `sleepWithAbort`, `withTimeout`, `withSourceTimeout`).                                                                                                                                            |
 
 ### Geocoding (`src/services/geocoding/`)
 

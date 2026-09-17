@@ -98,9 +98,9 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 
 ## 8. Verification and documentation
 
-- [ ] 8.1 Run `pnpm typecheck`, `pnpm lint`, and `pnpm format:check` and resolve all issues introduced by this change
-- [ ] 8.2 Run the relevant unit, integration, and contract suites and record actual results, noting pre-existing failures separately
+- [x] 8.1 Run `pnpm typecheck`, `pnpm lint`, and `pnpm format:check` and resolve all issues introduced by this change
+- [x] 8.2 Run the relevant unit, integration, and contract suites and record actual results, noting pre-existing failures separately
 - [ ] 8.3 Run storage and performance benchmarks for the media cache, place-detail cache, and list merge; record thresholds
-- [ ] 8.4 Update `src/services/search/README.md`, `src/services/poi/README.md`, and `src/services/places/README.md` with the new contracts
-- [ ] 8.5 Update `AGENTS.md` and the release notes with the new capabilities, iOS-only universal-link scope, and the `broaden-traffic-and-media-sources` coordination
-- [ ] 8.6 Record unresolved open questions (ATProto photo blobs, Mapillary license, Panoramax coverage, menu viewer) in the change notes
+- [x] 8.4 Update `src/services/search/README.md`, `src/services/poi/README.md`, and `src/services/places/README.md` with the new contracts
+- [x] 8.5 Update `AGENTS.md` and the release notes with the new capabilities, iOS-only universal-link scope, and the `broaden-traffic-and-media-sources` coordination
+- [x] 8.6 Record unresolved open questions (ATProto photo blobs, Mapillary license, Panoramax coverage, menu viewer) in the change notes

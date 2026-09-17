@@ -75,7 +75,7 @@
 
 ## 8. Verification and documentation
 
-- [ ] 8.1 Run `pnpm lint`, `pnpm format:check`, and `pnpm typecheck` and fix all failures
-- [ ] 8.2 Run the relevant unit and integration tests and record the actual results
+- [x] 8.1 Run `pnpm lint`, `pnpm format:check`, and `pnpm typecheck` and fix all failures
+- [x] 8.2 Run the relevant unit and integration tests and record the actual results
 - [ ] 8.3 Capture before/after map performance benchmarks per Constitution IV
-- [ ] 8.4 Update affected service READMEs and AGENTS.md where new conventions or dependencies are introduced
+- [x] 8.4 Update affected service READMEs and AGENTS.md where new conventions or dependencies are introduced

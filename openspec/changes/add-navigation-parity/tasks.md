@@ -65,7 +65,7 @@
 
 ## 8. Verification And Documentation
 
-- [ ] 8.1 Run `pnpm typecheck`, `pnpm lint`, and `pnpm format:check`
-- [ ] 8.2 Run the most relevant Jest suites and report actual results (the suite has known pre-existing failures)
+- [x] 8.1 Run `pnpm typecheck`, `pnpm lint`, and `pnpm format:check`
+- [x] 8.2 Run the most relevant Jest suites and report actual results (the suite has known pre-existing failures)
 - [ ] 8.3 Verify on-device lock-screen voice prompts and background location coexistence
-- [ ] 8.4 Update service READMEs and note the Open Questions resolved during implementation
+- [x] 8.4 Update service READMEs and note the Open Questions resolved during implementation
