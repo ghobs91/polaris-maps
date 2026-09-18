@@ -119,7 +119,7 @@ Key flows:
 
 ## Background Jobs & Scheduled Tasks
 
-- **In-app**: offline action queue replay; background location for traffic contribution.
+- **In-app**: offline action queue replay; background location for traffic contribution; background **audio** (`UIBackgroundModes: ["location", "audio"]`) so turn-by-turn voice guidance keeps speaking while the screen is locked or the app is backgrounded — the `audio` mode keeps the audio session alive for `expo-speech` prompts (no music/media playback).
 - **CI (`build-region-data.yml`)**: weekly (Sun 00:00 UTC) OSM → Valhalla tiles + PMTiles + geocoding DB build, published to GitHub Releases; also on push to `scripts/regions.json`/workflow and manual dispatch.
 - **CI (`ios-testflight.yml`)**: manual TestFlight build/upload via Fastlane.
 

@@ -24,8 +24,10 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 2.3 Adopt the shared row in `SearchResults.tsx` and in the floating panel result list (preserve the transit-station variant)
 - [x] 2.4 Add cursor-based `loadMore()` pagination to `usePlaceSearch` with dedupe by canonical key across re-sorts
 - [x] 2.5 Add the scroll-to-load affordance and end-of-results state in both result lists
-- [ ] 2.6 Create `useVoiceSearch` hook reusing the existing speech implementation from `SearchBar.tsx`, with just-in-time permission and keyboard fallback
-- [ ] 2.7 Add the microphone control to `FloatingSearchPanel.tsx` that fills the input and triggers a search
+- [x] 2.6 Create `useVoiceSearch` hook reusing the existing speech implementation from `SearchBar.tsx`, with just-in-time permission and keyboard fallback
+  - `src/hooks/useVoiceSearch.ts` (shared by `SearchBar` and `FloatingSearchPanel`); exposes `isAvailable` so the mic hides and the keyboard is the fallback when permission is denied. Unit test `__tests__/unit/useVoiceSearch.test.tsx`.
+- [x] 2.7 Add the microphone control to `FloatingSearchPanel.tsx` that fills the input and triggers a search
+  - Mic button in the search row (idle/searching); the transcript is passed to `handleQueryChange`, which fills the input and runs the search.
 - [ ] 2.8 Unit tests: row rendering with full and sparse data; pagination dedupe after a reordering emission; voice-search fallback when permission is denied
 - [ ] 2.9 Integration test: paginate to a second page and confirm no duplicates and stable sort order
 
@@ -34,7 +36,8 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 3.1 Define `PlaceMediaItem` with source, license, license URL, author, and attribution fields; define the provider interface and mark the retained website scraper as the primary source
 - [x] 3.2 Implement `src/services/poi/placeMediaService.ts` layering a supplementary Wikimedia Commons provider (Wikidata QID plus Commons geosearch, reusing `commonsThumbUrl`) on top of the retained `websitePhotosService.ts` scraper
 - [x] 3.3 Add a supplementary Panoramax STAC provider with attribution metadata, layered on top of the retained website scraper
-- [ ] 3.4 Add an optional Mapillary provider gated on a configured token and acceptable license (or record the decision to omit it)
+- [x] 3.4 Add an optional Mapillary provider gated on a configured token and acceptable license (or record the decision to omit it)
+  - Decision: Mapillary is NOT a place-photo provider (street-level, not a place photo). It is instead implemented as a token-gated street-level source for the Street View 3D viewer — see `src/services/imagery/streetViewService.ts` and `PanoramaViewer`. Panoramax fills the gaps (open, no token). Both are excluded from `PlaceMediaCarousel`.
 - [x] 3.5 Merge and de-duplicate scraped and open-provider results by content key (scraper output primary) and cache metadata with its attribution
 - [x] 3.6 Render media with visible attribution and a license link for open-source items in `POIInfoCard.tsx` and in result-row thumbnails
   - Note: `PlaceMediaCarousel` (mounted in `POIInfoCard`) renders Wikimedia Commons / Panoramax items with a visible attribution caption and a license link, fed by real providers in `placeMediaProviders.ts`. The shared `SearchResultRow` renders `thumbnailUrl` when present and omits it gracefully; per-result media is not fetched (no producer populates `thumbnailUrl` yet), so attribution is surfaced in the place card rather than a 34px row thumbnail.
@@ -70,7 +73,8 @@ Ordered so the no-schema search UX lands first and independently; each group is 
 - [x] 5.4 Add the offline indicator and last-updated staleness label, plus refresh-on-reconnect
   - Note: `POIInfoCard` shows the "Offline · cached <date>" label from `cachedAt` and now reads `peerStore.isOnline` reactively, so a reconnect re-runs enrichment (and the media carousel re-fetches) instead of leaving the stale snapshot on screen.
 - [x] 5.5 Merge canonical identifiers so one place viewed from search and from a saved list shares one snapshot
-- [ ] 5.6 Support optional region-pack place-detail data that seeds the cache without overwriting newer snapshots
+- [x] 5.6 Support optional region-pack place-detail data that seeds the cache without overwriting newer snapshots
+  - `placeDetailCache.seedPlaceDetails` + `regions/placeDetailImporter.ts` import an optional `region_place_details.json` during region download. Region seeds default to `sourceVersion` 0, so the existing `putPlaceDetail` guard never lets them clobber a fresher live snapshot (>=1). Covered in `__tests__/unit/placeDetailCache.test.ts`.
 - [x] 5.7 Add a settings control to clear cached place details
 - [x] 5.8 Unit tests: round-trip, key aliasing, LRU eviction, source-version precedence, clear
 - [ ] 5.9 Benchmark: cache write/read timing and stored size for a realistic place snapshot

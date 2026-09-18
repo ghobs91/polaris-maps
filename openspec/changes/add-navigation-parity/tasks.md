@@ -60,7 +60,8 @@
 - [ ] 7.2 Extend `plugins/native/PolarisMaps/PolarisMapKit.swift` to emit `street_names`, `verbal_post_transition`, and any available speed/lane data
 - [ ] 7.3 Mirror the Swift changes into `ios/PolarisMaps/` for local builds and confirm `plugins/withValhalla.js` copies them
 - [x] 7.4 Extend `NativePolarisValhalla.ts` and `NativePolarisMapKit.ts` types and map the new fields in `src/native/valhalla/index.ts` and `src/native/mapkit/index.ts` using `parseLaneGuidance`
-- [ ] 7.5 Add `audio` to `UIBackgroundModes` in `app.json` and document the background audio usage
+- [x] 7.5 Add `audio` to `UIBackgroundModes` in `app.json` and document the background audio usage
+  - `app.json` already declares `UIBackgroundModes: ["location", "audio"]`; documented the voice-guidance rationale in `docs/architecture.md`.
 - [x] 7.6 Add unit tests asserting native route payloads with lanes/speed limits map through, and absent payloads omit the fields
 
 ## 8. Verification And Documentation

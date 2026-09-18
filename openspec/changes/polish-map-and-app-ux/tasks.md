@@ -26,10 +26,12 @@
 - [x] 2.1 Add `clusterPoisForDisplay` in `src/utils` that buckets screen-space POIs into `{ lat, lng, count, poiIds, dominantCategory }` descriptors
 - [x] 2.2 Render a themed, accessible ClusterBadge MarkerView with count and dominant category color in POILayer, switching between clusters and individual markers by zoom
 - [x] 2.3 Wire cluster tap to camera expansion zoom and center the map on the cluster
-- [ ] 2.4 Add a bounded low-zoom fetch tier in MapView: cached Overture SQLite first, capped online Overture/PMTiles second, and skip Overpass below the individual-marker threshold
+- [x] 2.4 Add a bounded low-zoom fetch tier in MapView: cached Overture SQLite first, capped online Overture/PMTiles second, and skip Overpass below the individual-marker threshold
+  - Between `POI_CLUSTER_MIN_ZOOM` (11) and `POI_MIN_ZOOM` (14) MapView now serves cached Overture (cap 300) then a capped online Overture page (cap 200), and skips Overpass/Nominatim entirely; below 11 it clears. Offline still serves cache only.
 - [x] 2.5 Preserve collision-safe label filtering for individual markers and enforce single-line cluster badges
 - [x] 2.6 Ensure offline clustering is computed from cached places and region packs with no network request
-- [ ] 2.7 Defer cluster recomputation to settled region events, memoize on `(pois, bounds, zoom)`, and cap the rendered marker count
+- [x] 2.7 Defer cluster recomputation to settled region events, memoize on `(pois, bounds, zoom)`, and cap the rendered marker count
+  - POILayer already reads the store's `currentZoom`/`viewportBounds`, which are set only in `onRegionDidChange` (settled), and memoizes on `(pois, bounds, zoom)`. Added `MAX_RENDERED_CLUSTERS` (200): `clusterPoisForDisplay` keeps the densest clusters when over the cap.
 - [x] 2.8 Add unit tests for clustering counts, centroid, threshold behavior, empty input, and offline input
 - [ ] 2.9 Add an integration test covering cluster tap-to-expand
 - [x] 2.10 Capture before/after benchmark results for cluster recompute and map frame rate (Constitution IV)
@@ -50,7 +52,8 @@
 
 - [x] 4.1 Add accessibilityLabel, accessibilityRole, and state to all map controls (CtrlBtn and new chrome) with hit targets of at least 44 by 44 points
 - [x] 4.2 Replace the Settings theme picker with an accessible segmented or radio control exposing role and selected state
-- [ ] 4.3 Audit fixed-height text containers, replace them with minimum heights or scrollable content, and define Dynamic Type caps for dense map overlays
+- [x] 4.3 Audit fixed-height text containers, replace them with minimum heights or scrollable content, and define Dynamic Type caps for dense map overlays
+  - Added `src/constants/a11y.ts` (`MAX_FONT_SCALE_DENSE` 1.2, `MAX_FONT_SCALE_CHROME` 1.4) and applied it to dense overlays: POI labels + cluster counts, map scale text, current-speed badge, traffic coverage badge. The speed badge's fixed height became `minHeight`; `SegmentedControl` already used `minHeight: 44`.
 - [x] 4.4 Add a VoiceOver summary to the map container and per-marker labels for POIs and clusters
 - [x] 4.5 Measure contrast in both themes and fix any palette values that fail WCAG AA
 - [x] 4.6 Respect the Reduce Motion preference for camera and sheet animations
