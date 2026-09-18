@@ -750,6 +750,9 @@ export function FloatingSearchPanel({
   // True while waiting for the camera to settle after a search fit, so the
   // anchor is captured at the fitted viewport rather than mid-animation.
   const anchorPendingRef = useRef(false);
+  // Whether the next result emission should move the camera. Only an explicit
+  // submit sets this; live autosuggest typing must leave the map where it is.
+  const fitResultsOnEmitRef = useRef(false);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const isCategorySearching = useOsmPoiStore((s) => s.isCategorySearching);
   const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
@@ -795,8 +798,6 @@ export function FloatingSearchPanel({
     const displayedResults = [...stationResults, ...filteredApple, ...filteredUnified];
     setResults(displayedResults);
 
-    if (!updateMap) return;
-
     const mapPois: OsmPoi[] = displayedResults
       .filter((result) => result.entry.type !== 'station')
       .map(
@@ -820,15 +821,14 @@ export function FloatingSearchPanel({
       );
 
     if (mapPois.length > 0) {
-      // Label the closest matches on the map and zoom the camera out to
-      // frame them, matching Apple/Google Maps search behaviour. A small
-      // subset is fitted (selectSearchFitPois) so one distant outlier
-      // can't hijack the camera.
+      // Always refresh the suggestion pins so the list and map stay in sync.
+      // The camera only moves when the search was explicitly committed
+      // (`updateMap`); live autosuggest typing must never pan the map.
       const fitPois = selectSearchFitPois(mapPois);
       useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
 
       const fitBounds = boundsForPois(fitPois);
-      if (fitBounds) {
+      if (updateMap && fitBounds) {
         const vp = useMapStore.getState().viewport;
         useOsmPoiStore.getState().setZoomAndBounds(vp.zoom, fitBounds);
         useMapStore
@@ -837,12 +837,21 @@ export function FloatingSearchPanel({
             [fitBounds.minLng, fitBounds.minLat, fitBounds.maxLng, fitBounds.maxLat],
             'search',
           );
+        anchorPendingRef.current = true;
+      } else {
+        // No camera move: anchor "Search this area" to the current viewport so
+        // panning after an autosuggest search still offers a re-search.
+        const bounds = useOsmPoiStore.getState().viewportBounds;
+        if (bounds) {
+          searchAnchorRef.current = {
+            lat: (bounds.minLat + bounds.maxLat) / 2,
+            lng: (bounds.minLng + bounds.maxLng) / 2,
+          };
+        }
       }
     } else {
       useOsmPoiStore.getState().clearCategorySearch();
     }
-
-    anchorPendingRef.current = true;
   }, []);
 
   const startAuxiliarySearch = useCallback(
@@ -895,7 +904,7 @@ export function FloatingSearchPanel({
           rank: 95 - i,
         }));
 
-        applyMergedResults(true);
+        applyMergedResults(fitResultsOnEmitRef.current);
       });
     },
     [applyMergedResults],
@@ -911,7 +920,7 @@ export function FloatingSearchPanel({
         appleResultsRef.current = [];
         auxQueryRef.current = '';
         setResults([]);
-        if (meta.final) applyMergedResults(true);
+        if (meta.final) applyMergedResults(fitResultsOnEmitRef.current);
         useOsmPoiStore.getState().setIsCategorySearching(false);
         return;
       }
@@ -933,7 +942,7 @@ export function FloatingSearchPanel({
         return;
       }
 
-      applyMergedResults(true);
+      applyMergedResults(fitResultsOnEmitRef.current);
       useOsmPoiStore.getState().setIsCategorySearching(false);
     },
     [applyMergedResults, startAuxiliarySearch],
@@ -1124,6 +1133,9 @@ export function FloatingSearchPanel({
   const handleQueryChange = useCallback(
     (text: string) => {
       ensureUserLocation();
+      // Live autosuggest typing must never move the camera; only an explicit
+      // submit re-enables the result fit (see handleSearchSubmit).
+      fitResultsOnEmitRef.current = false;
       // Clear active category if user manually typed something different
       if (activeCategory && text !== activeCategory) {
         setActiveCategory(null);
@@ -1166,6 +1178,8 @@ export function FloatingSearchPanel({
     const text = query.trim();
     if (text.length < 2) return;
     ensureUserLocation();
+    // An explicit submit may frame the results on the map (unlike typing).
+    fitResultsOnEmitRef.current = true;
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
     useOsmPoiStore.getState().setIsCategorySearching(true);
