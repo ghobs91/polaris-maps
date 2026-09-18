@@ -15,6 +15,8 @@ import { usePlaceListStore } from '../../src/stores/placeListStore';
 import { isICloudAvailable } from '../../src/services/icloud/iCloudSyncService';
 import { parseImport } from '../../src/services/places/importService';
 import { PlaceListCard } from '../../src/components/places';
+import { GoogleReviewsImport } from '../../src/components/reviews';
+import { useReviewImportStore, isTakeoutReminderDue } from '../../src/stores/reviewImportStore';
 import { Button, ErrorBoundary, Modal, GlassView } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -84,6 +86,10 @@ export default function MyPlacesScreen() {
 
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
+  const [showReviews, setShowReviews] = useState(false);
+  const takeoutReminderAt = useReviewImportStore((s) => s.takeoutReminderAt);
+  const clearTakeoutReminder = useReviewImportStore((s) => s.clearTakeoutReminder);
+  const reminderDue = isTakeoutReminderDue(takeoutReminderAt);
 
   const handlePickFile = useCallback(async () => {
     try {
@@ -105,6 +111,7 @@ export default function MyPlacesScreen() {
       const content = await FileSystem.readAsStringAsync(asset.uri);
       const imported = parseImport(content, undefined, asset.name);
       usePlaceListStore.getState().importList(imported);
+      useReviewImportStore.getState().clearTakeoutReminder();
       setShowImport(false);
       Alert.alert(
         'Import Complete',
@@ -257,6 +264,26 @@ export default function MyPlacesScreen() {
           Home/Work favorites are set from the map search bar for quick routing.
         </Text>
 
+        {reminderDue && (
+          <GlassView material="regular" style={styles.reminderCard}>
+            <Text style={styles.reminderTitle}>Your Google Takeout is probably ready 📦</Text>
+            <Text style={styles.reminderBody}>
+              It has been 24 hours — Google has likely emailed your export link. Download and unzip
+              it, then import your saved places and reviews.
+            </Text>
+            <View style={styles.reminderActions}>
+              <Button title="Import places" onPress={() => setShowImport(true)} size="sm" />
+              <Button
+                title="Import reviews"
+                onPress={() => setShowReviews(true)}
+                variant="outline"
+                size="sm"
+              />
+              <Button title="Dismiss" onPress={clearTakeoutReminder} variant="ghost" size="sm" />
+            </View>
+          </GlassView>
+        )}
+
         <Button
           title="+ New list"
           onPress={() => setShowNewList(true)}
@@ -285,6 +312,11 @@ export default function MyPlacesScreen() {
 
         <View style={styles.footer}>
           <Button title="Import places" onPress={() => setShowImport(true)} variant="outline" />
+          <Button
+            title="Import Google reviews"
+            onPress={() => setShowReviews(true)}
+            variant="outline"
+          />
         </View>
 
         <Modal
@@ -335,6 +367,10 @@ export default function MyPlacesScreen() {
             />
             <Button title="Import" onPress={handleImportSubmit} disabled={!importText.trim()} />
           </View>
+        </Modal>
+
+        <Modal visible={showReviews} onClose={() => setShowReviews(false)} title="Google Reviews">
+          <GoogleReviewsImport />
         </Modal>
 
         <Modal visible={showNewList} onClose={() => setShowNewList(false)} title="New List">
@@ -468,6 +504,23 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     listContent: { paddingBottom: spacing.xxl },
     footer: {
       padding: spacing.lg,
+      gap: spacing.sm,
+    },
+    reminderCard: {
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.sm,
+      borderRadius: borderRadius.md,
+      overflow: 'hidden',
+      borderCurve: 'continuous',
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    reminderTitle: { ...typography.body, color: colors.text, fontWeight: '600' as const },
+    reminderBody: { ...typography.caption, color: colors.textSecondary },
+    reminderActions: {
+      flexDirection: 'row' as const,
+      flexWrap: 'wrap' as const,
+      gap: spacing.sm,
     },
     emptyState: {
       alignItems: 'center',

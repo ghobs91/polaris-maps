@@ -171,6 +171,7 @@ export async function createOrUpdateReview(
   text?: string,
   placeContext?: PlaceReviewContext,
   media?: ReviewMedia[],
+  options?: { createdAt?: number },
 ): Promise<Review> {
   assertPoiContributionEnabled();
   if (rating < 1 || rating > 5 || !Number.isInteger(rating)) {
@@ -178,7 +179,9 @@ export async function createOrUpdateReview(
   }
 
   const session = await getBlueskySession();
-  const now = Math.floor(Date.now() / 1000);
+  // Imported (e.g. Google Takeout) reviews keep their original timestamp so
+  // timelines stay honest; freshly written reviews use the current time.
+  const now = options?.createdAt ?? Math.floor(Date.now() / 1000);
   const db = await getDatabase();
   const gun = getGun();
 

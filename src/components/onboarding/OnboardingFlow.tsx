@@ -5,6 +5,8 @@ import { useRouter } from 'expo-router';
 import { Button, GlassView } from '@/components/common';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import { useMapStore } from '@/stores/mapStore';
+import { useReviewImportStore } from '@/stores/reviewImportStore';
+import { TAKEOUT_REQUEST_STEPS } from '@/components/reviews/takeoutCopy';
 import {
   applyConsentChoices,
   getConsentChoices,
@@ -54,7 +56,10 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
     hasCompletedConsent() ? getConsentChoices() : getDefaultConsentChoices(),
   );
   const setViewport = useMapStore((s) => s.setViewport);
+  const snoozeTakeoutReminder = useReviewImportStore((s) => s.snoozeTakeoutReminder);
   const router = useRouter();
+  /** First-run starts at the welcome step; re-consent entries start later. */
+  const isFirstRun = initialStep === 0;
 
   const requestLocation = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -89,6 +94,17 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   }, [onComplete, router]);
+
+  /** Region step leads into the Google-data step on first run; re-consent exits directly. */
+  const afterRegions = useCallback(() => {
+    if (isFirstRun) setStep(3);
+    else completeOnboarding();
+  }, [isFirstRun, completeOnboarding]);
+
+  const remindMeLater = useCallback(() => {
+    snoozeTakeoutReminder();
+    completeOnboarding();
+  }, [snoozeTakeoutReminder, completeOnboarding]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -158,8 +174,30 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
               We detected your location — we'll suggest nearby regions.
             </Text>
           )}
-          <Button title="Browse Regions" onPress={completeOnboarding} />
-          <Button title="Skip for Now" onPress={completeOnboarding} variant="ghost" />
+          <Button title="Browse Regions" onPress={afterRegions} />
+          <Button title="Skip for Now" onPress={afterRegions} variant="ghost" />
+        </GlassView>
+      )}
+
+      {step === 3 && (
+        <GlassView material="regular" style={styles.card}>
+          <Text style={styles.title}>Bring your Google data</Text>
+          <Text style={styles.body}>
+            Already use Google Maps? Bring your saved places and reviews with you. Both imports live
+            in My Places after setup — saved-place files import any time, and Reviews.json needs a
+            Bluesky sign-in (in Settings) since each review is published to your account.
+          </Text>
+          <Text style={styles.body}>To request your export:</Text>
+          {TAKEOUT_REQUEST_STEPS.map((item, i) => (
+            <Text key={i} style={styles.step}>
+              {i + 1}. {item}
+            </Text>
+          ))}
+          <Text style={styles.hint}>
+            Google usually takes a few hours — we can remind you tomorrow to do the imports.
+          </Text>
+          <Button title="Remind me in 24 hours" onPress={remindMeLater} />
+          <Button title="Skip" onPress={completeOnboarding} variant="ghost" />
         </GlassView>
       )}
     </SafeAreaView>
@@ -194,6 +232,11 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.primary,
     textAlign: 'center',
+  },
+  step: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: 'left',
   },
   toggleRow: {
     flexDirection: 'row',
