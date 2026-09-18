@@ -21,12 +21,22 @@ export function gridDegreesForPixels(zoom: number, lat: number, pixels = 44): nu
   return metres / 111_320;
 }
 
+/** Default cap on rendered cluster badges (keeps the marker count bounded). */
+export const MAX_RENDERED_CLUSTERS = 200;
+
 /**
  * Bucket POIs into a lat/lng grid of `gridDegrees`, returning one cluster per
  * occupied cell with its centroid, count, member ids, and dominant subtype.
  * Pure and network-free so it works identically online and offline.
+ *
+ * When more than `maxClusters` cells are occupied, the densest clusters are
+ * kept so the rendered marker count stays bounded.
  */
-export function clusterPoisForDisplay(pois: readonly OsmPoi[], gridDegrees: number): PoiCluster[] {
+export function clusterPoisForDisplay(
+  pois: readonly OsmPoi[],
+  gridDegrees: number,
+  maxClusters: number = MAX_RENDERED_CLUSTERS,
+): PoiCluster[] {
   if (pois.length === 0 || gridDegrees <= 0) return [];
 
   const cells = new Map<string, OsmPoi[]>();
@@ -68,5 +78,8 @@ export function clusterPoisForDisplay(pois: readonly OsmPoi[], gridDegrees: numb
     });
   }
 
+  if (maxClusters > 0 && clusters.length > maxClusters) {
+    return clusters.sort((a, b) => b.count - a.count).slice(0, maxClusters);
+  }
   return clusters;
 }

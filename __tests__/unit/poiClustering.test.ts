@@ -59,4 +59,25 @@ describe('clusterPoisForDisplay', () => {
     const [cluster] = clusterPoisForDisplay(pois, 0.01);
     expect(cluster.poiIds).toHaveLength(3);
   });
+
+  it('caps the rendered cluster count, keeping the densest clusters', () => {
+    // 30 well-separated cells, each with a different member count.
+    const pois: OsmPoi[] = [];
+    let id = 0;
+    for (let cell = 0; cell < 30; cell++) {
+      for (let n = 0; n <= cell; n++) {
+        pois.push(poi(++id, 40 + cell, -74 + cell * 0.001));
+      }
+    }
+    const clusters = clusterPoisForDisplay(pois, 0.0005, 5);
+
+    expect(clusters).toHaveLength(5);
+    // Densest first (count 30..26).
+    expect(clusters.map((c) => c.count)).toEqual([30, 29, 28, 27, 26]);
+  });
+
+  it('does not cap when under the limit', () => {
+    const pois = [poi(1, 40.7, -74.0), poi(2, 40.9, -74.5)];
+    expect(clusterPoisForDisplay(pois, 0.01, 200)).toHaveLength(2);
+  });
 });

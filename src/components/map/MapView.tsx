@@ -60,6 +60,12 @@ Logger.setLogCallback((log) => {
 // Below this the viewport covers too large an area to fetch meaningfully and
 // the pill badges would be too sparse/cluttered to be useful.
 const POI_MIN_ZOOM = 14;
+// Bounded low-zoom tier: between these zooms we still fetch cached Overture
+// places plus a capped online Overture page (no Overpass) so clusters render.
+// Below POI_CLUSTER_MIN_ZOOM the viewport is too large to query at all.
+const POI_CLUSTER_MIN_ZOOM = 11;
+const LOW_ZOOM_CACHED_CAP = 300;
+const LOW_ZOOM_ONLINE_CAP = 200;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
 const POI_ZOOM_REUSE_THRESHOLD = 0.35;
@@ -445,14 +451,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
       }
 
-      if (zoom < POI_MIN_ZOOM) {
-        // Clear POIs when zoomed out (but keep category search results)
-        const { categorySearchResults } = useOsmPoiStore.getState();
-        if (!categorySearchResults) {
-          useOsmPoiStore.getState().setPois([]);
-        }
-        return;
-      }
       if (!rawBounds) return;
       const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
 
@@ -487,6 +485,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const { categorySearchResults } = useOsmPoiStore.getState();
       if (categorySearchResults) {
         useOsmPoiStore.getState().setPois(categorySearchResults);
+        return;
+      }
+
+      // Below POI_CLUSTER_MIN_ZOOM the viewport covers too much ground to query.
+      // Between there and POI_MIN_ZOOM, fall through to the bounded low-zoom
+      // tier (cached Overture + a capped online Overture page, no Overpass).
+      const lowZoom = zoom < POI_MIN_ZOOM;
+      if (lowZoom && zoom < POI_CLUSTER_MIN_ZOOM) {
+        useOsmPoiStore.getState().setPois([]);
         return;
       }
 
@@ -533,7 +540,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             fetchMinLng,
             fetchMaxLat,
             fetchMaxLng,
-            500,
+            lowZoom ? LOW_ZOOM_CACHED_CAP : 500,
           ).catch(() => []);
           if (controller.signal.aborted) {
             if (__DEV__) console.warn('[POI] aborted after phase1');
@@ -560,18 +567,23 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           // At street level (zoom >= 17), always fetch Overture to fill in gaps
           // from OSM — Overture has much richer business/POI data for commercial
           // buildings (strip malls, office parks, etc.) that OSM often misses.
+          // Low zoom skips Overpass/Nominatim entirely and only pulls a capped
+          // Overture page so clusters stay cheap.
           const isStreetLevel = zoom >= 17;
           const skipOnlineOverture = !isStreetLevel && cachedPlaces.length >= 20;
+          const onlineCap = lowZoom ? LOW_ZOOM_ONLINE_CAP : 500;
           const [osmPois, onlineOverture, nominatimPois] = await Promise.all([
-            fetchOsmPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
-              () => [] as OsmPoi[],
-            ),
+            lowZoom
+              ? ([] as OsmPoi[])
+              : fetchOsmPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
+                  () => [] as OsmPoi[],
+                ),
             skipOnlineOverture
               ? ([] as OsmPoi[])
-              : fetchOverturePlaces(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng, 500)
+              : fetchOverturePlaces(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng, onlineCap)
                   .then((places) => places.map(placeToOsmPoi))
                   .catch(() => [] as OsmPoi[]),
-            isStreetLevel
+            isStreetLevel && !lowZoom
               ? fetchNominatimPois(fetchMinLat, fetchMinLng, fetchMaxLat, fetchMaxLng).catch(
                   () => [] as OsmPoi[],
                 )
@@ -595,7 +607,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
           // If all sources returned nothing, try Nominatim with broader queries
           // (only if we didn't already run it above)
-          if (merged.length === 0 && !isStreetLevel) {
+          if (merged.length === 0 && !isStreetLevel && !lowZoom) {
             const fallbackPois = await fetchNominatimPois(
               fetchMinLat,
               fetchMinLng,
