@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Linking,
   ScrollView,
@@ -10,6 +11,7 @@ import {
   Image,
   Share,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +35,13 @@ import { getReviewsForPlace } from '../../services/poi/reviewService';
 import { mergeRatings, type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
 import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
+import { normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
+import {
+  fetchWebsiteActions,
+  type WebsiteAction,
+  type WebsiteActionKind,
+} from '../../services/poi/websiteActionsService';
+import { findStreetViewPanoramas } from '../../services/imagery/streetViewService';
 import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
 import { TripadvisorRatingCard } from './TripadvisorRatingCard';
 import { spacing, typography, borderRadius } from '../../constants/theme';
@@ -45,6 +54,24 @@ import {
 } from '../../services/poi/openChargeMapService';
 // Two sheet snap points: peek (55%) and expanded (85%).
 const POI_SHEET_SNAPS = [0.55, 0.85] as const;
+/** Apples-Maps-style: at most this many action pills visible, rest scroll. */
+const VISIBLE_ACTION_PILLS = 4;
+const STREETVIEW_THUMB_SIZE = 72;
+
+const WEBSITE_ACTION_LABELS: Record<WebsiteActionKind, string> = {
+  order: 'Order',
+  reserve: 'Reserve',
+  menu: 'Menu',
+};
+
+const WEBSITE_ACTION_ICONS: Record<
+  WebsiteActionKind,
+  React.ComponentProps<typeof Ionicons>['name']
+> = {
+  order: 'bag-handle-outline',
+  reserve: 'calendar-outline',
+  menu: 'restaurant-outline',
+};
 
 // ---------------------------------------------------------------------------
 // Tag parsing helpers
@@ -337,14 +364,24 @@ interface ActionPillProps {
   color: string;
   fillColor: string;
   borderColor: string;
+  /** Fixed width (used so exactly four pills fit before horizontal scroll). */
+  width?: number;
 }
 
-function ActionPill({ icon, label, onPress, color, fillColor, borderColor }: ActionPillProps) {
+function ActionPill({
+  icon,
+  label,
+  onPress,
+  color,
+  fillColor,
+  borderColor,
+  width,
+}: ActionPillProps) {
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.75}
-      style={{ flex: 1 }}
+      style={width ? { width } : { flex: 1 }}
       accessibilityLabel={label}
       accessibilityRole="button"
     >
@@ -558,6 +595,48 @@ export function POIInfoCard() {
   const pillSecondaryFill = isDark ? 'rgba(64,156,255,0.22)' : 'rgba(0,122,255,0.12)';
   const pillSecondaryContent = isDark ? colors.primaryLight : primary;
   const pillSecondaryBorder = isDark ? 'rgba(64,156,255,0.35)' : 'rgba(0,122,255,0.25)';
+
+  // Street-level preview thumbnail (Mapillary first, then open Panoramax).
+  const [streetViewThumb, setStreetViewThumb] = useState<string | null>(null);
+  // Detected order / reserve / menu links on the venue website.
+  const [websiteActions, setWebsiteActions] = useState<WebsiteAction[]>([]);
+
+  useEffect(() => {
+    setStreetViewThumb(null);
+    if (!poi || !isOnline) return;
+    let cancelled = false;
+    findStreetViewPanoramas(poi.lat, poi.lng, { limit: 1 })
+      .then((panos) => {
+        if (cancelled) return;
+        const first = panos[0];
+        if (first) setStreetViewThumb(first.thumbnailUrl ?? first.imageUrl);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [poi, isOnline]);
+
+  useEffect(() => {
+    setWebsiteActions([]);
+    const website = parsed?.website ? normalizeWebsiteUrl(parsed.website) : null;
+    if (!website || !isOnline) return;
+    let cancelled = false;
+    fetchWebsiteActions(website)
+      .then((actions) => {
+        if (!cancelled) setWebsiteActions(actions);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [parsed?.website, isOnline]);
+
+  const openActionUrl = useCallback((url: string, label: string) => {
+    Linking.openURL(url).catch(() =>
+      Alert.alert(`${label} unavailable`, `We couldn't open that link for this place.`),
+    );
+  }, []);
 
   const handlePhone = useCallback(() => {
     if (parsed?.phone) Linking.openURL(`tel:${parsed.phone.replace(/\s+/g, '')}`);
@@ -849,6 +928,106 @@ export function POIInfoCard() {
     : [];
   const infoRows = rawInfoRows.filter((row): row is InfoRowData => !!row);
 
+  const { width: screenWidth } = useWindowDimensions();
+  // Size each pill so exactly VISIBLE_ACTION_PILLS fit; the rest scroll.
+  const actionPillWidth = Math.floor(
+    (screenWidth - spacing.md * 2 - spacing.sm * (VISIBLE_ACTION_PILLS - 1)) / VISIBLE_ACTION_PILLS,
+  );
+
+  const actionItems = useMemo(() => {
+    const items: Array<{
+      key: string;
+      icon: React.ComponentProps<typeof Ionicons>['name'];
+      label: string;
+      onPress: () => void;
+      primary?: boolean;
+    }> = [
+      {
+        key: 'directions',
+        icon: 'navigate',
+        label: 'Directions',
+        onPress: handleDirections,
+        primary: true,
+      },
+    ];
+    if (parsed?.phone)
+      items.push({ key: 'call', icon: 'call', label: 'Call', onPress: handlePhone });
+    if (parsed?.website)
+      items.push({ key: 'website', icon: 'globe', label: 'Website', onPress: handleWebsite });
+
+    // Order / reserve / menu detected on the venue website, then the OSM menu.
+    const detected = new Map(websiteActions.map((action) => [action.kind, action] as const));
+    for (const kind of ['order', 'reserve'] as const) {
+      const action = detected.get(kind);
+      if (action) {
+        items.push({
+          key: action.kind,
+          icon: WEBSITE_ACTION_ICONS[kind],
+          label: WEBSITE_ACTION_LABELS[kind],
+          onPress: () => openActionUrl(action.url, WEBSITE_ACTION_LABELS[kind]),
+        });
+      }
+    }
+    const detectedMenu = detected.get('menu');
+    if (detectedMenu) {
+      items.push({
+        key: 'menu',
+        icon: WEBSITE_ACTION_ICONS.menu,
+        label: WEBSITE_ACTION_LABELS.menu,
+        onPress: () => openActionUrl(detectedMenu.url, WEBSITE_ACTION_LABELS.menu),
+      });
+    } else if (parsed?.menuUrl) {
+      items.push({
+        key: 'menu',
+        icon: WEBSITE_ACTION_ICONS.menu,
+        label: 'Menu',
+        onPress: handleMenu,
+      });
+    }
+
+    // When a street-view thumbnail is pinned above, it is the way in.
+    if (!streetViewThumb) {
+      items.push({
+        key: 'streetview',
+        icon: 'camera-outline',
+        label: 'Street View',
+        onPress: handleStreetView,
+      });
+    }
+    items.push({
+      key: 'save',
+      icon: 'bookmark-outline',
+      label: 'Save',
+      onPress: () => setShowSaveSheet(true),
+    });
+    items.push({
+      key: 'reviews',
+      icon: 'star-outline',
+      label:
+        detailsTarget && detailsTarget.reviewCount > 0
+          ? `Reviews (${detailsTarget.reviewCount})`
+          : 'Reviews',
+      onPress: () => {
+        void handleOpenDetails();
+      },
+    });
+    return items;
+  }, [
+    parsed?.phone,
+    parsed?.website,
+    parsed?.menuUrl,
+    websiteActions,
+    streetViewThumb,
+    handleDirections,
+    handlePhone,
+    handleWebsite,
+    handleMenu,
+    handleStreetView,
+    handleOpenDetails,
+    detailsTarget,
+    openActionUrl,
+  ]);
+
   return (
     <BottomSheet
       visible={!!selectedPoi}
@@ -860,11 +1039,29 @@ export function POIInfoCard() {
       surfaceStyle={styles.sheetSurface}
       testID="poi-info-sheet"
     >
-      <GlassView material="regular" style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
+      <View style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
+        {poi && streetViewThumb && (
+          <Pressable
+            style={styles.streetViewThumb}
+            onPress={handleStreetView}
+            accessibilityRole="button"
+            accessibilityLabel="Open street view"
+          >
+            <Image
+              source={{ uri: streetViewThumb }}
+              style={styles.streetViewThumbImage}
+              resizeMode="cover"
+            />
+            <View style={styles.streetViewThumbBadge}>
+              <Ionicons name="binoculars-outline" size={12} color="#fff" />
+            </View>
+          </Pressable>
+        )}
+
         {/* Share/close with the name centered between them (Apple Maps-style).
             The sheet's own handle sits above this row. */}
         {poi && (
-          <View style={styles.actionRow}>
+          <View style={[styles.actionRow, streetViewThumb && styles.actionRowWithThumb]}>
             <TouchableOpacity
               onPress={handleShare}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -965,77 +1162,26 @@ export function POIInfoCard() {
               </View>
             )}
 
-            {/* ── Action pill buttons ────────────────────────────────────── */}
-            <View style={styles.actions}>
-              <ActionPill
-                icon="navigate"
-                label="Directions"
-                onPress={handleDirections}
-                color={pillPrimaryContent}
-                fillColor={pillPrimaryFill}
-                borderColor={pillPrimaryFill}
-              />
-              {parsed.phone && (
+            {/* ── Action pill buttons (max 4 visible; the rest scroll) ───── */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.actionsRow}
+              contentContainerStyle={styles.actionsContent}
+            >
+              {actionItems.map((item) => (
                 <ActionPill
-                  icon="call"
-                  label="Call"
-                  onPress={handlePhone}
-                  color={pillSecondaryContent}
-                  fillColor={pillSecondaryFill}
-                  borderColor={pillSecondaryBorder}
+                  key={item.key}
+                  icon={item.icon}
+                  label={item.label}
+                  width={actionPillWidth}
+                  onPress={item.onPress}
+                  color={item.primary ? pillPrimaryContent : pillSecondaryContent}
+                  fillColor={item.primary ? pillPrimaryFill : pillSecondaryFill}
+                  borderColor={item.primary ? pillPrimaryFill : pillSecondaryBorder}
                 />
-              )}
-              {parsed.website && (
-                <ActionPill
-                  icon="globe"
-                  label="Website"
-                  onPress={handleWebsite}
-                  color={pillSecondaryContent}
-                  fillColor={pillSecondaryFill}
-                  borderColor={pillSecondaryBorder}
-                />
-              )}
-              <ActionPill
-                icon="camera-outline"
-                label="Street View"
-                onPress={handleStreetView}
-                color={pillSecondaryContent}
-                fillColor={pillSecondaryFill}
-                borderColor={pillSecondaryBorder}
-              />
-              {parsed.menuUrl && (
-                <ActionPill
-                  icon="restaurant-outline"
-                  label="Menu"
-                  onPress={handleMenu}
-                  color={pillSecondaryContent}
-                  fillColor={pillSecondaryFill}
-                  borderColor={pillSecondaryBorder}
-                />
-              )}
-              <ActionPill
-                icon="bookmark-outline"
-                label="Save"
-                onPress={() => setShowSaveSheet(true)}
-                color={pillSecondaryContent}
-                fillColor={pillSecondaryFill}
-                borderColor={pillSecondaryBorder}
-              />
-              <ActionPill
-                icon="star-outline"
-                label={
-                  detailsTarget && detailsTarget.reviewCount > 0
-                    ? `Reviews (${detailsTarget.reviewCount})`
-                    : 'Reviews'
-                }
-                onPress={() => {
-                  void handleOpenDetails();
-                }}
-                color={pillSecondaryContent}
-                fillColor={pillSecondaryFill}
-                borderColor={pillSecondaryBorder}
-              />
-            </View>
+              ))}
+            </ScrollView>
 
             {/* ── Website photos (on-device headless browse of POI website) ─── */}
             <WebsitePhotosCarousel websiteUrl={parsed.website} resetKey={poi.id} />
@@ -1209,7 +1355,7 @@ export function POIInfoCard() {
               )}
           </ScrollView>
         )}
-      </GlassView>
+      </View>
     </BottomSheet>
   );
 }
@@ -1236,6 +1382,41 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
+  },
+  // Leaves room for the floating street-view thumbnail above the top-left.
+  actionRowWithThumb: {
+    paddingTop: STREETVIEW_THUMB_SIZE + spacing.sm,
+  },
+  streetViewThumb: {
+    position: 'absolute',
+    top: spacing.sm,
+    left: spacing.md,
+    width: STREETVIEW_THUMB_SIZE,
+    height: STREETVIEW_THUMB_SIZE,
+    borderRadius: 12,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    zIndex: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  streetViewThumbImage: { width: '100%', height: '100%' },
+  streetViewThumbBadge: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   topTitle: {
     flex: 1,
@@ -1276,11 +1457,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 1,
   },
-  actions: {
+  actionsRow: {
+    marginBottom: spacing.md,
+  },
+  actionsContent: {
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
   },
   section: {
     marginHorizontal: spacing.md,
