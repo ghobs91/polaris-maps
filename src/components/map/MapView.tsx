@@ -820,6 +820,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         ref={mapRef}
         style={styles.map}
         mapStyle={resolvedMapStyle}
+        attributionEnabled={false}
         onDidFailLoadingMap={handleMapLoadFail}
         onDidFinishLoadingMap={handleMapLoadSuccess}
         onPress={handlePress}
@@ -1059,12 +1060,6 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             cameraRef.current?.setCamera({
               heading: 0,
               pitch: 0,
-              animationDuration: reduceMotion ? 0 : 300,
-            })
-          }
-          onTogglePitch={() =>
-            cameraRef.current?.setCamera({
-              pitch: camera.pitch > 5 ? 0 : 45,
               animationDuration: reduceMotion ? 0 : 300,
             })
           }

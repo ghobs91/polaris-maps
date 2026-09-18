@@ -12,8 +12,6 @@ interface MapChromeProps {
   lat: number;
   /** Reset heading + pitch to north-up, 2D. */
   onReset: () => void;
-  /** Toggle between 2D (flat) and 3D (tilted) pitch. */
-  onTogglePitch?: () => void;
   /** Bottom offset (safe-area aware), supplied by the host. */
   bottomInset?: number;
 }
@@ -30,12 +28,10 @@ export function MapChrome({
   zoom,
   lat,
   onReset,
-  onTogglePitch,
   bottomInset = 12,
 }: MapChromeProps) {
   const showCompass = compassVisible(bearing, pitch);
   const bar = computeScaleBar(zoom, lat);
-  const is3d = pitch > 5;
 
   return (
     <View style={[styles.container, { bottom: bottomInset }]} pointerEvents="box-none">
@@ -53,17 +49,6 @@ export function MapChrome({
             color="#0A84FF"
             style={{ transform: [{ rotate: `${-bearing}deg` }] }}
           />
-        </Pressable>
-      )}
-      {onTogglePitch && (
-        <Pressable
-          style={styles.chromeBtn}
-          onPress={onTogglePitch}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={is3d ? 'Switch to 2D view' : 'Switch to 3D view'}
-        >
-          <Ionicons name={is3d ? 'map-outline' : 'cube-outline'} size={18} color="#FFFFFF" />
         </Pressable>
       )}
       <View
@@ -93,14 +78,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 20,
-    backgroundColor: 'rgba(28,28,30,0.72)',
-  },
-  chromeBtn: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 17,
     backgroundColor: 'rgba(28,28,30,0.72)',
   },
   scale: {
