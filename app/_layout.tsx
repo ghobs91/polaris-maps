@@ -112,6 +112,9 @@ function RootLayoutInner() {
       headerTitleStyle: { color: colors.text, fontWeight: '600' as const },
       headerShadowVisible: false,
       headerBackVisible: true,
+      // Show only the chevron: the previous route is the "(tabs)" group, whose
+      // title otherwise leaks into every back button as "(tabs)".
+      headerBackButtonDisplayMode: 'minimal' as const,
       contentStyle: { backgroundColor: colors.background },
     }),
     [colors.background, colors.primary, colors.text],
@@ -133,7 +136,7 @@ function RootLayoutInner() {
         <Stack.Screen name="imagery/viewer" options={{ title: 'Street View' }} />
         <Stack.Screen name="imagery/street-view" options={{ title: 'Street View 3D' }} />
         <Stack.Screen name="imagery/capture" options={{ title: 'Capture' }} />
-        <Stack.Screen name="settings/index" options={{ title: '', headerBackTitle: 'Back' }} />
+        <Stack.Screen name="settings/index" options={{ title: '' }} />
         <Stack.Screen name="places/list" options={{ headerShown: false }} />
       </Stack>
     </>
