@@ -39,6 +39,7 @@ import { isFilterEmpty } from '../../services/search/searchFilters';
 import type { SearchStageMeta } from '../../services/search/searchSession';
 import { usePlaceSearch } from '../../hooks/usePlaceSearch';
 import { useGtfsLoadingBanner } from '../../hooks/useGtfsLoadingBanner';
+import { useVoiceSearch } from '../../hooks/useVoiceSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
@@ -1143,6 +1144,23 @@ export function FloatingSearchPanel({
     },
     [setQuery, activeCategory, ensureUserLocation],
   );
+
+  // Voice search — fills the input and runs the search. Falls back to the
+  // keyboard when permission is denied (isAvailable === false hides the mic).
+  const {
+    isListening,
+    isAvailable,
+    toggle: toggleVoiceSearch,
+  } = useVoiceSearch({
+    onTranscript: (transcript) => {
+      setMode('searching');
+      handleQueryChange(transcript);
+    },
+  });
+
+  const handleMicPress = useCallback(() => {
+    void toggleVoiceSearch();
+  }, [toggleVoiceSearch]);
 
   const handleSearchSubmit = useCallback(() => {
     const text = query.trim();
@@ -2687,6 +2705,23 @@ export function FloatingSearchPanel({
               returnKeyType="search"
               clearButtonMode="while-editing"
             />
+            {isAvailable && (mode === 'idle' || mode === 'searching') && (
+              <TouchableOpacity
+                onPress={handleMicPress}
+                hitSlop={10}
+                style={[styles.micBtn, isListening && styles.micBtnActive]}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
+                accessibilityHint="Tap to search by voice"
+              >
+                <Ionicons
+                  name={isListening ? 'mic' : 'mic-outline'}
+                  size={18}
+                  color={isListening ? colors.error : subColor}
+                />
+              </TouchableOpacity>
+            )}
             {mode !== 'idle' ? (
               <TouchableOpacity onPress={dismissSearch} hitSlop={10} style={styles.cancelBtn}>
                 <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
@@ -3352,6 +3387,17 @@ const styles = StyleSheet.create({
   },
   cancelBtn: {
     paddingLeft: spacing.sm,
+  },
+  micBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
+  },
+  micBtnActive: {
+    backgroundColor: 'rgba(239,68,68,0.12)',
   },
   searchLoadingRow: {
     flexDirection: 'row',

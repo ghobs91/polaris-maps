@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { TextInput, View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
+import { useVoiceSearch } from '../../hooks/useVoiceSearch';
 import { GlassView } from '../common/GlassView';
 
 interface SearchBarProps {
@@ -16,7 +16,6 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
   const [query, setQuery] = useState('');
-  const [isListening, setIsListening] = useState(false);
 
   const handleChangeText = useCallback(
     (text: string) => {
@@ -26,56 +25,17 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
     [onSearch],
   );
 
-  // Handle speech recognition results
-  useSpeechRecognitionEvent('result', (event) => {
-    const transcript = event.results[0]?.transcript ?? '';
-    if (transcript) {
+  const { isListening, toggle: toggleVoiceSearch } = useVoiceSearch({
+    onTranscript: (transcript) => {
       setQuery(transcript);
       onSearch(transcript);
-    }
-    setIsListening(false);
+    },
   });
 
-  useSpeechRecognitionEvent('error', () => {
-    setIsListening(false);
-  });
-
-  useSpeechRecognitionEvent('end', () => {
-    setIsListening(false);
-  });
-
-  const toggleVoiceSearch = useCallback(async () => {
-    if (isListening) {
-      ExpoSpeechRecognitionModule.stop();
-      setIsListening(false);
-      return;
-    }
-
-    try {
-      const { granted } = await ExpoSpeechRecognitionModule.getPermissionsAsync();
-      if (!granted) {
-        const { granted: requested } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        if (!requested) return;
-      }
-    } catch {
-      return;
-    }
-
-    setQuery('');
-    setIsListening(true);
-
-    try {
-      ExpoSpeechRecognitionModule.start({
-        lang: 'en-US',
-        interimResults: false,
-        maxAlternatives: 1,
-        addsPunctuation: true,
-        iosTaskHint: 'search',
-      });
-    } catch {
-      setIsListening(false);
-    }
-  }, [isListening]);
+  const handleMicPress = useCallback(() => {
+    if (!isListening) setQuery('');
+    void toggleVoiceSearch();
+  }, [isListening, toggleVoiceSearch]);
 
   return (
     <View style={styles.container}>
@@ -94,7 +54,7 @@ export function SearchBar({ onSearch, placeholder = 'Search for an address...' }
           accessibilityHint="Type an address, place name, or category to search"
         />
         <TouchableOpacity
-          onPress={toggleVoiceSearch}
+          onPress={handleMicPress}
           style={[styles.micButton, isListening && styles.micButtonActive]}
           activeOpacity={0.7}
           accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
