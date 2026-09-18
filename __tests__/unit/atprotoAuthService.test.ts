@@ -16,7 +16,8 @@ jest.mock('expo-secure-store', () => ({
   }),
 }));
 
-// Mock ExpoOAuthClient
+// Mock ExpoOAuthClient. On native, signIn/restore resolve directly to an
+// OAuthSession (there is no { status, session } envelope).
 const mockSignIn = jest.fn();
 const mockRestore = jest.fn();
 
@@ -27,15 +28,20 @@ jest.mock('@atproto/oauth-client-expo', () => ({
   })),
 }));
 
-// Mock BskyAgent
-let mockAgentSession: { did: string; handle: string } | null = null;
+// Mock Agent. The DID comes from the OAuthSession the agent was built with,
+// and the handle is resolved through com.atproto.server.getSession().
+let mockAgentDid: string | null = null;
+let mockHandle = 'alice.bsky.social';
+const mockGetSession = jest.fn(() => Promise.resolve({ data: { handle: mockHandle } }));
 
 jest.mock('@atproto/api', () => ({
-  BskyAgent: jest.fn().mockImplementation(() => ({
-    get session() {
-      return mockAgentSession;
+  Agent: jest.fn().mockImplementation(() => ({
+    get did() {
+      return mockAgentDid;
     },
-    api: {},
+    get com() {
+      return { atproto: { server: { getSession: mockGetSession } } };
+    },
   })),
 }));
 
@@ -55,26 +61,39 @@ beforeEach(() => {
   }
   mockSignIn.mockReset();
   mockRestore.mockReset();
-  mockAgentSession = null;
+  mockGetSession.mockClear();
+  mockAgentDid = null;
+  mockHandle = 'alice.bsky.social';
 });
 
 describe('loginWithBluesky', () => {
   it('stores DID in SecureStore and sets agent on success', async () => {
-    const oauthSession = { did: 'did:plc:test123' };
-    mockSignIn.mockResolvedValue({ status: 'success', session: oauthSession });
-    mockAgentSession = { did: 'did:plc:test123', handle: 'alice.bsky.social' };
+    mockSignIn.mockResolvedValue({ did: 'did:plc:test123' });
+    mockAgentDid = 'did:plc:test123';
 
-    await loginWithBluesky('alice.bsky.social');
+    const session = await loginWithBluesky('alice.bsky.social');
 
     expect(mockSignIn).toHaveBeenCalledWith('alice.bsky.social');
 
     const storedDid = mockSecureStore['atproto_did'];
     expect(storedDid).toBe('did:plc:test123');
+    expect(session).toEqual({ did: 'did:plc:test123', handle: 'alice.bsky.social' });
     expect(getAgent()).not.toBeNull();
   });
 
-  it('throws AuthError when signIn returns non-success status', async () => {
-    mockSignIn.mockResolvedValue({ status: 'cancel' });
+  it('falls back to the input handle when the PDS cannot resolve one', async () => {
+    mockSignIn.mockResolvedValue({ did: 'did:plc:test123' });
+    mockAgentDid = 'did:plc:test123';
+    mockGetSession.mockRejectedValueOnce(new Error('offline'));
+
+    const session = await loginWithBluesky('bob.test');
+
+    expect(session).toEqual({ did: 'did:plc:test123', handle: 'bob.test' });
+  });
+
+  it('throws AuthError when the returned session has no DID', async () => {
+    mockSignIn.mockResolvedValue({});
+    mockAgentDid = null;
 
     await expect(loginWithBluesky('alice.bsky.social')).rejects.toThrow(AuthError);
   });
@@ -103,10 +122,9 @@ describe('getBlueskySession', () => {
     expect(result).toBeNull();
   });
 
-  it('returns session from in-memory agent', async () => {
-    // Simulate login that sets the agent
-    mockSignIn.mockResolvedValue({ status: 'success', session: { did: 'did:plc:test123' } });
-    mockAgentSession = { did: 'did:plc:test123', handle: 'alice.bsky.social' };
+  it('returns session from in-memory agent after login', async () => {
+    mockSignIn.mockResolvedValue({ did: 'did:plc:test123' });
+    mockAgentDid = 'did:plc:test123';
     await loginWithBluesky('alice.bsky.social');
 
     const result = await getBlueskySession();
@@ -122,9 +140,8 @@ describe('restoreBlueskySession', () => {
 
   it('restores session from stored DID and sets agent', async () => {
     mockSecureStore['atproto_did'] = 'did:plc:test123';
-    const oauthSession = { did: 'did:plc:test123' };
-    mockRestore.mockResolvedValue(oauthSession);
-    mockAgentSession = { did: 'did:plc:test123', handle: 'alice.bsky.social' };
+    mockRestore.mockResolvedValue({ did: 'did:plc:test123' });
+    mockAgentDid = 'did:plc:test123';
 
     const result = await restoreBlueskySession();
 

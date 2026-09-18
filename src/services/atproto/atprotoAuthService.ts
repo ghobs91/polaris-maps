@@ -1,4 +1,4 @@
-import { BskyAgent } from '@atproto/api';
+import { Agent } from '@atproto/api';
 import { ExpoOAuthClient } from '@atproto/oauth-client-expo';
 import * as SecureStore from 'expo-secure-store';
 
@@ -13,14 +13,19 @@ const DID_KEY = 'atproto_did';
 //
 // This metadata MUST also be served at the client_id URL so the PDS can
 // verify the client during the OAuth flow:
-//   https://polarismaps.com/.well-known/oauth-client-metadata.json
+//   https://polaris-maps-bsky-auth.netlify.app/.well-known/oauth-client-metadata.json
+//
+// The native redirect URI must use a custom scheme that passes
+// `@atproto/oauth-client-expo`'s CUSTOM_URI_SCHEME_REGEX, which requires the
+// scheme to contain at least one dot. `com.polarismaps.app` is the app's
+// registered URL scheme (see app.json / Info.plist / AndroidManifest.xml).
 // ---------------------------------------------------------------------------
 
 const CLIENT_METADATA = {
   client_id: 'https://polaris-maps-bsky-auth.netlify.app/.well-known/oauth-client-metadata.json',
   client_name: 'Polaris Maps',
   client_uri: 'https://polarismaps.com',
-  redirect_uris: ['polaris-maps:/oauth/callback'],
+  redirect_uris: ['com.polarismaps.app:/oauth/callback'],
   scope: 'atproto transition:generic',
   token_endpoint_auth_method: 'none',
   response_types: ['code'],
@@ -52,7 +57,8 @@ export class AuthError extends Error {
 // ---------------------------------------------------------------------------
 
 let oauthClient: ExpoOAuthClient | null = null;
-let agent: BskyAgent | null = null;
+let agent: Agent | null = null;
+let currentHandle = '';
 
 /** Lazily create (or return) the shared OAuth client instance. */
 function getClient(): ExpoOAuthClient {
@@ -70,8 +76,23 @@ function getClient(): ExpoOAuthClient {
 // ---------------------------------------------------------------------------
 
 /** Return the current Bluesky agent (or null if not logged in). */
-export function getAgent(): BskyAgent | null {
+export function getAgent(): Agent | null {
   return agent;
+}
+
+/**
+ * Resolve the account handle for an authenticated agent.
+ *
+ * `OAuthSession` only exposes the DID, so the authoritative handle comes from
+ * the PDS. Best-effort: an empty string means unknown.
+ */
+async function resolveHandle(oauthAgent: Agent): Promise<string> {
+  try {
+    const res = await oauthAgent.com.atproto.server.getSession();
+    return res.data.handle ?? '';
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -85,31 +106,24 @@ export async function loginWithBluesky(handle: string): Promise<AtprotoSession> 
 
   try {
     console.log('[bsky-oauth] Starting signIn for:', handle);
-    const result = await client.signIn(handle);
-    console.log('[bsky-oauth] signIn result:', JSON.stringify(result));
+    // On native, `ExpoOAuthClient.signIn` resolves directly to an OAuthSession
+    // (it opens the browser and handles the redirect internally).
+    const oauthSession = await client.signIn(handle);
+    const oauthAgent = new Agent(oauthSession);
 
-    if (result.status !== 'success' || !result.session) {
-      throw new AuthError(
-        `Login was cancelled or failed (status: ${(result as { status?: string }).status})`,
-      );
-    }
-
-    agent = new BskyAgent(result.session);
-
-    const { did, handle: resolvedHandle } = agent.session ?? {};
+    const did = oauthAgent.did;
     if (!did) {
       throw new AuthError('No DID in session after login');
     }
 
-    const session: AtprotoSession = {
-      did,
-      handle: resolvedHandle ?? handle,
-    };
+    const resolvedHandle = (await resolveHandle(oauthAgent)) || handle;
+    agent = oauthAgent;
+    currentHandle = resolvedHandle;
 
-    await SecureStore.setItemAsync(DID_KEY, session.did);
-    console.log('[bsky-oauth] Login successful:', session);
+    await SecureStore.setItemAsync(DID_KEY, did);
+    console.log('[bsky-oauth] Login successful:', { did, handle: resolvedHandle });
 
-    return session;
+    return { did, handle: resolvedHandle };
   } catch (err) {
     const message =
       err instanceof AuthError
@@ -125,6 +139,7 @@ export async function loginWithBluesky(handle: string): Promise<AtprotoSession> 
 export async function logoutBluesky(): Promise<void> {
   await SecureStore.deleteItemAsync(DID_KEY);
   agent = null;
+  currentHandle = '';
   oauthClient = null;
 }
 
@@ -135,12 +150,10 @@ export async function logoutBluesky(): Promise<void> {
  * in-memory agent has a live session.
  */
 export async function getBlueskySession(): Promise<AtprotoSession | null> {
-  if (!agent?.session?.did) return null;
+  const did = agent?.did;
+  if (!did) return null;
 
-  return {
-    did: agent.session.did,
-    handle: (agent.session as { handle?: string }).handle ?? '',
-  };
+  return { did, handle: currentHandle };
 }
 
 /**
@@ -156,15 +169,15 @@ export async function restoreBlueskySession(): Promise<AtprotoSession | null> {
   try {
     const client = getClient();
     const oauthSession = await client.restore(did);
+    const oauthAgent = new Agent(oauthSession);
 
-    agent = new BskyAgent(oauthSession);
-
-    const sessionDid = agent.session?.did;
-    const sessionHandle = (agent.session as { handle?: string }).handle ?? '';
+    const resolvedHandle = await resolveHandle(oauthAgent);
+    agent = oauthAgent;
+    currentHandle = resolvedHandle;
 
     return {
-      did: sessionDid ?? did,
-      handle: sessionHandle,
+      did: oauthAgent.did ?? did,
+      handle: resolvedHandle,
     };
   } catch (err) {
     // Session is invalid or expired — clear everything
