@@ -2,6 +2,28 @@ import * as SQLite from 'expo-sqlite';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
+// Column definitions for the `reviews` table, shared by the fresh-install DDL
+// and the foreign-key removal migration.
+//
+// NOTE: `poi_uuid` intentionally has no foreign key. Reviews can target places
+// that are not in the local `places` cache (e.g. an OSM POI opened straight
+// from the map, identified as `osm:node/123`); the local place table is a
+// cache, not the source of truth, so requiring a parent row would reject valid
+// reviews.
+const REVIEWS_TABLE_COLUMNS = `
+  id TEXT PRIMARY KEY,
+  poi_uuid TEXT NOT NULL,
+  author_pubkey TEXT NOT NULL,
+  rating INTEGER NOT NULL,
+  text TEXT,
+  signature TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  source TEXT NOT NULL DEFAULT 'anonymous',
+  atproto_uri TEXT,
+  author_handle TEXT
+`;
+
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (db) return db;
   db = await SQLite.openDatabaseAsync('polaris-maps.db');
@@ -179,17 +201,7 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
         VALUES (NEW.rowid, NEW.name, NEW.brand_name, NEW.category, NEW.address_city);
     END;
 
-    CREATE TABLE IF NOT EXISTS reviews (
-      id TEXT PRIMARY KEY,
-      poi_uuid TEXT NOT NULL,
-      author_pubkey TEXT NOT NULL,
-      rating INTEGER NOT NULL,
-      text TEXT,
-      signature TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      FOREIGN KEY (poi_uuid) REFERENCES places(uuid)
-    );
+    CREATE TABLE IF NOT EXISTS reviews (${REVIEWS_TABLE_COLUMNS});
 
     CREATE TABLE IF NOT EXISTS review_media (
       review_id TEXT NOT NULL,
@@ -299,7 +311,51 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     }
   }
 
+  await migrateReviewsForeignKey(database);
   await migrateSearchIndexes(database);
+}
+
+/**
+ * Drop the legacy `reviews.poi_uuid → places(uuid)` foreign key.
+ *
+ * Older databases created `reviews` with that constraint, which rejects
+ * reviews for POIs that are not in the local `places` cache (e.g. an OSM POI
+ * identified as `osm:node/123`). SQLite cannot drop a constraint in place, so
+ * the table is rebuilt. `legacy_alter_table` is enabled during the rebuild so
+ * the rename does not rewrite the `review_media`/`review_helpful` foreign keys
+ * to point at the temporary table.
+ */
+async function migrateReviewsForeignKey(database: SQLite.SQLiteDatabase): Promise<void> {
+  const row = await database.getFirstAsync<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'reviews'",
+  );
+  if (!row?.sql || !row.sql.includes('REFERENCES places')) return;
+
+  await database.execAsync('PRAGMA foreign_keys = OFF');
+  await database.execAsync('PRAGMA legacy_alter_table = ON');
+  try {
+    await database.execAsync(`
+      BEGIN;
+      ALTER TABLE reviews RENAME TO reviews_fk_legacy;
+      CREATE TABLE reviews (${REVIEWS_TABLE_COLUMNS});
+      INSERT INTO reviews (
+        id, poi_uuid, author_pubkey, rating, text, signature, created_at, updated_at,
+        source, atproto_uri, author_handle
+      )
+      SELECT
+        id, poi_uuid, author_pubkey, rating, text, signature, created_at, updated_at,
+        source, atproto_uri, author_handle
+      FROM reviews_fk_legacy;
+      DROP TABLE reviews_fk_legacy;
+      COMMIT;
+    `);
+  } catch (err) {
+    await database.execAsync('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    await database.execAsync('PRAGMA legacy_alter_table = OFF').catch(() => {});
+    await database.execAsync('PRAGMA foreign_keys = ON').catch(() => {});
+  }
 }
 
 const PLACES_FTS_TRIGGERS = `
