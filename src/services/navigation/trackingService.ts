@@ -9,6 +9,8 @@ import {
   angleDifferenceDeg,
   isOffRoute,
   OFF_ROUTE_THRESHOLD_METERS,
+  OFF_ROUTE_CONSECUTIVE_COUNT,
+  OFF_ROUTE_MAX_ACCURACY_METERS,
 } from '../../utils/routeSnap';
 import { reroute } from '../routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -159,9 +161,15 @@ export function getRouteCoords(): ReadonlyArray<[number, number]> {
   return coords;
 }
 
-/** True while recent fixes are off-route (puck shows live GPS, DR frozen). */
+/**
+ * True once a deviation is CONFIRMED (the same consecutive-reading threshold
+ * that triggers a reroute), at which point the puck shows live GPS and DR is
+ * frozen. A single noisy off-route reading does not qualify: switching the
+ * puck to raw GPS on one bad fix made it visibly leave the road while the
+ * user was still on route.
+ */
 export function isOffRouteActive(): boolean {
-  return offRouteCount >= 1;
+  return offRouteCount >= OFF_ROUTE_CONSECUTIVE_COUNT;
 }
 
 /**
@@ -275,8 +283,17 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   lastGpsRemaining = gpsRemainingNow;
 
   // --- Off-route detection & rerouting ---
+  // Only count a reading as deviation evidence when the GPS fix is accurate
+  // enough to trust: a fix whose own error circle is wide cannot prove the
+  // user left the route. Ignoring such fixes keeps a noisy low-accuracy lock
+  // from dragging the puck off the road.
+  const rawAccuracy = location.coords.accuracy;
+  const accuracyTrustworthy =
+    rawAccuracy == null ||
+    !Number.isFinite(rawAccuracy) ||
+    rawAccuracy <= OFF_ROUTE_MAX_ACCURACY_METERS;
   if (distFromRoute > OFF_ROUTE_THRESHOLD_METERS) {
-    offRouteCount++;
+    if (accuracyTrustworthy) offRouteCount++;
   } else {
     offRouteCount = 0;
   }
@@ -420,14 +437,17 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   // way. In that case the GPS-snapped position legitimately moves backwards
   // along the route, and holding the DR projection ahead is exactly what
   // makes the puck glide forward while the car reverses relative to it.
-  // While truly off-route, anchor to LIVE GPS (not the snapped point) and
-  // freeze dead-reckoning advance: projecting forward along the stale route
-  // is what made the puck glide down the original road while the car drove
-  // away, feeding the rerouter a stale origin on every retry.
+  // Once a deviation is CONFIRMED (same consecutive-reading threshold as the
+  // reroute), anchor to LIVE GPS (not the snapped point) and freeze
+  // dead-reckoning advance: projecting forward along the stale route is what
+  // made the puck glide down the original road while the car drove away,
+  // feeding the rerouter a stale origin on every retry. A single noisy
+  // off-route reading must NOT do this — it yanked the puck off the road
+  // while the user was still on route.
   const suspectedWrongWay = wrongWayCount > 0;
-  const isCurrentlyOffRoute = distFromRoute > OFF_ROUTE_THRESHOLD_METERS;
+  const offRouteConfirmed = isOffRoute(distFromRoute, offRouteCount);
   const prevAnchor = drAnchor;
-  if (isCurrentlyOffRoute) {
+  if (offRouteConfirmed) {
     drAnchor = { pos: gpsPos, segIdx: segmentIndex, speedMps, time: now };
   } else if (prevAnchor && prevAnchor.speedMps > 0.3 && !suspectedWrongWay) {
     const elapsed = Math.min((now - prevAnchor.time) / 1000, 2.0);

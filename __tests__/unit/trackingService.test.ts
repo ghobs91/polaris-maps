@@ -31,6 +31,7 @@ import {
   getRouteCoords,
   advanceAlongRoute,
   distToIndex,
+  isOffRouteActive,
 } from '../../src/services/navigation/trackingService';
 import { haversineMeters } from '../../src/utils/routeSnap';
 
@@ -114,6 +115,7 @@ type FixOverrides = Partial<{
   lng: number;
   speed: number | null;
   heading: number | null;
+  accuracy: number | null;
 }>;
 
 function makeFix({
@@ -121,13 +123,14 @@ function makeFix({
   lng,
   speed = 10,
   heading = 0,
+  accuracy = 5,
 }: FixOverrides): Parameters<typeof processFix>[0] {
   return {
     coords: {
       latitude: lat,
       longitude: lng,
       altitude: null,
-      accuracy: 5,
+      accuracy,
       altitudeAccuracy: null,
       heading,
       speed,
@@ -269,6 +272,54 @@ describe('trackingService — off-route detection & rerouting', () => {
     processFix(farOffRouteFix());
     processFix(farOffRouteFix());
     expect(mockReroute).not.toHaveBeenCalled();
+  });
+
+  it('keeps the puck on the route and DR live for a single noisy off-route fix', () => {
+    startNav(makeRoute());
+    startTracking(makeRoute());
+
+    // Establish an anchor on the route.
+    processFix(makeFix({ lat: A[1] + 0.0005, lng: A[0], speed: 10 }));
+    const before = getAnchor()!;
+    expect(before.pos[0]).toBeCloseTo(A[0], 4);
+
+    // One GPS glitch well east of the route must not yank the marker to raw
+    // GPS (or freeze DR): that made the puck leave the road while on route.
+    processFix(farOffRouteFix());
+
+    expect(isOffRouteActive()).toBe(false);
+    expect(getAnchor()!.pos[0]).toBeCloseTo(A[0], 4);
+  });
+
+  it('anchors to live GPS and flags off-route once the deviation is confirmed', () => {
+    startNav(makeRoute());
+    startTracking(makeRoute());
+
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    expect(isOffRouteActive()).toBe(false);
+
+    processFix(farOffRouteFix());
+
+    expect(isOffRouteActive()).toBe(true);
+    expect(getAnchor()!.pos[0]).toBeCloseTo(A[0] + 0.01, 4);
+  });
+
+  it('ignores off-route fixes whose own GPS accuracy is worse than the threshold', () => {
+    startNav(makeRoute());
+    startTracking(makeRoute());
+    mockReroute.mockResolvedValue(makeRoute());
+
+    // 80 m accuracy is wider than the 50 m deviation threshold, so a fix
+    // reported "off route" proves nothing — do not move the puck or reroute.
+    const blurryOffRoute = () => makeFix({ lat: A[1], lng: A[0] + 0.01, speed: 10, accuracy: 80 });
+    processFix(blurryOffRoute());
+    processFix(blurryOffRoute());
+    processFix(blurryOffRoute());
+
+    expect(isOffRouteActive()).toBe(false);
+    expect(mockReroute).not.toHaveBeenCalled();
+    expect(getAnchor()!.pos[0]).toBeCloseTo(A[0], 4);
   });
 
   it('triggers reroute on the third consecutive off-route reading and replaces the route', async () => {

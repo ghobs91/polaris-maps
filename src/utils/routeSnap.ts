@@ -71,6 +71,13 @@ export function snapToRoute(
 export const OFF_ROUTE_THRESHOLD_METERS = 50;
 
 /**
+ * Worst GPS accuracy (meters) still trusted as off-route evidence. A position
+ * whose own error circle is bigger than this cannot prove the user left the
+ * route, so such fixes are ignored for deviation counting.
+ */
+export const OFF_ROUTE_MAX_ACCURACY_METERS = 30;
+
+/**
  * Number of consecutive off-route GPS readings required before triggering a reroute.
  * Prevents false positives from GPS drift or brief signal loss.
  */
