@@ -19,7 +19,6 @@ const ALLOWLIST = [
   'src/components/imagery/ImageryViewer.tsx',
   'src/components/map/LocationActionPanel.tsx',
   'src/components/map/MapView.tsx',
-  'src/components/onboarding/OnboardingFlow.tsx',
   'src/components/poi/POICard.tsx',
   'src/components/poi/POIList.tsx',
   'src/components/poi/RatingWidget.tsx',

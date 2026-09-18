@@ -1,9 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, Switch, Pressable } from 'react-native';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { Button, GlassView } from '@/components/common';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { spacing, typography, borderRadius } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 import { useMapStore } from '@/stores/mapStore';
 import { useReviewImportStore } from '@/stores/reviewImportStore';
 import { TAKEOUT_REQUEST_STEPS } from '@/components/reviews/takeoutCopy';
@@ -33,6 +34,8 @@ interface ConsentToggleProps {
 }
 
 function ConsentToggle({ label, description, value, onToggle }: ConsentToggleProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Pressable style={styles.toggleRow} onPress={() => onToggle(!value)}>
       <View style={styles.toggleText}>
@@ -49,6 +52,8 @@ function ConsentToggle({ label, description, value, onToggle }: ConsentTogglePro
 }
 
 export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [step, setStep] = useState(initialStep);
   const [locationGranted, setLocationGranted] = useState(false);
   // Pre-fill from saved choices on re-consent; first-run starts privacy-preserving (all off).
@@ -204,60 +209,61 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  card: {
-    padding: spacing.xl,
-    gap: spacing.md,
-    borderRadius: borderRadius.xl,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-  },
-  title: {
-    ...typography.h1,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  body: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  hint: {
-    ...typography.caption,
-    color: colors.primary,
-    textAlign: 'center',
-  },
-  step: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'left',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  toggleText: {
-    flex: 1,
-    marginRight: spacing.md,
-  },
-  toggleLabel: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '600',
-  },
-  toggleDesc: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-});
+const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      padding: spacing.lg,
+    },
+    card: {
+      padding: spacing.xl,
+      gap: spacing.md,
+      borderRadius: borderRadius.xl,
+      borderCurve: 'continuous',
+      overflow: 'hidden',
+    },
+    title: {
+      ...typography.h1,
+      color: colors.text,
+      textAlign: 'center',
+    },
+    body: {
+      ...typography.body,
+      color: colors.textSecondary,
+      textAlign: 'center',
+    },
+    hint: {
+      ...typography.caption,
+      color: colors.primary,
+      textAlign: 'center',
+    },
+    step: {
+      ...typography.body,
+      color: colors.textSecondary,
+      textAlign: 'left',
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.sm,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    toggleText: {
+      flex: 1,
+      marginRight: spacing.md,
+    },
+    toggleLabel: {
+      ...typography.body,
+      color: colors.text,
+      fontWeight: '600',
+    },
+    toggleDesc: {
+      ...typography.caption,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+  });
