@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { shadow } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 import { formatDistance } from '../../utils/units';
 import type {
   ValhallaManeuver,
@@ -74,7 +75,9 @@ export function NextTurnBanner({
   const exitSpoken = maneuver.exitNumber ? `Exit ${maneuver.exitNumber}` : exitName;
 
   return (
-    <View
+    <GlassView
+      material="regular"
+      colorScheme="dark"
       style={styles.container}
       accessibilityRole="summary"
       accessibilityLabel={`Next turn: ${exitSpoken ? `${exitSpoken}, ` : ''}${instruction}, in ${formatDistance(displayDistance)}`}
@@ -160,7 +163,7 @@ export function NextTurnBanner({
 
       {/* Lane guidance strip — which lane to be in for the exit/merge */}
       {laneGuidance && <LaneGuidance laneGuidance={laneGuidance} />}
-    </View>
+    </GlassView>
   );
 }
 
@@ -168,7 +171,7 @@ const NAV_BG = '#1a2f3e';
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: NAV_BG,
+    backgroundColor: 'rgba(26,47,62,0.72)',
     borderRadius: 16,
     overflow: 'hidden',
     ...shadow.lg,

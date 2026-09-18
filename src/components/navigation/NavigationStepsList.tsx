@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { GlassView } from '../common/GlassView';
 import type { ValhallaManeuver, ValhallaRoute } from '../../models/route';
 import { formatDistance } from '../../utils/units';
 
@@ -26,7 +27,7 @@ export function NavigationStepsList({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.sheet}>
+        <GlassView material="regular" colorScheme="dark" style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Steps</Text>
             <Pressable
@@ -73,7 +74,7 @@ export function NavigationStepsList({
               }}
             />
           )}
-        </View>
+        </GlassView>
       </View>
     </Modal>
   );
@@ -86,7 +87,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: 'rgba(28,28,30,0.98)',
+    backgroundColor: 'rgba(28,28,45,0.72)',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 20,

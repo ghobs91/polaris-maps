@@ -14,6 +14,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { GlassView } from '../common/GlassView';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { usePlaceSearch } from '../../hooks/usePlaceSearch';
@@ -394,6 +395,7 @@ export function AddDestinationPanel({
       <TouchableOpacity style={styles.backdrop} onPress={handleClose} activeOpacity={1} />
       <View style={[styles.keyboardAvoid, keyboardHeight > 0 && { paddingBottom: keyboardHeight }]}>
         <Animated.View style={[styles.panel, { transform: [{ translateY }] }]}>
+          <GlassView material="regular" colorScheme="dark" style={styles.panelGlass} />
           {/* Drag handle */}
           <View style={styles.dragHandle} />
 
@@ -504,13 +506,22 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   panel: {
-    backgroundColor: 'rgba(28,28,30,0.96)',
+    backgroundColor: 'transparent',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    overflow: 'hidden',
     paddingHorizontal: spacing.md,
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : spacing.lg,
     maxHeight: '75%',
+  },
+  panelGlass: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(28,28,45,0.72)',
   },
   dragHandle: {
     width: 36,

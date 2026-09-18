@@ -17,6 +17,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GlassView } from './GlassView';
 import { sheet as sheetTokens } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { resolveSheetSnap, snapTopsForFractions } from '../../utils/sheetSnap';
@@ -193,15 +194,11 @@ export function BottomSheet({
         </Animated.View>
       ) : null}
       <Animated.View
-        style={[
-          styles.sheet,
-          { backgroundColor: colors.surface, paddingBottom: insets.bottom },
-          surfaceStyle,
-          sheetStyle,
-        ]}
+        style={[styles.sheet, { paddingBottom: insets.bottom }, surfaceStyle, sheetStyle]}
         pointerEvents={visible ? 'auto' : 'none'}
         testID={testID}
       >
+        <GlassView material="regular" style={styles.glassFill} />
         {showHandle ? (
           <GestureDetector gesture={handleGesture}>
             <View
@@ -237,6 +234,13 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
+  },
+  glassFill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   handleArea: {
     alignItems: 'center',

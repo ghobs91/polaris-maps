@@ -9,6 +9,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { EtaDisplay } from './EtaDisplay';
+import { GlassView } from '../common/GlassView';
 import type { NextStop, UpcomingStop } from '../../utils/navigationStops';
 import { spacing, borderRadius, sheet as sheetTokens } from '../../constants/theme';
 
@@ -180,7 +181,7 @@ export function NavigationHud({
   };
 
   return (
-    <View style={styles.card}>
+    <GlassView material="regular" colorScheme="dark" style={styles.card}>
       {/* Grabber — drag up/down or double-tap to toggle the stops sheet */}
       <GestureDetector gesture={expandGesture}>
         <View
@@ -227,13 +228,13 @@ export function NavigationHud({
         nextStop={nextStop}
         onSkipStop={onSkipStop}
       />
-    </View>
+    </GlassView>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: 'rgba(17,17,17,0.96)',
+    backgroundColor: 'rgba(28,28,45,0.72)',
     borderRadius: borderRadius.xxl,
     overflow: 'hidden',
     paddingTop: 6,
