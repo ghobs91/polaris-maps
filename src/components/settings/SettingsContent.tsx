@@ -129,7 +129,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
 
       <SettingsGroup
         header="Accounts"
-        footer="Sign in with OpenStreetMap to edit places and with Bluesky to leave reviews."
+        footer="OpenStreetMap signs you in to edit map data. Bluesky is used only to leave place reviews."
       >
         <View style={styles.accountCard}>
           {osmAccessToken && osmUser ? (
@@ -143,7 +143,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                     {osmUser.displayName}
                   </Text>
                   <Text style={styles.accountCaption} numberOfLines={1}>
-                    OpenStreetMap
+                    Signed in to edit map data
                   </Text>
                 </View>
               </View>
@@ -158,7 +158,16 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
               <SettingsRow title="Sign Out" onPress={osmLogout} />
             </>
           ) : (
-            <View style={styles.accountSigninRow}>
+            <View style={styles.signinBlock}>
+              <View style={styles.accountRow}>
+                <View style={[styles.accountIcon, { backgroundColor: '#7EBC6F' }]}>
+                  <MaterialCommunityIcons name="map" size={16} color="#FFFFFF" />
+                </View>
+                <View style={styles.accountTextCol}>
+                  <Text style={styles.accountName}>OpenStreetMap</Text>
+                  <Text style={styles.accountCaption}>Edit map data</Text>
+                </View>
+              </View>
               <Button
                 title={osmIsLoggingIn ? 'Signing in…' : 'Sign in with OpenStreetMap'}
                 variant="primary"
@@ -182,21 +191,21 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                     @{bskySession.handle}
                   </Text>
                   <Text style={styles.accountCaption} numberOfLines={1}>
-                    Signed in for reviews
+                    Signed in to leave reviews
                   </Text>
                 </View>
               </View>
               <SettingsRow title="Disconnect" onPress={bskyLogout} destructive />
             </>
           ) : (
-            <View style={styles.bskySigninBlock}>
+            <View style={styles.signinBlock}>
               <View style={styles.accountRow}>
                 <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
                   <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
                 </View>
                 <View style={styles.accountTextCol}>
                   <Text style={styles.accountName}>Bluesky</Text>
-                  <Text style={styles.accountCaption}>Leave reviews on places</Text>
+                  <Text style={styles.accountCaption}>Leave place reviews</Text>
                 </View>
               </View>
               {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
@@ -371,9 +380,8 @@ const createStyles = (isDark: boolean) => {
     accountTextCol: { flex: 1 },
     accountName: { ...typography.body, fontSize: 16, fontWeight: '500', color: primaryTextColor },
     accountCaption: { ...typography.caption, fontSize: 12, color: captionColor, marginTop: 1 },
-    accountSigninRow: { paddingVertical: spacing.sm },
     signinBtn: { alignSelf: 'stretch' },
-    bskySigninBlock: { paddingVertical: spacing.sm, gap: spacing.sm },
+    signinBlock: { paddingVertical: spacing.sm, gap: spacing.sm },
     errorText: { ...typography.caption, color: '#FF453A' },
   });
 };
