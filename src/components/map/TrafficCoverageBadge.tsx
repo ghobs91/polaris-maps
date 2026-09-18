@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useTrafficStore } from '../../stores/trafficStore';
+import { MAX_FONT_SCALE_CHROME } from '../../constants/a11y';
 import {
   resolveTrafficCoverage,
   TRAFFIC_COVERAGE_LABELS,
@@ -35,7 +36,9 @@ export function TrafficCoverageBadge() {
       accessibilityLabel={`Traffic coverage: ${label}`}
     >
       <View style={[styles.dot, { backgroundColor: COVERAGE_COLORS[coverage] }]} />
-      <Text style={styles.text}>{label}</Text>
+      <Text style={styles.text} maxFontSizeMultiplier={MAX_FONT_SCALE_CHROME}>
+        {label}
+      </Text>
     </View>
   );
 }

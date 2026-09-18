@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { compassVisible, computeScaleBar } from '../../utils/mapChrome';
 import { formatDistance } from '../../utils/units';
+import { MAX_FONT_SCALE_CHROME } from '../../constants/a11y';
 
 interface MapChromeProps {
   bearing: number;
@@ -70,7 +71,9 @@ export function MapChrome({
         accessibilityRole="image"
         accessibilityLabel={`Map scale ${formatDistance(bar.metres)}`}
       >
-        <Text style={styles.scaleText}>{formatDistance(bar.metres)}</Text>
+        <Text style={styles.scaleText} maxFontSizeMultiplier={MAX_FONT_SCALE_CHROME}>
+          {formatDistance(bar.metres)}
+        </Text>
         <View style={[styles.scaleLine, { width: bar.widthPx }]} />
       </View>
     </View>

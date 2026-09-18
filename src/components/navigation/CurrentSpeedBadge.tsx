@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { mphToKmh } from '../../utils/units';
+import { MAX_FONT_SCALE_DENSE } from '../../constants/a11y';
 
 interface CurrentSpeedBadgeProps {
   /** Current speed in mph, or null when unavailable. */
@@ -25,8 +26,18 @@ export function CurrentSpeedBadge({ speedMph, over }: CurrentSpeedBadgeProps) {
       accessibilityRole="text"
       accessibilityLabel={`Current speed ${value} ${unit}${over ? ', over the speed limit' : ''}`}
     >
-      <Text style={[styles.value, over && styles.valueOver]}>{value}</Text>
-      <Text style={[styles.unit, over && styles.unitOver]}>{unit}</Text>
+      <Text
+        style={[styles.value, over && styles.valueOver]}
+        maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}
+      >
+        {value}
+      </Text>
+      <Text
+        style={[styles.unit, over && styles.unitOver]}
+        maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}
+      >
+        {unit}
+      </Text>
     </View>
   );
 }
@@ -34,7 +45,8 @@ export function CurrentSpeedBadge({ speedMph, over }: CurrentSpeedBadgeProps) {
 const styles = StyleSheet.create({
   badge: {
     width: 56,
-    height: 68,
+    minHeight: 68,
+    paddingVertical: 4,
     borderRadius: 12,
     backgroundColor: 'rgba(28,28,30,0.92)',
     alignItems: 'center',

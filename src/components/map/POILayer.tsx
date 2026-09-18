@@ -17,6 +17,7 @@ import {
   type PoiCluster,
 } from '../../utils/poiClustering';
 import { getPoiCategory } from '../../utils/poiCategories';
+import { MAX_FONT_SCALE_DENSE } from '../../constants/a11y';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 
 /**
@@ -50,6 +51,7 @@ const PoiBadge = memo(function PoiBadge({ poi, showLabel, onPress }: PoiBadgePro
             style={[styles.label, { color }, isDark ? styles.labelDark : styles.labelLight]}
             numberOfLines={1}
             ellipsizeMode="tail"
+            maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}
           >
             {poi.name}
           </Text>
@@ -87,7 +89,11 @@ const ClusterBadge = memo(function ClusterBadge({
           { width: size, height: size, borderRadius: size / 2, backgroundColor: color },
         ]}
       >
-        <Text style={styles.clusterText} numberOfLines={1}>
+        <Text
+          style={styles.clusterText}
+          numberOfLines={1}
+          maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}
+        >
           {cluster.count}
         </Text>
       </View>
