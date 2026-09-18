@@ -592,6 +592,15 @@ export function POIInfoCard() {
       );
   }, [parsed?.facebook]);
 
+  const handleStreetView = useCallback(() => {
+    if (!poi) return;
+    setSelectedPoi(null);
+    router.push({
+      pathname: '/imagery/street-view',
+      params: { lat: String(poi.lat), lng: String(poi.lng), name: poi.name },
+    });
+  }, [poi, router, setSelectedPoi]);
+
   const handleDirections = useCallback(() => {
     if (!poi) return;
     setPendingDirectionsTarget({
@@ -986,6 +995,14 @@ export function POIInfoCard() {
                   borderColor={pillSecondaryBorder}
                 />
               )}
+              <ActionPill
+                icon="camera-outline"
+                label="Street View"
+                onPress={handleStreetView}
+                color={pillSecondaryContent}
+                fillColor={pillSecondaryFill}
+                borderColor={pillSecondaryBorder}
+              />
               {parsed.menuUrl && (
                 <ActionPill
                   icon="restaurant-outline"

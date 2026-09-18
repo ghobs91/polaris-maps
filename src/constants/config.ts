@@ -73,6 +73,20 @@ export const OTP_BASE_URL: string = process.env.EXPO_PUBLIC_OTP_BASE_URL ?? '';
 export const TRANSITOUS_BASE_URL: string =
   process.env.EXPO_PUBLIC_TRANSITOUS_BASE_URL ?? 'https://api.transitous.org/api';
 
+// ── Street-level imagery ────────────────────────────────────────────
+
+/**
+ * Mapillary client token — set EXPO_PUBLIC_MAPILLARY_TOKEN in .env.
+ * Street-level imagery is an explicit exception to the no-corporate-cloud
+ * rule: it is opt-in (feature hidden without a token), online-only, and
+ * never used as a primary or cached source. Panoramax (open, no token) fills
+ * the gaps where Mapillary has no coverage.
+ */
+export const MAPILLARY_TOKEN: string = process.env.EXPO_PUBLIC_MAPILLARY_TOKEN ?? '';
+
+/** Panoramax STAC search endpoint (open street-level imagery, CC-BY-SA). */
+export const PANORAMAX_SEARCH_URL = 'https://api.panoramax.xyz/api/search';
+
 /** OTP GraphQL endpoint path. */
 export const OTP_GRAPHQL_PATH = '/otp/gtfs/v1';
 

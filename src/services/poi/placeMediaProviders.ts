@@ -122,6 +122,12 @@ export function createPanoramaxProvider(fetchImpl: FetchLike = fetch): PlaceMedi
 }
 
 /**
+ * Mapillary: not a PLACE-PHOTO provider.
+ *
+ * Its imagery is street-level (often 360°), so it is surfaced through the
+ * dedicated Street View 3D viewer (`src/services/imagery/streetViewService.ts`)
+ * instead of the place-photo carousel. It stays token-gated and online-only.
+ *
  * Default supplementary providers, tried in order after the website scraper.
  *
  * Panoramax is intentionally NOT included: its assets are equirectangular
