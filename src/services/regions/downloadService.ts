@@ -9,6 +9,7 @@ import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
 import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
 import { importRegionOverturePlaces } from './overtureImporter';
+import { importRegionPlaceDetails } from './placeDetailImporter';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -167,6 +168,12 @@ export async function downloadRegion(
 
     // Download and import geocoding bundle if the region has a geocoding URL.
     await downloadAndImportGeocodingBundle(region, destDir, onProgress, signal).catch(() => {});
+
+    checkAborted(signal);
+
+    // Seed the place-detail cache from an optional region-pack payload. Region
+    // seeds use sourceVersion 0 so they never clobber fresher live snapshots.
+    await importRegionPlaceDetails(destDir).catch(() => {});
 
     checkAborted(signal);
 
