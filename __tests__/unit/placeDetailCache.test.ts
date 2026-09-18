@@ -8,6 +8,7 @@ import {
   evictPlaceDetails,
   getPlaceDetail,
   putPlaceDetail,
+  seedPlaceDetails,
   setPlaceDetailCacheBackend,
   type PlaceDetailCacheBackend,
   type PlaceDetailRow,
@@ -119,6 +120,42 @@ describe('place detail cache', () => {
     expect(stored).toBe(false);
     const found = await getPlaceDetail({ placeId: 'p1', lat: 40.7, lng: -74 });
     expect(found?.snapshot).toBe('live');
+  });
+
+  it('seeds from a region pack without overwriting a fresher live snapshot', async () => {
+    await putPlaceDetail(row({ sourceVersion: 1, snapshot: 'live' }));
+
+    const seeded = await seedPlaceDetails([
+      {
+        canonicalId: 'place:p1',
+        placeId: 'p1',
+        name: 'Cafe',
+        lat: 40.7,
+        lng: -74,
+        snapshot: 'region-pack',
+      },
+    ]);
+
+    expect(seeded).toBe(0);
+    const found = await getPlaceDetail({ placeId: 'p1', lat: 40.7, lng: -74 });
+    expect(found?.snapshot).toBe('live');
+  });
+
+  it('seeds an empty cache from a region pack', async () => {
+    const seeded = await seedPlaceDetails([
+      {
+        canonicalId: 'place:p1',
+        placeId: 'p1',
+        name: 'Cafe',
+        lat: 40.7,
+        lng: -74,
+        snapshot: 'region-pack',
+      },
+    ]);
+
+    expect(seeded).toBe(1);
+    const found = await getPlaceDetail({ placeId: 'p1', lat: 40.7, lng: -74 });
+    expect(found?.snapshot).toBe('region-pack');
   });
 
   it('evicts least-recently-accessed snapshots beyond the bound', async () => {

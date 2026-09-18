@@ -220,6 +220,47 @@ export async function putPlaceDetail(
   return true;
 }
 
+/** A place-detail snapshot embedded in a region pack. */
+export interface RegionPlaceDetailSeed {
+  canonicalId: string;
+  placeId?: string | null;
+  osmId?: string | null;
+  name: string;
+  lat: number;
+  lng: number;
+  snapshot: string;
+  media?: string | null;
+  reviews?: string | null;
+  /** Pack data version. Defaults to 0 so live data (>=1) always wins. */
+  sourceVersion?: number;
+  cachedAt?: number;
+}
+
+/**
+ * Seed the cache from a region pack. Region seeds default to sourceVersion 0,
+ * so `putPlaceDetail` never lets them overwrite a fresher live snapshot.
+ */
+export async function seedPlaceDetails(entries: readonly RegionPlaceDetailSeed[]): Promise<number> {
+  let seeded = 0;
+  for (const entry of entries) {
+    const stored = await putPlaceDetail({
+      canonicalId: entry.canonicalId,
+      placeId: entry.placeId ?? null,
+      osmId: entry.osmId ?? null,
+      name: entry.name,
+      lat: entry.lat,
+      lng: entry.lng,
+      snapshot: entry.snapshot,
+      media: entry.media ?? null,
+      reviews: entry.reviews ?? null,
+      sourceVersion: entry.sourceVersion ?? 0,
+      cachedAt: entry.cachedAt ?? 0,
+    });
+    if (stored) seeded++;
+  }
+  return seeded;
+}
+
 /** Evict least-recently-accessed snapshots beyond the LRU bound. */
 export async function evictPlaceDetails(
   maxEntries: number = DEFAULT_PLACE_DETAIL_CACHE_MAX,
