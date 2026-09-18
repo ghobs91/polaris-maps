@@ -2358,7 +2358,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - RNGestureHandler (3.1.0):
+  - RNGestureHandler (2.32.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2628,10 +2628,10 @@ DEPENDENCIES:
   - "ExpoLocation (from `../node_modules/.pnpm/expo-location@57.0.6_expo@57.0.8_typescript@6.0.3/node_modules/expo-location/ios/ExpoLocation.podspec`)"
   - "ExpoLogBox (from `../node_modules/.pnpm/@expo+log-box@57.0.1_@expo+dom-webview@57.0.1_expo@57.0.8_react-native@0.86.0_@babel+co_bd39ef868e2b7dcc9d477c804856a7c8/node_modules/@expo/log-box`)"
   - "ExpoModulesCore (from `../node_modules/.pnpm/expo-modules-core@57.0.7_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+_ecae350dc3ff0a11d2da0b8124280d48/node_modules/expo-modules-core/ExpoModulesCore.podspec`)"
-  - "ExpoModulesJSI (from `../node_modules/.pnpm/expo-modules-jsi@57.0.4_react-native@0.86.0_@babel+core@7.29.0_@react-native-community+_99c0b04b2952e5c766e01efbb063173b/node_modules/expo-modules-jsi/apple`)"
+  - "ExpoModulesJSI (from `../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=e45f8b03cf5ab9a9ed71c10d355c61ba8665e5acc05247bfbb31_4868db9d7261d812fdc108b6c3840745/node_modules/expo-modules-jsi/apple`)"
   - "ExpoModulesWorklets (from `../node_modules/.pnpm/expo-modules-core@57.0.7_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+_ecae350dc3ff0a11d2da0b8124280d48/node_modules/expo-modules-core/ExpoModulesWorklets.podspec`)"
   - "ExpoModulesWorkletsAdapter (from `../node_modules/.pnpm/expo-modules-core@57.0.7_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+_ecae350dc3ff0a11d2da0b8124280d48/node_modules/expo-modules-core`)"
-  - "ExpoRouter (from `../node_modules/.pnpm/expo-router@57.0.8_d1585197248690cf7bd8cb076f7de517/node_modules/expo-router/ios`)"
+  - "ExpoRouter (from `../node_modules/.pnpm/expo-router@57.0.8_ea94e86b2de36c1d2f54bb0ecbb723de/node_modules/expo-router/ios`)"
   - "ExpoSecureStore (from `../node_modules/.pnpm/expo-secure-store@57.0.1_expo@57.0.8/node_modules/expo-secure-store/ios`)"
   - "ExpoSpeech (from `../node_modules/.pnpm/expo-speech@57.0.1_expo@57.0.8/node_modules/expo-speech/ios`)"
   - "ExpoSpeechRecognition (from `../node_modules/.pnpm/expo-speech-recognition@56.0.1_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@reac_253d86cacde8c92e70b9b727ae0fbf0f/node_modules/expo-speech-recognition/ios`)"
@@ -2728,7 +2728,7 @@ DEPENDENCIES:
   - "ReactNativeDependencies (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)"
   - "RNCMaskedView (from `../node_modules/.pnpm/@react-native-masked-view+masked-view@0.3.2_react-native@0.86.0_@babel+core@7.29.0_@rea_3ec0b84d8c47aea28676b3e3acb05f9a/node_modules/@react-native-masked-view/masked-view`)"
   - "RNDateTimePicker (from `../node_modules/.pnpm/@react-native-community+datetimepicker@9.1.0_expo@57.0.8_react-native@0.86.0_@babel+cor_c699c3cc0623d649b162e2d57f7fe210/node_modules/@react-native-community/datetimepicker`)"
-  - "RNGestureHandler (from `../node_modules/.pnpm/react-native-gesture-handler@3.1.0_react-native@0.86.0_@babel+core@7.29.0_@react-native_c1c9955522c9003528a85ee5b2435d41/node_modules/react-native-gesture-handler`)"
+  - "RNGestureHandler (from `../node_modules/.pnpm/react-native-gesture-handler@2.32.0_react-native@0.86.0_@babel+core@7.29.0_@react-nativ_248b1cd14fe51e7cf8bae272a0cf799c/node_modules/react-native-gesture-handler`)"
   - "RNReanimated (from `../node_modules/.pnpm/react-native-reanimated@4.5.0_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-na_142962b1d4b7216d76bc4b81bd816d69/node_modules/react-native-reanimated`)"
   - "RNScreens (from `../node_modules/.pnpm/react-native-screens@4.26.2_react-native@0.86.0_@babel+core@7.29.0_@react-native-commun_de84d18aa3b543c93a04d23044b14d37/node_modules/react-native-screens`)"
   - "RNWorklets (from `../node_modules/.pnpm/react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+metro-config@0.86.0_@babe_98d4a45bef0ad5c87d693c99ffa4d31c/node_modules/react-native-worklets`)"
@@ -2795,13 +2795,13 @@ EXTERNAL SOURCES:
   ExpoModulesCore:
     :podspec: "../node_modules/.pnpm/expo-modules-core@57.0.7_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+_ecae350dc3ff0a11d2da0b8124280d48/node_modules/expo-modules-core/ExpoModulesCore.podspec"
   ExpoModulesJSI:
-    :path: "../node_modules/.pnpm/expo-modules-jsi@57.0.4_react-native@0.86.0_@babel+core@7.29.0_@react-native-community+_99c0b04b2952e5c766e01efbb063173b/node_modules/expo-modules-jsi/apple"
+    :path: "../node_modules/.pnpm/expo-modules-jsi@57.0.4_patch_hash=e45f8b03cf5ab9a9ed71c10d355c61ba8665e5acc05247bfbb31_4868db9d7261d812fdc108b6c3840745/node_modules/expo-modules-jsi/apple"
   ExpoModulesWorklets:
     :podspec: "../node_modules/.pnpm/expo-modules-core@57.0.7_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+_ecae350dc3ff0a11d2da0b8124280d48/node_modules/expo-modules-core/ExpoModulesWorklets.podspec"
   ExpoModulesWorkletsAdapter:
     :path: "../node_modules/.pnpm/expo-modules-core@57.0.7_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-native+_ecae350dc3ff0a11d2da0b8124280d48/node_modules/expo-modules-core"
   ExpoRouter:
-    :path: "../node_modules/.pnpm/expo-router@57.0.8_d1585197248690cf7bd8cb076f7de517/node_modules/expo-router/ios"
+    :path: "../node_modules/.pnpm/expo-router@57.0.8_ea94e86b2de36c1d2f54bb0ecbb723de/node_modules/expo-router/ios"
   ExpoSecureStore:
     :path: "../node_modules/.pnpm/expo-secure-store@57.0.1_expo@57.0.8/node_modules/expo-secure-store/ios"
   ExpoSpeech:
@@ -2994,7 +2994,7 @@ EXTERNAL SOURCES:
   RNDateTimePicker:
     :path: "../node_modules/.pnpm/@react-native-community+datetimepicker@9.1.0_expo@57.0.8_react-native@0.86.0_@babel+cor_c699c3cc0623d649b162e2d57f7fe210/node_modules/@react-native-community/datetimepicker"
   RNGestureHandler:
-    :path: "../node_modules/.pnpm/react-native-gesture-handler@3.1.0_react-native@0.86.0_@babel+core@7.29.0_@react-native_c1c9955522c9003528a85ee5b2435d41/node_modules/react-native-gesture-handler"
+    :path: "../node_modules/.pnpm/react-native-gesture-handler@2.32.0_react-native@0.86.0_@babel+core@7.29.0_@react-nativ_248b1cd14fe51e7cf8bae272a0cf799c/node_modules/react-native-gesture-handler"
   RNReanimated:
     :path: "../node_modules/.pnpm/react-native-reanimated@4.5.0_react-native-worklets@0.10.0_@babel+core@7.29.0_@react-na_142962b1d4b7216d76bc4b81bd816d69/node_modules/react-native-reanimated"
   RNScreens:
@@ -3134,7 +3134,7 @@ SPEC CHECKSUMS:
   ReactNativeDependencies: fa0a54b3f5319ae0e3b9aff32bfee7a424b88e66
   RNCMaskedView: eb2b2e538afa907f05a5848a1a1ac26092e6fec9
   RNDateTimePicker: 7b2738f1e595f83c14580a11c476872755c5befc
-  RNGestureHandler: a426f18ab9021991fe2cbc8bf1677b740e20e70c
+  RNGestureHandler: 92172e79df6e88e0e93b6341f9dcd8b5a02746ba
   RNReanimated: 731df8426dc647413b269a663d872ec1ea26efe4
   RNScreens: c1a06fd73d0581a2a28a160577be393f579662b9
   RNWorklets: 8cccab22f4c14ba3e1ec1e0d757cd77edca292c4
@@ -3143,4 +3143,4 @@ SPEC CHECKSUMS:
 
 PODFILE CHECKSUM: 6ca29bb605a20880fc1a4447445751d2eac3b1c5
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.17.0
