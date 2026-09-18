@@ -1,11 +1,12 @@
 /**
  * Unified street-level imagery lookup.
  *
- * Sources, in precedence order:
- *   1. Panoramax — open (CC-BY-SA), no token, always queried.
- *   2. Mapillary — opt-in exception to the no-corporate-cloud rule: only
+ * Sources, in result precedence order:
+ *   1. Mapillary — opt-in exception to the no-corporate-cloud rule: only
  *      queried when `EXPO_PUBLIC_MAPILLARY_TOKEN` is configured, online-only,
- *      never cached for offline.
+ *      never cached for offline. Leads the carousel where it has coverage.
+ *   2. Panoramax — open (CC-BY-SA), no token, always queried; follows
+ *      Mapillary, most recently captured panoramas first.
  *
  * This is separate from the P2P `street_imagery` feed (see `browseService`),
  * which stays the primary, offline-capable source. Results here are online
@@ -195,8 +196,11 @@ async function fetchMapillary(
 
 /**
  * Find nearby 360° panoramas from every configured source, deduped by id,
- * sorted by distance, and capped. Best-effort: a failing source contributes
- * nothing. Only panoramas (`isPano`) are returned for the 3D viewer.
+ * and capped. Mapillary panoramas come first (nearest first) so they are the
+ * leading carousel option wherever they have coverage; the open Panoramax
+ * panoramas follow, most recently captured first. Best-effort: a failing
+ * source contributes nothing. Only panoramas (`isPano`) are returned for the
+ * 3D viewer.
  */
 export async function findStreetViewPanoramas(
   lat: number,
@@ -213,17 +217,24 @@ export async function findStreetViewPanoramas(
   ]);
 
   const seen = new Set<string>();
-  const merged: StreetViewPanorama[] = [];
-  for (const item of [...panoramax, ...mapillary]) {
+  const mapillaryPanes: StreetViewPanorama[] = [];
+  const panoramaxPanes: StreetViewPanorama[] = [];
+  for (const item of mapillary) {
     if (!item.isPano || seen.has(item.id)) continue;
     seen.add(item.id);
-    merged.push(item);
+    mapillaryPanes.push(item);
+  }
+  for (const item of panoramax) {
+    if (!item.isPano || seen.has(item.id)) continue;
+    seen.add(item.id);
+    panoramaxPanes.push(item);
   }
 
-  return merged
-    .sort(
-      (a, b) =>
-        haversineMeters([lng, lat], [a.lng, a.lat]) - haversineMeters([lng, lat], [b.lng, b.lat]),
-    )
-    .slice(0, limit);
+  const distanceFromCenter = (p: StreetViewPanorama) => haversineMeters([lng, lat], [p.lng, p.lat]);
+
+  mapillaryPanes.sort((a, b) => distanceFromCenter(a) - distanceFromCenter(b));
+  // Most recently captured first; undated panoramas sort last.
+  panoramaxPanes.sort((a, b) => (b.capturedAt ?? -Infinity) - (a.capturedAt ?? -Infinity));
+
+  return [...mapillaryPanes, ...panoramaxPanes].slice(0, limit);
 }

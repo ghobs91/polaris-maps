@@ -13,13 +13,13 @@ The imagery service enables users to contribute street-level photos to the decen
 
 ## Files
 
-| File                   | Description                                                                                                                                                                                                                |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `captureService.ts`    | Captures street-level imagery with GPS/heading/geohash metadata and Schnorr signature. Stores images in the app's captures directory.                                                                                      |
-| `blurService.ts`       | Placeholder privacy blur service — re-saves images via expo-image-manipulator. Designed to be replaced with on-device ML face/plate detection.                                                                             |
-| `uploadService.ts`     | Orchestrates the upload pipeline: blur → hash → append to Hypercore feed → sign metadata → publish to Gun.js for peer discovery.                                                                                           |
-| `browseService.ts`     | Queries locally stored street imagery by spatial proximity (lat/lng + radius), geohash prefix, or ID from the `street_imagery` SQLite table.                                                                               |
-| `streetViewService.ts` | Online street-level 3D panorama lookup, separate from the P2P feed: open **Panoramax** (always) + **Mapillary** (token-gated via `EXPO_PUBLIC_MAPILLARY_TOKEN`). Merges/dedupes 360° panoramas by distance for the viewer. |
+| File                   | Description                                                                                                                                                                                                                                         |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `captureService.ts`    | Captures street-level imagery with GPS/heading/geohash metadata and Schnorr signature. Stores images in the app's captures directory.                                                                                                               |
+| `blurService.ts`       | Placeholder privacy blur service — re-saves images via expo-image-manipulator. Designed to be replaced with on-device ML face/plate detection.                                                                                                      |
+| `uploadService.ts`     | Orchestrates the upload pipeline: blur → hash → append to Hypercore feed → sign metadata → publish to Gun.js for peer discovery.                                                                                                                    |
+| `browseService.ts`     | Queries locally stored street imagery by spatial proximity (lat/lng + radius), geohash prefix, or ID from the `street_imagery` SQLite table.                                                                                                        |
+| `streetViewService.ts` | Online street-level 3D panorama lookup, separate from the P2P feed: open **Panoramax** (always) + **Mapillary** (token-gated via `EXPO_PUBLIC_MAPILLARY_TOKEN`). Merges/dedupes 360° panoramas, leading with Mapillary then Panoramax newest-first. |
 
 ## Pipeline
 
@@ -42,10 +42,11 @@ browseService.ts ← spatial query (nearby imagery)
 The P2P `street_imagery` feed stays the primary, offline-capable source. The
 `Street View 3D` viewer (`app/imagery/street-view.tsx`) adds online coverage:
 
-- **Panoramax** — open, CC-BY-SA, no token; always queried.
+- **Panoramax** — open, CC-BY-SA, no token; always queried, shown after
+  Mapillary and ordered most-recently-captured first.
 - **Mapillary** — explicit opt-in exception to the no-corporate-cloud rule:
   hidden without `EXPO_PUBLIC_MAPILLARY_TOKEN`, online-only, never cached for
-  offline, and never used as a primary source.
+  offline. Leads the carousel (nearest first) wherever it has coverage.
 - Rendering: `PanoramaViewer` projects the equirectangular image with a real
   WebGL perspective shader (drag to look, pinch/wheel to zoom), with a flat
   fallback if WebGL or the texture upload is unavailable.

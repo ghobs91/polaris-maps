@@ -128,6 +128,46 @@ describe('findStreetViewPanoramas', () => {
     expect(result).toHaveLength(1);
   });
 
+  it('puts Mapillary first, then Panoramax most-recently-captured first', async () => {
+    mockConfig.MAPILLARY_TOKEN = 'test-token';
+    const panoramaxMulti = {
+      features: [
+        {
+          id: 'old',
+          geometry: { coordinates: [2.2945, 48.8584] },
+          assets: { hd: { href: 'old.jpg' } },
+          properties: { datetime: '2020-01-01T00:00:00Z' },
+        },
+        {
+          id: 'new',
+          geometry: { coordinates: [2.2945, 48.8584] },
+          assets: { hd: { href: 'new.jpg' } },
+          properties: { datetime: '2025-01-01T00:00:00Z' },
+        },
+        {
+          id: 'undated',
+          geometry: { coordinates: [2.2945, 48.8584] },
+          assets: { hd: { href: 'undated.jpg' } },
+          properties: {},
+        },
+      ],
+    };
+    mockFetch.mockImplementation((url: string) =>
+      Promise.resolve(
+        jsonResponse(String(url).includes('mapillary') ? mapillaryPayload : panoramaxMulti),
+      ),
+    );
+
+    const result = await findStreetViewPanoramas(48.8584, 2.2945);
+
+    expect(result.map((p) => p.id)).toEqual([
+      'mapillary:mly-1',
+      'panoramax:new',
+      'panoramax:old',
+      'panoramax:undated',
+    ]);
+  });
+
   it('degrades to an empty list when the network fails', async () => {
     mockFetch.mockRejectedValue(new Error('offline'));
     await expect(findStreetViewPanoramas(48.8584, 2.2945)).resolves.toEqual([]);
