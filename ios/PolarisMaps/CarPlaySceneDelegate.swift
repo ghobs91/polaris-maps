@@ -22,3 +22,60 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     PolarisCarPlay.sceneDidDisconnect(interfaceController: interfaceController)
   }
 }
+
+/// CarPlay Dashboard widget (iOS 13.4+). Provides the two shortcut buttons the
+/// widget shows; tapping one asks JS to preview navigation to that favorite.
+class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboardSceneDelegate {
+
+  func templateApplicationDashboardScene(
+    _ templateApplicationDashboardScene: CPTemplateApplicationDashboardScene,
+    didConnect dashboardController: CPDashboardController,
+    to window: UIWindow
+  ) {
+    let home = CPDashboardButton(
+      titleVariants: ["Home"],
+      subtitleVariants: ["Navigate home"],
+      image: UIImage(systemName: "house.fill") ?? UIImage()
+    ) { _ in
+      PolarisCarPlay.emitDashboardFavorite("home")
+    }
+    let work = CPDashboardButton(
+      titleVariants: ["Work"],
+      subtitleVariants: ["Navigate to work"],
+      image: UIImage(systemName: "briefcase.fill") ?? UIImage()
+    ) { _ in
+      PolarisCarPlay.emitDashboardFavorite("work")
+    }
+    dashboardController.shortcutButtons = [home, work]
+  }
+
+  func templateApplicationDashboardScene(
+    _ templateApplicationDashboardScene: CPTemplateApplicationDashboardScene,
+    didDisconnect dashboardController: CPDashboardController,
+    from window: UIWindow
+  ) {
+  }
+}
+
+/// CarPlay instrument cluster (iOS 15.4+). The cluster mirrors the active
+/// navigation session's maneuvers; the app only supplies the idle caption.
+class CarPlayInstrumentClusterSceneDelegate: UIResponder,
+  CPTemplateApplicationInstrumentClusterSceneDelegate
+{
+
+  func templateApplicationInstrumentClusterScene(
+    _ templateApplicationInstrumentClusterScene: CPTemplateApplicationInstrumentClusterScene,
+    didConnect instrumentClusterController: CPInstrumentClusterController
+  ) {
+    instrumentClusterController.inactiveDescriptionVariants = ["Polaris Maps"]
+  }
+
+  func templateApplicationInstrumentClusterScene(
+    _ templateApplicationInstrumentClusterScene: CPTemplateApplicationInstrumentClusterScene,
+    didDisconnect instrumentClusterController: CPInstrumentClusterController
+  ) {
+  }
+
+  func contentStyleDidChange(_ contentStyle: UIUserInterfaceStyle) {
+  }
+}

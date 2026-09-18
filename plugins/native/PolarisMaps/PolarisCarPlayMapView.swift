@@ -18,6 +18,14 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Phone parity: white casing + cyan core (DEFAULT_ROUTE_COLOR #2FD4F2,
   /// see TrafficRouteLayer).
   private static let routeCoreColor = UIColor(red: 0x2F / 255, green: 0xD4 / 255, blue: 0xF2 / 255, alpha: 1)
+  /// Route line widths. The CarPlay follow camera stays at the phone's nav
+  /// zoom, so the phone's zoom-17 stops (11 / 7.5) are used directly.
+  private static let routeCasingWidth: Double = 11
+  private static let routeCoreWidth: Double = 7.5
+  private static let baseSourceId = "polaris-route-base"
+  private static let alternatesSourceId = "polaris-route-alternates"
+  private static let destinationSourceId = "polaris-route-destination"
+  private static let destinationImageName = "polaris-destination-flag"
   /// Across-distance in meters approximating the phone's zoom-17 nav camera.
   private static let followDistance: CLLocationDistance = 350
   /// Camera target sits this far ahead of the vehicle so the puck renders low
@@ -25,14 +33,15 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private static let forwardOffsetMeters: Double = 100
 
   private var mapView: MLNMapView?
-  private var routeCasing: MLNPolyline?
-  private var routeCore: MLNPolyline?
-  private var trafficCores: [MLNPolyline] = []
   private var routeCoordinates: [CLLocationCoordinate2D] = []
-  private var destinationMark: MLNPointAnnotation?
-  private var pendingPolyline: String?
-  private var pendingDestination: CLLocationCoordinate2D?
-  private var pendingTraffic: [RouteTrafficRange]?
+  private var alternateCoordinates: [[CLLocationCoordinate2D]] = []
+  private var trafficRanges: [RouteTrafficRange] = []
+  private var destinationCoordinate: CLLocationCoordinate2D?
+  private var installedSourceIds: [String] = []
+  private var installedLayerIds: [String] = []
+  private var incidentMarkers: [CarPlayIncidentMarker] = []
+  private var incidentSourceIds: [String] = []
+  private var incidentLayerIds: [String] = []
   private var styleLoaded = false
   private weak var carPlayWindow: CPWindow?
   private var followVehicle = true
@@ -83,9 +92,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   func deactivate() {
     clearRoute()
-    pendingPolyline = nil
-    pendingDestination = nil
-    pendingTraffic = nil
+    incidentMarkers = []
+    incidentSourceIds = []
+    incidentLayerIds = []
     pendingStyleJson = nil
     if let previous = lastStyleFileURL {
       try? FileManager.default.removeItem(at: previous)
@@ -111,8 +120,8 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Applies a MapLibre style JSON (the phone's resolved style) so the
   /// CarPlay map matches the phone map (dark/light mode, satellite). The
   /// JSON is written to a content-tagged file because MLNMapView only
-  /// reloads when the style URL changes. Route/traffic/destination shape
-  /// annotations persist across the reload.
+  /// reloads when the style URL changes. Custom route sources/layers are
+  /// rebuilt from `didFinishLoading` after the swap.
   func applyStyle(json: String) {
     guard !json.isEmpty else { return }
     guard mapView != nil else {
@@ -166,88 +175,41 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   // MARK: Route
 
-  func showRoute(encodedPolyline: String, destination: CLLocationCoordinate2D? = nil) {
-    // The style may still be loading when navigation starts. Park the
-    // polyline and draw it from `mapView(_:didFinishLoading:)` — otherwise
-    // the route silently never appears.
-    pendingPolyline = encodedPolyline
-    pendingDestination = destination
-    guard styleLoaded else { return }
-    drawPendingRoute()
-  }
-
-  private func drawPendingRoute() {
-    guard let view = mapView, let encoded = pendingPolyline else { return }
-    pendingPolyline = nil
-    // Capture before clearRoute() resets the pending state (it nils all
-    // three pendings, including the destination flag).
-    let stashedTraffic = pendingTraffic
-    let stashedDestination = pendingDestination
-    clearRoute()
-
-    let coordinates = PolylineDecoder.decode(encoded)
-    guard coordinates.count >= 2 else { return }
+  /// Draws the active route (plus destination flag) with MapLibre style layers,
+  /// exactly like the phone's `TrafficRouteLayer`. Legacy `MLNPolyline`
+  /// annotations never painted reliably in the CarPlay window; style layers do,
+  /// and they also survive the phone's style reload.
+  func showRoute(
+    encodedPolyline: String,
+    destination: CLLocationCoordinate2D? = nil,
+    alternates: [String] = []
+  ) {
+    let coordinates = PolylineDecoder.decode(encodedPolyline)
+    guard coordinates.count >= 2 else {
+      clearRoute()
+      return
+    }
     routeCoordinates = coordinates
-
-    var mutable = coordinates
-    let casing = MLNPolyline(coordinates: &mutable, count: UInt(mutable.count))
-    casing.title = "route-casing"
-    routeCasing = casing
-    view.addAnnotation(casing)
-
-    var mutableCore = coordinates
-    let core = MLNPolyline(coordinates: &mutableCore, count: UInt(mutableCore.count))
-    core.title = "route-core"
-    routeCore = core
-    view.addAnnotation(core)
-
-    if let destination = stashedDestination {
-      let mark = MLNPointAnnotation()
-      mark.coordinate = destination
-      mark.title = "destination"
-      destinationMark = mark
-      view.addAnnotation(mark)
+    alternateCoordinates = alternates.compactMap { encoded in
+      let decoded = PolylineDecoder.decode(encoded)
+      return decoded.count >= 2 ? decoded : nil
     }
-
+    destinationCoordinate = destination
     puckView?.isHidden = false
-    if let traffic = stashedTraffic {
-      drawTrafficCores(traffic)
-    }
+    rebuildRouteLayers()
     if followVehicle {
       fitCamera(to: coordinates)
     }
   }
 
   func clearRoute() {
-    pendingPolyline = nil
-    pendingDestination = nil
-    pendingTraffic = nil
+    routeCoordinates = []
+    alternateCoordinates = []
+    trafficRanges = []
+    destinationCoordinate = nil
     puckView?.isHidden = true
     speedSign?.isHidden = true
-    routeCoordinates = []
-    guard let view = mapView else {
-      routeCasing = nil
-      routeCore = nil
-      trafficCores = []
-      destinationMark = nil
-      return
-    }
-    if let casing = routeCasing {
-      view.removeAnnotation(casing)
-      routeCasing = nil
-    }
-    if let core = routeCore {
-      view.removeAnnotation(core)
-      routeCore = nil
-    }
-    for core in trafficCores {
-      view.removeAnnotation(core)
-    }
-    trafficCores = []
-    if let mark = destinationMark {
-      view.removeAnnotation(mark)
-      destinationMark = nil
-    }
+    removeRouteLayers()
   }
 
   // MARK: Traffic-colored segments (phone's TrafficRouteLayer)
@@ -255,29 +217,249 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Overlays per-range colored cores on top of the blue fallback. An empty
   /// array restores the plain blue line.
   func showTraffic(_ ranges: [RouteTrafficRange]) {
-    guard styleLoaded, mapView != nil, !routeCoordinates.isEmpty else {
-      pendingTraffic = ranges
-      return
-    }
-    drawTrafficCores(ranges)
+    trafficRanges = ranges
+    rebuildRouteLayers()
   }
 
-  private func drawTrafficCores(_ ranges: [RouteTrafficRange]) {
-    guard let view = mapView, !routeCoordinates.isEmpty else { return }
-    for core in trafficCores {
-      view.removeAnnotation(core)
+  // MARK: Incident markers (phone's IncidentLayer)
+
+  /// Draws crowd-reported incidents as typed symbols. Rebuilt on every style
+  /// load so they survive the phone's style push, like the route.
+  func showIncidents(_ markers: [CarPlayIncidentMarker]) {
+    incidentMarkers = markers
+    rebuildIncidentLayers()
+  }
+
+  private func rebuildIncidentLayers() {
+    guard styleLoaded, let style = mapView?.style else { return }
+    removeIncidentLayers()
+    var groups: [String: [CLLocationCoordinate2D]] = [:]
+    for marker in incidentMarkers {
+      groups[marker.type, default: []].append(marker.coordinate)
     }
-    trafficCores = []
-    for range in ranges {
+    for (type, coordinates) in groups {
+      let identifier = "polaris-incident-\(type.replacingOccurrences(of: " ", with: "-"))"
+      let features: [MLNShape & MLNFeature] = coordinates.map { coordinate in
+        let feature = MLNPointFeature()
+        feature.coordinate = coordinate
+        return feature
+      }
+      let source = MLNShapeSource(identifier: identifier, features: features, options: nil)
+      style.addSource(source)
+      incidentSourceIds.append(identifier)
+      let imageName = "\(identifier)-icon"
+      if let image = Self.incidentSymbol(for: type) {
+        style.setImage(image, forName: imageName)
+      }
+      let layer = MLNSymbolStyleLayer(identifier: "\(identifier)-layer", source: source)
+      layer.iconImageName = NSExpression(forConstantValue: imageName)
+      layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
+      layer.iconIgnoresPlacement = NSExpression(forConstantValue: true)
+      style.addLayer(layer)
+      incidentLayerIds.append(layer.identifier)
+    }
+  }
+
+  private func removeIncidentLayers() {
+    guard let style = mapView?.style else {
+      incidentSourceIds = []
+      incidentLayerIds = []
+      return
+    }
+    for identifier in incidentLayerIds {
+      if let layer = style.layer(withIdentifier: identifier) {
+        style.removeLayer(layer)
+      }
+    }
+    for identifier in incidentSourceIds {
+      if let source = style.source(withIdentifier: identifier) {
+        style.removeSource(source)
+      }
+    }
+    incidentSourceIds = []
+    incidentLayerIds = []
+  }
+
+  /// SF Symbol per incident type, mirroring the phone's `INCIDENT_TYPE_ICONS`.
+  private static func incidentSymbol(for type: String) -> UIImage? {
+    let name: String
+    switch type {
+    case "accident": name = "car.fill"
+    case "road_closure": name = "nosign"
+    case "hazard": name = "exclamationmark.triangle.fill"
+    case "construction": name = "hammer.fill"
+    case "police": name = "shield.fill"
+    default: name = "exclamationmark.circle.fill"
+    }
+    return UIImage(systemName: name)?
+      .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
+  }
+
+  /// (Re)builds every route layer from the current state. Called on route
+  /// start, traffic updates, and every style load — a style swap (dark/light,
+  /// satellite) wipes custom sources/layers, so they must be re-added.
+  private func rebuildRouteLayers() {
+    guard styleLoaded, let style = mapView?.style, !routeCoordinates.isEmpty else { return }
+    removeRouteLayers()
+
+    // Grey alternatives first so the active route paints above them (mirrors
+    // the phone's `route-alternates` layer).
+    if !alternateCoordinates.isEmpty {
+      let shapes: [MLNShape] = alternateCoordinates.map { slice in
+        var coordinates = slice
+        return MLNPolyline(coordinates: &coordinates, count: UInt(coordinates.count))
+      }
+      let source = MLNShapeSource(
+        identifier: Self.alternatesSourceId, shapes: shapes, options: nil)
+      style.addSource(source)
+      installedSourceIds.append(Self.alternatesSourceId)
+      let layer = MLNLineStyleLayer(
+        identifier: "\(Self.alternatesSourceId)-line", source: source)
+      layer.lineColor = NSExpression(
+        forConstantValue: UIColor(red: 0x8E / 255, green: 0x8E / 255, blue: 0x93 / 255, alpha: 1))
+      layer.lineWidth = NSExpression(forConstantValue: 6.0)
+      layer.lineOpacity = NSExpression(forConstantValue: 0.6)
+      layer.lineCap = NSExpression(forConstantValue: "round")
+      layer.lineJoin = NSExpression(forConstantValue: "round")
+      style.addLayer(layer)
+      installedLayerIds.append(layer.identifier)
+    }
+
+    var baseCoordinates = routeCoordinates
+    let baseShape = MLNPolyline(
+      coordinates: &baseCoordinates, count: UInt(baseCoordinates.count))
+    let baseSource = MLNShapeSource(identifier: Self.baseSourceId, shape: baseShape, options: nil)
+    style.addSource(baseSource)
+    installedSourceIds.append(Self.baseSourceId)
+
+    let hasTraffic = !trafficRanges.isEmpty
+    var groups: [String: (color: UIColor, slices: [[CLLocationCoordinate2D]])] = [:]
+    for range in trafficRanges {
       let from = max(0, range.from)
       let to = min(routeCoordinates.count - 1, range.to)
       guard to > from else { continue }
-      var slice = Array(routeCoordinates[from...to])
-      let core = TrafficCorePolyline(coordinates: &slice, count: UInt(slice.count))
-      core.color = range.color
-      trafficCores.append(core)
-      view.addAnnotation(core)
+      var group = groups[range.hex] ?? (range.color, [])
+      group.slices.append(Array(routeCoordinates[from...to]))
+      groups[range.hex] = group
     }
+
+    var trafficSources: [(UIColor, MLNShapeSource)] = []
+    for (hex, group) in groups {
+      let shapes: [MLNShape] = group.slices.map { slice in
+        var coordinates = slice
+        return MLNPolyline(coordinates: &coordinates, count: UInt(coordinates.count))
+      }
+      guard !shapes.isEmpty else { continue }
+      let identifier = "polaris-route-traffic-\(hex.replacingOccurrences(of: "#", with: ""))"
+      let source = MLNShapeSource(identifier: identifier, shapes: shapes, options: nil)
+      style.addSource(source)
+      installedSourceIds.append(identifier)
+      trafficSources.append((group.color, source))
+    }
+
+    var destinationSource: MLNShapeSource?
+    if let destination = destinationCoordinate {
+      let feature = MLNPointFeature()
+      feature.coordinate = destination
+      let source = MLNShapeSource(
+        identifier: Self.destinationSourceId, shape: feature, options: nil)
+      style.addSource(source)
+      installedSourceIds.append(Self.destinationSourceId)
+      destinationSource = source
+    }
+
+    // Casing layers first so every colored core paints above every casing.
+    addLineLayer(
+      identifier: "polaris-route-base-casing",
+      source: baseSource,
+      color: .white,
+      opacity: hasTraffic ? 0 : 1,
+      width: Self.routeCasingWidth,
+      style: style
+    )
+    for (_, source) in trafficSources {
+      addLineLayer(
+        identifier: "\(source.identifier)-casing",
+        source: source,
+        color: .white,
+        opacity: 1,
+        width: Self.routeCasingWidth,
+        style: style
+      )
+    }
+
+    addLineLayer(
+      identifier: "polaris-route-base-core",
+      source: baseSource,
+      color: Self.routeCoreColor,
+      opacity: hasTraffic ? 0 : 1,
+      width: Self.routeCoreWidth,
+      style: style
+    )
+    for (color, source) in trafficSources {
+      addLineLayer(
+        identifier: "\(source.identifier)-core",
+        source: source,
+        color: color,
+        opacity: 1,
+        width: Self.routeCoreWidth,
+        style: style
+      )
+    }
+
+    if let source = destinationSource {
+      if let flag = UIImage(systemName: "flag.checkered")?
+        .withTintColor(Self.routeCoreColor, renderingMode: .alwaysOriginal)
+      {
+        style.setImage(flag, forName: Self.destinationImageName)
+      }
+      let symbol = MLNSymbolStyleLayer(
+        identifier: "polaris-route-destination-symbol", source: source)
+      symbol.iconImageName = NSExpression(forConstantValue: Self.destinationImageName)
+      symbol.iconAnchor = NSExpression(forConstantValue: "bottom")
+      symbol.iconAllowsOverlap = NSExpression(forConstantValue: true)
+      symbol.iconIgnoresPlacement = NSExpression(forConstantValue: true)
+      style.addLayer(symbol)
+      installedLayerIds.append(symbol.identifier)
+    }
+  }
+
+  private func addLineLayer(
+    identifier: String,
+    source: MLNSource,
+    color: UIColor,
+    opacity: Double,
+    width: Double,
+    style: MLNStyle
+  ) {
+    let layer = MLNLineStyleLayer(identifier: identifier, source: source)
+    layer.lineColor = NSExpression(forConstantValue: color)
+    layer.lineWidth = NSExpression(forConstantValue: width)
+    layer.lineOpacity = NSExpression(forConstantValue: opacity)
+    layer.lineCap = NSExpression(forConstantValue: "round")
+    layer.lineJoin = NSExpression(forConstantValue: "round")
+    style.addLayer(layer)
+    installedLayerIds.append(identifier)
+  }
+
+  private func removeRouteLayers() {
+    guard let style = mapView?.style else {
+      installedSourceIds = []
+      installedLayerIds = []
+      return
+    }
+    for identifier in installedLayerIds {
+      if let layer = style.layer(withIdentifier: identifier) {
+        style.removeLayer(layer)
+      }
+    }
+    for identifier in installedSourceIds {
+      if let source = style.source(withIdentifier: identifier) {
+        style.removeSource(source)
+      }
+    }
+    installedSourceIds = []
+    installedLayerIds = []
   }
 
   // MARK: Camera
@@ -305,6 +487,74 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     guard mapView != nil else { return }
     updateCenter(
       lat: currentCoordinate.latitude, lng: currentCoordinate.longitude, heading: lastHeading)
+  }
+
+  /// True while the camera tracks the vehicle. CarPlay gesture callbacks clear
+  /// this so a look-around isn't snapped back by the next GPS tick.
+  var isFollowing: Bool { followVehicle }
+
+  /// Fits the whole route and stops following, for the overview control.
+  func showRouteOverview() {
+    guard !routeCoordinates.isEmpty else { return }
+    followVehicle = false
+    fitCamera(to: routeCoordinates)
+  }
+
+  func beginUserInteraction() {
+    followVehicle = false
+  }
+
+  /// Rotaries/edge presses arrive as discrete pan directions. Move the viewport
+  /// by a fixed screen delta, matching the system's step feel.
+  func pan(direction: CPMapTemplate.PanDirection) {
+    guard let view = mapView else { return }
+    followVehicle = false
+    let step: CGFloat = 140
+    var offset = CGPoint.zero
+    if direction.contains(.left) { offset.x += step }
+    if direction.contains(.right) { offset.x -= step }
+    if direction.contains(.up) { offset.y += step }
+    if direction.contains(.down) { offset.y -= step }
+    guard offset != .zero else { return }
+    let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+    view.centerCoordinate = view.convert(
+      CGPoint(x: center.x + offset.x, y: center.y + offset.y), toCoordinateFrom: view)
+  }
+
+  /// Touch pan gestures deliver a screen-space translation; follow it exactly.
+  func pan(byScreenTranslation translation: CGPoint) {
+    guard let view = mapView else { return }
+    followVehicle = false
+    let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+    view.centerCoordinate = view.convert(
+      CGPoint(x: center.x - translation.x, y: center.y - translation.y), toCoordinateFrom: view)
+  }
+
+  // MARK: Continuous gestures (iOS 26 touch surfaces)
+
+  private var lastGestureScale: CGFloat = 1
+  private var lastGestureRotation: CGFloat = 0
+
+  func resetGestureTracking() {
+    lastGestureScale = 1
+    lastGestureRotation = 0
+  }
+
+  func applyZoomGesture(scale: CGFloat) {
+    guard let view = mapView, scale > 0 else { return }
+    followVehicle = false
+    let delta = scale / lastGestureScale
+    lastGestureScale = scale
+    view.zoomLevel = min(max(view.zoomLevel + log2(Double(delta)), 3), 19)
+  }
+
+  func applyRotationGesture(rotation: CGFloat) {
+    guard let view = mapView else { return }
+    followVehicle = false
+    let delta = rotation - lastGestureRotation
+    lastGestureRotation = rotation
+    view.direction = (view.direction + Double(delta) * 180 / .pi)
+      .truncatingRemainder(dividingBy: 360)
   }
 
   private func coordinate(
@@ -372,45 +622,17 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
     styleLoaded = true
-    drawPendingRoute()
+    rebuildRouteLayers()
+    rebuildIncidentLayers()
   }
 
   func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {
-    // Never leave a route parked forever behind a failed style: annotations
-    // can still be added and will paint if tiles arrive later.
+    // Never leave a route parked forever behind a failed style: sources and
+    // layers can still be added and will paint if tiles arrive later.
     styleLoaded = true
-    drawPendingRoute()
+    rebuildRouteLayers()
+    rebuildIncidentLayers()
   }
-
-  func mapView(_ mapView: MLNMapView, strokeColorForShapeAnnotation shape: MLNShape) -> UIColor {
-    if let traffic = shape as? TrafficCorePolyline { return traffic.color }
-    if shape.title == "route-core" { return Self.routeCoreColor }
-    return .white
-  }
-
-  func mapView(_ mapView: MLNMapView, lineWidthForPolylineAnnotation polyline: MLNPolyline) -> CGFloat {
-    if polyline is TrafficCorePolyline { return 7.5 }
-    if polyline.title == "route-core" { return 7.5 }
-    return 11
-  }
-
-  func mapView(_ mapView: MLNMapView, imageFor annotation: MLNAnnotation) -> MLNAnnotationImage? {
-    guard annotation.title == "destination" else { return nil }
-    let reuseId = "polaris-destination-flag"
-    if let existing = mapView.dequeueReusableAnnotationImage(withIdentifier: reuseId) {
-      return existing
-    }
-    let image = UIImage(systemName: "flag.checkered")?
-      .withTintColor(Self.routeCoreColor, renderingMode: .alwaysOriginal)
-      ?? UIImage()
-    return MLNAnnotationImage(image: image, reuseIdentifier: reuseId)
-  }
-}
-
-/// Traffic-colored route core. Carries its color because the style delegate
-/// only receives the shape, and ranges are simpler than tag bookkeeping.
-final class TrafficCorePolyline: MLNPolyline {
-  var color: UIColor = .systemBlue
 }
 
 /// White navigation chevron with a dark outline, matching the phone's nav puck.

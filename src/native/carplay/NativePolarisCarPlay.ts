@@ -28,6 +28,27 @@ export interface CarPlayNavigationData {
   laneGuidance?: CarPlayLaneGuidance;
   /** True while the router is computing a new route after a deviation. */
   isRerouting: boolean;
+  /** In-navigation mute state, so the CarPlay mute button stays in sync. */
+  muted: boolean;
+  /** Overall route traffic color for the ETA pill. */
+  etaColor: 'default' | 'green' | 'orange' | 'red';
+  /** Highway exit number/label for exit maneuvers (e.g. "91B"). */
+  highwayExitLabel?: string;
+}
+
+export interface CarPlayArrivalData {
+  destinationName: string;
+}
+
+export interface CarPlayIncidentData {
+  label: string;
+  distanceMeters: number;
+}
+
+export interface CarPlayIncidentMarker {
+  type: string;
+  lat: number;
+  lng: number;
 }
 
 export interface CarPlayStartNavigationData {
@@ -49,6 +70,22 @@ export interface CarPlayStartNavigationData {
   }>;
 }
 
+export interface CarPlayTripPreviewRoute {
+  encodedPolyline: string;
+  /** Phone route-preview summary ("26 min · 13.8 mi"); preferred over native formatting. */
+  summary: string;
+  distanceMeters: number;
+  durationSeconds: number;
+}
+
+export interface CarPlayTripPreviewData {
+  destinationName: string;
+  destinationLat: number;
+  destinationLng: number;
+  /** Primary route first, then alternatives in phone preview order. */
+  routes: CarPlayTripPreviewRoute[];
+}
+
 export interface CarPlaySearchResult {
   name: string;
   subtitle: string;
@@ -66,6 +103,11 @@ export interface Spec extends TurboModule {
   updateNavigation(data: object): void;
   startNavigation(data: object): void;
   endNavigation(): void;
+  showTripPreview(data: object): void;
+  hideTripPreview(): void;
+  showArrival(data: object): void;
+  showIncidentAlert(data: object): void;
+  updateIncidents(incidents: Array<object>): void;
   updateRouteTraffic(ranges: Array<object>): void;
   showReroutingAlert(): void;
   hideNavigationAlert(): void;

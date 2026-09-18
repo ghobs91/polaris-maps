@@ -41,6 +41,16 @@ class AppDelegate: ExpoAppDelegate {
     if connectingSceneSession.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" {
       configuration.sceneClass = CPTemplateApplicationScene.self
       configuration.delegateClass = CarPlaySceneDelegate.self
+    } else if connectingSceneSession.role.rawValue
+      == "CPTemplateApplicationDashboardSceneSessionRoleApplication"
+    {
+      configuration.sceneClass = CPTemplateApplicationDashboardScene.self
+      configuration.delegateClass = CarPlayDashboardSceneDelegate.self
+    } else if connectingSceneSession.role.rawValue
+      == "CPTemplateApplicationInstrumentClusterSceneSessionRoleApplication"
+    {
+      configuration.sceneClass = CPTemplateApplicationInstrumentClusterScene.self
+      configuration.delegateClass = CarPlayInstrumentClusterSceneDelegate.self
     } else {
       configuration.delegateClass = SceneDelegate.self
     }

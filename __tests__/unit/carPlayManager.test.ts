@@ -12,6 +12,11 @@ jest.mock('react-native', () => {
         updateNavigation: jest.fn(),
         startNavigation: jest.fn(),
         endNavigation: jest.fn(),
+        showTripPreview: jest.fn(),
+        hideTripPreview: jest.fn(),
+        showArrival: jest.fn(),
+        showIncidentAlert: jest.fn(),
+        updateIncidents: jest.fn(),
         updateRouteTraffic: jest.fn(),
         showReroutingAlert: jest.fn(),
         hideNavigationAlert: jest.fn(),
@@ -66,6 +71,12 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
 }));
 jest.mock('../../src/services/search/unifiedSearch', () => ({ unifiedSearch: jest.fn() }));
 jest.mock('../../src/services/routing/routingService', () => ({ computeRoute: jest.fn() }));
+jest.mock('../../src/services/favorites/favoritesService', () => ({
+  getFavorites: jest.fn(() => []),
+}));
+jest.mock('../../src/services/traffic/incidentAhead', () => ({
+  findIncidentsAhead: jest.fn(() => []),
+}));
 
 import { NativeModules } from 'react-native';
 import {
@@ -84,6 +95,8 @@ import { encodePolyline } from '../../src/utils/polyline';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 import { unifiedSearch } from '../../src/services/search/unifiedSearch';
 import { computeRoute } from '../../src/services/routing/routingService';
+import { getFavorites } from '../../src/services/favorites/favoritesService';
+import { findIncidentsAhead } from '../../src/services/traffic/incidentAhead';
 import type { ValhallaRoute } from '../../src/models/route';
 
 // Grab a reference to the emitter created at module load time (before clearAllMocks)
@@ -161,7 +174,9 @@ describe('CarPlayManager', () => {
     jest.clearAllMocks();
     teardownCarPlay();
     useNavigationStore.getState().stopNavigation();
+    useNavigationStore.getState().clearRoutePreview();
     useNavigationTrackingStore.getState().setDistanceToTurn(null);
+    useNavigationTrackingStore.getState().setNavPosition(null);
     useTrafficStore.getState().setNormalizedSegments([]);
     useSettingsStore.getState().setUseMetric(false);
     useSettingsStore.getState().setThemeMode('system');
@@ -194,13 +209,33 @@ describe('CarPlayManager', () => {
       'searchResultAddStop',
       expect.any(Function),
     );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayRouteStart',
+      expect.any(Function),
+    );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayContentStyleChanged',
+      expect.any(Function),
+    );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayToggleMute',
+      expect.any(Function),
+    );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayArrivalDismiss',
+      expect.any(Function),
+    );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayDashboardFavorite',
+      expect.any(Function),
+    );
   });
 
   it('does not initialise twice', () => {
     initCarPlay();
     initCarPlay();
-    // addListener should be called only 5 times (once per event), not 10
-    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(5);
+    // addListener should be called only 10 times (once per event), not 20
+    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(10);
   });
 
   it('tracks connected state', () => {
@@ -436,6 +471,119 @@ describe('CarPlayManager', () => {
     );
   });
 
+  it('follows the car content style over the phone theme', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
+      expect.stringContaining('Polaris Light'),
+    );
+
+    // The head unit is in dark mode while the phone stays light.
+    fireEvent('carPlayContentStyleChanged', { dark: true });
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
+      expect.stringContaining('Polaris Dark'),
+    );
+  });
+
+  it('toggles phone mute from the CarPlay navigation button', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    expect(useNavigationStore.getState().muted).toBe(false);
+    fireEvent('carPlayToggleMute');
+    expect(useNavigationStore.getState().muted).toBe(true);
+    fireEvent('carPlayToggleMute');
+    expect(useNavigationStore.getState().muted).toBe(false);
+  });
+
+  it('shows the arrival card and ends the trip when Done is tapped', () => {
+    const route = makeRoute();
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    jest.clearAllMocks();
+
+    useNavigationStore.getState().setArrived(true);
+    expect(NativeModules.PolarisCarPlay.showArrival).toHaveBeenCalledWith({
+      destinationName: 'Dest',
+    });
+
+    fireEvent('carPlayArrivalDismiss');
+    expect(useNavigationStore.getState().isNavigating).toBe(false);
+  });
+
+  it('draws active incidents on the CarPlay map while navigating', () => {
+    const route = makeRoute();
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    jest.clearAllMocks();
+
+    useTrafficStore.getState().setIncidents([
+      {
+        id: 'inc-1',
+        reporterPubkey: 'pk',
+        lat: 40.75,
+        lng: -73.98,
+        geohash6: 'dr5ru7',
+        type: 'accident',
+        description: '',
+        reportedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        signature: new Uint8Array(),
+      },
+    ]);
+    expect(NativeModules.PolarisCarPlay.updateIncidents).toHaveBeenCalledWith([
+      { type: 'accident', lat: 40.75, lng: -73.98 },
+    ]);
+
+    useTrafficStore.getState().setIncidents([]);
+    expect(NativeModules.PolarisCarPlay.updateIncidents).toHaveBeenLastCalledWith([]);
+  });
+
+  it('warns about an incident ahead once per incident', () => {
+    const route = {
+      ...makeRoute(),
+      geometry: encodePolyline([
+        [-73.98, 40.75],
+        [-73.97, 40.76],
+      ]),
+    };
+    (findIncidentsAhead as jest.Mock).mockReturnValue([
+      {
+        id: 'inc-1',
+        type: 'accident',
+        lat: 40.755,
+        lng: -73.975,
+        expiresAt: Date.now() + 60_000,
+      },
+    ]);
+
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(100_000);
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    jest.clearAllMocks();
+
+    useNavigationTrackingStore.getState().setNavPosition([-73.98, 40.75]);
+    expect(NativeModules.PolarisCarPlay.showIncidentAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ label: 'Accident', distanceMeters: expect.any(Number) }),
+    );
+
+    // Past the throttle window, the same incident is not announced again.
+    (NativeModules.PolarisCarPlay.showIncidentAlert as jest.Mock).mockClear();
+    nowSpy.mockReturnValue(200_000);
+    useNavigationTrackingStore.getState().setNavPosition([-73.979, 40.751]);
+    expect(NativeModules.PolarisCarPlay.showIncidentAlert).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
+  });
+
   it('adds a search result as a stop on the active drive', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
@@ -463,7 +611,7 @@ describe('CarPlayManager', () => {
     expect(useNavigationStore.getState().waypoints[0]).toMatchObject({ name: 'Coffee Shop' });
   });
 
-  it('starts fresh navigation when adding a stop while idle', async () => {
+  it('shows a preview when adding a stop while idle', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
 
@@ -474,9 +622,10 @@ describe('CarPlayManager', () => {
     fireEvent('searchResultAddStop', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
       expect.objectContaining({ destinationName: 'Coffee Shop' }),
     );
+    expect(useNavigationStore.getState().routePreview).not.toBeNull();
   });
 
   it('shows and hides the rerouting alert on transitions only', () => {
@@ -607,7 +756,68 @@ describe('CarPlayManager', () => {
     ]);
   });
 
-  it('starts navigation when a search result is selected', async () => {
+  it('previews navigation to a dashboard favorite', async () => {
+    const route = makeRoute();
+    (computeRoute as jest.Mock).mockResolvedValue([route]);
+    (getFavorites as jest.Mock).mockReturnValue([
+      {
+        id: 'work',
+        kind: 'work',
+        label: 'Work',
+        entry: { lat: 40.7, lng: -73.9, text: 'Office' },
+      },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    fireEvent('carPlayDashboardFavorite', { kind: 'work' });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(computeRoute).toHaveBeenCalledWith(
+      expect.arrayContaining([{ lat: 40.7, lng: -73.9 }]),
+      'auto',
+      expect.objectContaining({ alternates: 2 }),
+    );
+    expect(useNavigationStore.getState().routePreview).not.toBeNull();
+    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ destinationName: 'Work' }),
+    );
+  });
+
+  it('shows saved places for an empty search query', async () => {
+    (getFavorites as jest.Mock).mockReturnValue([
+      {
+        id: 'home',
+        kind: 'home',
+        label: 'Home',
+        entry: {
+          id: 1,
+          text: '1 Main St, Town',
+          type: 'address',
+          housenumber: '1',
+          street: 'Main St',
+          city: 'Town',
+          state: null,
+          postcode: null,
+          country: null,
+          lat: 40.7,
+          lng: -73.9,
+        },
+      },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    fireEvent('searchQuery', { query: '' });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([
+      { name: 'Home', subtitle: '1 Main St, Town', lat: 40.7, lng: -73.9 },
+    ]);
+    expect(unifiedSearch).not.toHaveBeenCalled();
+  });
+
+  it('shows a trip preview when a search result is selected', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
 
@@ -623,16 +833,63 @@ describe('CarPlayManager', () => {
         { lat: 40.75, lng: -73.98 },
       ]),
       'auto',
+      expect.objectContaining({ alternates: 2 }),
     );
-    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+    // Preview, not navigation: the driver picks a route and taps Go.
+    expect(useNavigationStore.getState().routePreview).not.toBeNull();
+    expect(useNavigationStore.getState().isNavigating).toBe(false);
+    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
       expect.objectContaining({
         destinationName: 'Coffee Shop',
         destinationLat: 40.75,
         destinationLng: -73.98,
+        routes: expect.arrayContaining([
+          expect.objectContaining({ encodedPolyline: route.geometry }),
+        ]),
       }),
     );
-    // Phone-side navigation should also be active
+    expect(NativeModules.PolarisCarPlay.startNavigation).not.toHaveBeenCalled();
+  });
+
+  it('starts the selected route when the driver taps Go in the preview', async () => {
+    const route = makeRoute();
+    const alternate = {
+      ...makeRoute(),
+      geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`B',
+    };
+    (computeRoute as jest.Mock).mockResolvedValue([route, alternate]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    fireEvent('searchResultSelected', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
+    await new Promise((r) => setTimeout(r, 10));
+    jest.clearAllMocks();
+
+    fireEvent('carPlayRouteStart', { index: 1 });
+
     expect(useNavigationStore.getState().isNavigating).toBe(true);
+    expect(useNavigationStore.getState().activeRoute).toBe(alternate);
+    expect(useNavigationStore.getState().alternateRoutes).toContain(route);
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destinationName: 'Coffee Shop',
+        encodedPolyline: alternate.geometry,
+      }),
+    );
+  });
+
+  it('mirrors an existing phone route preview when CarPlay connects', () => {
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .setRoutePreview(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ destinationName: 'Dest', routes: expect.any(Array) }),
+    );
   });
 
   it('teardown cleans up listeners and state', () => {

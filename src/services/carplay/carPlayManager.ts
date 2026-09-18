@@ -22,6 +22,17 @@ import { createSearchSession, type SearchSession } from '../search/searchSession
 import { computeRoute } from '../routing/routingService';
 import { formatDistance } from '../../utils/units';
 import { resolveMapStyle, setLayerVisibilityInStyle } from '../../components/map/mapStyleResolver';
+import {
+  averageRouteTrafficColor,
+  ETA_COLOR_ORANGE,
+  ETA_COLOR_RED,
+} from '../traffic/routeTrafficService';
+import { decodePolyline } from '../../utils/polyline';
+import { getFavorites } from '../favorites/favoritesService';
+import { findIncidentsAhead } from '../traffic/incidentAhead';
+import { INCIDENT_TYPE_LABELS } from '../traffic/incidentWire';
+import { haversineMeters } from '../../utils/routeSnap';
+import type { CarPlaySearchResult, CarPlayIncidentMarker } from '../../native/carplay';
 import type { EmitterSubscription } from 'react-native';
 
 let initialized = false;
@@ -34,13 +45,22 @@ let settingsUnsubscribe: (() => void) | null = null;
 let mapStyleUnsubscribe: (() => void) | null = null;
 let appearanceSubscription: { remove: () => void } | null = null;
 let lastMapStyleKey: string | null = null;
+let carPlayDark: boolean | null = null;
 let carPlayRouteKey: string | null = null;
+let previewKey: string | null = null;
 let rerouteAlertShown = false;
 let lastDistanceBucket: number | null = null;
 let lastTrafficSignature = '';
 let searchSession: SearchSession | null = null;
 let mapCenterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingMapCenter: { lat: number; lng: number; heading: number } | null = null;
+let arrivalShown = false;
+let lastIncidentCheckAt = 0;
+let warnedIncidentIds = new Set<string>();
+let lastIncidentSignature = '';
+
+/** Throttle for the incident look-ahead, matching the phone's banner. */
+const INCIDENT_CHECK_INTERVAL_MS = 10_000;
 
 /**
  * Initialise the CarPlay manager. Safe to call multiple times — subsequent
@@ -56,6 +76,11 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('searchQuery', onSearchQuery),
     CarPlay.emitter.addListener('searchResultSelected', onSearchResultSelected),
     CarPlay.emitter.addListener('searchResultAddStop', onSearchResultAddStop),
+    CarPlay.emitter.addListener('carPlayRouteStart', onRouteStart),
+    CarPlay.emitter.addListener('carPlayContentStyleChanged', onContentStyleChanged),
+    CarPlay.emitter.addListener('carPlayToggleMute', onToggleMute),
+    CarPlay.emitter.addListener('carPlayArrivalDismiss', onArrivalDismiss),
+    CarPlay.emitter.addListener('carPlayDashboardFavorite', onDashboardFavorite),
   ];
   appearanceSubscription?.remove();
   appearanceSubscription = Appearance.addChangeListener(syncMapStyle);
@@ -85,12 +110,18 @@ export function teardownCarPlay(): void {
   appearanceSubscription?.remove();
   appearanceSubscription = null;
   lastMapStyleKey = null;
+  carPlayDark = null;
   clearMapCenterUpdate();
   searchSession?.cancel();
   initialized = false;
   connected = false;
   carPlayRouteKey = null;
+  previewKey = null;
   rerouteAlertShown = false;
+  arrivalShown = false;
+  lastIncidentCheckAt = 0;
+  warnedIncidentIds = new Set();
+  lastIncidentSignature = '';
   lastDistanceBucket = null;
   lastTrafficSignature = '';
 }
@@ -115,7 +146,10 @@ function onConnected() {
   trackingUnsubscribe?.();
   trackingUnsubscribe = useNavigationTrackingStore.subscribe(onTrackingUpdate);
   trafficUnsubscribe?.();
-  trafficUnsubscribe = useTrafficStore.subscribe(syncRouteTraffic);
+  trafficUnsubscribe = useTrafficStore.subscribe(() => {
+    syncRouteTraffic();
+    syncIncidents();
+  });
   settingsUnsubscribe?.();
   settingsUnsubscribe = useSettingsStore.subscribe(syncMapStyle);
   mapStyleUnsubscribe?.();
@@ -143,10 +177,16 @@ function onDisconnected() {
   mapStyleUnsubscribe?.();
   mapStyleUnsubscribe = null;
   lastMapStyleKey = null;
+  carPlayDark = null;
   clearMapCenterUpdate();
   searchSession?.cancel();
   carPlayRouteKey = null;
+  previewKey = null;
   rerouteAlertShown = false;
+  arrivalShown = false;
+  lastIncidentCheckAt = 0;
+  warnedIncidentIds = new Set();
+  lastIncidentSignature = '';
   lastDistanceBucket = null;
   lastTrafficSignature = '';
 }
@@ -167,7 +207,15 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     lastDistanceBucket = null;
     lastTrafficSignature = '';
     hideRerouteAlert();
+    syncIncidents();
+    syncRoutePreview(state);
     return;
+  }
+
+  // Navigation won the race with a preview the driver was still comparing.
+  if (previewKey !== null) {
+    previewKey = null;
+    CarPlay.hideTripPreview();
   }
 
   const routeKey = `${state.activeRoute.geometry}:${state.destination.lat}:${state.destination.lng}`;
@@ -176,7 +224,12 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     carPlayRouteKey = routeKey;
     // Fresh route — re-evaluate traffic colors even if the store didn't change.
     lastTrafficSignature = '';
+    arrivalShown = false;
+    lastIncidentCheckAt = 0;
+    warnedIncidentIds = new Set();
+    lastIncidentSignature = '';
     syncRouteTraffic();
+    syncIncidents();
   }
 
   const allManeuvers = state.activeRoute.legs.flatMap((l) => l.maneuvers);
@@ -214,8 +267,171 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
         }
       : undefined,
     isRerouting: rerouting,
+    muted: state.muted,
+    etaColor: selectCarPlayEtaColor(state),
+    highwayExitLabel: maneuver.exitNumber ?? maneuver.exitBranch,
   });
+
+  if (state.hasArrived && !arrivalShown) {
+    arrivalShown = true;
+    CarPlay.showArrival({ destinationName: state.destination.name ?? 'your destination' });
+  } else if (!state.hasArrived) {
+    arrivalShown = false;
+  }
   syncMapCenter(tracking);
+}
+
+/**
+ * Warns about the nearest crowd-reported incident ahead on the active route,
+ * reusing the phone's `findIncidentsAhead` and announcing each incident once
+ * per navigation session (mirrors `IncidentAheadBanner`).
+ */
+function checkIncidentsAhead(
+  tracking: ReturnType<typeof useNavigationTrackingStore.getState>,
+): void {
+  if (!tracking.navPosition) return;
+  const now = Date.now();
+  if (now - lastIncidentCheckAt < INCIDENT_CHECK_INTERVAL_MS) return;
+  lastIncidentCheckAt = now;
+
+  const nav = useNavigationStore.getState();
+  if (!nav.activeRoute) return;
+  const routeCoords = decodePolyline(nav.activeRoute.geometry);
+  const ahead = findIncidentsAhead(
+    routeCoords,
+    tracking.navPosition,
+    useTrafficStore.getState().incidents,
+  );
+  const next = ahead.find((incident) => !warnedIncidentIds.has(incident.id));
+  if (!next) return;
+
+  warnedIncidentIds.add(next.id);
+  CarPlay.showIncidentAlert({
+    label: INCIDENT_TYPE_LABELS[next.type],
+    distanceMeters: haversineMeters(tracking.navPosition, [next.lng, next.lat]),
+  });
+}
+
+/** Phone EtaDisplay's overall traffic color, mapped to the CarPlay enum. */
+export function selectCarPlayEtaColor(
+  state: Pick<ReturnType<typeof useNavigationStore.getState>, 'activeRoute'>,
+): 'green' | 'orange' | 'red' {
+  if (!state.activeRoute) return 'green';
+  const color = averageRouteTrafficColor(
+    decodePolyline(state.activeRoute.geometry),
+    useTrafficStore.getState().normalizedSegments,
+  );
+  if (color === ETA_COLOR_ORANGE) return 'orange';
+  if (color === ETA_COLOR_RED) return 'red';
+  return 'green';
+}
+
+/**
+ * Mirrors the phone's route-preview state as an Apple/Google-style CarPlay
+ * trip preview: every computed route becomes a `CPRouteChoice`, and the driver
+ * starts one by tapping Go (native then emits `carPlayRouteStart`).
+ */
+function syncRoutePreview(state: ReturnType<typeof useNavigationStore.getState>): void {
+  if (!state.routePreview || !state.routePreviewDestination) {
+    if (previewKey !== null) {
+      previewKey = null;
+      CarPlay.hideTripPreview();
+    }
+    return;
+  }
+
+  const destination = state.routePreviewDestination;
+  const routes = [state.routePreview, ...state.routePreviewAlternates];
+  const key = `${routes.map((route) => route.geometry).join('|')}:${destination.lat}:${destination.lng}`;
+  if (key === previewKey) return;
+  previewKey = key;
+
+  CarPlay.showTripPreview({
+    destinationName: destination.name ?? 'Destination',
+    destinationLat: destination.lat,
+    destinationLng: destination.lng,
+    routes: routes.map((route) => ({
+      encodedPolyline: route.geometry,
+      summary: formatCarPlayRouteSummary(
+        route.summary.distanceMeters,
+        route.summary.durationSeconds,
+      ),
+      distanceMeters: route.summary.distanceMeters,
+      durationSeconds: route.summary.durationSeconds,
+    })),
+  });
+}
+
+/** Starts the phone-side trip the driver selected in the CarPlay preview. */
+function onRouteStart({ index }: { index?: number }): void {
+  if (!connected) return;
+  const state = useNavigationStore.getState();
+  if (!state.routePreview || !state.routePreviewDestination) return;
+  const routes = [state.routePreview, ...state.routePreviewAlternates];
+  const selected = routes[index ?? 0];
+  if (!selected) return;
+  useNavigationStore.getState().startNavigation(
+    selected,
+    routes.filter((route) => route !== selected),
+    state.routePreviewDestination,
+    state.routePreviewCosting,
+    state.routePreviewWaypoints,
+  );
+}
+
+/** The head unit switched light/dark; re-resolve the phone map style. */
+function onContentStyleChanged({ dark }: { dark?: boolean }): void {
+  carPlayDark = dark ?? null;
+  lastMapStyleKey = null;
+  syncMapStyle();
+}
+
+/** CarPlay's mute button toggled voice guidance. */
+function onToggleMute(): void {
+  const nav = useNavigationStore.getState();
+  nav.setMuted(!nav.muted);
+}
+
+/** The driver tapped Done on the CarPlay arrival card; end on the phone too. */
+function onArrivalDismiss(): void {
+  arrivalShown = false;
+  useNavigationStore.getState().stopNavigation();
+}
+
+/** CarPlay dashboard shortcut (Home/Work): preview navigation to that favorite. */
+async function onDashboardFavorite({ kind }: { kind?: string }): Promise<void> {
+  if (!connected || !kind) return;
+  const favorite = getFavorites().find((entry) => entry.kind === kind);
+  if (!favorite) return;
+  const { viewport } = useMapStore.getState();
+  const prefs = useSettingsStore.getState().routePreferences;
+  try {
+    const routes = await computeRoute(
+      [
+        { lat: viewport.lat, lng: viewport.lng },
+        { lat: favorite.entry.lat, lng: favorite.entry.lng },
+      ],
+      'auto',
+      {
+        avoidTolls: prefs.avoidTolls,
+        avoidHighways: prefs.avoidHighways,
+        avoidFerries: prefs.avoidFerries,
+        alternates: 2,
+      },
+    );
+    const route = routes[0];
+    if (!route) return;
+    useNavigationStore
+      .getState()
+      .setRoutePreview(
+        route,
+        routes.slice(1),
+        { lat: favorite.entry.lat, lng: favorite.entry.lng, name: favorite.label },
+        'auto',
+      );
+  } catch {
+    // Route computation failed — silently ignore on CarPlay
+  }
 }
 
 /** Shows/dismisses the native "Rerouting" alert only on transitions. */
@@ -316,7 +532,9 @@ export function syncMapStyle(): void {
   if (!connected) return;
   const themeMode = useSettingsStore.getState().themeMode;
   const systemDark = Appearance.getColorScheme() === 'dark';
-  const isDark = themeMode === 'dark' || (themeMode === 'system' && systemDark);
+  // The head unit's content style wins while CarPlay is attached, so the map
+  // matches the car rather than the phone's theme.
+  const isDark = carPlayDark ?? (themeMode === 'dark' || (themeMode === 'system' && systemDark));
   const mapStylePref = useMapStore.getState().mapStyle;
   const key = `${isDark ? 'dark' : 'light'}:${mapStylePref}`;
   if (key === lastMapStyleKey) return;
@@ -350,6 +568,33 @@ function syncRouteTraffic(): void {
 }
 
 /**
+ * Draws the phone's crowd-reported incidents on the CarPlay map, mirroring
+ * `IncidentLayer`. Only active during navigation; clears when the trip ends.
+ * No-ops unless the marker set actually changed.
+ */
+function syncIncidents(): void {
+  if (!connected) return;
+  const nav = useNavigationStore.getState();
+  if (!nav.isNavigating) {
+    if (lastIncidentSignature !== '') {
+      lastIncidentSignature = '';
+      CarPlay.updateIncidents([]);
+    }
+    return;
+  }
+  const markers: CarPlayIncidentMarker[] = useTrafficStore
+    .getState()
+    .incidents.filter((incident) => incident.expiresAt > Date.now())
+    .map((incident) => ({ type: incident.type, lat: incident.lat, lng: incident.lng }));
+  const signature = markers
+    .map((marker) => `${marker.type}:${marker.lat.toFixed(5)},${marker.lng.toFixed(5)}`)
+    .join(';');
+  if (signature === lastIncidentSignature) return;
+  lastIncidentSignature = signature;
+  CarPlay.updateIncidents(markers);
+}
+
+/**
  * Tracking-pipeline subscriber: moves the map camera and re-pushes the
  * maneuver panel when the live countdown crosses a distance bucket. The
  * native side applies those re-pushes as in-place estimate updates (no card
@@ -360,6 +605,7 @@ function onTrackingUpdate(state: ReturnType<typeof useNavigationTrackingStore.ge
   if (!connected) return;
   const nav = useNavigationStore.getState();
   if (!nav.isNavigating || !nav.currentManeuver) return;
+  checkIncidentsAhead(state);
   const live = state.distanceToTurn ?? nav.currentManeuver.distanceMeters;
   const bucket = distanceBucket(live);
   if (bucket === lastDistanceBucket) return;
@@ -429,7 +675,24 @@ function getSearchSession(): SearchSession {
 
 async function onSearchQuery({ query }: { query: string }) {
   if (!connected) return;
+  // Empty query shows the phone's saved places, like Apple/Google's
+  // recents/Home/Work list, instead of submitting an empty search.
+  if (!query.trim()) {
+    searchSession?.cancel();
+    CarPlay.pushSearchResults(emptyQueryResults());
+    return;
+  }
   await getSearchSession().submit(query);
+}
+
+/** Home → Work → pins, matching `favoritesService`'s ordering. */
+function emptyQueryResults(): CarPlaySearchResult[] {
+  return getFavorites().map((favorite) => ({
+    name: favorite.label,
+    subtitle: favorite.entry.text,
+    lat: favorite.entry.lat,
+    lng: favorite.entry.lng,
+  }));
 }
 
 async function onSearchResultSelected(result: { name?: string; lat?: number; lng?: number }) {
@@ -442,6 +705,7 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
 
   // Get current location from map viewport as origin
   const { viewport } = useMapStore.getState();
+  const prefs = useSettingsStore.getState().routePreferences;
 
   try {
     const routes = await computeRoute(
@@ -450,14 +714,22 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
         { lat, lng },
       ],
       'auto',
+      {
+        avoidTolls: prefs.avoidTolls,
+        avoidHighways: prefs.avoidHighways,
+        avoidFerries: prefs.avoidFerries,
+        alternates: 2,
+      },
     );
 
     const route = routes[0];
     if (!route) return;
 
-    // Start navigation in the phone-side store. The store subscription above
-    // creates the CarPlay session and keeps it in sync for every entry point.
-    useNavigationStore.getState().startNavigation(route, [], { lat, lng, name }, 'auto');
+    // Show the phone's route preview; the driver compares options and taps Go,
+    // which native reports back via `carPlayRouteStart`.
+    useNavigationStore
+      .getState()
+      .setRoutePreview(route, routes.slice(1), { lat, lng, name }, 'auto');
   } catch {
     // Route computation failed — silently ignore on CarPlay
   }

@@ -50,6 +50,7 @@ class PolarisCarPlay: RCTEventEmitter {
     }
     mapTemplateManager.activate(
       interfaceController: pendingInterfaceController!, window: pendingWindow!)
+    emitContentStyle(dark: mapTemplateManager.contentStyleIsDark)
     emit("carPlayConnected", ["connected": true])
   }
 
@@ -81,7 +82,8 @@ class PolarisCarPlay: RCTEventEmitter {
   override func supportedEvents() -> [String]! {
     return [
       "carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected",
-      "searchResultAddStop",
+      "searchResultAddStop", "carPlayRouteStart", "carPlayContentStyleChanged",
+      "carPlayToggleMute", "carPlayArrivalDismiss", "carPlayDashboardFavorite",
     ]
   }
 
@@ -102,6 +104,36 @@ class PolarisCarPlay: RCTEventEmitter {
 
   @objc func endNavigation() {
     DispatchQueue.main.async { Self.mapTemplateManager.endNavigation() }
+  }
+
+  @objc func showTripPreview(_ data: NSDictionary) {
+    DispatchQueue.main.async { Self.mapTemplateManager.showTripPreview(with: data) }
+  }
+
+  @objc func hideTripPreview() {
+    DispatchQueue.main.async { Self.mapTemplateManager.hideTripPreview() }
+  }
+
+  @objc func showArrival(_ data: NSDictionary) {
+    DispatchQueue.main.async { Self.mapTemplateManager.showArrival(with: data) }
+  }
+
+  @objc func showIncidentAlert(_ data: NSDictionary) {
+    DispatchQueue.main.async { Self.mapTemplateManager.showIncidentAlert(with: data) }
+  }
+
+  @objc func updateIncidents(_ incidents: NSArray) {
+    let markers = incidents.compactMap { element -> CarPlayIncidentMarker? in
+      guard let dict = element as? NSDictionary,
+        let lat = (dict["lat"] as? NSNumber)?.doubleValue,
+        let lng = (dict["lng"] as? NSNumber)?.doubleValue
+      else { return nil }
+      return CarPlayIncidentMarker(
+        coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+        type: dict["type"] as? String ?? "other"
+      )
+    }
+    DispatchQueue.main.async { Self.mapTemplateManager.updateIncidents(markers) }
   }
 
   @objc func pushSearchResults(_ results: NSArray) {
@@ -137,7 +169,7 @@ class PolarisCarPlay: RCTEventEmitter {
         let to = (dict["to"] as? NSNumber)?.intValue,
         let color = UIColor(hexString: hex)
       else { return nil }
-      return RouteTrafficRange(color: color, from: from, to: to)
+      return RouteTrafficRange(color: color, hex: hex, from: from, to: to)
     }
     DispatchQueue.main.async { Self.mapTemplateManager.applyRouteTraffic(parsed) }
   }
@@ -203,6 +235,11 @@ struct CarPlayNavigationUpdate {
   let speedLimitUnit: String
   let laneGuidance: CarPlayLaneInfo?
   let isRerouting: Bool
+  let muted: Bool
+  /// Overall route traffic color for the ETA pill: green/orange/red/default.
+  let etaColor: String
+  /// Highway exit number/label for exit maneuvers (e.g. "91B").
+  let highwayExitLabel: String?
 
   init(from data: NSDictionary) {
     isNavigating = (data["isNavigating"] as? NSNumber)?.boolValue ?? false
@@ -237,6 +274,10 @@ struct CarPlayNavigationUpdate {
       laneGuidance = nil
     }
     isRerouting = (data["isRerouting"] as? NSNumber)?.boolValue ?? false
+    muted = (data["muted"] as? NSNumber)?.boolValue ?? false
+    etaColor = data["etaColor"] as? String ?? "default"
+    let exit = data["highwayExitLabel"] as? String ?? ""
+    highwayExitLabel = exit.isEmpty ? nil : exit
   }
 
   /// Identity of the maneuver pair. Distance/ETA changes must NOT create new
@@ -262,8 +303,15 @@ struct CarPlayManeuverStep {
 /// indices into the precision-6 decoded polyline, matching the JS builder.
 struct RouteTrafficRange {
   let color: UIColor
+  let hex: String
   let from: Int
   let to: Int
+}
+
+/// A crowd-reported incident to draw on the CarPlay map.
+struct CarPlayIncidentMarker {
+  let coordinate: CLLocationCoordinate2D
+  let type: String
 }
 
 extension UIColor {
@@ -327,6 +375,48 @@ struct CarPlayStartNavigationPayload {
   }
 }
 
+/// One route the driver can pick from the CarPlay trip preview.
+struct CarPlayTripPreviewRoute {
+  let encodedPolyline: String
+  let summary: String
+  let distanceMeters: Double
+  let durationSeconds: Double
+}
+
+struct CarPlayTripPreviewPayload {
+  let destinationName: String
+  let destinationLat: Double
+  let destinationLng: Double
+  let routes: [CarPlayTripPreviewRoute]
+
+  init?(from data: NSDictionary) {
+    guard
+      let name = data["destinationName"] as? String,
+      let lat = (data["destinationLat"] as? NSNumber)?.doubleValue,
+      let lng = (data["destinationLng"] as? NSNumber)?.doubleValue,
+      let rawRoutes = data["routes"] as? NSArray
+    else { return nil }
+    destinationName = name
+    destinationLat = lat
+    destinationLng = lng
+    var parsed: [CarPlayTripPreviewRoute] = []
+    for entry in rawRoutes {
+      guard
+        let route = entry as? NSDictionary,
+        let polyline = route["encodedPolyline"] as? String
+      else { continue }
+      parsed.append(
+        CarPlayTripPreviewRoute(
+          encodedPolyline: polyline,
+          summary: route["summary"] as? String ?? "",
+          distanceMeters: (route["distanceMeters"] as? NSNumber)?.doubleValue ?? 0,
+          durationSeconds: (route["durationSeconds"] as? NSNumber)?.doubleValue ?? 0
+        ))
+    }
+    routes = parsed
+  }
+}
+
 // MARK: - Templates and navigation session management
 
 /// Owns the CPMapTemplate / CPSearchTemplate and the active navigation
@@ -343,7 +433,18 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var activeTrip: CPTrip?
   private var activePolyline = ""
   private var maneuverSignature = ""
-  private var reroutingAlert: CPNavigationAlert?
+  private var previewTrip: CPTrip?
+  private var previewRoutes: [CarPlayTripPreviewRoute] = []
+  private var previewDestination: CLLocationCoordinate2D?
+  private var activeAlert: CPNavigationAlert?
+  private var muteButton: CPBarButton?
+  private var overviewButton: CPBarButton?
+  private var isMuted = false
+  private var isOverview = false
+
+  /// Phone NextTurnBanner base colour (rgba(26,47,62,0.72) flattened).
+  private static let guidanceBackgroundColor = UIColor(
+    red: 26 / 255, green: 47 / 255, blue: 62 / 255, alpha: 1)
   private var searchItems: [CarPlaySearchItem] = []
   private var activeSearchText = ""
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
@@ -360,6 +461,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let template = CPMapTemplate()
     template.mapDelegate = self
     template.mapButtons = makeMapButtons()
+    // Base tint for the guidance banner, matching the phone's NextTurnBanner.
+    template.guidanceBackgroundColor = Self.guidanceBackgroundColor
+    configureNavigationBar(template)
     mapTemplate = template
 
     let search = CPSearchTemplate()
@@ -377,6 +481,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activePolyline = ""
     maneuverSignature = ""
     appliedStyleHash = 0
+    isMuted = false
+    isOverview = false
+    muteButton = nil
+    overviewButton = nil
+    recenterButton = nil
     mapViewHost.deactivate()
     interfaceController = nil
     mapTemplate = nil
@@ -389,17 +498,84 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   // MARK: Map buttons
 
+  private var recenterButton: CPMapButton?
+
   private func makeMapButtons() -> [CPMapButton] {
+    let recenter = makeMapButton(systemName: "location.fill") { [weak self] in
+      self?.recenter()
+    }
+    recenterButton = recenter
     return [
-      makeMapButton(systemName: "location.fill") { [weak self] in self?.mapViewHost.recenter() },
+      recenter,
       makeMapButton(systemName: "magnifyingglass") { [weak self] in self?.presentSearch() },
     ]
+  }
+
+  /// Returns to vehicle-follow and leaves the panning interface, like the
+  /// recenter control in Apple/Google Maps.
+  private func recenter() {
+    mapViewHost.recenter()
+    updateRecenterButton()
+    if mapTemplate?.isPanningInterfaceVisible == true {
+      mapTemplate?.dismissPanningInterface(animated: true)
+    }
+  }
+
+  private func updateRecenterButton() {
+    recenterButton?.image = UIImage(systemName: mapViewHost.isFollowing ? "location.fill" : "location")
   }
 
   private func makeMapButton(systemName: String, handler: @escaping () -> Void) -> CPMapButton {
     let button = CPMapButton { _ in handler() }
     button.image = UIImage(systemName: systemName)
     return button
+  }
+
+  // MARK: Navigation bar buttons (mute + route overview)
+
+  /// The vehicle's light/dark preference, so JS can resolve the phone map style
+  /// to match the head unit instead of the phone's theme.
+  var contentStyleIsDark: Bool {
+    sessionConfiguration?.contentStyle.contains(.dark) ?? false
+  }
+
+  private func configureNavigationBar(_ template: CPMapTemplate) {
+    let mute = CPBarButton(image: UIImage(systemName: "speaker.wave.2.fill") ?? UIImage()) {
+      [weak self] _ in self?.toggleMute()
+    }
+    muteButton = mute
+    let overview = CPBarButton(image: UIImage(systemName: "map.fill") ?? UIImage()) {
+      [weak self] _ in self?.toggleOverview()
+    }
+    overviewButton = overview
+    template.leadingNavigationBarButtons = [mute]
+    template.trailingNavigationBarButtons = [overview]
+  }
+
+  private func toggleMute() {
+    isMuted.toggle()
+    updateMuteButton()
+    PolarisCarPlay.emitToggleMute()
+  }
+
+  private func updateMuteButton() {
+    muteButton?.image = UIImage(
+      systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+  }
+
+  /// Zooms out to the whole route; pressing again (or recentering) returns to
+  /// the follow camera.
+  private func toggleOverview() {
+    if isOverview {
+      isOverview = false
+      mapViewHost.recenter()
+      overviewButton?.image = UIImage(systemName: "map.fill")
+    } else {
+      isOverview = true
+      mapViewHost.showRouteOverview()
+      overviewButton?.image = UIImage(systemName: "location.fill")
+    }
+    updateRecenterButton()
   }
 
   private func presentSearch() {
@@ -417,8 +593,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
     // Ignore duplicate starts for the route already on screen. Restarting the
     // session tears down the guidance card and the route overlay, which reads
-    // as a flashing banner with no route.
+    // as a flashing banner with no route. A trip preview that the driver
+    // already started leaves a session with no maneuver card, so fill it in.
     if navigationSession != nil && payload.encodedPolyline == activePolyline {
+      applyManeuvers(payload.maneuvers)
       return
     }
 
@@ -482,6 +660,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       return
     }
 
+    // Keep the mute button in sync when the phone toggles voice guidance.
+    if update.muted != isMuted {
+      isMuted = update.muted
+      updateMuteButton()
+    }
+
     // Steady-state path: the maneuver pair hasn't changed, so only refresh
     // numbers in place. Replacing `upcomingManeuvers` on every tick makes the
     // guidance card visibly flicker.
@@ -491,15 +675,17 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
         for: current
       )
       if let trip = activeTrip {
-        template.updateEstimates(
+        template.update(
           travelEstimates(distanceMeters: update.remainingDistanceMeters, seconds: update.etaSeconds),
-          for: trip
+          for: trip,
+          with: timeRemainingColor(update.etaColor)
         )
       }
       return
     }
 
     var upcoming: [CPManeuver] = []
+    let nativeLanes = supportsNativeLaneGuidance(update.laneGuidance)
     if !update.displayInstruction.isEmpty {
       upcoming.append(
         makeManeuver(
@@ -507,14 +693,17 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
           shortInstruction: update.instruction,
           maneuverType: update.maneuverType,
           distanceMeters: update.distanceToTurnMeters,
-          durationSeconds: update.durationToTurnSeconds
+          durationSeconds: update.durationToTurnSeconds,
+          laneGuidance: nativeLanes ? update.laneGuidance : nil,
+          highwayExitLabel: update.highwayExitLabel
         ))
     }
     if let next = update.nextInstruction, !next.isEmpty {
-      // Lane guidance takes the second slot (Apple's recommended layout):
-      // the lane strip renders symbol-only while the "Then" turn stays in
-      // the instruction variants for other surfaces.
+      // On iOS 17.4+ the current maneuver carries native lane guidance
+      // (`linkedLaneGuidance`), so the second "Then" slot only needs the
+      // rasterized lane strip as a fallback on older systems.
       let lanes = update.laneGuidance
+      let fallbackLanes = !nativeLanes && lanes?.isUsable == true ? lanes : nil
       upcoming.append(
         makeManeuver(
           instruction: next,
@@ -522,18 +711,33 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
           maneuverType: update.nextManeuverType ?? "",
           distanceMeters: update.nextDistanceMeters,
           durationSeconds: 0,
-          laneImage: lanes?.isUsable == true ? LaneStripImage.make(from: lanes!) : nil
+          laneImage: fallbackLanes.map { LaneStripImage.make(from: $0) } ?? nil
         ))
     }
     guard !upcoming.isEmpty else { return }
     maneuverSignature = update.signature
     session.upcomingManeuvers = upcoming
+    if #available(iOS 17.4, *) {
+      session.currentLaneGuidance =
+        nativeLanes ? update.laneGuidance.flatMap { makeLaneGuidance($0) } : nil
+    }
     mapViewHost.showSpeedLimit(value: update.speedLimitValue, unit: update.speedLimitUnit)
     if let trip = activeTrip {
-      template.updateEstimates(
+      template.update(
         travelEstimates(distanceMeters: update.remainingDistanceMeters, seconds: update.etaSeconds),
-        for: trip
+        for: trip,
+        with: timeRemainingColor(update.etaColor)
       )
+    }
+  }
+
+  /// Maps the JS traffic color for the ETA pill to the CarPlay enum.
+  private func timeRemainingColor(_ raw: String) -> CPTimeRemainingColor {
+    switch raw {
+    case "green": return .green
+    case "orange": return .orange
+    case "red": return .red
+    default: return .default
     }
   }
 
@@ -546,36 +750,169 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activeTrip = nil
     activePolyline = ""
     maneuverSignature = ""
+    previewTrip = nil
+    previewRoutes = []
+    previewDestination = nil
     mapViewHost.clearRoute()
   }
 
-  // MARK: Navigation alerts (rerouting banner, like the phone's blue banner)
+  // MARK: Trip preview (Apple/Google-style route options before starting)
+
+  /// Shows the CarPlay trip preview with one route choice per computed route,
+  /// drawing the primary route and the rest as grey alternates. The driver
+  /// picks a route and taps Go; `mapTemplate(_:startedTrip:using:)` then emits
+  /// `carPlayRouteStart` so JS starts the matching phone-side navigation.
+  func showTripPreview(with data: NSDictionary) {
+    guard let template = mapTemplate, let payload = CarPlayTripPreviewPayload(from: data),
+      !payload.routes.isEmpty
+    else { return }
+
+    endNavigation()
+
+    let origin = MKMapItem(placemark: MKPlacemark(coordinate: mapViewHost.currentCoordinate))
+    origin.name = "Current location"
+    let destinationCoordinate = CLLocationCoordinate2D(
+      latitude: payload.destinationLat, longitude: payload.destinationLng)
+    let destination = MKMapItem(placemark: MKPlacemark(coordinate: destinationCoordinate))
+    destination.name = payload.destinationName
+
+    var choices: [CPRouteChoice] = []
+    for (index, route) in payload.routes.enumerated() {
+      let summary =
+        route.summary.isEmpty
+        ? String(
+          format: "%.1f km · %d min", route.distanceMeters / 1000,
+          Int(route.durationSeconds / 60))
+        : route.summary
+      let choice = CPRouteChoice(
+        summaryVariants: [summary],
+        additionalInformationVariants: [],
+        selectionSummaryVariants: [payload.destinationName]
+      )
+      choice.userInfo = index
+      choices.append(choice)
+    }
+
+    let trip = CPTrip(origin: origin, destination: destination, routeChoices: choices)
+    previewTrip = trip
+    previewRoutes = payload.routes
+    previewDestination = destinationCoordinate
+
+    mapViewHost.showRoute(
+      encodedPolyline: payload.routes[0].encodedPolyline,
+      destination: destinationCoordinate,
+      alternates: payload.routes.dropFirst().map { $0.encodedPolyline }
+    )
+
+    let text = CPTripPreviewTextConfiguration(
+      startButtonTitle: "Go",
+      additionalRoutesButtonTitle: "Routes",
+      overviewButtonTitle: "Overview"
+    )
+    template.showTripPreviews([trip], textConfiguration: text)
+  }
+
+  /// Dismisses the trip preview. The map route is only cleared when no
+  /// navigation session is active, so starting a trip doesn't wipe the line.
+  func hideTripPreview() {
+    previewTrip = nil
+    previewRoutes = []
+    previewDestination = nil
+    mapTemplate?.hideTripPreviews()
+    if navigationSession == nil {
+      mapViewHost.clearRoute()
+    }
+  }
+
+  // MARK: Navigation alerts (rerouting, incidents, arrival)
 
   func showReroutingAlert() {
-    guard let template = mapTemplate, reroutingAlert == nil else { return }
+    guard mapTemplate != nil, activeAlert == nil else { return }
     // The SDK requires at least a primary action on navigation alerts.
     let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
       self?.hideNavigationAlert()
     }
-    let alert = CPNavigationAlert(
-      titleVariants: ["Rerouting…"],
-      subtitleVariants: ["Finding the best route"],
-      image: nil,
-      primaryAction: dismiss,
-      secondaryAction: nil,
-      duration: 0
-    )
-    reroutingAlert = alert
-    template.present(navigationAlert: alert, animated: true)
+    presentAlert(
+      CPNavigationAlert(
+        titleVariants: ["Rerouting…"],
+        subtitleVariants: ["Finding the best route"],
+        image: nil,
+        primaryAction: dismiss,
+        secondaryAction: nil,
+        duration: 0
+      ))
   }
 
   func hideNavigationAlert() {
-    guard reroutingAlert != nil, let template = mapTemplate else {
-      reroutingAlert = nil
+    guard activeAlert != nil, let template = mapTemplate else {
+      activeAlert = nil
       return
     }
-    reroutingAlert = nil
+    activeAlert = nil
     template.dismissNavigationAlert(animated: true, completion: { _ in })
+  }
+
+  /// Transient crowd-reported incident warning, mirroring the phone's
+  /// `IncidentAheadBanner` (auto-dismisses after the minimum duration).
+  func showIncidentAlert(with data: NSDictionary) {
+    guard mapTemplate != nil, activeAlert == nil else { return }
+    let label = data["label"] as? String ?? "Incident"
+    let distanceMeters = (data["distanceMeters"] as? NSNumber)?.doubleValue ?? 0
+    let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
+      self?.hideNavigationAlert()
+    }
+    presentAlert(
+      CPNavigationAlert(
+        titleVariants: ["\(label) ahead"],
+        subtitleVariants: [formattedDistance(distanceMeters)],
+        image: nil,
+        primaryAction: dismiss,
+        secondaryAction: nil,
+        duration: CPNavigationAlertMinimumDuration
+      ))
+  }
+
+  /// Arrival card shown when the destination is reached. "Done" ends the trip
+  /// on both surfaces (the phone mirror stops via `carPlayArrivalDismiss`).
+  func showArrival(with data: NSDictionary) {
+    let name = data["destinationName"] as? String ?? "your destination"
+    let done = CPAlertAction(title: "Done", style: .default) { [weak self] _ in
+      self?.endNavigation()
+      PolarisCarPlay.emitArrivalDismiss()
+    }
+    // Arrival replaces any transient alert still on screen.
+    replaceAlert(
+      CPNavigationAlert(
+        titleVariants: ["You have arrived"],
+        subtitleVariants: [name],
+        image: nil,
+        primaryAction: done,
+        secondaryAction: nil,
+        duration: 0
+      ))
+  }
+
+  private func presentAlert(_ alert: CPNavigationAlert) {
+    guard let template = mapTemplate else { return }
+    activeAlert = alert
+    template.present(navigationAlert: alert, animated: true)
+  }
+
+  private func replaceAlert(_ alert: CPNavigationAlert) {
+    guard let template = mapTemplate else { return }
+    if activeAlert != nil {
+      activeAlert = nil
+      template.dismissNavigationAlert(animated: false, completion: { _ in })
+    }
+    activeAlert = alert
+    template.present(navigationAlert: alert, animated: true)
+  }
+
+  /// Locale-aware distance for alert subtitles (mirrors `MKDistanceFormatter`).
+  private func formattedDistance(_ meters: Double) -> String {
+    let formatter = MKDistanceFormatter()
+    formatter.unitStyle = .abbreviated
+    return formatter.string(fromDistance: meters)
   }
 
   private func applyManeuvers(_ steps: [CarPlayManeuverStep]) {
@@ -615,7 +952,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     maneuverType typeName: String,
     distanceMeters: Double,
     durationSeconds: Double,
-    laneImage: UIImage? = nil
+    laneImage: UIImage? = nil,
+    laneGuidance: CarPlayLaneInfo? = nil,
+    highwayExitLabel: String? = nil
   ) -> CPManeuver {
     let maneuver = CPManeuver()
     // Long-to-short variants so CarPlay picks the longest string that fits,
@@ -630,6 +969,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     if #available(iOS 17.4, *) {
       maneuver.maneuverType = maneuverType(for: typeName)
       maneuver.junctionType = typeName.contains("roundabout") ? .roundabout : .intersection
+      if let exit = highwayExitLabel, !exit.isEmpty {
+        maneuver.highwayExitLabel = exit
+      }
+      if let lanes = laneGuidance, let guide = makeLaneGuidance(lanes) {
+        maneuver.linkedLaneGuidance = guide
+      }
     }
     if let lanes = laneImage {
       maneuver.symbolImage = lanes
@@ -640,6 +985,59 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     maneuver.initialTravelEstimates = travelEstimates(
       distanceMeters: distanceMeters, seconds: durationSeconds)
     return maneuver
+  }
+
+  /// True when the OS can render lanes natively (`CPLaneGuidance`, 17.4+).
+  /// When it can, we skip the rasterized lane-strip fallback to avoid
+  /// showing the lanes twice.
+  private func supportsNativeLaneGuidance(_ lanes: CarPlayLaneInfo?) -> Bool {
+    guard #available(iOS 17.4, *), let lanes = lanes, lanes.isUsable else { return false }
+    return makeLaneGuidance(lanes) != nil
+  }
+
+  /// Builds CarPlay's native lane guidance from the phone's lane model.
+  @available(iOS 17.4, *)
+  private func makeLaneGuidance(_ lanes: CarPlayLaneInfo) -> CPLaneGuidance? {
+    guard lanes.laneCount >= 2, lanes.laneDirections.count >= 2 else { return nil }
+    var result: [CPLane] = []
+    for (index, direction) in lanes.laneDirections.enumerated() {
+      let angle = Measurement(value: laneAngleDegrees(for: direction), unit: UnitAngle.degrees)
+      let preferred = lanes.activeLanes.contains(index)
+      if #available(iOS 18.0, *) {
+        // iOS 18+ splits the highlighted angle out of `angles`; preferred
+        // lanes carry the angle, the rest are plain `notGood` lanes.
+        if preferred {
+          result.append(CPLane(angles: [], highlightedAngle: angle, isPreferred: true))
+        } else {
+          result.append(CPLane(angles: [angle]))
+        }
+      } else {
+        let lane = CPLane()
+        lane.status = preferred ? .preferred : .notGood
+        lane.primaryAngle = angle
+        result.append(lane)
+      }
+    }
+    guard !result.isEmpty else { return nil }
+    let guidance = CPLaneGuidance()
+    guidance.lanes = result
+    guidance.instructionVariants = ["Use the highlighted lane"]
+    return guidance
+  }
+
+  /// Screen degrees (0 = straight, negative = left) mirroring the phone's
+  /// lane glyph rotations in `LaneStripImage`.
+  private func laneAngleDegrees(for direction: String) -> Double {
+    switch direction {
+    case "left": return -90
+    case "slight_left": return -45
+    case "slight_right": return 45
+    case "right": return 90
+    case "merge_left": return -30
+    case "merge_right": return 30
+    case "u_turn": return 180
+    default: return 0
+    }
   }
 
   /// Maps Valhalla maneuver type strings (see src/models/route.ts) to the
@@ -714,6 +1112,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func applyRouteTraffic(_ ranges: [RouteTrafficRange]) {
     mapViewHost.showTraffic(ranges)
+  }
+
+  // MARK: Incident markers
+
+  func updateIncidents(_ markers: [CarPlayIncidentMarker]) {
+    mapViewHost.showIncidents(markers)
   }
 
   // MARK: Search
@@ -807,6 +1211,153 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     return .leadingSymbol
   }
 
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, selectedPreviewFor trip: CPTrip, using routeChoice: CPRouteChoice
+  ) {
+    guard let index = routeChoice.userInfo as? Int, previewRoutes.indices.contains(index) else {
+      return
+    }
+    let route = previewRoutes[index]
+    let alternates = previewRoutes.enumerated()
+      .filter { $0.offset != index }
+      .map { $0.element.encodedPolyline }
+    mapViewHost.showRoute(
+      encodedPolyline: route.encodedPolyline,
+      destination: previewDestination,
+      alternates: alternates
+    )
+  }
+
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, startedTrip trip: CPTrip, using routeChoice: CPRouteChoice
+  ) {
+    let index = (routeChoice.userInfo as? Int) ?? 0
+    guard previewRoutes.indices.contains(index) else { return }
+    let route = previewRoutes[index]
+
+    // Start the session here so CarPlay leaves the preview UI immediately. The
+    // JS `startNavigation` that follows fills in the maneuver card.
+    navigationSession = mapTemplate.startNavigationSession(for: trip)
+    activeTrip = trip
+    activePolyline = route.encodedPolyline
+    mapViewHost.showRoute(encodedPolyline: route.encodedPolyline, destination: previewDestination)
+    mapTemplate.updateEstimates(
+      CPTravelEstimates(
+        distanceRemaining: Measurement(value: route.distanceMeters, unit: UnitLength.meters),
+        timeRemaining: route.durationSeconds
+      ),
+      for: trip
+    )
+
+    previewTrip = nil
+    previewRoutes = []
+    previewDestination = nil
+    PolarisCarPlay.emitRouteStart(index)
+  }
+
+  // MARK: Map interaction (look around, zoom, rotate)
+
+  /// Any look-around gesture stops the follow camera and shows the panning UI;
+  /// `recenter()` clears both.
+  private func beginMapInteraction(_ mapTemplate: CPMapTemplate) {
+    mapViewHost.beginUserInteraction()
+    updateRecenterButton()
+    if !mapTemplate.isPanningInterfaceVisible {
+      mapTemplate.showPanningInterface(animated: true)
+    }
+  }
+
+  func mapTemplateDidShowPanningInterface(_ mapTemplate: CPMapTemplate) {
+    mapViewHost.beginUserInteraction()
+    updateRecenterButton()
+  }
+
+  func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
+    // Snap back to the vehicle once the driver leaves the panning interface.
+    mapViewHost.recenter()
+    updateRecenterButton()
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, panWith direction: CPMapTemplate.PanDirection) {
+    beginMapInteraction(mapTemplate)
+    mapViewHost.pan(direction: direction)
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, panBeganWith direction: CPMapTemplate.PanDirection) {
+    beginMapInteraction(mapTemplate)
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, panEndedWith direction: CPMapTemplate.PanDirection) {
+    beginMapInteraction(mapTemplate)
+    mapViewHost.pan(direction: direction)
+  }
+
+  func mapTemplateDidBeginPanGesture(_ mapTemplate: CPMapTemplate) {
+    beginMapInteraction(mapTemplate)
+  }
+
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, didUpdatePanGestureWithTranslation translation: CGPoint,
+    velocity: CGPoint
+  ) {
+    mapViewHost.pan(byScreenTranslation: translation)
+  }
+
+  func mapTemplate(_ mapTemplate: CPMapTemplate, didEndPanGestureWithVelocity velocity: CGPoint) {
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplateDidBeginZoomGesture(_ mapTemplate: CPMapTemplate) {
+    beginMapInteraction(mapTemplate)
+    mapViewHost.resetGestureTracking()
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, didUpdateZoomGestureWithCenter center: CGPoint, scale: CGFloat,
+    velocity: CGFloat
+  ) {
+    mapViewHost.applyZoomGesture(scale: scale)
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(_ mapTemplate: CPMapTemplate, didEndZoomGestureWithVelocity velocity: CGFloat) {
+    mapViewHost.resetGestureTracking()
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplateDidBeginRotationGesture(_ mapTemplate: CPMapTemplate) {
+    beginMapInteraction(mapTemplate)
+    mapViewHost.resetGestureTracking()
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate, didRotateWithCenter center: CGPoint, rotation: CGFloat,
+    velocity: CGFloat
+  ) {
+    mapViewHost.applyRotationGesture(rotation: rotation)
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(_ mapTemplate: CPMapTemplate, rotationDidEndWithVelocity velocity: CGFloat) {
+    mapViewHost.resetGestureTracking()
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplateDidBeginPitchGesture(_ mapTemplate: CPMapTemplate) {
+    beginMapInteraction(mapTemplate)
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(_ mapTemplate: CPMapTemplate, pitchWithCenter center: CGPoint) {
+    mapViewHost.beginUserInteraction()
+  }
+
+  @available(iOS 26.0, *)
+  func mapTemplate(_ mapTemplate: CPMapTemplate, pitchEndedWithCenter center: CGPoint) {
+  }
+
   func mapTemplateDidCancelNavigation(_ mapTemplate: CPMapTemplate) {
     endNavigation()
   }
@@ -817,6 +1368,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     _ sessionConfiguration: CPSessionConfiguration,
     limitedUserInterfacesChanged limitedUserInterfaces: CPLimitableUserInterface
   ) {
+  }
+
+  /// The head unit switched light/dark; JS resolves the matching phone map
+  /// style so CarPlay tracks the car, not the phone.
+  func sessionConfiguration(
+    _ sessionConfiguration: CPSessionConfiguration, contentStyleChanged contentStyle: CPContentStyle
+  ) {
+    PolarisCarPlay.emitContentStyle(dark: contentStyle.contains(.dark))
   }
 }
 
@@ -895,5 +1454,27 @@ extension PolarisCarPlay {
     var body: [String: Any] = ["lat": lat, "lng": lng]
     body["name"] = name
     emit("searchResultAddStop", body)
+  }
+
+  fileprivate static func emitRouteStart(_ index: Int) {
+    emit("carPlayRouteStart", ["index": index])
+  }
+
+  fileprivate static func emitContentStyle(dark: Bool) {
+    emit("carPlayContentStyleChanged", ["dark": dark])
+  }
+
+  fileprivate static func emitToggleMute() {
+    emit("carPlayToggleMute", [:])
+  }
+
+  fileprivate static func emitArrivalDismiss() {
+    emit("carPlayArrivalDismiss", [:])
+  }
+
+  /// Called from the dashboard scene delegate (separate file), so it must be
+  /// internal rather than fileprivate.
+  static func emitDashboardFavorite(_ kind: String) {
+    emit("carPlayDashboardFavorite", ["kind": kind])
   }
 }

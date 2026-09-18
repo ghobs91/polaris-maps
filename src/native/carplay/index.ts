@@ -5,6 +5,10 @@ import type {
   CarPlayStartNavigationData,
   CarPlaySearchResult,
   CarPlayTrafficRange,
+  CarPlayTripPreviewData,
+  CarPlayArrivalData,
+  CarPlayIncidentData,
+  CarPlayIncidentMarker,
 } from './NativePolarisCarPlay';
 
 export type {
@@ -13,6 +17,10 @@ export type {
   CarPlayStartNavigationData,
   CarPlaySearchResult,
   CarPlayTrafficRange,
+  CarPlayTripPreviewData,
+  CarPlayArrivalData,
+  CarPlayIncidentData,
+  CarPlayIncidentMarker,
 };
 
 const NativeModule = Platform.OS === 'ios' ? NativeModules.PolarisCarPlay : null;
@@ -31,6 +39,26 @@ export function startNavigation(data: CarPlayStartNavigationData): void {
 
 export function endNavigation(): void {
   NativeModule?.endNavigation();
+}
+
+export function showTripPreview(data: CarPlayTripPreviewData): void {
+  NativeModule?.showTripPreview(data);
+}
+
+export function hideTripPreview(): void {
+  NativeModule?.hideTripPreview();
+}
+
+export function showArrival(data: CarPlayArrivalData): void {
+  NativeModule?.showArrival(data);
+}
+
+export function showIncidentAlert(data: CarPlayIncidentData): void {
+  NativeModule?.showIncidentAlert(data);
+}
+
+export function updateIncidents(incidents: CarPlayIncidentMarker[]): void {
+  NativeModule?.updateIncidents(incidents);
 }
 
 export function updateRouteTraffic(ranges: CarPlayTrafficRange[]): void {

@@ -27,6 +27,16 @@ describe('CarPlay iOS configuration', () => {
     expect(infoPlist).toContain('<key>UISupportsCarPlay</key>');
     expect(infoPlist).toContain('CPTemplateApplicationSceneSessionRoleApplication');
     expect(infoPlist).toContain('CarPlaySceneDelegate');
+    // Dashboard + instrument-cluster scenes (iOS 13.4 / 15.4).
+    expect(infoPlist).toContain('CPTemplateApplicationDashboardSceneSessionRoleApplication');
+    expect(infoPlist).toContain(
+      'CPTemplateApplicationInstrumentClusterSceneSessionRoleApplication',
+    );
+    expect(infoPlist).toContain('CarPlayDashboardSceneDelegate');
+    expect(infoPlist).toContain('CarPlayInstrumentClusterSceneDelegate');
+    const appDelegate = readRepoFile('ios/PolarisMaps/AppDelegate.swift');
+    expect(appDelegate).toContain('CarPlayDashboardSceneDelegate');
+    expect(appDelegate).toContain('CarPlayInstrumentClusterSceneDelegate');
 
     expect(packageJson).toContain('"carplay:sim": "sh scripts/install-carplay-simulator.sh"');
     expect(packageJson).toContain(
@@ -123,11 +133,50 @@ describe('CarPlay iOS configuration', () => {
   it('keeps the committed ios/ CarPlay sources in sync with the plugin sources', () => {
     // CI builds ios/ without running prebuild, so withCarPlay's copy step is
     // bypassed: both copies must be identical by hand.
-    for (const file of ['PolarisCarPlay.swift', 'PolarisCarPlayMapView.swift']) {
+    for (const file of [
+      'PolarisCarPlay.swift',
+      'PolarisCarPlayMapView.swift',
+      'CarPlaySceneDelegate.swift',
+      'AppDelegate.swift',
+    ]) {
       expect(readRepoFile(`ios/PolarisMaps/${file}`)).toBe(
         readRepoFile(`plugins/native/PolarisMaps/${file}`),
       );
     }
+  });
+
+  it('declares every emitted CarPlay event in supportedEvents', () => {
+    // RCTEventEmitter throws when JS subscribes to an event that isn't listed
+    // in supportedEvents(); this catches a missing declaration at test time.
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      const supportedStart = nativeModule.indexOf(
+        'return [',
+        nativeModule.indexOf('supportedEvents'),
+      );
+      const supportedEnd = nativeModule.indexOf(']', supportedStart);
+      const supported = nativeModule.slice(supportedStart, supportedEnd);
+      const emitted = new Set(
+        [...nativeModule.matchAll(/emit\(\s*"([^"]+)"/g)].map((match) => match[1]),
+      );
+      expect(emitted.size).toBeGreaterThan(0);
+      for (const name of emitted) {
+        expect(supported).toContain(`"${name}"`);
+      }
+    }
+  });
+
+  it('bridges every native CarPlay method the JS manager calls', () => {
+    // Every @objc method must have an RCT_EXTERN_METHOD declaration, otherwise
+    // the JS call silently no-ops (map style, route traffic, reroute alert).
+    const swift = readRepoFile('plugins/native/PolarisMaps/PolarisCarPlay.swift');
+    const bridge = readRepoFile('plugins/native/PolarisMaps/PolarisCarPlay-Bridging.m');
+    const methods = [...swift.matchAll(/@objc\s+func\s+(\w+)/g)].map((match) => match[1]);
+    expect(methods.length).toBeGreaterThan(0);
+    for (const method of methods) {
+      expect(bridge).toContain(`RCT_EXTERN_METHOD(${method}`);
+    }
+    expect(readRepoFile('ios/PolarisMaps/PolarisCarPlay-Bridging.m')).toBe(bridge);
   });
 
   it('mirrors the phone UI on CarPlay: summaries, banner text, map style, add-stop', () => {
@@ -145,8 +194,12 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).toContain('appliedStyleHash');
       expect(mapView).toContain('func applyStyle(json: String)');
       expect(mapView).toContain('polaris-carplay-style-');
-      // Destination flag survives the pending-state clear.
-      expect(mapView).toContain('stashedDestination');
+      // Route + destination render as style layers (mirroring the phone's
+      // TrafficRouteLayer), which is what reliably paints in the CarPlay window.
+      expect(mapView).toContain('MLNLineStyleLayer');
+      expect(mapView).toContain('MLNShapeSource');
+      expect(mapView).toContain('rebuildRouteLayers');
+      expect(mapView).toContain('polaris-route-destination-symbol');
       // Failed styles never park the route forever.
       expect(mapView).toContain('mapViewDidFailLoadingMap');
       // Search results offer Start vs Add Stop like the phone place card.
@@ -154,6 +207,24 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).toContain('Add Stop');
       expect(nativeModule).toContain('Start Navigation');
       expect(nativeModule).toContain('popToRootTemplate');
+      // Apple/Google-style trip preview with route choices + Go.
+      expect(nativeModule).toContain('showTripPreview');
+      expect(nativeModule).toContain('selectedPreviewFor');
+      expect(nativeModule).toContain('startedTrip');
+      expect(mapView).toContain('polaris-route-alternates');
+      // CarPlay chrome parity: guidance tint, car light/dark, nav-bar buttons.
+      expect(nativeModule).toContain('guidanceBackgroundColor');
+      expect(nativeModule).toContain('contentStyleChanged');
+      expect(nativeModule).toContain('leadingNavigationBarButtons');
+      expect(nativeModule).toContain('showPanningInterface');
+      // Arrival card, incident warnings, and native lane guidance (17.4+).
+      expect(nativeModule).toContain('showArrival');
+      expect(nativeModule).toContain('carPlayArrivalDismiss');
+      expect(nativeModule).toContain('showIncidentAlert');
+      expect(nativeModule).toContain('linkedLaneGuidance');
+      expect(nativeModule).toContain('highwayExitLabel');
+      expect(nativeModule).toContain('updateIncidents');
+      expect(mapView).toContain('polaris-incident-');
     }
   });
 

@@ -37,6 +37,9 @@ const ENTITLEMENTS_FILES = [
 ];
 
 const CARPLAY_SCENE_ROLE = 'CPTemplateApplicationSceneSessionRoleApplication';
+const CARPLAY_DASHBOARD_SCENE_ROLE = 'CPTemplateApplicationDashboardSceneSessionRoleApplication';
+const CARPLAY_INSTRUMENT_CLUSTER_SCENE_ROLE =
+  'CPTemplateApplicationInstrumentClusterSceneSessionRoleApplication';
 const SIMULATOR_ENTITLEMENTS_SETTING = 'CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]';
 const SIGNATURE_WORKAROUND_PHASE = 'Remove signature files (Xcode workaround)';
 
@@ -231,6 +234,22 @@ function withCarPlay(config) {
         UISceneClassName: 'CPTemplateApplicationScene',
         UISceneConfigurationName: 'CarPlayTemplateScene',
         UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate',
+      },
+    ];
+    // Dashboard widget (iOS 13.4+) and instrument cluster (iOS 15.4+). Both are
+    // optional CarPlay surfaces; the delegates live in CarPlaySceneDelegate.swift.
+    manifest.UISceneConfigurations[CARPLAY_DASHBOARD_SCENE_ROLE] = [
+      {
+        UISceneClassName: 'CPTemplateApplicationDashboardScene',
+        UISceneConfigurationName: 'CarPlayDashboardScene',
+        UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).CarPlayDashboardSceneDelegate',
+      },
+    ];
+    manifest.UISceneConfigurations[CARPLAY_INSTRUMENT_CLUSTER_SCENE_ROLE] = [
+      {
+        UISceneClassName: 'CPTemplateApplicationInstrumentClusterScene',
+        UISceneConfigurationName: 'CarPlayInstrumentClusterScene',
+        UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).CarPlayInstrumentClusterSceneDelegate',
       },
     ];
     cfg.modResults.UIApplicationSceneManifest = manifest;
