@@ -23,25 +23,17 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
-if ! codesign -d --entitlements :- "$APP_PATH" > "$MERGED_ENTITLEMENTS_PATH" 2>/dev/null; then
-  cat > "$MERGED_ENTITLEMENTS_PATH" <<'PLIST'
+# Start from a clean entitlements dict. Ad-hoc simulator signing only wants the
+# entitlements the app itself needs; carrying over profile/distribution or
+# restricted entitlements (CarPlay, iCloud, get-task-allow, team-id) makes the
+# simulator refuse to exec the binary. The deletes below are kept as a guard.
+cat > "$MERGED_ENTITLEMENTS_PATH" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList/1.0.dtd">
 <plist version="1.0">
 <dict/>
 </plist>
 PLIST
-fi
-
-if ! grep -q '<plist' "$MERGED_ENTITLEMENTS_PATH"; then
-  cat > "$MERGED_ENTITLEMENTS_PATH" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict/>
-</plist>
-PLIST
-fi
 
 # Remove application-identifier (triggers SBMainWorkspace denial on simulators).
 if /usr/libexec/PlistBuddy -c "Print :$APP_IDENTIFIER_KEY" "$MERGED_ENTITLEMENTS_PATH" >/dev/null 2>&1; then
@@ -58,6 +50,24 @@ fi
 if /usr/libexec/PlistBuddy -c "Print :$CARPLAY_MAPS_KEY" "$MERGED_ENTITLEMENTS_PATH" >/dev/null 2>&1; then
   /usr/libexec/PlistBuddy -c "Delete :$CARPLAY_MAPS_KEY" "$MERGED_ENTITLEMENTS_PATH"
 fi
+
+# Remove profile/distribution-only entitlements that block simulator launch when
+# the app was previously signed with a real identity (`pnpm carplay:sim` tries
+# profile signing first). A clean ad-hoc signature is what the simulator wants.
+for key in \
+  get-task-allow \
+  beta-reports-active \
+  com.apple.developer.team-identifier \
+  keychain-access-groups \
+  com.apple.developer.ubiquity-kvstore-identifier; do
+  if /usr/libexec/PlistBuddy -c "Print :$key" "$MERGED_ENTITLEMENTS_PATH" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Delete :$key" "$MERGED_ENTITLEMENTS_PATH"
+  fi
+done
+
+# Drop any profile embedded by the CarPlay profile-signing path; a leftover
+# profile would keep authorizing the CarPlay entitlement on the simulator.
+rm -f "$APP_PATH/embedded.mobileprovision"
 
 codesign --force --sign - --entitlements "$MERGED_ENTITLEMENTS_PATH" --timestamp=none "$APP_PATH"
 

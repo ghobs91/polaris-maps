@@ -39,6 +39,12 @@ has_carplay_scene() {
   plutil -convert xml1 -o - "$1/Info.plist" 2>/dev/null | grep -q 'CPTemplateApplicationSceneSessionRoleApplication'
 }
 
+# A CarPlay entitlement is only authorized on the simulator when its matching
+# Development profile is embedded in the bundle (see the profile-signing path).
+has_embedded_profile() {
+  [ -f "$1/embedded.mobileprovision" ]
+}
+
 print_status() {
   label="$1"
   app_path="$2"
@@ -50,7 +56,11 @@ print_status() {
 
   echo "$label: $app_path"
   if has_carplay_entitlement "$app_path"; then
-    echo "  carplay entitlement: present"
+    if has_embedded_profile "$app_path"; then
+      echo "  carplay entitlement: present (profile-signed)"
+    else
+      echo "  carplay entitlement: present (no embedded profile; simulator launch will be denied)"
+    fi
   else
     echo "  carplay entitlement: missing"
   fi
@@ -59,7 +69,9 @@ print_status() {
     echo "  WARNING: carplay-navigation present (triggers SBMainWorkspace on simulators)"
   fi
 
-  if has_application_identifier_entitlement "$app_path"; then
+  if has_embedded_profile "$app_path"; then
+    echo "  embedded profile: present"
+  elif has_application_identifier_entitlement "$app_path"; then
     echo "  application-identifier: present (can block simulator launch)"
   else
     echo "  application-identifier: absent"
@@ -108,24 +120,32 @@ fi
 
 if ! has_carplay_entitlement "$INSTALLED_APP_PATH"; then
   echo "diagnosis: installed app is missing CarPlay entitlement"
-  echo "  CarPlay Simulator requires a provisioning profile with com.apple.developer.carplay-navigation"
+  echo "  CarPlay Simulator requires a Development provisioning profile with com.apple.developer.carplay-maps"
   echo "  Without it, the CarPlay scene will not be activated on the simulator"
-  echo "action: request CarPlay entitlement from Apple, then add it to PolarisMaps.entitlements"
+  echo "action: request CarPlay entitlement from Apple, then run pnpm carplay:sim"
   exit 1
+fi
+
+if has_embedded_profile "$INSTALLED_APP_PATH"; then
+  if has_carplay_navigation_entitlement "$INSTALLED_APP_PATH"; then
+    echo "diagnosis: carplay-navigation entitlement present with a profile"
+    echo "  This can trigger SBMainWorkspace denial on the simulator"
+    echo "action: re-sign without CarPlay entitlements (pnpm carplay:resign) or use a maps profile"
+    exit 1
+  fi
+  echo "diagnosis: installed app is CarPlay-eligible (profile-signed)"
+  echo "if Polaris Maps still does not appear, restart the CarPlay Simulator to refresh its cached app list"
+  exit 0
 fi
 
 if has_carplay_navigation_entitlement "$INSTALLED_APP_PATH"; then
   echo "diagnosis: installed app has carplay-navigation entitlement without a provisioning profile"
   echo "  This will trigger SBMainWorkspace denial on the simulator"
-  echo "action: re-sign without CarPlay entitlements (pnpm carplay:sim) or use a provisioning profile"
+  echo "action: re-sign without CarPlay entitlements (pnpm carplay:resign or pnpm carplay:sim) or use a provisioning profile"
   exit 1
 fi
 
-if has_application_identifier_entitlement "$INSTALLED_APP_PATH"; then
-  echo "diagnosis: installed app still has application-identifier, which can block simulator launch"
-  echo "action: run pnpm carplay:resign or pnpm carplay:sim"
-  exit 1
-fi
-
-echo "diagnosis: installed app is CarPlay-eligible"
-echo "if Polaris Maps still does not appear, restart the CarPlay Simulator to refresh its cached app list"
+echo "diagnosis: CarPlay entitlement present without an embedded provisioning profile"
+echo "  the simulator will refuse to launch the app (SBMainWorkspace denial)"
+echo "action: install a Development profile with com.apple.developer.carplay-maps, then run pnpm carplay:sim"
+exit 1

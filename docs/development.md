@@ -71,10 +71,24 @@ Requires App Store Connect env vars: `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONN
 ## CarPlay Simulator
 
 ```bash
-pnpm carplay:sim      # install CarPlay simulator app
+pnpm carplay:sim      # build, sign, install and launch on the booted simulator
 pnpm carplay:resign   # resign without rebuild
 pnpm carplay:doctor   # diagnose simulator setup
 ```
+
+`pnpm carplay:sim` first tries to sign the app with a **Development provisioning
+profile that grants `com.apple.developer.carplay-maps`**, embedding the profile so
+the app is eligible to appear in the CarPlay Simulator. It scans
+`~/Library/MobileDevice/Provisioning Profiles` (override with
+`CARPLAY_PROVISIONING_PROFILE=/path/to.mobileprovision`, or pick the identity with
+`CARPLAY_SIGNING_IDENTITY`). Distribution/App Store profiles are ignored —
+simulators require a Development profile. When no usable profile is found (or the
+signed build won't launch), it falls back to stripping CarPlay entitlements and
+ad-hoc signing, which still lets the phone app run in the simulator but not in the
+CarPlay Simulator (`CARPLAY_FORCE_STRIP=1` forces the fallback).
+
+Note: CarPlay still requires Apple approval; without an approved Development
+profile the CarPlay Simulator falls back to real-car testing.
 
 ## Region Data
 

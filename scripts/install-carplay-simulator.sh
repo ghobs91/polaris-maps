@@ -76,13 +76,42 @@ if has_application_identifier_entitlement "$APP_PATH"; then
 fi
 
 if has_carplay_entitlement "$APP_PATH"; then
-  echo "CarPlay entitlement present, removing for simulator compatibility"
+  echo "CarPlay entitlement present, will re-sign for simulator"
   needs_resign=1
 fi
 
-if [ "$needs_resign" -eq 1 ]; then
-  "$RESIGN_SCRIPT" "$APP_PATH"
+SIGN_WITH_PROFILE_SCRIPT="$ROOT_DIR/scripts/sign-carplay-simulator-app-with-profile.sh"
+signed_with_profile=0
+
+# Prefer signing with a Development provisioning profile that grants
+# com.apple.developer.carplay-maps, so the app can appear in the CarPlay
+# Simulator. Falls back to stripping CarPlay entitlements (phone simulator only)
+# when no such profile/identity exists, or when the signed build won't launch.
+if [ "${CARPLAY_FORCE_STRIP:-0}" != "1" ] && [ -f "$SIGN_WITH_PROFILE_SCRIPT" ]; then
+  if sh "$SIGN_WITH_PROFILE_SCRIPT" "$APP_PATH"; then
+    signed_with_profile=1
+  else
+    echo "No usable CarPlay provisioning profile; using simulator ad-hoc signing"
+  fi
+else
+  echo "Skipping CarPlay profile signing"
 fi
+
+if [ "$signed_with_profile" -eq 1 ]; then
+  xcrun simctl terminate "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1 || true
+  if xcrun simctl install "$DEVICE_ID" "$APP_PATH"; then
+    launch_output="$(xcrun simctl launch "$DEVICE_ID" "$BUNDLE_ID" 2>&1 || true)"
+    if printf '%s' "$launch_output" | grep -q "$BUNDLE_ID:"; then
+      echo "Installed profile-signed build: $APP_PATH on $DEVICE_ID"
+      exit 0
+    fi
+    echo "Profile-signed build failed to launch; falling back to ad-hoc signing" >&2
+  fi
+  # A failed profile sign can leave an embedded profile behind; strip it.
+  needs_resign=1
+fi
+
+"$RESIGN_SCRIPT" "$APP_PATH"
 
 xcrun simctl terminate "$DEVICE_ID" "$BUNDLE_ID" >/dev/null 2>&1 || true
 xcrun simctl install "$DEVICE_ID" "$APP_PATH"
