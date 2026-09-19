@@ -32,8 +32,8 @@ const NATIVE_FILES = [
 ];
 
 const ENTITLEMENTS_FILES = [
-  'PolarisMaps.Debug.entitlements',
-  'PolarisMaps.SimulatorCarPlay.entitlements',
+  { name: 'PolarisMaps.Debug.entitlements', carplay: true },
+  { name: 'PolarisMaps.SimulatorCarPlay.entitlements', carplay: false },
 ];
 
 const CARPLAY_SCENE_ROLE = 'CPTemplateApplicationSceneSessionRoleApplication';
@@ -59,22 +59,28 @@ function copyFiles() {
 }
 
 function writeEntitlementsFiles() {
-  // Base entitlements shared by all configurations. CarPlay keys are
-  // deliberately absent: simulator testing re-signs via
-  // scripts/resign-carplay-simulator-app.sh, and store-facing builds must not
-  // carry unapproved CarPlay entitlements.
-  const contents = `<?xml version="1.0" encoding="UTF-8"?>
+  // Debug (device) builds carry com.apple.developer.carplay-maps so a local
+  // Xcode run is picked up by the CarPlay Simulator; the matching development
+  // profile authorizes it. Simulator entitlements stay clean because simulator
+  // re-signing happens ad-hoc in scripts/resign-carplay-simulator-app.sh.
+  const contentsFor = (carplay) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
-    <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+    <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>${
+      carplay
+        ? `
+    <key>com.apple.developer.carplay-maps</key>
+    <true/>`
+        : ''
+    }
   </dict>
 </plist>
 `;
-  for (const name of ENTITLEMENTS_FILES) {
+  for (const { name, carplay } of ENTITLEMENTS_FILES) {
     const dest = path.join(IOS_DIR, 'PolarisMaps', name);
-    fs.writeFileSync(dest, contents);
+    fs.writeFileSync(dest, contentsFor(carplay));
     console.log('[withCarPlay] Wrote ' + dest);
   }
 }

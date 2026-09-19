@@ -73,6 +73,17 @@ describe('CarPlay iOS configuration', () => {
     expect(doctorScript).toContain('SBMainWorkspace');
     expect(doctorScript).toContain('CPTemplateApplicationSceneSessionRoleApplication');
     expect(doctorScript).toContain('pnpm carplay:resign or pnpm carplay:sim');
+    // CarPlay Simulator eligibility: sign with a Development profile that grants
+    // carplay-maps, falling back to ad-hoc stripping when none is installed.
+    const profileSignScript = readRepoFile('scripts/sign-carplay-simulator-app-with-profile.sh');
+    expect(installScript).toContain('SIGN_WITH_PROFILE_SCRIPT');
+    expect(installScript).toContain('sign-carplay-simulator-app-with-profile.sh');
+    expect(profileSignScript).toContain('com.apple.developer.carplay-maps');
+    expect(profileSignScript).toContain('get-task-allow');
+    expect(profileSignScript).toContain('embedded.mobileprovision');
+    expect(profileSignScript).toContain('CARPLAY_PROVISIONING_PROFILE');
+    expect(resignScript).toContain('embedded.mobileprovision');
+    expect(doctorScript).toContain('has_embedded_profile');
 
     expect(scheme).not.toContain('Re-sign CarPlay simulator app');
     expect(scheme).not.toContain('resign-carplay-simulator-app.sh');
@@ -92,7 +103,9 @@ describe('CarPlay iOS configuration', () => {
       '<key>com.apple.developer.carplay-navigation</key>',
     );
     expect(simulatorEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
-    expect(debugEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
+    // Debug device builds carry the entitlement so the CarPlay Simulator (real
+    // device) lists the app; the development profile authorizes it.
+    expect(debugEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
     expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
     expect(releaseEntitlements).not.toContain('<key>com.apple.developer.carplay-navigation</key>');
   });
