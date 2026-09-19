@@ -753,8 +753,10 @@ enum PolylineDecoder {
     while index < chars.count {
       let dLat = nextValue()
       let dLng = nextValue()
-      lat += ~(dLat >> 1) ^ -(dLat & 1)
-      lng += ~(dLng >> 1) ^ -(dLng & 1)
+      // Zig-zag decode, matching src/utils/polyline.ts:
+      // odd deltas are negative (~x), even deltas positive (x).
+      lat += (dLat & 1) != 0 ? ~(dLat >> 1) : (dLat >> 1)
+      lng += (dLng & 1) != 0 ? ~(dLng >> 1) : (dLng >> 1)
       coordinates.append(
         CLLocationCoordinate2D(
           latitude: Double(lat) / precision,

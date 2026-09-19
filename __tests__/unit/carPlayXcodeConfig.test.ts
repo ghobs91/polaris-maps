@@ -225,6 +225,10 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).toContain('highwayExitLabel');
       expect(nativeModule).toContain('updateIncidents');
       expect(mapView).toContain('polaris-incident-');
+      // Polyline decoding must match src/utils/polyline.ts zig-zag, or the
+      // route decodes to the wrong hemisphere while the camera follows GPS.
+      expect(mapView).toContain('(dLat & 1) != 0 ? ~(dLat >> 1) : (dLat >> 1)');
+      expect(mapView).not.toContain('~(dLat >> 1) ^');
     }
   });
 
