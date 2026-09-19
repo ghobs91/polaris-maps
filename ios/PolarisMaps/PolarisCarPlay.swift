@@ -84,6 +84,7 @@ class PolarisCarPlay: RCTEventEmitter {
       "carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected",
       "searchResultAddStop", "carPlayRouteStart", "carPlayContentStyleChanged",
       "carPlayToggleMute", "carPlayArrivalDismiss", "carPlayDashboardFavorite",
+      "carPlayNavigationCancelled",
     ]
   }
 
@@ -1359,7 +1360,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   func mapTemplateDidCancelNavigation(_ mapTemplate: CPMapTemplate) {
+    // The driver ended the trip from CarPlay; mirror the phone's state so the
+    // phone stops navigating instead of silently continuing.
     endNavigation()
+    PolarisCarPlay.emitNavigationCancelled()
   }
 
   // MARK: CPSessionConfigurationDelegate
@@ -1476,5 +1480,9 @@ extension PolarisCarPlay {
   /// internal rather than fileprivate.
   static func emitDashboardFavorite(_ kind: String) {
     emit("carPlayDashboardFavorite", ["kind": kind])
+  }
+
+  fileprivate static func emitNavigationCancelled() {
+    emit("carPlayNavigationCancelled", [:])
   }
 }

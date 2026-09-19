@@ -81,6 +81,7 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('carPlayToggleMute', onToggleMute),
     CarPlay.emitter.addListener('carPlayArrivalDismiss', onArrivalDismiss),
     CarPlay.emitter.addListener('carPlayDashboardFavorite', onDashboardFavorite),
+    CarPlay.emitter.addListener('carPlayNavigationCancelled', onNavigationCancelled),
   ];
   appearanceSubscription?.remove();
   appearanceSubscription = Appearance.addChangeListener(syncMapStyle);
@@ -396,6 +397,12 @@ function onToggleMute(): void {
 function onArrivalDismiss(): void {
   arrivalShown = false;
   useNavigationStore.getState().stopNavigation();
+}
+
+/** The driver ended the trip from CarPlay; stop navigation on the phone too. */
+function onNavigationCancelled(): void {
+  const nav = useNavigationStore.getState();
+  if (nav.isNavigating) nav.stopNavigation();
 }
 
 /** CarPlay dashboard shortcut (Home/Work): preview navigation to that favorite. */

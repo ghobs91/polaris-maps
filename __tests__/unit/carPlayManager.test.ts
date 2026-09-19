@@ -229,13 +229,17 @@ describe('CarPlayManager', () => {
       'carPlayDashboardFavorite',
       expect.any(Function),
     );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayNavigationCancelled',
+      expect.any(Function),
+    );
   });
 
   it('does not initialise twice', () => {
     initCarPlay();
     initCarPlay();
-    // addListener should be called only 10 times (once per event), not 20
-    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(10);
+    // addListener should be called only 11 times (once per event), not 22
+    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(11);
   });
 
   it('tracks connected state', () => {
@@ -494,6 +498,19 @@ describe('CarPlayManager', () => {
     expect(useNavigationStore.getState().muted).toBe(true);
     fireEvent('carPlayToggleMute');
     expect(useNavigationStore.getState().muted).toBe(false);
+  });
+
+  it('stops phone navigation when the trip is ended on CarPlay', () => {
+    const route = makeRoute();
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    expect(useNavigationStore.getState().isNavigating).toBe(true);
+
+    fireEvent('carPlayNavigationCancelled');
+    expect(useNavigationStore.getState().isNavigating).toBe(false);
   });
 
   it('shows the arrival card and ends the trip when Done is tapped', () => {
