@@ -785,10 +785,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
           format: "%.1f km · %d min", route.distanceMeters / 1000,
           Int(route.durationSeconds / 60))
         : route.summary
+      // The preview card renders the route's ETA/distance from these variants.
+      // `selectionSummaryVariants` was echoing the destination, which is why the
+      // summary was missing (and the destination showed twice).
       let choice = CPRouteChoice(
         summaryVariants: [summary],
-        additionalInformationVariants: [],
-        selectionSummaryVariants: [payload.destinationName]
+        additionalInformationVariants: [index == 0 ? "Fastest" : "Alternate"],
+        selectionSummaryVariants: [summary]
       )
       choice.userInfo = index
       choices.append(choice)

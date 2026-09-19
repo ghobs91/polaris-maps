@@ -635,28 +635,42 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   }
 }
 
-/// White navigation chevron with a dark outline, matching the phone's nav puck.
-/// The follow camera is always heading-up, so the puck points straight up.
+/// Navigation chevron with the phone's cyan halo, matching the phone's nav
+/// puck (halo rim #65D8FF, fill rgba(0,145,214,0.38)). The follow camera is
+/// always heading-up, so the puck points straight up.
 enum NavPuckImage {
   static func make() -> UIImage {
-    let size = CGSize(width: 34, height: 34)
+    let size = CGSize(width: 44, height: 44)
     let format = UIGraphicsImageRendererFormat()
     format.opaque = false
     return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+      let cg = ctx.cgContext
+      let center = CGPoint(x: 22, y: 22)
+
+      // Halo (phone: #65D8FF rim over rgba(0,145,214,0.38) fill).
+      let halo = UIBezierPath(
+        ovalIn: CGRect(x: center.x - 16, y: center.y - 16, width: 32, height: 32))
+      UIColor(red: 0, green: 145 / 255, blue: 214 / 255, alpha: 0.38).setFill()
+      halo.fill()
+      UIColor(red: 0x65 / 255, green: 0xD8 / 255, blue: 0xFF / 255, alpha: 1).setStroke()
+      halo.lineWidth = 2
+      halo.stroke()
+
+      // Chevron: white with a soft dark outline for contrast on light maps.
       let arrow = CGMutablePath()
-      arrow.move(to: CGPoint(x: 17, y: 2))
-      arrow.addLine(to: CGPoint(x: 29, y: 24))
-      arrow.addLine(to: CGPoint(x: 17, y: 18.5))
-      arrow.addLine(to: CGPoint(x: 5, y: 24))
+      arrow.move(to: CGPoint(x: 22, y: 6))
+      arrow.addLine(to: CGPoint(x: 35, y: 31))
+      arrow.addLine(to: CGPoint(x: 22, y: 25))
+      arrow.addLine(to: CGPoint(x: 9, y: 31))
       arrow.closeSubpath()
-      ctx.cgContext.setFillColor(UIColor.white.cgColor)
-      ctx.cgContext.addPath(arrow)
-      ctx.cgContext.fillPath()
-      ctx.cgContext.setStrokeColor(UIColor(white: 0.15, alpha: 0.9).cgColor)
-      ctx.cgContext.setLineWidth(2)
-      ctx.cgContext.setLineJoin(.round)
-      ctx.cgContext.addPath(arrow)
-      ctx.cgContext.strokePath()
+      cg.addPath(arrow)
+      cg.setFillColor(UIColor.white.cgColor)
+      cg.fillPath()
+      cg.addPath(arrow)
+      cg.setStrokeColor(UIColor(white: 0.15, alpha: 0.9).cgColor)
+      cg.setLineWidth(2)
+      cg.setLineJoin(.round)
+      cg.strokePath()
     }
   }
 }
