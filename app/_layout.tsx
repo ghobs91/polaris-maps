@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { ToastProvider } from '@/contexts/ToastContext';
 import { hasCompletedConsent } from '@/services/identity/consent';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
+import { initNavigationVoice } from '@/services/tts/navigationVoice';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
 import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
 import {
@@ -48,6 +49,9 @@ function RootLayoutInner() {
     // Keep the iOS background navigation session in sync with navigation
     // state (starts/stops it wherever navigation is triggered from).
     initNavigationBackgroundSession();
+    // Speak turn-by-turn prompts even when the navigation screen isn't mounted
+    // (e.g. a trip started from CarPlay).
+    initNavigationVoice();
     // Show aggregate offline-download progress in a Live Activity while the
     // app is backgrounded during an active region download.
     initDownloadLiveActivity();
