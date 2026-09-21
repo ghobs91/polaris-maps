@@ -10,6 +10,7 @@
  */
 
 import { Appearance, Platform } from 'react-native';
+import * as Location from 'expo-location';
 import * as CarPlay from '../../native/carplay';
 import type { CarPlayStartNavigationData } from '../../native/carplay';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -82,6 +83,7 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('carPlayArrivalDismiss', onArrivalDismiss),
     CarPlay.emitter.addListener('carPlayDashboardFavorite', onDashboardFavorite),
     CarPlay.emitter.addListener('carPlayNavigationCancelled', onNavigationCancelled),
+    CarPlay.emitter.addListener('carPlayLocateRequest', onLocateRequest),
   ];
   appearanceSubscription?.remove();
   appearanceSubscription = Appearance.addChangeListener(syncMapStyle);
@@ -163,6 +165,11 @@ function onConnected() {
 
   // If navigation is already active, push initial state
   syncNavigationState(useNavigationStore.getState());
+
+  // Center the idle map on the driver instead of leaving it at the native
+  // host's (0, 0) default ("blank ocean"). No-op while navigating, where the
+  // tracking pipeline already owns the camera.
+  void pushUserLocation();
 }
 
 function onDisconnected() {
@@ -271,6 +278,7 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     muted: state.muted,
     etaColor: selectCarPlayEtaColor(state),
     highwayExitLabel: maneuver.exitNumber ?? maneuver.exitBranch,
+    useMetric: useSettingsStore.getState().useMetric,
   });
 
   if (state.hasArrived && !arrivalShown) {
@@ -351,6 +359,7 @@ function syncRoutePreview(state: ReturnType<typeof useNavigationStore.getState>)
     destinationName: destination.name ?? 'Destination',
     destinationLat: destination.lat,
     destinationLng: destination.lng,
+    useMetric: useSettingsStore.getState().useMetric,
     routes: routes.map((route) => ({
       encodedPolyline: route.geometry,
       summary: formatCarPlayRouteSummary(
@@ -653,6 +662,66 @@ function clearMapCenterUpdate() {
   pendingMapCenter = null;
 }
 
+/** CarPlay's Locate/Recenter button: refresh the map from the phone's GPS. */
+function onLocateRequest(): void {
+  void pushUserLocation();
+}
+
+/**
+ * Centers the CarPlay map on the driver's live position. Runs on connect and
+ * when the driver taps Locate/Recenter, since the native map host has no
+ * position of its own outside navigation.
+ */
+async function pushUserLocation(): Promise<void> {
+  if (!locationPushAllowed()) return;
+
+  let pushed = false;
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (!locationPushAllowed()) return;
+    if (status !== 'granted') {
+      syncFallbackCenter();
+      return;
+    }
+    // Last-known first for an instant response, then the fresh fix. Re-check
+    // between awaits: a trip preview or active navigation can start while the
+    // GPS call is in flight, and its camera fit must win.
+    const last = await Location.getLastKnownPositionAsync();
+    if (last && locationPushAllowed()) {
+      CarPlay.updateMapCenter(last.coords.latitude, last.coords.longitude, 0);
+      pushed = true;
+    }
+    const current = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    if (locationPushAllowed()) {
+      CarPlay.updateMapCenter(current.coords.latitude, current.coords.longitude, 0);
+      pushed = true;
+    }
+  } catch {
+    // Fall through to the viewport fallback.
+  }
+  if (!pushed && locationPushAllowed()) syncFallbackCenter();
+}
+
+/**
+ * Whether the idle GPS locate may move the camera: never while driving (the
+ * tracking pipeline owns the camera) and never while a trip preview is up
+ * (the route-overview fit owns it instead).
+ */
+function locationPushAllowed(): boolean {
+  if (!connected) return false;
+  const nav = useNavigationStore.getState();
+  return !nav.isNavigating && !nav.routePreview;
+}
+
+/** Last phone map viewport center, used when GPS is unavailable. */
+function syncFallbackCenter(): void {
+  const { viewport } = useMapStore.getState();
+  if (!viewport || (viewport.lat === 0 && viewport.lng === 0)) return;
+  CarPlay.updateMapCenter(viewport.lat, viewport.lng, 0);
+}
+
 function getSearchSession(): SearchSession {
   if (!searchSession) {
     searchSession = createSearchSession({
@@ -812,6 +881,7 @@ function toCarPlayNavigationData(
       route.summary.distanceMeters,
       route.summary.durationSeconds,
     ),
+    useMetric: useSettingsStore.getState().useMetric,
     maneuvers: route.legs.flatMap((leg) =>
       leg.maneuvers.map((maneuver) => ({
         instruction: maneuver.instruction,

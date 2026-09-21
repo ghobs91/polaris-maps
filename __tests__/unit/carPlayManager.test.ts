@@ -35,6 +35,14 @@ jest.mock('react-native', () => {
   };
 });
 jest.mock('expo-sqlite', () => ({}));
+jest.mock('expo-location', () => ({
+  Accuracy: { Balanced: 3 },
+  getForegroundPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
+  getLastKnownPositionAsync: jest.fn().mockResolvedValue(null),
+  getCurrentPositionAsync: jest.fn().mockResolvedValue({
+    coords: { latitude: 40.7128, longitude: -74.006 },
+  }),
+}));
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(),
   setItemAsync: jest.fn(),
@@ -233,13 +241,17 @@ describe('CarPlayManager', () => {
       'carPlayNavigationCancelled',
       expect.any(Function),
     );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayLocateRequest',
+      expect.any(Function),
+    );
   });
 
   it('does not initialise twice', () => {
     initCarPlay();
     initCarPlay();
-    // addListener should be called only 11 times (once per event), not 22
-    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(11);
+    // addListener should be called only 12 times (once per event), not 24
+    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(12);
   });
 
   it('tracks connected state', () => {
@@ -249,6 +261,21 @@ describe('CarPlayManager', () => {
     expect(isCarPlayConnected()).toBe(true);
     fireEvent('carPlayDisconnected');
     expect(isCarPlayConnected()).toBe(false);
+  });
+
+  it('centers the idle CarPlay map on the driver on connect and on locate', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Connect pushes the phone's position so the map isn't stuck at (0, 0).
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7128, -74.006, 0);
+
+    (NativeModules.PolarisCarPlay.updateMapCenter as jest.Mock).mockClear();
+    fireEvent('carPlayLocateRequest');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7128, -74.006, 0);
   });
 
   it('hydrates an already-connected native CarPlay session during init', async () => {

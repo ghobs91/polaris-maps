@@ -16,6 +16,7 @@ class PolarisCarPlay: RCTEventEmitter {
 
   private static var pendingInterfaceController: CPInterfaceController?
   private static var pendingWindow: CPWindow?
+  private static var pendingDashboardWindow: UIWindow?
   private static var isSceneConnected = false
   private static weak var instance: PolarisCarPlay?
 
@@ -25,6 +26,7 @@ class PolarisCarPlay: RCTEventEmitter {
     super.init()
     Self.instance = self
     Self.attachPendingSceneIfNeeded()
+    Self.attachPendingDashboardIfNeeded()
   }
 
   private static func emit(_ event: String, _ body: Any) {
@@ -54,6 +56,29 @@ class PolarisCarPlay: RCTEventEmitter {
     emit("carPlayConnected", ["connected": true])
   }
 
+  /// Attaches the buffered CarPlay Dashboard window to a second map host so
+  /// the split view shows the Polaris map (Apple/Google Maps parity).
+  static func dashboardSceneDidConnect(window: UIWindow) {
+    pendingDashboardWindow = window
+    DispatchQueue.main.async { Self.attachPendingDashboardIfNeeded() }
+  }
+
+  static func dashboardSceneDidDisconnect() {
+    DispatchQueue.main.async {
+      mapTemplateManager.detachDashboard()
+      pendingDashboardWindow = nil
+    }
+  }
+
+  private static func attachPendingDashboardIfNeeded() {
+    guard let window = pendingDashboardWindow else { return }
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { Self.attachPendingDashboardIfNeeded() }
+      return
+    }
+    mapTemplateManager.attachDashboard(window: window)
+  }
+
   // MARK: - Scene lifecycle (called by CarPlaySceneDelegate)
 
   static func sceneDidConnect(interfaceController: CPInterfaceController, window: CPWindow) {
@@ -68,6 +93,7 @@ class PolarisCarPlay: RCTEventEmitter {
       mapTemplateManager.deactivate()
       pendingInterfaceController = nil
       pendingWindow = nil
+      pendingDashboardWindow = nil
       isSceneConnected = false
       emit("carPlayDisconnected", ["connected": false])
     }
@@ -84,12 +110,13 @@ class PolarisCarPlay: RCTEventEmitter {
       "carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected",
       "searchResultAddStop", "carPlayRouteStart", "carPlayContentStyleChanged",
       "carPlayToggleMute", "carPlayArrivalDismiss", "carPlayDashboardFavorite",
-      "carPlayNavigationCancelled",
+      "carPlayNavigationCancelled", "carPlayLocateRequest",
     ]
   }
 
   override func startObserving() {
     Self.attachPendingSceneIfNeeded()
+    Self.attachPendingDashboardIfNeeded()
   }
 
   // MARK: - JS API (mirrors NativePolarisCarPlay.ts)
@@ -241,6 +268,8 @@ struct CarPlayNavigationUpdate {
   let etaColor: String
   /// Highway exit number/label for exit maneuvers (e.g. "91B").
   let highwayExitLabel: String?
+  /// Phone unit preference (imperial vs metric) for travel-estimate distances.
+  let useMetric: Bool
 
   init(from data: NSDictionary) {
     isNavigating = (data["isNavigating"] as? NSNumber)?.boolValue ?? false
@@ -279,6 +308,7 @@ struct CarPlayNavigationUpdate {
     etaColor = data["etaColor"] as? String ?? "default"
     let exit = data["highwayExitLabel"] as? String ?? ""
     highwayExitLabel = exit.isEmpty ? nil : exit
+    useMetric = (data["useMetric"] as? NSNumber)?.boolValue ?? false
   }
 
   /// Identity of the maneuver pair. Distance/ETA changes must NOT create new
@@ -340,6 +370,8 @@ struct CarPlayStartNavigationPayload {
   let encodedPolyline: String
   /// Phone route-preview summary ("26 min · 13.8 mi"); preferred over local formatting.
   let routeSummary: String?
+  /// Phone unit preference (imperial vs metric) for travel-estimate distances.
+  let useMetric: Bool
   let maneuvers: [CarPlayManeuverStep]
 
   init?(from data: NSDictionary) {
@@ -354,6 +386,7 @@ struct CarPlayStartNavigationPayload {
     destinationLng = lng
     encodedPolyline = polyline
     routeSummary = data["routeSummary"] as? String
+    useMetric = (data["useMetric"] as? NSNumber)?.boolValue ?? false
     var steps: [CarPlayManeuverStep] = []
     if let list = data["maneuvers"] as? NSArray {
       for entry in list {
@@ -389,6 +422,8 @@ struct CarPlayTripPreviewPayload {
   let destinationLat: Double
   let destinationLng: Double
   let routes: [CarPlayTripPreviewRoute]
+  /// Phone unit preference (imperial vs metric) for the displayed distances.
+  let useMetric: Bool
 
   init?(from data: NSDictionary) {
     guard
@@ -400,6 +435,7 @@ struct CarPlayTripPreviewPayload {
     destinationName = name
     destinationLat = lat
     destinationLng = lng
+    useMetric = (data["useMetric"] as? NSNumber)?.boolValue ?? false
     var parsed: [CarPlayTripPreviewRoute] = []
     for entry in rawRoutes {
       guard
@@ -451,11 +487,27 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
   private var appliedStyleHash = 0
 
-  private lazy var mapViewHost = CarPlayMapViewHost()
+  private lazy var mapViewHost = CarPlayMapViewHost(mode: .full)
+  private weak var templateWindow: UIWindow?
+  private var dashboardWindow: UIWindow?
+  private var dashboardHost: CarPlayMapViewHost?
+  /// Last values pushed to the map hosts, replayed to a dashboard tile that
+  /// attaches after the template scene (CarPlay connects the two scenes
+  /// independently).
+  private var lastStyleJson: String?
+  private var routeState: (encoded: String, destination: CLLocationCoordinate2D?, alternates: [String])?
+  private var trafficState: [RouteTrafficRange] = []
+  private var incidentState: [CarPlayIncidentMarker] = []
+  private var cameraState: (lat: Double, lng: Double, heading: Double)?
+  private var navigationActive = false
+  /// Phone unit preference, mirrored so travel-estimate distances match the
+  /// phone (miles vs km) instead of CarPlay's raw meters.
+  private var useMetric = false
 
   func activate(interfaceController: CPInterfaceController, window: CPWindow) {
     guard self.interfaceController == nil else { return }
     self.interfaceController = interfaceController
+    templateWindow = window
 
     mapViewHost.activate(in: window)
 
@@ -464,6 +516,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     template.mapButtons = makeMapButtons()
     // Base tint for the guidance banner, matching the phone's NextTurnBanner.
     template.guidanceBackgroundColor = Self.guidanceBackgroundColor
+    // Apple Maps keeps the map full-bleed and auto-hides the top bar during
+    // navigation; the mute/overview controls reappear when the driver taps.
+    template.automaticallyHidesNavigationBar = true
     configureNavigationBar(template)
     mapTemplate = template
 
@@ -487,6 +542,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     muteButton = nil
     overviewButton = nil
     recenterButton = nil
+    detachDashboard()
+    templateWindow = nil
+    lastStyleJson = nil
+    routeState = nil
+    trafficState = []
+    incidentState = []
+    cameraState = nil
+    navigationActive = false
     mapViewHost.deactivate()
     interfaceController = nil
     mapTemplate = nil
@@ -495,6 +558,92 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
+  }
+
+  // MARK: Map hosts (template + CarPlay Dashboard split view)
+
+  private var renderHosts: [CarPlayMapViewHost] {
+    var hosts = [mapViewHost]
+    if let dashboard = dashboardHost { hosts.append(dashboard) }
+    return hosts
+  }
+
+  private func forEachHost(_ body: (CarPlayMapViewHost) -> Void) {
+    renderHosts.forEach(body)
+  }
+
+  /// Records the CarPlay Dashboard window. The map is only rendered into it
+  /// while navigating (like Apple Maps), so an idle dashboard keeps its normal
+  /// system layout instead of a second map stealing the main window.
+  func attachDashboard(window: UIWindow) {
+    dashboardWindow = window
+    attachDashboardHostIfNeeded()
+  }
+
+  func detachDashboard() {
+    detachDashboardHost()
+    dashboardWindow = nil
+  }
+
+  private func attachDashboardHostIfNeeded() {
+    guard navigationActive, dashboardHost == nil, let window = dashboardWindow else { return }
+    // Defensive: never render a second map over the main template window.
+    guard window !== templateWindow else { return }
+    let host = CarPlayMapViewHost(mode: .dashboard)
+    host.activate(in: window)
+    host.isNavigating = true
+    dashboardHost = host
+    configureHost(host)
+  }
+
+  private func detachDashboardHost() {
+    guard let host = dashboardHost else { return }
+    host.deactivate()
+    dashboardHost = nil
+    dashboardWindow?.rootViewController = nil
+  }
+
+  /// Replays the current rendering state into a host that attached late.
+  private func configureHost(_ host: CarPlayMapViewHost) {
+    if let style = lastStyleJson { host.applyStyle(json: style) }
+    if let route = routeState {
+      host.showRoute(
+        encodedPolyline: route.encoded,
+        destination: route.destination,
+        alternates: route.alternates)
+    }
+    host.showTraffic(trafficState)
+    host.showIncidents(incidentState)
+    if let camera = cameraState {
+      host.updateCenter(lat: camera.lat, lng: camera.lng, heading: camera.heading)
+    }
+  }
+
+  private func presentRoute(
+    encodedPolyline: String, destination: CLLocationCoordinate2D?, alternates: [String] = []
+  ) {
+    routeState = (encodedPolyline, destination, alternates)
+    forEachHost {
+      $0.showRoute(
+        encodedPolyline: encodedPolyline, destination: destination, alternates: alternates)
+    }
+  }
+
+  private func removeRoute() {
+    routeState = nil
+    trafficState = []
+    incidentState = []
+    forEachHost { $0.clearRoute() }
+  }
+
+  private func setNavigating(_ value: Bool) {
+    navigationActive = value
+    if value {
+      attachDashboardHostIfNeeded()
+    } else {
+      detachDashboardHost()
+    }
+    forEachHost { $0.isNavigating = value }
   }
 
   // MARK: Map buttons
@@ -513,9 +662,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   /// Returns to vehicle-follow and leaves the panning interface, like the
-  /// recenter control in Apple/Google Maps.
+  /// recenter control in Apple/Google Maps. Also asks JS for a fresh GPS fix
+  /// so the first locate isn't stuck on the map host's (0, 0) default.
   private func recenter() {
     mapViewHost.recenter()
+    PolarisCarPlay.emitLocateRequest()
     updateRecenterButton()
     if mapTemplate?.isPanningInterfaceVisible == true {
       mapTemplate?.dismissPanningInterface(animated: true)
@@ -591,6 +742,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       let payload = CarPlayStartNavigationPayload(from: data),
       let template = mapTemplate
     else { return }
+    useMetric = payload.useMetric
 
     // Ignore duplicate starts for the route already on screen. Restarting the
     // session tears down the guidance card and the route overlay, which reads
@@ -606,9 +758,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // A phone-side navigation session may connect before its first position
     // update reaches CarPlay. Use the route start instead of leaving the trip
     // origin at the map host's (0, 0) default.
-    if mapViewHost.currentCoordinate.latitude == 0 && mapViewHost.currentCoordinate.longitude == 0,
-      let firstCoordinate = PolylineDecoder.decode(payload.encodedPolyline).first {
-      mapViewHost.currentCoordinate = firstCoordinate
+    if !mapViewHost.hasCenter, let firstCoordinate = PolylineDecoder.decode(payload.encodedPolyline).first {
+      forEachHost { $0.seedCoordinate(firstCoordinate) }
     }
 
     let origin = MKMapItem(placemark: MKPlacemark(coordinate: mapViewHost.currentCoordinate))
@@ -636,7 +787,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let destinationCoordinate = CLLocationCoordinate2D(
       latitude: payload.destinationLat, longitude: payload.destinationLng)
 
-    mapViewHost.showRoute(encodedPolyline: payload.encodedPolyline, destination: destinationCoordinate)
+    presentRoute(encodedPolyline: payload.encodedPolyline, destination: destinationCoordinate)
+    setNavigating(true)
     navigationSession = template.startNavigationSession(for: trip)
     activeTrip = trip
     activePolyline = payload.encodedPolyline
@@ -644,7 +796,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // Publish overall trip estimates so the arrival pill shows a real ETA
     // instead of "now".
     let tripEstimates = CPTravelEstimates(
-      distanceRemaining: Measurement(value: totalDistance, unit: UnitLength.meters),
+      distanceRemaining: distanceMeasurement(totalDistance),
       timeRemaining: totalTime
     )
     template.updateEstimates(tripEstimates, for: trip)
@@ -656,6 +808,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func applyNavigationUpdate(_ update: CarPlayNavigationUpdate) {
     guard let session = navigationSession, let template = mapTemplate else { return }
+    useMetric = update.useMetric
     if !update.isNavigating {
       endNavigation()
       return
@@ -754,7 +907,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     previewTrip = nil
     previewRoutes = []
     previewDestination = nil
-    mapViewHost.clearRoute()
+    setNavigating(false)
+    removeRoute()
   }
 
   // MARK: Trip preview (Apple/Google-style route options before starting)
@@ -767,6 +921,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     guard let template = mapTemplate, let payload = CarPlayTripPreviewPayload(from: data),
       !payload.routes.isEmpty
     else { return }
+    useMetric = payload.useMetric
 
     endNavigation()
 
@@ -777,21 +932,22 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let destination = MKMapItem(placemark: MKPlacemark(coordinate: destinationCoordinate))
     destination.name = payload.destinationName
 
+    // A single trip whose route choices are shown with CarPlay's route-choice
+    // panel — Apple/Google Maps' route options, not a destination trip list.
+    // Per-route time/distance rides the choice text (unit-aware) because
+    // per-choice travel estimates aren't available before iOS 27.
     var choices: [CPRouteChoice] = []
     for (index, route) in payload.routes.enumerated() {
-      let summary =
-        route.summary.isEmpty
-        ? String(
-          format: "%.1f km · %d min", route.distanceMeters / 1000,
-          Int(route.durationSeconds / 60))
-        : route.summary
-      // The preview card renders the route's ETA/distance from these variants.
-      // `selectionSummaryVariants` was echoing the destination, which is why the
-      // summary was missing (and the destination showed twice).
+      let duration = durationString(route.durationSeconds)
+      let detail =
+        "\(arrivalTimeString(route.durationSeconds)) ETA · "
+        + formatDistanceText(route.distanceMeters, metric: payload.useMetric)
+      let summary = route.summary.isEmpty ? duration : route.summary
       let choice = CPRouteChoice(
-        summaryVariants: [summary],
-        additionalInformationVariants: [index == 0 ? "Fastest" : "Alternate"],
-        selectionSummaryVariants: [summary]
+        // Longest first; CarPlay picks the first variant that fits.
+        summaryVariants: [summary, duration],
+        additionalInformationVariants: [detail],
+        selectionSummaryVariants: [index == 0 ? "Fastest" : "Alternate"]
       )
       choice.userInfo = index
       choices.append(choice)
@@ -802,7 +958,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     previewRoutes = payload.routes
     previewDestination = destinationCoordinate
 
-    mapViewHost.showRoute(
+    presentRoute(
       encodedPolyline: payload.routes[0].encodedPolyline,
       destination: destinationCoordinate,
       alternates: payload.routes.dropFirst().map { $0.encodedPolyline }
@@ -813,7 +969,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       additionalRoutesButtonTitle: "Routes",
       overviewButtonTitle: "Overview"
     )
-    template.showTripPreviews([trip], textConfiguration: text)
+    template.showRouteChoicesPreview(for: trip, textConfiguration: text)
+    // Re-assert the whole-route fit: presenting the panel can dismiss the
+    // panning interface, whose delegate snaps the camera back to the vehicle.
+    mapViewHost.fitRouteOverview()
+    DispatchQueue.main.async { [weak self] in
+      self?.mapViewHost.fitRouteOverview()
+    }
   }
 
   /// Dismisses the trip preview. The map route is only cleared when no
@@ -824,7 +986,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     previewDestination = nil
     mapTemplate?.hideTripPreviews()
     if navigationSession == nil {
-      mapViewHost.clearRoute()
+      removeRoute()
     }
   }
 
@@ -919,6 +1081,41 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     return formatter.string(fromDistance: meters)
   }
 
+  /// Local arrival clock time for a route duration ("6:10 PM"), used in the
+  /// trip-preview additional-information line like Apple Maps.
+  private func arrivalTimeString(_ durationSeconds: Double) -> String {
+    let arrival = Date().addingTimeInterval(max(durationSeconds, 0))
+    let formatter = DateFormatter()
+    formatter.timeStyle = .short
+    formatter.dateStyle = .none
+    return formatter.string(from: arrival)
+  }
+
+  /// Trip-preview route duration ("18 min", "1 h 5 min"), matching the phone's
+  /// `formatDuration`.
+  private func durationString(_ seconds: Double) -> String {
+    let minutes = Int((max(seconds, 0) / 60).rounded())
+    if minutes < 60 { return "\(minutes) min" }
+    let hours = minutes / 60
+    let remainder = minutes % 60
+    return remainder > 0 ? "\(hours) h \(remainder) min" : "\(hours) h"
+  }
+
+  /// Unit-aware distance text mirroring the phone's `formatDistance`: miles (or
+  /// feet) unless the user prefers metric.
+  private func formatDistanceText(_ meters: Double, metric: Bool) -> String {
+    if metric {
+      if meters < 1000 { return "\(Int(max(meters, 0).rounded())) m" }
+      return String(format: "%.1f km", meters / 1000)
+    }
+    let miles = meters / 1609.344
+    if miles < 0.1 {
+      let feet = Int(((meters / 0.3048) / 50).rounded()) * 50
+      return "\(max(feet, 50)) ft"
+    }
+    return String(format: "%.1f mi", miles)
+  }
+
   private func applyManeuvers(_ steps: [CarPlayManeuverStep]) {
     guard let session = navigationSession else { return }
     let maneuvers = steps.map { step in
@@ -945,9 +1142,16 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private func travelEstimates(distanceMeters: Double, seconds: Double) -> CPTravelEstimates {
     let time = seconds > 0 ? seconds : distanceMeters / (40_000 / 3600)
     return CPTravelEstimates(
-      distanceRemaining: Measurement(value: max(distanceMeters, 0), unit: UnitLength.meters),
+      distanceRemaining: distanceMeasurement(distanceMeters),
       timeRemaining: max(time, 0)
     )
+  }
+
+  /// Phone-consistent distance measurement: miles unless the user prefers
+  /// metric, so CarPlay doesn't render every distance as "17,117 meter".
+  private func distanceMeasurement(_ meters: Double) -> Measurement<UnitLength> {
+    if useMetric { return Measurement(value: max(meters, 0), unit: UnitLength.meters) }
+    return Measurement(value: max(meters, 0) / 1609.344, unit: UnitLength.miles)
   }
 
   private func makeManeuver(
@@ -1096,7 +1300,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   // MARK: Camera
 
   func updateCamera(lat: Double, lng: Double, heading: Double) {
-    mapViewHost.updateCenter(lat: lat, lng: lng, heading: heading)
+    cameraState = (lat, lng, heading)
+    forEachHost { $0.updateCenter(lat: lat, lng: lng, heading: heading) }
   }
 
   // MARK: Map style (phone parity: dark/light + satellite preference)
@@ -1109,19 +1314,22 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let hash = json.hashValue
     guard hash != appliedStyleHash else { return }
     appliedStyleHash = hash
-    mapViewHost.applyStyle(json: json)
+    lastStyleJson = json
+    forEachHost { $0.applyStyle(json: json) }
   }
 
   // MARK: Route traffic
 
   func applyRouteTraffic(_ ranges: [RouteTrafficRange]) {
-    mapViewHost.showTraffic(ranges)
+    trafficState = ranges
+    forEachHost { $0.showTraffic(ranges) }
   }
 
   // MARK: Incident markers
 
   func updateIncidents(_ markers: [CarPlayIncidentMarker]) {
-    mapViewHost.showIncidents(markers)
+    incidentState = markers
+    forEachHost { $0.showIncidents(markers) }
   }
 
   // MARK: Search
@@ -1225,7 +1433,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let alternates = previewRoutes.enumerated()
       .filter { $0.offset != index }
       .map { $0.element.encodedPolyline }
-    mapViewHost.showRoute(
+    presentRoute(
       encodedPolyline: route.encodedPolyline,
       destination: previewDestination,
       alternates: alternates
@@ -1244,10 +1452,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     navigationSession = mapTemplate.startNavigationSession(for: trip)
     activeTrip = trip
     activePolyline = route.encodedPolyline
-    mapViewHost.showRoute(encodedPolyline: route.encodedPolyline, destination: previewDestination)
+    setNavigating(true)
+    presentRoute(encodedPolyline: route.encodedPolyline, destination: previewDestination)
     mapTemplate.updateEstimates(
       CPTravelEstimates(
-        distanceRemaining: Measurement(value: route.distanceMeters, unit: UnitLength.meters),
+        distanceRemaining: distanceMeasurement(route.distanceMeters),
         timeRemaining: route.durationSeconds
       ),
       for: trip
@@ -1277,8 +1486,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
-    // Snap back to the vehicle once the driver leaves the panning interface.
-    mapViewHost.recenter()
+    // Snap back to the vehicle only if the driver was actually looking around.
+    // A dismissal while already following (e.g. the system closing the
+    // interface when a route preview appears) must not clobber a route fit.
+    if !mapViewHost.isFollowing {
+      mapViewHost.recenter()
+    }
     updateRecenterButton()
   }
 
@@ -1487,5 +1700,11 @@ extension PolarisCarPlay {
 
   fileprivate static func emitNavigationCancelled() {
     emit("carPlayNavigationCancelled", [:])
+  }
+
+  /// Asks JS for a fresh GPS fix when the driver taps Locate (or recenter),
+  /// because the map host has no position of its own outside navigation.
+  fileprivate static func emitLocateRequest() {
+    emit("carPlayLocateRequest", [:])
   }
 }

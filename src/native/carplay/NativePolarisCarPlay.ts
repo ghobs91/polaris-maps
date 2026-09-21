@@ -34,6 +34,8 @@ export interface CarPlayNavigationData {
   etaColor: 'default' | 'green' | 'orange' | 'red';
   /** Highway exit number/label for exit maneuvers (e.g. "91B"). */
   highwayExitLabel?: string;
+  /** True when the phone's unit preference is metric (miles vs km). */
+  useMetric?: boolean;
 }
 
 export interface CarPlayArrivalData {
@@ -58,6 +60,8 @@ export interface CarPlayStartNavigationData {
   encodedPolyline: string;
   /** Phone route-preview summary ("26 min · 13.8 mi"); preferred over native formatting. */
   routeSummary?: string;
+  /** True when the phone's unit preference is metric (miles vs km). */
+  useMetric?: boolean;
   maneuvers: Array<{
     instruction: string;
     /** Phone-banner text (verbalPreTransition || instruction); preferred for display. */
@@ -84,6 +88,8 @@ export interface CarPlayTripPreviewData {
   destinationLng: number;
   /** Primary route first, then alternatives in phone preview order. */
   routes: CarPlayTripPreviewRoute[];
+  /** True when the phone's unit preference is metric (miles vs km). */
+  useMetric?: boolean;
 }
 
 export interface CarPlaySearchResult {

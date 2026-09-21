@@ -4,13 +4,33 @@ import MapLibre
 import MapKit
 import UIKit
 
-/// Hosts a live MapLibre map inside the CarPlay window and draws the active
-/// route. Mirrors the phone's navigation view: heading-up pitched follow
-/// camera, white-cased blue route line, chevron puck, destination flag, and a
-/// speed-limit overlay. Created lazily on scene connect and torn down on
-/// disconnect so the second render target only costs resources while CarPlay
-/// is attached.
+/// Which CarPlay surface a map host renders into. The dashboard tile is the
+/// small secondary map in CarPlay's split view, so it skips the speed-limit
+/// overlay and uses a flat north-up follow camera.
+enum CarPlayMapMode {
+  case full
+  case dashboard
+}
+
+/// Hosts a live MapLibre map inside a CarPlay window (the main template or the
+/// Dashboard split tile) and draws the active route. Mirrors the phone's
+/// navigation view: heading-up pitched follow camera, white-cased blue route
+/// line, chevron puck, destination flag, and a speed-limit overlay. Created
+/// lazily on scene connect and torn down on disconnect so the second render
+/// target only costs resources while CarPlay is attached.
 final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
+
+  let mode: CarPlayMapMode
+
+  init(mode: CarPlayMapMode) {
+    self.mode = mode
+    super.init(nibName: nil, bundle: nil)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
 
   /// Same default style as the phone-side light map (src/constants/config.ts).
   private static let styleURL = URL(string: "https://tiles.openfreemap.org/styles/liberty")!
@@ -43,7 +63,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private var incidentSourceIds: [String] = []
   private var incidentLayerIds: [String] = []
   private var styleLoaded = false
-  private weak var carPlayWindow: CPWindow?
+  private weak var carPlayWindow: UIWindow?
   private var followVehicle = true
   private var lastHeading: Double = 0
   private var puckView: UIImageView?
@@ -51,9 +71,24 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private var pendingStyleJson: String?
   private var lastStyleFileURL: URL?
 
+  /// True once a real position has arrived; guards against locating to (0, 0).
+  private(set) var hasCenter = false
+  /// True while a navigation session is active; switches to the pitched
+  /// heading-up follow camera (the dashboard tile stays flat/north-up).
+  var isNavigating = false
+
   var currentCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
 
-  func activate(in window: CPWindow) {
+  /// Seeds the position without moving the camera (used for the route start
+  /// before the first GPS fix).
+  func seedCoordinate(_ coordinate: CLLocationCoordinate2D) {
+    currentCoordinate = coordinate
+    hasCenter = true
+  }
+
+  /// Accepts `UIWindow` (not just `CPWindow`) so the same host serves the main
+  /// template scene's `CPWindow` and the Dashboard scene's plain `UIWindow`.
+  func activate(in window: UIWindow) {
     guard mapView == nil else { return }
     carPlayWindow = window
 
@@ -77,8 +112,10 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
     let badge = SpeedLimitBadge()
     badge.isHidden = true
-    window.addSubview(badge)
-    speedSign = badge
+    if mode == .full {
+      window.addSubview(badge)
+      speedSign = badge
+    }
 
     layoutOverlays()
 
@@ -197,9 +234,10 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     destinationCoordinate = destination
     puckView?.isHidden = false
     rebuildRouteLayers()
-    if followVehicle {
-      fitCamera(to: coordinates)
-    }
+    // Always show the whole route on a route change (preview/start/selection);
+    // follow-camera ticks come through `updateCenter`, not here.
+    followVehicle = true
+    fitCamera(to: coordinates)
   }
 
   func clearRoute() {
@@ -464,29 +502,43 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   // MARK: Camera
 
+  /// Zoom used when not actively navigating (locate, dashboard tile).
+  private static let idleZoom: Double = 15
+
   func updateCenter(lat: Double, lng: Double, heading: Double) {
+    // (0, 0) is the Atlantic off West Africa — never a real fix. Ignoring it
+    // keeps the pre-fix default from parking the map in "blank ocean".
+    if lat == 0 && lng == 0 { return }
     currentCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    hasCenter = true
     lastHeading = heading
     guard let view = mapView, followVehicle else { return }
-    // Heading-up pitched follow camera (phone: zoom 17, pitch 60). The
-    // target is pushed ahead of the vehicle so the puck sits low with the
-    // road ahead in view.
-    let target = coordinate(
-      from: currentCoordinate, distanceMeters: Self.forwardOffsetMeters, bearing: heading)
-    let camera = MLNMapCamera(
-      lookingAtCenter: target,
-      acrossDistance: Self.followDistance,
-      pitch: 60,
-      heading: heading
-    )
-    view.camera = camera
+    applyFollowCamera(view, heading: heading)
+  }
+
+  private func applyFollowCamera(_ view: MLNMapView, heading: Double) {
+    if isNavigating && mode == .full {
+      // Heading-up pitched follow camera (phone: zoom 17, pitch 60). The
+      // target is pushed ahead of the vehicle so the puck sits low with the
+      // road ahead in view.
+      let target = coordinate(
+        from: currentCoordinate, distanceMeters: Self.forwardOffsetMeters, bearing: heading)
+      view.camera = MLNMapCamera(
+        lookingAtCenter: target,
+        acrossDistance: Self.followDistance,
+        pitch: 60,
+        heading: heading
+      )
+    } else {
+      // Idle locate and the dashboard split tile: flat, north-up, centered.
+      view.setCenter(currentCoordinate, zoomLevel: Self.idleZoom, direction: 0, animated: false)
+    }
   }
 
   func recenter() {
     followVehicle = true
-    guard mapView != nil else { return }
-    updateCenter(
-      lat: currentCoordinate.latitude, lng: currentCoordinate.longitude, heading: lastHeading)
+    guard let view = mapView, hasCenter else { return }
+    applyFollowCamera(view, heading: lastHeading)
   }
 
   /// True while the camera tracks the vehicle. CarPlay gesture callbacks clear
@@ -497,6 +549,14 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func showRouteOverview() {
     guard !routeCoordinates.isEmpty else { return }
     followVehicle = false
+    fitCamera(to: routeCoordinates)
+  }
+
+  /// Re-fits the whole active route without changing follow state. Used when a
+  /// CarPlay route-choice panel appears over the map and can otherwise snap the
+  /// camera back to the vehicle.
+  func fitRouteOverview() {
+    guard !routeCoordinates.isEmpty else { return }
     fitCamera(to: routeCoordinates)
   }
 

@@ -32,6 +32,9 @@ class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboard
     didConnect dashboardController: CPDashboardController,
     to window: UIWindow
   ) {
+    // Render the live Polaris map into the Dashboard window so the split view
+    // (map + upcoming maneuver + Now Playing) mirrors Apple/Google Maps.
+    PolarisCarPlay.dashboardSceneDidConnect(window: window)
     let home = CPDashboardButton(
       titleVariants: ["Home"],
       subtitleVariants: ["Navigate home"],
@@ -54,6 +57,7 @@ class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboard
     didDisconnect dashboardController: CPDashboardController,
     from window: UIWindow
   ) {
+    PolarisCarPlay.dashboardSceneDidDisconnect()
   }
 }
 
