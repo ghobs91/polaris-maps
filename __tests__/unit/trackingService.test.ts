@@ -252,6 +252,33 @@ describe('trackingService — happy path fix processing', () => {
   });
 });
 
+describe('trackingService — snap continuity', () => {
+  // Route that doubles back near its start: the final (southbound) segment
+  // passes within ~11 m of the first (eastbound) segment.
+  const loop: [number, number][] = [
+    [-74.0, 40.0],
+    [-73.99, 40.0],
+    [-73.99, 40.002],
+    [-73.9995, 40.0019],
+    [-73.9995, 39.9999],
+  ];
+
+  it('does not teleport the puck to a distant self-approaching segment', () => {
+    startNav(makeRoute(loop));
+    startTracking(makeRoute(loop));
+
+    // First fix lies on the eastbound segment (lat 40.0) but exactly on the
+    // final segment that doubles back. Without continuity it would snap to the
+    // end of the route and the puck would fly off in the wrong direction.
+    processFix(makeFix({ lat: 40.0001, lng: -73.9995, speed: 10 }));
+
+    expect(getGpsSegmentIndex()).toBe(0);
+    const anchor = getAnchor()!;
+    expect(anchor.segIdx).toBe(0);
+    expect(anchor.pos[1]).toBeCloseTo(40.0, 4);
+  });
+});
+
 describe('trackingService — off-route detection & rerouting', () => {
   function farOffRouteFix(): Parameters<typeof processFix>[0] {
     // Well over OFF_ROUTE_THRESHOLD_METERS (50 m) east of the route.

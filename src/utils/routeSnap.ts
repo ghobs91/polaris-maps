@@ -27,20 +27,48 @@ export function haversineMeters(a: [number, number], b: [number, number]): numbe
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/**
- * Snap a GPS coordinate to the nearest point on the route polyline.
- * Returns the snapped [lng, lat], bearing, the shape index of the segment,
- * and the distance in meters from the original position to the snapped point.
- */
-export function snapToRoute(
+/** Snap result: the projected point, its bearing, segment index and offset. */
+export interface RouteSnapResult {
+  snapped: [number, number];
+  bearing: number;
+  segmentIndex: number;
+  distanceMeters: number;
+}
+
+export interface SnapToRouteOptions {
+  /**
+   * Segment index of the previous fix. When provided, the snap is constrained
+   * to a window of the route around this index so a fix near a self-approaching
+   * section (cloverleaf, parallel carriageway, out-and-back) cannot teleport
+   * the puck to a distant part of the route.
+   */
+  hintIndex?: number;
+  /** Route distance (m) ahead of the hint still eligible for snapping. */
+  maxAheadMeters?: number;
+  /** Route distance (m) behind the hint still eligible for snapping. */
+  maxBehindMeters?: number;
+}
+
+/** Continuity window defaults — generous for 1 Hz fixes (≤ ~55 m/fix). */
+const SNAP_MAX_AHEAD_METERS = 500;
+const SNAP_MAX_BEHIND_METERS = 250;
+
+interface SnapCandidate {
+  dist: number;
+  point: [number, number];
+  idx: number;
+}
+
+/** Nearest projection of `pos` onto the given segments (all when `indices` is null). */
+function nearestOnSegments(
   pos: [number, number],
   coords: [number, number][],
-): { snapped: [number, number]; bearing: number; segmentIndex: number; distanceMeters: number } {
-  let bestDist = Infinity;
-  let bestPoint: [number, number] = pos;
-  let bestIdx = 0;
+  indices: Set<number> | null,
+): SnapCandidate {
+  let best: SnapCandidate = { dist: Infinity, point: pos, idx: 0 };
 
   for (let i = 0; i < coords.length - 1; i++) {
+    if (indices && !indices.has(i)) continue;
     const a = coords[i];
     const b = coords[i + 1];
     // Project pos onto segment a→b using parameter t ∈ [0,1]
@@ -51,20 +79,66 @@ export function snapToRoute(
     t = Math.max(0, Math.min(1, t));
     const proj: [number, number] = [a[0] + t * dx, a[1] + t * dy];
     const dist = haversineMeters(pos, proj);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestPoint = proj;
-      bestIdx = i;
+    if (dist < best.dist) {
+      best = { dist, point: proj, idx: i };
     }
   }
 
-  const bearing = computeBearing(coords[bestIdx], coords[Math.min(bestIdx + 1, coords.length - 1)]);
+  return best;
+}
+
+function toSnapResult(candidate: SnapCandidate, coords: [number, number][]): RouteSnapResult {
+  const idx = candidate.idx;
   return {
-    snapped: bestPoint,
-    bearing,
-    segmentIndex: bestIdx,
-    distanceMeters: bestDist === Infinity ? 0 : bestDist,
+    snapped: candidate.point,
+    bearing: computeBearing(coords[idx], coords[Math.min(idx + 1, coords.length - 1)]),
+    segmentIndex: idx,
+    distanceMeters: candidate.dist === Infinity ? 0 : candidate.dist,
   };
+}
+
+/**
+ * Snap a GPS coordinate to the nearest point on the route polyline.
+ * Returns the snapped [lng, lat], bearing, the shape index of the segment,
+ * and the distance in meters from the original position to the snapped point.
+ *
+ * When `options.hintIndex` is supplied, snapping is constrained to a window of
+ * the route around that index: if the fix lies plausibly on-route within the
+ * window it snaps there, otherwise (the user genuinely moved beyond the window
+ * or is off-route) it falls back to the globally nearest segment.
+ */
+export function snapToRoute(
+  pos: [number, number],
+  coords: [number, number][],
+  options?: SnapToRouteOptions,
+): RouteSnapResult {
+  const global = nearestOnSegments(pos, coords, null);
+  if (options?.hintIndex == null || coords.length < 2) return toSnapResult(global, coords);
+
+  const hint = Math.max(0, Math.min(options.hintIndex, coords.length - 2));
+  const maxAhead = options.maxAheadMeters ?? SNAP_MAX_AHEAD_METERS;
+  const maxBehind = options.maxBehindMeters ?? SNAP_MAX_BEHIND_METERS;
+
+  // Build the eligible segment window by walking route distance from the hint.
+  const window = new Set<number>();
+  let acc = 0;
+  for (let i = hint; i >= 0; i--) {
+    window.add(i);
+    acc += haversineMeters(coords[i], coords[Math.min(i + 1, coords.length - 1)]);
+    if (acc > maxBehind) break;
+  }
+  acc = 0;
+  for (let i = hint; i < coords.length - 1; i++) {
+    window.add(i);
+    acc += haversineMeters(coords[i], coords[i + 1]);
+    if (acc > maxAhead) break;
+  }
+
+  const windowed = nearestOnSegments(pos, coords, window);
+  // A windowed snap within the off-route threshold means the fix is on the
+  // route near the hint — prefer it over a globally-nearest far segment.
+  if (windowed.dist <= OFF_ROUTE_THRESHOLD_METERS) return toSnapResult(windowed, coords);
+  return toSnapResult(global, coords);
 }
 
 /** Threshold in meters beyond which the user is considered off-route. */

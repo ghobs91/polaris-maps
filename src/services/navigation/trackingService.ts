@@ -232,12 +232,16 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   const isBackground = opts?.background === true;
 
   const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
+  // Constrain the snap to the previous segment's neighbourhood so a fix near a
+  // self-approaching section (cloverleaf, parallel carriageway) cannot snap to
+  // a distant part of the route and make the puck "fly" off in another
+  // direction while the user is still on the same road.
   const {
     snapped,
     segmentIndex,
     distanceMeters: distFromRoute,
     bearing: routeBearing,
-  } = snapToRoute(gpsPos, coords);
+  } = snapToRoute(gpsPos, coords, { hintIndex: gpsSegmentIndex });
   gpsSegmentIndex = segmentIndex;
   const now = performance.now();
 

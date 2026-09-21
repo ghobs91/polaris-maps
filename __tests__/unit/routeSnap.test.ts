@@ -105,6 +105,38 @@ describe('routeSnap', () => {
     });
   });
 
+  describe('snapToRoute continuity window', () => {
+    // Route that doubles back near its start: the final (southbound) segment
+    // passes within ~11 m of the first (eastbound) segment.
+    const loop: [number, number][] = [
+      [-74.0, 40.0], // 0
+      [-73.99, 40.0], // 1
+      [-73.99, 40.002], // 2
+      [-73.9995, 40.0019], // 3
+      [-73.9995, 39.9999], // 4
+    ];
+    // On the first segment (lat 40.0), 11 m north of it — and exactly on the
+    // final segment that doubles back.
+    const pos: [number, number] = [-73.9995, 40.0001];
+
+    it('picks the globally nearest segment without a hint', () => {
+      expect(snapToRoute(pos, loop).segmentIndex).toBe(3);
+    });
+
+    it('stays on the hinted segment when it is plausibly on-route', () => {
+      const result = snapToRoute(pos, loop, { hintIndex: 0 });
+      expect(result.segmentIndex).toBe(0);
+      expect(result.snapped[1]).toBeCloseTo(40.0, 4);
+    });
+
+    it('falls back to the global nearest when the hinted window is too far away', () => {
+      // A genuine jump to the far end of the route: the fix is ~200 m from the
+      // hinted segment, so continuity must yield to the real position.
+      const far: [number, number] = [-73.9995, 40.0018];
+      expect(snapToRoute(far, loop, { hintIndex: 0 }).segmentIndex).toBe(3);
+    });
+  });
+
   describe('computeRemainingMeters', () => {
     // 3-point straight eastward route: each segment ~1.1 km at 40° lat
     const coords: [number, number][] = [
