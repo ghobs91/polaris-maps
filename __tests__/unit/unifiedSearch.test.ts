@@ -240,6 +240,17 @@ describe('unifiedSearch', () => {
     expect(results[0].name).toBe('Tanger Outlet Deer Park');
   });
 
+  it('passes the viewport zoom to Photon so distant matches do not drown out local ones', async () => {
+    (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue([]);
+
+    await unifiedSearch('plumbing supply', { lat: 40.749, lng: -73.64, zoom: 16 });
+
+    // Photon's 4th argument is zoom; a widened (min(zoom, 10)) value pulled
+    // distant Manhattan results above nearby Mineola ones.
+    const photonCall = (photonGeocoder.searchPhoton as jest.Mock).mock.calls[0];
+    expect(photonCall[3]).toBe(16);
+  });
+
   it('handles failures in individual sources gracefully', async () => {
     // Local FTS throws, but Photon succeeds
     (poiService.searchPlacesFts as jest.Mock).mockRejectedValue(new Error('DB error'));

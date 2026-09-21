@@ -552,24 +552,23 @@ export async function unifiedSearch(
       parsed.categories?.length === 1
         ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
         : undefined;
-    // For name/brand searches, lower the zoom passed to Photon so it
-    // searches a broader area. Without this, Photon would heavily bias
-    // toward the viewport center and return only nearby matches (e.g.
-    // "Times Square Music" in Garden City instead of the actual Times
-    // Square in Manhattan 40 km away).
-    const photonZoom = parsed.brand || parsed.isNameSearch ? Math.min(zoom, 10) : zoom;
+    // Pass the actual viewport zoom so Photon's location bias stays local.
+    // Photon already ranks globally-unique names ("Times Square") correctly
+    // even at a high zoom, so lowering it is unnecessary — and harmful, since
+    // it floods generic local queries ("plumbing supply") with distant
+    // matches that outrank the nearby ones.
     const viewportBounds = { south, north, west, east };
     return cachedFetch(
       cacheKey([
         'photon',
         parsed.originalQuery,
         boundsKey(viewportBounds),
-        photonZoom,
+        zoom,
         limit,
         osmTagFilter,
       ]),
       () =>
-        searchPhoton(parsed.originalQuery, lat, lng, photonZoom, limit, 'en', osmTagFilter, {
+        searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
           signal,
         }),
       { bounds: viewportBounds },
