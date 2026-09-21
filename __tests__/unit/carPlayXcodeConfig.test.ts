@@ -29,6 +29,9 @@ describe('CarPlay iOS configuration', () => {
     expect(infoPlist).toContain('CarPlaySceneDelegate');
     // Dashboard + instrument-cluster scenes (iOS 13.4 / 15.4).
     expect(infoPlist).toContain('CPTemplateApplicationDashboardSceneSessionRoleApplication');
+    // Apple's opt-in for the Dashboard split view; without it the system keeps
+    // showing Apple Maps instead of this app's navigation map.
+    expect(infoPlist).toContain('<key>CPSupportsDashboardNavigationScene</key>');
     expect(infoPlist).toContain(
       'CPTemplateApplicationInstrumentClusterSceneSessionRoleApplication',
     );

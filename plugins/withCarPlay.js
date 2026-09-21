@@ -223,6 +223,10 @@ function withCarPlay(config) {
     // so multiple scenes must be enabled or iOS never connects the CarPlay
     // scene on a real head unit.
     manifest.UIApplicationSupportsMultipleScenes = true;
+    // Apple requires this opt-in for a navigation app's map and maneuvers to
+    // appear in the CarPlay Dashboard split view ("Displaying Content in
+    // CarPlay"); without it the Dashboard keeps showing Apple Maps.
+    manifest.CPSupportsDashboardNavigationScene = true;
     manifest.UISceneConfigurations = manifest.UISceneConfigurations ?? {};
     // Keep the phone scene if withSceneLifecycle (or Expo defaults) defined it.
     manifest.UISceneConfigurations.UIWindowSceneSessionRoleApplication = manifest
