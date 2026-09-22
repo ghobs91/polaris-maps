@@ -29,6 +29,8 @@ import { navigationModeCapabilities, navigationModeForCosting } from '@/utils/na
 import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
 import { CurrentSpeedBadge } from '@/components/navigation/CurrentSpeedBadge';
 import { NavigationStepsList } from '@/components/navigation/NavigationStepsList';
+import { CarPlayNavigationCompanion } from '@/components/navigation/CarPlayNavigationCompanion';
+import { useCarPlayStore } from '@/stores/carPlayStore';
 import { OverSpeedMonitor } from '@/services/navigation/speedAlerts';
 import { formatDuration } from '@/utils/units';
 import {
@@ -92,6 +94,9 @@ export default function NavigationScreen() {
   const setArrived = useNavigationStore((s) => s.setArrived);
   const navigationAutoAdvanceLegs = useSettingsStore((s) => s.navigationAutoAdvanceLegs);
   const navigationAutoEnd = useSettingsStore((s) => s.navigationAutoEnd);
+  // While CarPlay is attached the car screen drives the map; the phone becomes
+  // the companion (step list + add-stop search), like Apple Maps.
+  const carPlayConnected = useCarPlayStore((s) => s.connected);
 
   // Keep the screen awake while actively navigating (like Apple/Google Maps)
   useEffect(() => {
@@ -626,6 +631,52 @@ export default function NavigationScreen() {
   const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
   const nextManeuver = allManeuvers[currentStepIndex + 1] ?? null;
 
+  // CarPlay companion: the car shows the map, so the phone shows the step list
+  // and an add-stop search bar instead of duplicating the map HUD.
+  if (isNavigating && carPlayConnected) {
+    return (
+      <View style={styles.container}>
+        <CarPlayNavigationCompanion
+          route={activeRoute}
+          currentStepIndex={currentStepIndex}
+          etaSeconds={etaSeconds}
+          remainingDistanceMeters={remainingDistanceMeters}
+          destinationName={destination?.name}
+          onAddStop={handleOpenAddDestination}
+          onEnd={stopNavigation}
+        />
+
+        <AddDestinationPanel
+          visible={showAddDestination}
+          onClose={handleCloseAddDestination}
+          onSelect={handleSelectDestination}
+          onShowOnMap={handleShowSearchResultsOnMap}
+          searchCenter={searchCenter}
+        />
+
+        <IncidentReportPanel
+          visible={showIncidentReport}
+          onClose={() => setShowIncidentReport(false)}
+          position={navPosition ?? [0, 0]}
+        />
+
+        {showArrival && destination && (
+          <ArrivalSummary
+            destinationName={destination.name}
+            elapsedSeconds={
+              startedAtRef.current ? Math.floor((Date.now() - startedAtRef.current) / 1000) : 0
+            }
+            distanceMeters={activeRoute?.summary.distanceMeters ?? 0}
+            onDismiss={() => {
+              setShowArrival(false);
+              stopNavigation();
+            }}
+          />
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Full-screen map — tilted + heading-up when navigating */}
@@ -637,6 +688,7 @@ export default function NavigationScreen() {
         navBearing={navBearing}
         followCamera={followCamera}
         onFollowCameraChange={handleFollowCameraChange}
+        destination={destination}
       />
 
       {/* Turn banner + speed limit + lane guidance overlaid at top */}

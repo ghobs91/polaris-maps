@@ -29,7 +29,9 @@ import {
   ETA_COLOR_RED,
 } from '../traffic/routeTrafficService';
 import { decodePolyline } from '../../utils/polyline';
-import { getFavorites } from '../favorites/favoritesService';
+import { getFavorites, subscribeFavorites } from '../favorites/favoritesService';
+import { getSearchHistory } from '../search/searchHistoryService';
+import { useCarPlayStore } from '../../stores/carPlayStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
 import { INCIDENT_TYPE_LABELS } from '../traffic/incidentWire';
 import { haversineMeters } from '../../utils/routeSnap';
@@ -44,6 +46,7 @@ let trackingUnsubscribe: (() => void) | null = null;
 let trafficUnsubscribe: (() => void) | null = null;
 let settingsUnsubscribe: (() => void) | null = null;
 let mapStyleUnsubscribe: (() => void) | null = null;
+let favoritesUnsubscribe: (() => void) | null = null;
 let appearanceSubscription: { remove: () => void } | null = null;
 let lastMapStyleKey: string | null = null;
 let carPlayDark: boolean | null = null;
@@ -110,6 +113,8 @@ export function teardownCarPlay(): void {
   settingsUnsubscribe = null;
   mapStyleUnsubscribe?.();
   mapStyleUnsubscribe = null;
+  favoritesUnsubscribe?.();
+  favoritesUnsubscribe = null;
   appearanceSubscription?.remove();
   appearanceSubscription = null;
   lastMapStyleKey = null;
@@ -118,6 +123,7 @@ export function teardownCarPlay(): void {
   searchSession?.cancel();
   initialized = false;
   connected = false;
+  useCarPlayStore.getState().setConnected(false);
   carPlayRouteKey = null;
   previewKey = null;
   rerouteAlertShown = false;
@@ -142,6 +148,7 @@ function onConnected() {
   if (connected) return;
 
   connected = true;
+  useCarPlayStore.getState().setConnected(true);
 
   // Sync current navigation state whenever it changes
   navUnsubscribe?.();
@@ -157,6 +164,8 @@ function onConnected() {
   settingsUnsubscribe = useSettingsStore.subscribe(syncMapStyle);
   mapStyleUnsubscribe?.();
   mapStyleUnsubscribe = useMapStore.subscribe(syncMapStyle);
+  favoritesUnsubscribe?.();
+  favoritesUnsubscribe = subscribeFavorites(pushHomeSuggestions);
 
   // Push the phone's current map style (dark/light, satellite) so the
   // CarPlay map matches the phone map.
@@ -166,6 +175,9 @@ function onConnected() {
   // If navigation is already active, push initial state
   syncNavigationState(useNavigationStore.getState());
 
+  // Pre-search suggestions for the floating map panel.
+  pushHomeSuggestions();
+
   // Center the idle map on the driver instead of leaving it at the native
   // host's (0, 0) default ("blank ocean"). No-op while navigating, where the
   // tracking pipeline already owns the camera.
@@ -174,6 +186,7 @@ function onConnected() {
 
 function onDisconnected() {
   connected = false;
+  useCarPlayStore.getState().setConnected(false);
   navUnsubscribe?.();
   navUnsubscribe = null;
   trackingUnsubscribe?.();
@@ -184,6 +197,8 @@ function onDisconnected() {
   settingsUnsubscribe = null;
   mapStyleUnsubscribe?.();
   mapStyleUnsubscribe = null;
+  favoritesUnsubscribe?.();
+  favoritesUnsubscribe = null;
   lastMapStyleKey = null;
   carPlayDark = null;
   clearMapCenterUpdate();
@@ -751,24 +766,52 @@ function getSearchSession(): SearchSession {
 
 async function onSearchQuery({ query }: { query: string }) {
   if (!connected) return;
-  // Empty query shows the phone's saved places, like Apple/Google's
-  // recents/Home/Work list, instead of submitting an empty search.
+  // Empty query: clear the search list. Saved/recents places live in the
+  // floating map panel (`pushHomeSuggestions`), so the keyboard never covers
+  // a list of suggestions.
   if (!query.trim()) {
     searchSession?.cancel();
-    CarPlay.pushSearchResults(emptyQueryResults());
+    CarPlay.pushSearchResults([]);
     return;
   }
   await getSearchSession().submit(query);
 }
 
-/** Home → Work → pins, matching `favoritesService`'s ordering. */
+/** Pushes the Pinned/Recents suggestions for the floating CarPlay map panel. */
+function pushHomeSuggestions(): void {
+  if (!connected) return;
+  CarPlay.updateHomeSuggestions(emptyQueryResults());
+}
+
+/**
+ * Pre-search list, Apple Maps style: a "Pinned" section (Home → Work → pins,
+ * matching `favoritesService`'s ordering) followed by a "Recents" section
+ * built from the phone's search history. `kind` drives the row icon; `section`
+ * groups rows under headers on the native side.
+ */
 function emptyQueryResults(): CarPlaySearchResult[] {
-  return getFavorites().map((favorite) => ({
+  const pinned: CarPlaySearchResult[] = getFavorites().map((favorite) => ({
     name: favorite.label,
-    subtitle: favorite.entry.text,
+    subtitle: favorite.kind === 'home' ? 'Close by' : favorite.entry.text,
     lat: favorite.entry.lat,
     lng: favorite.entry.lng,
+    kind: favorite.kind,
+    section: 'pinned',
   }));
+
+  const recents: CarPlaySearchResult[] = getSearchHistory().map((entry) => {
+    const region = [entry.entry.city, entry.entry.state].filter(Boolean).join(', ');
+    return {
+      name: entry.entry.text,
+      subtitle: region || entry.query || 'Recent',
+      lat: entry.entry.lat,
+      lng: entry.entry.lng,
+      kind: 'recent',
+      section: 'recent',
+    };
+  });
+
+  return [...pinned, ...recents];
 }
 
 async function onSearchResultSelected(result: { name?: string; lat?: number; lng?: number }) {

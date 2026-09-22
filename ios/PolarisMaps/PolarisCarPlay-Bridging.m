@@ -30,6 +30,8 @@ RCT_EXTERN_METHOD(hideNavigationAlert)
 
 RCT_EXTERN_METHOD(pushSearchResults:(NSArray *)results)
 
+RCT_EXTERN_METHOD(updateHomeSuggestions:(NSArray *)items)
+
 RCT_EXTERN_METHOD(updateMapCenter:(double)lat
                   lng : (double)lng
                   heading : (double)heading)

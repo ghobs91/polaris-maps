@@ -10,7 +10,7 @@ The map layer is built on MapLibre React Native with OpenFreeMap vector tiles an
 2. **Traffic overlay** — color-coded GeoJSON line layers for congestion (green → yellow → orange → red → dark-red)
 3. **POI layer** — `MarkerView`-based pill badges with icon circle + label, category-colored backgrounds, spatial filtering for density control
 4. **Transit layer** — always-mounted GeoJSON layers for route lines and stops with visibility toggling (no GPU re-upload on toggle, empty GeoJSON singletons for stable initial state)
-5. **Navigation mode** — heading-up camera, route polyline rendering, position tracking
+5. **Navigation mode** — heading-up camera, route polyline + destination-flag rendering, position tracking (map-plane 3D nav puck matching CarPlay)
 6. **Layer control** — traffic, satellite, transit, and POI layers toggled via the map store
 
 ## Key Components

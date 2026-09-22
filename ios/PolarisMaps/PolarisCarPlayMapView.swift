@@ -15,7 +15,8 @@ enum CarPlayMapMode {
 /// Hosts a live MapLibre map inside a CarPlay window (the main template or the
 /// Dashboard split tile) and draws the active route. Mirrors the phone's
 /// navigation view: heading-up pitched follow camera, white-cased blue route
-/// line, chevron puck, destination flag, and a speed-limit overlay. Created
+/// line, phone-parity 3D nav puck, destination flag, and a speed-limit
+/// overlay. Created
 /// lazily on scene connect and torn down on disconnect so the second render
 /// target only costs resources while CarPlay is attached.
 final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
@@ -38,10 +39,21 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Phone parity: white casing + cyan core (DEFAULT_ROUTE_COLOR #2FD4F2,
   /// see TrafficRouteLayer).
   private static let routeCoreColor = UIColor(red: 0x2F / 255, green: 0xD4 / 255, blue: 0xF2 / 255, alpha: 1)
-  /// Route line widths. The CarPlay follow camera stays at the phone's nav
-  /// zoom, so the phone's zoom-17 stops (11 / 7.5) are used directly.
-  private static let routeCasingWidth: Double = 11
-  private static let routeCoreWidth: Double = 7.5
+  /// Route line widths interpolated by zoom, matching the phone's
+  /// `TrafficRouteLayer` / `MapView` stops so the line thins out in the route
+  /// overview instead of staying at nav-zoom thickness.
+  private static let routeCasingWidthStops: [NSNumber: NSNumber] = [10: 4, 14: 7, 17: 11]
+  private static let routeCoreWidthStops: [NSNumber: NSNumber] = [10: 2, 14: 4.5, 17: 7.5]
+  private static let alternateWidthStops: [NSNumber: NSNumber] = [10: 2, 14: 4, 17: 6]
+
+  /// A `lineWidth` expression interpolating the given zoom stops linearly.
+  private static func zoomWidth(_ stops: [NSNumber: NSNumber]) -> NSExpression {
+    NSExpression(
+      forMLNInterpolating: NSExpression.zoomLevelVariable,
+      curveType: MLNExpressionInterpolationMode.linear,
+      parameters: nil,
+      stops: NSExpression(forConstantValue: stops))
+  }
   private static let baseSourceId = "polaris-route-base"
   private static let alternatesSourceId = "polaris-route-alternates"
   private static let destinationSourceId = "polaris-route-destination"
@@ -65,17 +77,33 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private var styleLoaded = false
   private weak var carPlayWindow: UIWindow?
   private var followVehicle = true
+  /// True while the camera is fitted to the whole route (preview / overview).
+  /// Kept separate from `followVehicle` so dismissing the panning interface —
+  /// which CarPlay does when a route-choice panel appears — doesn't snap the
+  /// camera back to the vehicle and clobber the whole-route fit.
+  private var routeOverviewActive = false
   private var lastHeading: Double = 0
-  private var puckView: UIImageView?
   private var speedSign: SpeedLimitBadge?
+  // Map-plane nav puck (phone parity): the same polygon groups the phone's
+  // MapView renders, as MapLibre fill layers so the puck tilts and
+  // foreshortens with the 3D follow camera instead of a flat screen-space image.
+  private var puckBuilt = false
+  private var puckSourceIds: [String] = []
+  private var puckLayerIds: [String] = []
   private var pendingStyleJson: String?
   private var lastStyleFileURL: URL?
 
   /// True once a real position has arrived; guards against locating to (0, 0).
   private(set) var hasCenter = false
   /// True while a navigation session is active; switches to the pitched
-  /// heading-up follow camera (the dashboard tile stays flat/north-up).
-  var isNavigating = false
+  /// heading-up follow camera (the dashboard tile stays flat/north-up) and
+  /// swaps the idle location dot for the nav puck (matching the phone, which
+  /// shows the puck only in navigation mode).
+  var isNavigating = false {
+    didSet {
+      if oldValue != isNavigating { updateVehicleMarkers() }
+    }
+  }
 
   var currentCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
 
@@ -84,6 +112,8 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func seedCoordinate(_ coordinate: CLLocationCoordinate2D) {
     currentCoordinate = coordinate
     hasCenter = true
+    // Show the vehicle marker at the route start before the first GPS fix.
+    updateVehicleMarkers()
   }
 
   /// Accepts `UIWindow` (not just `CPWindow`) so the same host serves the main
@@ -103,12 +133,6 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
     self.view = view
     window.rootViewController = self
-
-    let puck = UIImageView(image: NavPuckImage.make())
-    puck.contentMode = .center
-    puck.isHidden = true
-    window.addSubview(puck)
-    puckView = puck
 
     let badge = SpeedLimitBadge()
     badge.isHidden = true
@@ -138,8 +162,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     }
     lastStyleFileURL = nil
     styleLoaded = false
-    puckView?.removeFromSuperview()
-    puckView = nil
+    removeVehicleMarkers()
     speedSign?.removeFromSuperview()
     speedSign = nil
     mapView?.delegate = nil
@@ -151,6 +174,20 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    layoutOverlays()
+  }
+
+  /// Re-asserts the map view as the CarPlay window's content. The system can
+  /// clear a `CPWindow`'s root view controller across template transitions,
+  /// which leaves the full-screen map blank (the Dashboard's plain `UIWindow`
+  /// is unaffected). Safe to call repeatedly.
+  func reassertWindowContent() {
+    guard let window = carPlayWindow, let view = mapView else { return }
+    if window.rootViewController !== self {
+      window.rootViewController = self
+    } else if view.superview == nil {
+      self.view = view
+    }
     layoutOverlays()
   }
 
@@ -194,19 +231,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     guard let window = carPlayWindow else { return }
     let bounds = window.bounds
     let inset = window.safeAreaInsets
-    if let puck = puckView, let image = puck.image {
-      puck.frame = CGRect(
-        x: bounds.midX - image.size.width / 2,
-        y: bounds.midY - image.size.height / 2,
-        width: image.size.width,
-        height: image.size.height
-      )
-    }
     speedSign?.frame = CGRect(
       x: inset.left + 12,
-      y: bounds.height - inset.bottom - 108,
-      width: 56,
-      height: 72
+      y: bounds.height - inset.bottom - 104,
+      width: 52,
+      height: 68
     )
   }
 
@@ -232,11 +261,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       return decoded.count >= 2 ? decoded : nil
     }
     destinationCoordinate = destination
-    puckView?.isHidden = false
     rebuildRouteLayers()
     // Always show the whole route on a route change (preview/start/selection);
     // follow-camera ticks come through `updateCenter`, not here.
     followVehicle = true
+    routeOverviewActive = false
     fitCamera(to: coordinates)
   }
 
@@ -245,9 +274,10 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     alternateCoordinates = []
     trafficRanges = []
     destinationCoordinate = nil
-    puckView?.isHidden = true
     speedSign?.isHidden = true
     removeRouteLayers()
+    // Keep the vehicle markers; just drop the puck back to the idle dot.
+    updateVehicleMarkers()
   }
 
   // MARK: Traffic-colored segments (phone's TrafficRouteLayer)
@@ -286,7 +316,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       style.addSource(source)
       incidentSourceIds.append(identifier)
       let imageName = "\(identifier)-icon"
-      if let image = Self.incidentSymbol(for: type) {
+      if let image = Self.incidentBadge(for: type) {
         style.setImage(image, forName: imageName)
       }
       let layer = MLNSymbolStyleLayer(identifier: "\(identifier)-layer", source: source)
@@ -296,6 +326,8 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       style.addLayer(layer)
       incidentLayerIds.append(layer.identifier)
     }
+    // Keep the puck above the incident symbols.
+    rebuildVehicleMarkers()
   }
 
   private func removeIncidentLayers() {
@@ -318,19 +350,242 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     incidentLayerIds = []
   }
 
-  /// SF Symbol per incident type, mirroring the phone's `INCIDENT_TYPE_ICONS`.
-  private static func incidentSymbol(for type: String) -> UIImage? {
-    let name: String
-    switch type {
-    case "accident": name = "car.fill"
-    case "road_closure": name = "nosign"
-    case "hazard": name = "exclamationmark.triangle.fill"
-    case "construction": name = "hammer.fill"
-    case "police": name = "shield.fill"
-    default: name = "exclamationmark.circle.fill"
+  // MARK: Nav puck (phone parity)
+
+  /// One source per polygon group of the phone's `navPuckShapes`
+  /// (src/components/map/MapView.tsx).
+  private static let puckHaloRim = "polaris-puck-halo-rim"
+  private static let puckHaloFill = "polaris-puck-halo-fill"
+  private static let puckShadowOuter = "polaris-puck-shadow-outer"
+  private static let puckShadowInner = "polaris-puck-shadow-inner"
+  private static let puckBody = "polaris-puck-body"
+  private static let puckTop = "polaris-puck-top"
+  /// Idle location dot (shown when not navigating, like the phone's UserLocation).
+  private static let locationDot = "polaris-location-dot"
+
+  /// (Re)creates the puck's fill layers on top of the route/incident layers.
+  /// A style swap wipes custom sources, so this runs on every style load and
+  /// after any route/incident rebuild to keep the puck topmost.
+  private func rebuildVehicleMarkers() {
+    removeVehicleMarkers()
+    guard styleLoaded, let style = mapView?.style else { return }
+    let specs: [(id: String, color: UIColor)] = [
+      (Self.puckHaloRim, UIColor(red: 0x65 / 255, green: 0xD8 / 255, blue: 0xFF / 255, alpha: 1)),
+      (Self.puckHaloFill, UIColor(red: 0, green: 145 / 255, blue: 214 / 255, alpha: 0.38)),
+      (Self.puckShadowOuter, UIColor(red: 26 / 255, green: 39 / 255, blue: 61 / 255, alpha: 0.14)),
+      (Self.puckShadowInner, UIColor(red: 26 / 255, green: 39 / 255, blue: 61 / 255, alpha: 0.2)),
+      (Self.puckBody, UIColor(red: 0xC7 / 255, green: 0xD0 / 255, blue: 0xDB / 255, alpha: 1)),
+      (Self.puckTop, .white),
+    ]
+    for spec in specs {
+      let source = MLNShapeSource(identifier: spec.id, shape: nil, options: nil)
+      style.addSource(source)
+      puckSourceIds.append(spec.id)
+      let layer = MLNFillStyleLayer(identifier: "\(spec.id)-fill", source: source)
+      layer.fillColor = NSExpression(forConstantValue: spec.color)
+      style.addLayer(layer)
+      puckLayerIds.append(layer.identifier)
     }
-    return UIImage(systemName: name)?
-      .withTintColor(.systemRed, renderingMode: .alwaysOriginal)
+
+    // Idle location dot: the phone shows the native UserLocation dot when not
+    // navigating; the puck replaces it during navigation.
+    let dotSource = MLNShapeSource(identifier: Self.locationDot, shape: nil, options: nil)
+    style.addSource(dotSource)
+    puckSourceIds.append(Self.locationDot)
+    let dotLayer = MLNCircleStyleLayer(identifier: "\(Self.locationDot)-circle", source: dotSource)
+    dotLayer.circleRadius = NSExpression(forConstantValue: 8)
+    dotLayer.circleColor = NSExpression(
+      forConstantValue: UIColor(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255, alpha: 1))
+    dotLayer.circleStrokeWidth = NSExpression(forConstantValue: 3)
+    dotLayer.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+    style.addLayer(dotLayer)
+    puckLayerIds.append(dotLayer.identifier)
+
+    puckBuilt = true
+    updateVehicleMarkers()
+  }
+
+  private func removeVehicleMarkers() {
+    puckBuilt = false
+    guard let style = mapView?.style else {
+      puckSourceIds = []
+      puckLayerIds = []
+      return
+    }
+    for identifier in puckLayerIds {
+      if let layer = style.layer(withIdentifier: identifier) {
+        style.removeLayer(layer)
+      }
+    }
+    for identifier in puckSourceIds {
+      if let source = style.source(withIdentifier: identifier) {
+        style.removeSource(source)
+      }
+    }
+    puckSourceIds = []
+    puckLayerIds = []
+  }
+
+  /// Positions the nav puck (while navigating) or the idle location dot
+  /// (otherwise), mirroring the phone's `navigationMode` behavior. Called on
+  /// every GPS tick; only the sources' shapes change (no layer churn).
+  private func updateVehicleMarkers() {
+    guard puckBuilt, hasCenter, let style = mapView?.style, let view = mapView else { return }
+    let coordinate = currentCoordinate
+
+    // Not navigating: hide the puck and show the plain location dot.
+    guard isNavigating else {
+      for id in [
+        Self.puckHaloRim, Self.puckHaloFill, Self.puckShadowOuter, Self.puckShadowInner,
+        Self.puckBody, Self.puckTop,
+      ] {
+        clearShape(style, id: id)
+      }
+      setDotShape(style, coordinate: coordinate)
+      return
+    }
+
+    setDotShape(style, coordinate: nil)
+
+    // Use the live map scale (meters per screen point) rather than
+    // `view.zoomLevel`: the CarPlay follow camera is configured via
+    // `acrossDistance`, so its reported zoom doesn't match the phone's zoom-17
+    // and would render the puck enormously large.
+    let metersPerPoint = view.metersPerPoint(atLatitude: coordinate.latitude)
+    let bearing = lastHeading
+
+    // Halo sits on the arrow's bounding-box center; shadow and body shift back
+    // to fake depth (mirrors MapView.tsx's build*GeoJSON helpers).
+    let haloShiftPx =
+      NavPuckGeometry.arrowCenteringPx
+      - (NavPuckGeometry.arrowTipPx + NavPuckGeometry.arrowBasePx) / 2
+    let haloCenter = NavPuckGeometry.shifted(
+      coordinate, bearing: bearing, metersPerPoint: metersPerPoint, backPx: haloShiftPx)
+    let shadowCenter = NavPuckGeometry.shifted(
+      coordinate, bearing: bearing, metersPerPoint: metersPerPoint,
+      backPx: NavPuckGeometry.shadowShiftPx)
+    let bodyCenter = NavPuckGeometry.shifted(
+      coordinate, bearing: bearing, metersPerPoint: metersPerPoint,
+      backPx: NavPuckGeometry.bodyShiftPx)
+
+    setPuckShape(
+      style, id: Self.puckHaloRim,
+      ring: NavPuckGeometry.ellipseRing(
+        center: haloCenter, bearing: bearing, metersPerPoint: metersPerPoint,
+        forwardSemiPx: NavPuckGeometry.haloRimForwardPx,
+        lateralSemiPx: NavPuckGeometry.haloRimLateralPx))
+    setPuckShape(
+      style, id: Self.puckHaloFill,
+      ring: NavPuckGeometry.ellipseRing(
+        center: haloCenter, bearing: bearing, metersPerPoint: metersPerPoint,
+        forwardSemiPx: NavPuckGeometry.haloFillForwardPx,
+        lateralSemiPx: NavPuckGeometry.haloFillLateralPx))
+    setPuckShape(
+      style, id: Self.puckShadowOuter,
+      ring: NavPuckGeometry.ellipseRing(
+        center: shadowCenter, bearing: bearing, metersPerPoint: metersPerPoint,
+        forwardSemiPx: NavPuckGeometry.shadowOuterForwardPx,
+        lateralSemiPx: NavPuckGeometry.shadowOuterLateralPx))
+    setPuckShape(
+      style, id: Self.puckShadowInner,
+      ring: NavPuckGeometry.ellipseRing(
+        center: shadowCenter, bearing: bearing, metersPerPoint: metersPerPoint,
+        forwardSemiPx: NavPuckGeometry.shadowInnerForwardPx,
+        lateralSemiPx: NavPuckGeometry.shadowInnerLateralPx))
+    setPuckShape(
+      style, id: Self.puckBody,
+      ring: NavPuckGeometry.arrowRing(
+        center: bodyCenter, bearing: bearing, metersPerPoint: metersPerPoint,
+        scale: NavPuckGeometry.bodyScale))
+    setPuckShape(
+      style, id: Self.puckTop,
+      ring: NavPuckGeometry.arrowRing(
+        center: coordinate, bearing: bearing, metersPerPoint: metersPerPoint, scale: 1))
+  }
+
+  private func setPuckShape(_ style: MLNStyle, id: String, ring: [CLLocationCoordinate2D]) {
+    guard let source = style.source(withIdentifier: id) as? MLNShapeSource else { return }
+    var coordinates = ring
+    source.shape = MLNPolygon(coordinates: &coordinates, count: UInt(coordinates.count))
+  }
+
+  /// Empties a shape source so its layer paints nothing (used to hide the puck).
+  private func clearShape(_ style: MLNStyle, id: String) {
+    (style.source(withIdentifier: id) as? MLNShapeSource)?.shape = nil
+  }
+
+  /// Moves the idle location dot, or hides it when `coordinate` is nil.
+  private func setDotShape(_ style: MLNStyle, coordinate: CLLocationCoordinate2D?) {
+    guard let source = style.source(withIdentifier: Self.locationDot) as? MLNShapeSource else {
+      return
+    }
+    if let coordinate = coordinate {
+      let feature = MLNPointFeature()
+      feature.coordinate = coordinate
+      source.shape = feature
+    } else {
+      source.shape = nil
+    }
+  }
+
+  /// Per-type badge colors, mirroring the phone's `IncidentLayer` TYPE_COLORS.
+  private static func incidentColor(for type: String) -> UIColor {
+    switch type {
+    case "accident": return UIColor(red: 0xFF / 255, green: 0x3B / 255, blue: 0x30 / 255, alpha: 1)
+    case "road_closure", "construction":
+      return UIColor(red: 0xFF / 255, green: 0x95 / 255, blue: 0x00 / 255, alpha: 1)
+    case "hazard": return UIColor(red: 0xFF / 255, green: 0xCC / 255, blue: 0x00 / 255, alpha: 1)
+    case "police": return UIColor(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255, alpha: 1)
+    default: return UIColor(red: 0x8E / 255, green: 0x8E / 255, blue: 0x93 / 255, alpha: 1)
+    }
+  }
+
+  /// SF Symbol glyph per incident type, mirroring the phone's Ionicons mapping.
+  private static func incidentGlyph(for type: String) -> String {
+    switch type {
+    case "accident": return "car.fill"
+    case "road_closure": return "nosign"
+    case "hazard": return "exclamationmark.triangle.fill"
+    case "construction": return "hammer.fill"
+    case "police": return "shield.fill"
+    default: return "exclamationmark.circle.fill"
+    }
+  }
+
+  /// 22pt circular badge (per-type color, white border, soft shadow, white
+  /// glyph) matching the phone's `IncidentBadge`. Rendered as a symbol image
+  /// so it stays a constant screen size like the phone's MarkerView.
+  private static func incidentBadge(for type: String) -> UIImage? {
+    let size = CGSize(width: 22, height: 22)
+    let format = UIGraphicsImageRendererFormat()
+    format.opaque = false
+    return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+      let cg = ctx.cgContext
+      let circle = UIBezierPath(ovalIn: CGRect(x: 1.5, y: 1.5, width: 19, height: 19))
+
+      cg.saveGState()
+      cg.setShadow(
+        offset: CGSize(width: 0, height: 1), blur: 2,
+        color: UIColor.black.withAlphaComponent(0.5).cgColor)
+      Self.incidentColor(for: type).setFill()
+      circle.fill()
+      cg.restoreGState()
+
+      UIColor.white.withAlphaComponent(0.85).setStroke()
+      circle.lineWidth = 1.5
+      circle.stroke()
+
+      if let glyph = UIImage(systemName: Self.incidentGlyph(for: type)), glyph.size.width > 0 {
+        let scale = min(13 / glyph.size.width, 13 / glyph.size.height)
+        let drawSize = CGSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
+        let rect = CGRect(
+          x: (size.width - drawSize.width) / 2,
+          y: (size.height - drawSize.height) / 2,
+          width: drawSize.width,
+          height: drawSize.height)
+        glyph.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: rect)
+      }
+    }
   }
 
   /// (Re)builds every route layer from the current state. Called on route
@@ -355,7 +610,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
         identifier: "\(Self.alternatesSourceId)-line", source: source)
       layer.lineColor = NSExpression(
         forConstantValue: UIColor(red: 0x8E / 255, green: 0x8E / 255, blue: 0x93 / 255, alpha: 1))
-      layer.lineWidth = NSExpression(forConstantValue: 6.0)
+      layer.lineWidth = Self.zoomWidth(Self.alternateWidthStops)
       layer.lineOpacity = NSExpression(forConstantValue: 0.6)
       layer.lineCap = NSExpression(forConstantValue: "round")
       layer.lineJoin = NSExpression(forConstantValue: "round")
@@ -412,7 +667,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       source: baseSource,
       color: .white,
       opacity: hasTraffic ? 0 : 1,
-      width: Self.routeCasingWidth,
+      width: Self.zoomWidth(Self.routeCasingWidthStops),
       style: style
     )
     for (_, source) in trafficSources {
@@ -421,7 +676,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
         source: source,
         color: .white,
         opacity: 1,
-        width: Self.routeCasingWidth,
+        width: Self.zoomWidth(Self.routeCasingWidthStops),
         style: style
       )
     }
@@ -431,7 +686,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       source: baseSource,
       color: Self.routeCoreColor,
       opacity: hasTraffic ? 0 : 1,
-      width: Self.routeCoreWidth,
+      width: Self.zoomWidth(Self.routeCoreWidthStops),
       style: style
     )
     for (color, source) in trafficSources {
@@ -440,7 +695,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
         source: source,
         color: color,
         opacity: 1,
-        width: Self.routeCoreWidth,
+        width: Self.zoomWidth(Self.routeCoreWidthStops),
         style: style
       )
     }
@@ -460,6 +715,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       style.addLayer(symbol)
       installedLayerIds.append(symbol.identifier)
     }
+
+    // Re-add the puck above the route layers just rebuilt.
+    rebuildVehicleMarkers()
   }
 
   private func addLineLayer(
@@ -467,12 +725,12 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     source: MLNSource,
     color: UIColor,
     opacity: Double,
-    width: Double,
+    width: NSExpression,
     style: MLNStyle
   ) {
     let layer = MLNLineStyleLayer(identifier: identifier, source: source)
     layer.lineColor = NSExpression(forConstantValue: color)
-    layer.lineWidth = NSExpression(forConstantValue: width)
+    layer.lineWidth = width
     layer.lineOpacity = NSExpression(forConstantValue: opacity)
     layer.lineCap = NSExpression(forConstantValue: "round")
     layer.lineJoin = NSExpression(forConstantValue: "round")
@@ -512,8 +770,13 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     currentCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
     hasCenter = true
     lastHeading = heading
-    guard let view = mapView, followVehicle else { return }
-    applyFollowCamera(view, heading: heading)
+    // Move the follow camera first so the puck is sized from the camera that's
+    // actually in effect. Updating markers before the camera made a recenter
+    // redraw the puck at the panned/zoomed-out scale.
+    if let view = mapView, followVehicle {
+      applyFollowCamera(view, heading: heading)
+    }
+    updateVehicleMarkers()
   }
 
   private func applyFollowCamera(_ view: MLNMapView, heading: Double) {
@@ -537,27 +800,38 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   func recenter() {
     followVehicle = true
+    routeOverviewActive = false
     guard let view = mapView, hasCenter else { return }
     applyFollowCamera(view, heading: lastHeading)
+    // Re-size the puck for the follow camera immediately; otherwise it keeps
+    // the panned/zoomed-out scale until the next GPS tick.
+    updateVehicleMarkers()
   }
 
   /// True while the camera tracks the vehicle. CarPlay gesture callbacks clear
   /// this so a look-around isn't snapped back by the next GPS tick.
   var isFollowing: Bool { followVehicle }
 
+  /// True while the camera is fitted to the whole route (preview / overview).
+  var isRouteOverviewActive: Bool { routeOverviewActive }
+
   /// Fits the whole route and stops following, for the overview control.
   func showRouteOverview() {
     guard !routeCoordinates.isEmpty else { return }
     followVehicle = false
+    routeOverviewActive = true
     fitCamera(to: routeCoordinates)
   }
 
-  /// Re-fits the whole active route without changing follow state. Used when a
-  /// CarPlay route-choice panel appears over the map and can otherwise snap the
-  /// camera back to the vehicle.
-  func fitRouteOverview() {
+  /// Fits the whole active route for the trip preview, insetting the left edge
+  /// so the route isn't hidden behind CarPlay's route-choice panel. Used when
+  /// the panel appears over the map and can otherwise snap the camera back to
+  /// the vehicle.
+  func fitRouteOverview(leftInsetFraction: CGFloat = 0) {
     guard !routeCoordinates.isEmpty else { return }
-    fitCamera(to: routeCoordinates)
+    followVehicle = false
+    routeOverviewActive = true
+    fitCamera(to: routeCoordinates, leftInsetFraction: leftInsetFraction)
   }
 
   func beginUserInteraction() {
@@ -569,6 +843,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func pan(direction: CPMapTemplate.PanDirection) {
     guard let view = mapView else { return }
     followVehicle = false
+    routeOverviewActive = false
     let step: CGFloat = 140
     var offset = CGPoint.zero
     if direction.contains(.left) { offset.x += step }
@@ -585,6 +860,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func pan(byScreenTranslation translation: CGPoint) {
     guard let view = mapView else { return }
     followVehicle = false
+    routeOverviewActive = false
     let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
     view.centerCoordinate = view.convert(
       CGPoint(x: center.x - translation.x, y: center.y - translation.y), toCoordinateFrom: view)
@@ -603,6 +879,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func applyZoomGesture(scale: CGFloat) {
     guard let view = mapView, scale > 0 else { return }
     followVehicle = false
+    routeOverviewActive = false
     let delta = scale / lastGestureScale
     lastGestureScale = scale
     view.zoomLevel = min(max(view.zoomLevel + log2(Double(delta)), 3), 19)
@@ -611,6 +888,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func applyRotationGesture(rotation: CGFloat) {
     guard let view = mapView else { return }
     followVehicle = false
+    routeOverviewActive = false
     let delta = rotation - lastGestureRotation
     lastGestureRotation = rotation
     view.direction = (view.direction + Double(delta) * 180 / .pi)
@@ -639,7 +917,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     view.zoomLevel = min(max(view.zoomLevel + log2(factor), 3), 19)
   }
 
-  private func fitCamera(to coordinates: [CLLocationCoordinate2D]) {
+  private func fitCamera(
+    to coordinates: [CLLocationCoordinate2D], leftInsetFraction: CGFloat = 0
+  ) {
     guard let view = mapView, !coordinates.isEmpty else { return }
     var rect = MKMapRect.null
     for coordinate in coordinates {
@@ -657,9 +937,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
           longitude: max(bounds.ne.longitude, coordinate.longitude))
       )
     }
+    // Inset the left edge so the route clears CarPlay's route-choice panel.
+    let leftPadding = 60 + (leftInsetFraction > 0 ? view.bounds.width * leftInsetFraction : 0)
     view.setVisibleCoordinateBounds(
       bounds,
-      edgePadding: UIEdgeInsets(top: 80, left: 60, bottom: 80, right: 60),
+      edgePadding: UIEdgeInsets(top: 80, left: leftPadding, bottom: 80, right: 60),
       animated: true,
       completionHandler: nil
     )
@@ -674,7 +956,6 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       return
     }
     badge.speed = Int(value.rounded())
-    badge.unit = unit
     badge.isHidden = false
   }
 
@@ -695,55 +976,139 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   }
 }
 
-/// Navigation chevron with the phone's cyan halo, matching the phone's nav
-/// puck (halo rim #65D8FF, fill rgba(0,145,214,0.38)). The follow camera is
-/// always heading-up, so the puck points straight up.
-enum NavPuckImage {
-  static func make() -> UIImage {
-    let size = CGSize(width: 44, height: 44)
-    let format = UIGraphicsImageRendererFormat()
-    format.opaque = false
-    return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
-      let cg = ctx.cgContext
-      let center = CGPoint(x: 22, y: 22)
+/// Map-plane geometry for the phone-parity nav puck. Ported from
+/// src/components/map/MapView.tsx (`buildArrowRing`, `buildEllipseRing`,
+/// `roundedPolygonRing`) so CarPlay draws the identical 3D arrow + halo +
+/// shadow the phone does.
+enum NavPuckGeometry {
+  // Screen-pixel sizes (MapView.tsx ARROW_* / HALO_* / BODY_* / SHADOW_*).
+  static let arrowTipPx = 12.0
+  static let arrowBasePx = -10.0
+  static let arrowHalfWidthPx = 9.0
+  static let arrowNotchPx = -6.0
+  static let arrowTipRadiusPx = 4.0
+  static let arrowBaseRadiusPx = 3.0
+  static let arrowNotchRadiusPx = 2.0
+  static let arrowCenteringPx = 1.5
+  static let bodyShiftPx = 2.0
+  static let bodyScale = 1.06
+  static let shadowShiftPx = 2.0
+  static let haloRimForwardPx = 20.0
+  static let haloRimLateralPx = 16.0
+  static let haloFillForwardPx = 18.0
+  static let haloFillLateralPx = 14.0
+  static let shadowOuterForwardPx = 12.0
+  static let shadowOuterLateralPx = 9.0
+  static let shadowInnerForwardPx = 9.0
+  static let shadowInnerLateralPx = 7.0
 
-      // Halo (phone: #65D8FF rim over rgba(0,145,214,0.38) fill).
-      let halo = UIBezierPath(
-        ovalIn: CGRect(x: center.x - 16, y: center.y - 16, width: 32, height: 32))
-      UIColor(red: 0, green: 145 / 255, blue: 214 / 255, alpha: 0.38).setFill()
-      halo.fill()
-      UIColor(red: 0x65 / 255, green: 0xD8 / 255, blue: 0xFF / 255, alpha: 1).setStroke()
-      halo.lineWidth = 2
-      halo.stroke()
+  private static func metersPerDegree(lat: Double) -> (lat: Double, lng: Double) {
+    let mPerDegLat = 111320.0
+    return (mPerDegLat, mPerDegLat * cos(lat * .pi / 180))
+  }
 
-      // Chevron: white with a soft dark outline for contrast on light maps.
-      let arrow = CGMutablePath()
-      arrow.move(to: CGPoint(x: 22, y: 6))
-      arrow.addLine(to: CGPoint(x: 35, y: 31))
-      arrow.addLine(to: CGPoint(x: 22, y: 25))
-      arrow.addLine(to: CGPoint(x: 9, y: 31))
-      arrow.closeSubpath()
-      cg.addPath(arrow)
-      cg.setFillColor(UIColor.white.cgColor)
-      cg.fillPath()
-      cg.addPath(arrow)
-      cg.setStrokeColor(UIColor(white: 0.15, alpha: 0.9).cgColor)
-      cg.setLineWidth(2)
-      cg.setLineJoin(.round)
-      cg.strokePath()
+  /// Offsets a coordinate backwards along `bearing` by `backPx` screen points.
+  static func shifted(
+    _ coordinate: CLLocationCoordinate2D, bearing: Double, metersPerPoint: Double, backPx: Double
+  ) -> CLLocationCoordinate2D {
+    let m = metersPerDegree(lat: coordinate.latitude)
+    let shiftM = backPx * metersPerPoint
+    let rad = bearing * .pi / 180
+    return CLLocationCoordinate2D(
+      latitude: coordinate.latitude - shiftM * cos(rad) / m.lat,
+      longitude: coordinate.longitude - shiftM * sin(rad) / m.lng)
+  }
+
+  /// The chunky rounded arrow with a concave base notch (phone's buildArrowRing).
+  static func arrowRing(
+    center: CLLocationCoordinate2D, bearing: Double, metersPerPoint: Double, scale: Double
+  ) -> [CLLocationCoordinate2D] {
+    let points: [(Double, Double)] = [
+      (arrowTipPx, 0),
+      (arrowBasePx, arrowHalfWidthPx),
+      (arrowNotchPx, 0),
+      (arrowBasePx, -arrowHalfWidthPx),
+    ]
+    let radii = [arrowTipRadiusPx, arrowBaseRadiusPx, arrowNotchRadiusPx, arrowBaseRadiusPx]
+    let rounded = roundedPolygonRing(points: points, radii: radii, samplesPerCorner: 6)
+    return project(
+      center: center, bearing: bearing, metersPerPoint: metersPerPoint, points: rounded,
+      scale: scale, forwardOffsetPx: arrowCenteringPx)
+  }
+
+  /// A foreshortened ellipse (phone's buildEllipseRing) for the halo/shadow.
+  static func ellipseRing(
+    center: CLLocationCoordinate2D, bearing: Double, metersPerPoint: Double,
+    forwardSemiPx: Double, lateralSemiPx: Double
+  ) -> [CLLocationCoordinate2D] {
+    let steps = 32
+    var points: [(Double, Double)] = []
+    for i in 0..<steps {
+      let theta = Double(i) / Double(steps) * 2 * .pi
+      points.append((forwardSemiPx * cos(theta), lateralSemiPx * sin(theta)))
     }
+    return project(
+      center: center, bearing: bearing, metersPerPoint: metersPerPoint, points: points, scale: 1,
+      forwardOffsetPx: 0)
+  }
+
+  /// Projects screen-space (forward, lateral) point offsets into a map-plane ring.
+  /// `metersPerPoint` comes from the live map view so the puck stays a constant
+  /// screen size regardless of how the camera was configured (CarPlay's follow
+  /// camera uses `acrossDistance`, whose `zoomLevel` doesn't match the phone's).
+  private static func project(
+    center: CLLocationCoordinate2D, bearing: Double, metersPerPoint: Double,
+    points: [(Double, Double)], scale: Double, forwardOffsetPx: Double
+  ) -> [CLLocationCoordinate2D] {
+    let m = metersPerDegree(lat: center.latitude)
+    let rad = bearing * .pi / 180
+    let perp = rad + .pi / 2
+    var ring: [CLLocationCoordinate2D] = points.map { forwardPx, lateralPx in
+      let forwardM = (forwardPx - forwardOffsetPx) * scale * metersPerPoint
+      let lateralM = lateralPx * scale * metersPerPoint
+      return CLLocationCoordinate2D(
+        latitude: center.latitude + (forwardM * cos(rad) + lateralM * cos(perp)) / m.lat,
+        longitude: center.longitude + (forwardM * sin(rad) + lateralM * sin(perp)) / m.lng)
+    }
+    if let first = ring.first { ring.append(first) }
+    return ring
+  }
+
+  /// Quadratic-Bezier corner fillet (phone's roundedPolygonRing).
+  private static func roundedPolygonRing(
+    points: [(Double, Double)], radii: [Double], samplesPerCorner: Int
+  ) -> [(Double, Double)] {
+    var ring: [(Double, Double)] = []
+    let n = points.count
+    for i in 0..<n {
+      let prev = points[(i - 1 + n) % n]
+      let cur = points[i]
+      let next = points[(i + 1) % n]
+      let prevDist = hypot(prev.0 - cur.0, prev.1 - cur.1)
+      let nextDist = hypot(next.0 - cur.0, next.1 - cur.1)
+      let r = min(radii[i], prevDist / 2, nextDist / 2)
+      let p0 = (
+        cur.0 + (prev.0 - cur.0) / prevDist * r, cur.1 + (prev.1 - cur.1) / prevDist * r)
+      let p1 = (
+        cur.0 + (next.0 - cur.0) / nextDist * r, cur.1 + (next.1 - cur.1) / nextDist * r)
+      for s in 0...samplesPerCorner {
+        let t = Double(s) / Double(samplesPerCorner)
+        let mt = 1 - t
+        ring.append((
+          mt * mt * p0.0 + 2 * mt * t * cur.0 + t * t * p1.0,
+          mt * mt * p0.1 + 2 * mt * t * cur.1 + t * t * p1.1))
+      }
+    }
+    return ring
   }
 }
 
 /// Speed limit badge for the CarPlay window. Mirrors the phone's
-/// `SpeedLimitSign` component (white sign, black border, limit number) with a
-/// unit caption so metric limits read correctly ("40 km/h").
+/// `SpeedLimitSign` component exactly: a 52×68 white sign with a 3pt black
+/// border, 6pt corner radius, 8pt "SPEED"/"LIMIT" labels and a 24pt limit
+/// number, plus the same soft drop shadow.
 final class SpeedLimitBadge: UIView {
   var speed: Int = 0 {
-    didSet { setNeedsDisplay() }
-  }
-
-  var unit: String = "mph" {
     didSet { setNeedsDisplay() }
   }
 
@@ -751,6 +1116,10 @@ final class SpeedLimitBadge: UIView {
     super.init(frame: .zero)
     backgroundColor = .clear
     isOpaque = false
+    layer.shadowColor = UIColor.black.cgColor
+    layer.shadowOpacity = 0.3
+    layer.shadowRadius = 4
+    layer.shadowOffset = CGSize(width: 0, height: 2)
   }
 
   @available(*, unavailable)
@@ -772,25 +1141,17 @@ final class SpeedLimitBadge: UIView {
     label.draw(
       in: CGRect(x: sign.minX, y: sign.minY + 4, width: sign.width, height: 20),
       withAttributes: [
-        .font: UIFont.systemFont(ofSize: 7, weight: .bold),
+        .font: UIFont.systemFont(ofSize: 8, weight: .heavy),
         .foregroundColor: UIColor.black,
         .paragraphStyle: centered(),
       ])
 
     let value = "\(speed)" as NSString
     value.draw(
-      in: CGRect(x: sign.minX, y: sign.minY + 22, width: sign.width, height: 28),
+      in: CGRect(x: sign.minX, y: sign.minY + 24, width: sign.width, height: 30),
       withAttributes: [
-        .font: UIFont.systemFont(ofSize: 22, weight: .heavy),
+        .font: UIFont.systemFont(ofSize: 24, weight: .heavy),
         .foregroundColor: UIColor.black,
-        .paragraphStyle: centered(),
-      ])
-
-    (unit as NSString).draw(
-      in: CGRect(x: sign.minX, y: sign.maxY - 14, width: sign.width, height: 12),
-      withAttributes: [
-        .font: UIFont.systemFont(ofSize: 8, weight: .semibold),
-        .foregroundColor: UIColor.darkGray,
         .paragraphStyle: centered(),
       ])
   }

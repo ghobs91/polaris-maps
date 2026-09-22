@@ -39,6 +39,9 @@ export default function MapScreen() {
   const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
   const routeGeometry = activeRouteGeometry ?? previewRouteGeometry;
   const isNavigating = useNavigationStore((s) => s.isNavigating);
+  const activeDestination = useNavigationStore((s) => s.destination);
+  const routePreviewDestination = useNavigationStore((s) => s.routePreviewDestination);
+  const destination = activeDestination ?? routePreviewDestination;
   const routePreviewAlternates = useNavigationStore((s) => s.routePreviewAlternates);
   const activeAlternateRoutes = useNavigationStore((s) => s.alternateRoutes);
   const alternateRouteGeometries = useMemo(
@@ -129,6 +132,7 @@ export default function MapScreen() {
             ref={mapViewRef}
             routeGeometry={routeGeometry}
             alternateRouteGeometries={alternateRouteGeometries}
+            destination={destination}
             onMapPress={handleMapPress}
             onMapLongPress={handleMapLongPress}
           />
@@ -202,6 +206,7 @@ export default function MapScreen() {
           ref={mapViewRef}
           routeGeometry={routeGeometry}
           alternateRouteGeometries={alternateRouteGeometries}
+          destination={destination}
           onMapPress={handleMapPress}
           onMapLongPress={handleMapLongPress}
         />

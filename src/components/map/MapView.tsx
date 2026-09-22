@@ -9,6 +9,8 @@ import React, {
 } from 'react';
 import MapLibreGL, { Logger } from '@maplibre/maplibre-react-native';
 import { StyleSheet, View, Text, Dimensions, InteractionManager } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { DEFAULT_ROUTE_COLOR } from '../../services/traffic/routeTrafficService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMapStore } from '../../stores/mapStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
@@ -167,6 +169,8 @@ interface MapViewProps {
   onFollowCameraChange?: (following: boolean) => void;
   /** When true, camera will re-center on navPosition (set by re-center button) */
   followCamera?: boolean;
+  /** Destination of the shown route; renders a flag marker (parity with CarPlay). */
+  destination?: { lat: number; lng: number } | null;
 }
 
 export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
@@ -180,6 +184,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     navBearing = 0,
     onFollowCameraChange,
     followCamera = true,
+    destination,
   },
   ref,
 ) {
@@ -884,6 +889,22 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
         {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
 
+        {/* Destination flag — parity with the CarPlay map's checkered flag. */}
+        {destination && (
+          <MapLibreGL.MarkerView
+            coordinate={[destination.lng, destination.lat]}
+            anchor={{ x: 0.5, y: 1 }}
+            allowOverlap
+          >
+            <Ionicons
+              name="flag"
+              size={22}
+              color={DEFAULT_ROUTE_COLOR}
+              style={styles.destinationFlag}
+            />
+          </MapLibreGL.MarkerView>
+        )}
+
         {/* Nav puck rendered as map layers so it tilts with the 3D map view.
             The halo, shadow and arrow each live in their own ShapeSource so the
             FillLayers only see the polygon features (avoids extra geometry from
@@ -1430,6 +1451,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '600',
+  },
+  // Destination flag: cyan flag with a soft shadow so it reads on light maps.
+  destinationFlag: {
+    textShadowColor: 'rgba(0, 0, 0, 0.45)',
+    textShadowRadius: 2,
+    textShadowOffset: { width: 0, height: 1 },
   },
   // Visually-hidden screen-reader summary of the map (VoiceOver).
   srSummary: {

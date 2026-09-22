@@ -97,6 +97,10 @@ export interface CarPlaySearchResult {
   subtitle: string;
   lat: number;
   lng: number;
+  /** Row icon kind for the pre-search list (Apple Maps style). */
+  kind?: 'home' | 'work' | 'pin' | 'recent';
+  /** Section the row belongs to; absent for typed-query results (flat list). */
+  section?: 'pinned' | 'recent';
 }
 
 export interface CarPlayTrafficRange {
@@ -118,6 +122,7 @@ export interface Spec extends TurboModule {
   showReroutingAlert(): void;
   hideNavigationAlert(): void;
   pushSearchResults(results: Array<object>): void;
+  updateHomeSuggestions(items: Array<object>): void;
   updateMapCenter(lat: number, lng: number, heading: number): void;
   updateMapStyle(styleJson: string): void;
   isConnected(): Promise<boolean>;

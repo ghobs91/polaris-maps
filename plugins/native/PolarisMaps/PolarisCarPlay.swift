@@ -164,8 +164,8 @@ class PolarisCarPlay: RCTEventEmitter {
     DispatchQueue.main.async { Self.mapTemplateManager.updateIncidents(markers) }
   }
 
-  @objc func pushSearchResults(_ results: NSArray) {
-    let items = results.compactMap { element -> CarPlaySearchItem? in
+  private static func parseSearchItems(_ results: NSArray) -> [CarPlaySearchItem] {
+    results.compactMap { element -> CarPlaySearchItem? in
       guard let dict = element as? NSDictionary,
         let name = dict["name"] as? String,
         let lat = (dict["lat"] as? NSNumber)?.doubleValue,
@@ -175,10 +175,22 @@ class PolarisCarPlay: RCTEventEmitter {
         name: name,
         subtitle: dict["subtitle"] as? String ?? "",
         lat: lat,
-        lng: lng
+        lng: lng,
+        kind: dict["kind"] as? String ?? "",
+        section: dict["section"] as? String ?? ""
       )
     }
+  }
+
+  @objc func pushSearchResults(_ results: NSArray) {
+    let items = Self.parseSearchItems(results)
     DispatchQueue.main.async { Self.mapTemplateManager.replaceSearchResults(items) }
+  }
+
+  /// Pre-search suggestions (Pinned + Recents) for the floating map panel.
+  @objc func updateHomeSuggestions(_ results: NSArray) {
+    let items = Self.parseSearchItems(results)
+    DispatchQueue.main.async { Self.mapTemplateManager.updateHomeSuggestions(items) }
   }
 
   @objc func updateMapCenter(_ lat: Double, lng: Double, heading: Double) {
@@ -226,6 +238,10 @@ struct CarPlaySearchItem {
   let subtitle: String
   let lat: Double
   let lng: Double
+  /// Row icon kind ("home" / "work" / "pin" / "recent"); "" for typed results.
+  let kind: String
+  /// Section the row belongs to ("pinned" / "recent"); "" for typed results.
+  let section: String
 }
 
 struct CarPlayLaneInfo {
@@ -459,7 +475,7 @@ struct CarPlayTripPreviewPayload {
 /// Owns the CPMapTemplate / CPSearchTemplate and the active navigation
 /// session. All methods must run on the main thread.
 final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
-  CPMapTemplateDelegate, CPSessionConfigurationDelegate
+  CPMapTemplateDelegate, CPSessionConfigurationDelegate, CPInterfaceControllerDelegate
 {
   private var interfaceController: CPInterfaceController?
   private var mapTemplate: CPMapTemplate?
@@ -476,6 +492,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var activeAlert: CPNavigationAlert?
   private var muteButton: CPBarButton?
   private var overviewButton: CPBarButton?
+  private var recenterBarButton: CPBarButton?
   private var isMuted = false
   private var isOverview = false
 
@@ -483,9 +500,15 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private static let guidanceBackgroundColor = UIColor(
     red: 26 / 255, green: 47 / 255, blue: 62 / 255, alpha: 1)
   private var searchItems: [CarPlaySearchItem] = []
+  /// Pre-search suggestions (Pinned + Recents) shown in the floating map panel.
+  private var homeSuggestions: [CarPlaySearchItem] = []
   private var activeSearchText = ""
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
   private var appliedStyleHash = 0
+  /// The floating Pinned/Recents overlay (iOS 27 `CPMapPanel`). Stored as
+  /// `Any?` so the property itself doesn't require the iOS 27 availability.
+  private var homePanel: Any?
+  private var homePanelVisible = false
 
   private lazy var mapViewHost = CarPlayMapViewHost(mode: .full)
   private weak var templateWindow: UIWindow?
@@ -507,6 +530,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   func activate(interfaceController: CPInterfaceController, window: CPWindow) {
     guard self.interfaceController == nil else { return }
     self.interfaceController = interfaceController
+    interfaceController.delegate = self
     templateWindow = window
 
     mapViewHost.activate(in: window)
@@ -542,6 +566,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     muteButton = nil
     overviewButton = nil
     recenterButton = nil
+    recenterBarButton = nil
+    searchMapButton = nil
+    endMapButton = nil
     detachDashboard()
     templateWindow = nil
     lastStyleJson = nil
@@ -644,21 +671,54 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       detachDashboardHost()
     }
     forEachHost { $0.isNavigating = value }
+    // End control is trip-only; re-assert the full-screen map window and drop
+    // the idle-only panel.
+    updateMapButtons()
+    mapViewHost.reassertWindowContent()
+    refreshHomePanel()
   }
 
   // MARK: Map buttons
 
   private var recenterButton: CPMapButton?
+  private var searchMapButton: CPMapButton?
+  private var endMapButton: CPMapButton?
 
   private func makeMapButtons() -> [CPMapButton] {
     let recenter = makeMapButton(systemName: "location.fill") { [weak self] in
       self?.recenter()
     }
     recenterButton = recenter
-    return [
-      recenter,
-      makeMapButton(systemName: "magnifyingglass") { [weak self] in self?.presentSearch() },
-    ]
+    let search = makeMapButton(systemName: "magnifyingglass") { [weak self] in
+      self?.presentSearch()
+    }
+    searchMapButton = search
+    let end = makeMapButton(systemName: "xmark.circle.fill") { [weak self] in
+      self?.endNavigationFromCarPlay()
+    }
+    endMapButton = end
+    // End is added only while navigating (see `updateMapButtons`).
+    return [recenter, search]
+  }
+
+  /// Rebuilds the always-visible map buttons. The End control appears only
+  /// during an active trip so the driver always has a way to stop navigation.
+  private func updateMapButtons() {
+    guard let template = mapTemplate else { return }
+    var buttons: [CPMapButton] = []
+    if let search = searchMapButton { buttons.append(search) }
+    if navigationActive, let end = endMapButton { buttons.append(end) }
+    // Recenter last so it sits at the bottom of the stack: CarPlay lays map
+    // buttons top-to-bottom, and the panning interface's arrows cover the
+    // upper buttons, which previously hid the recenter control.
+    if let recenter = recenterButton { buttons.append(recenter) }
+    template.mapButtons = buttons
+  }
+
+  /// Ends the trip from a CarPlay control and mirrors the state to the phone.
+  private func endNavigationFromCarPlay() {
+    endNavigation()
+    PolarisCarPlay.emitNavigationCancelled()
   }
 
   /// Returns to vehicle-follow and leaves the panning interface, like the
@@ -674,7 +734,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   private func updateRecenterButton() {
-    recenterButton?.image = UIImage(systemName: mapViewHost.isFollowing ? "location.fill" : "location")
+    let image = UIImage(systemName: mapViewHost.isFollowing ? "location.fill" : "location")
+    recenterButton?.image = image
+    recenterBarButton?.image = image
   }
 
   private func makeMapButton(systemName: String, handler: @escaping () -> Void) -> CPMapButton {
@@ -700,8 +762,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       [weak self] _ in self?.toggleOverview()
     }
     overviewButton = overview
+    let recenter = CPBarButton(image: UIImage(systemName: "location.fill") ?? UIImage()) {
+      [weak self] _ in self?.recenter()
+    }
+    recenterBarButton = recenter
     template.leadingNavigationBarButtons = [mute]
-    template.trailingNavigationBarButtons = [overview]
+    template.trailingNavigationBarButtons = [overview, recenter]
   }
 
   private func toggleMute() {
@@ -972,10 +1038,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     template.showRouteChoicesPreview(for: trip, textConfiguration: text)
     // Re-assert the whole-route fit: presenting the panel can dismiss the
     // panning interface, whose delegate snaps the camera back to the vehicle.
-    mapViewHost.fitRouteOverview()
+    // Inset the left edge so the route clears the route-choice panel.
+    mapViewHost.fitRouteOverview(leftInsetFraction: 0.4)
     DispatchQueue.main.async { [weak self] in
-      self?.mapViewHost.fitRouteOverview()
+      self?.mapViewHost.fitRouteOverview(leftInsetFraction: 0.4)
     }
+    // A route preview owns the screen; hide the idle Pinned/Recents panel.
+    refreshHomePanel()
   }
 
   /// Dismisses the trip preview. The map route is only cleared when no
@@ -988,6 +1057,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     if navigationSession == nil {
       removeRoute()
     }
+    // Back to the idle map: restore the floating Pinned/Recents panel.
+    refreshHomePanel()
   }
 
   // MARK: Navigation alerts (rerouting, incidents, arrival)
@@ -1339,21 +1410,190 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     finishPendingSearch()
   }
 
+  /// Pre-search suggestions (Pinned + Recents) for the floating map panel.
+  func updateHomeSuggestions(_ items: [CarPlaySearchItem]) {
+    homeSuggestions = items
+    refreshHomePanel()
+  }
+
   private func makeListItem(from item: CarPlaySearchItem) -> CPListItem {
     let listItem = CPListItem(text: item.name, detailText: item.subtitle)
+    listItem.setImage(Self.searchIcon(for: item.kind))
     listItem.userInfo = ["lat": item.lat, "lng": item.lng, "name": item.name]
     return listItem
   }
 
+  /// Rows for the search template. Only typed queries produce rows — the
+  /// pre-search Pinned/Recents list lives in the floating map panel instead, so
+  /// the keyboard never covers a list of suggestions.
   private func listItems(for searchText: String) -> [CPListItem] {
     let query = searchText.lowercased()
-    let matches =
-      query.isEmpty
-      ? searchItems
-      : searchItems.filter {
-        $0.name.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
-      }
+    guard !query.isEmpty else { return [] }
+    let matches = searchItems.filter {
+      $0.name.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
+    }
     return matches.prefix(12).map { makeListItem(from: $0) }
+  }
+
+  /// Items grouped by `section`, preserving first-seen order.
+  private static func groupedSections(
+    _ items: [CarPlaySearchItem]
+  ) -> [(section: String, items: [CarPlaySearchItem])] {
+    var order: [String] = []
+    var bySection: [String: [CarPlaySearchItem]] = [:]
+    for item in items where !item.section.isEmpty {
+      if bySection[item.section] == nil { order.append(item.section) }
+      bySection[item.section, default: []].append(item)
+    }
+    return order.map { ($0, bySection[$0] ?? []) }
+  }
+
+  // MARK: Floating home panel (Pinned + Recents, iOS 27)
+
+  /// Shows/hides the floating Pinned/Recents overlay to match the current
+  /// state: visible on the idle map, hidden while navigating, previewing a
+  /// route, or in the search template.
+  private func refreshHomePanel() {
+    guard #available(iOS 27.0, *) else { return }
+    guard shouldShowHomePanel else {
+      hideHomePanel()
+      return
+    }
+    showHomePanel(makeHomePanel())
+  }
+
+  private var shouldShowHomePanel: Bool {
+    guard mapTemplate != nil, !navigationActive, previewTrip == nil, !homeSuggestions.isEmpty
+    else { return false }
+    // Only overlay the map when the map template is actually on screen.
+    return interfaceController?.topTemplate === mapTemplate
+  }
+
+  @available(iOS 27.0, *)
+  private func makeHomePanel() -> CPMapPanel {
+    var sections: [CPMapPanelSection] = []
+    for (section, items) in Self.groupedSections(homeSuggestions) {
+      let rows: [CPMapPanelItem] = items.prefix(6).map { item in
+        let listItem = makeListItem(from: item)
+        listItem.handler = { [weak self] _, done in
+          self?.presentDestinationActions(name: item.name, lat: item.lat, lng: item.lng)
+          done()
+        }
+        return CPMapPanelItem(listItem: listItem)
+      }
+      sections.append(
+        CPMapPanelSection(title: section == "pinned" ? "Pinned" : "Recents", items: rows))
+    }
+    // No panel button config: search stays on the map template's search button.
+    return CPMapPanel(title: nil, sections: sections, buttonConfiguration: nil)
+  }
+
+  @available(iOS 27.0, *)
+  private func showHomePanel(_ panel: CPMapPanel) {
+    guard let template = mapTemplate, !homePanelVisible else { return }
+    homePanel = panel
+    // Assume shown until the completion says otherwise: a false `success` must
+    // not strand a presented overlay that we then refuse to hide.
+    homePanelVisible = true
+    template.showPanel(panel) { [weak self] success, _ in
+      self?.homePanelVisible = success
+    }
+  }
+
+  @available(iOS 27.0, *)
+  private func hideHomePanel() {
+    guard let template = mapTemplate else { return }
+    homePanelVisible = false
+    homePanel = nil
+    // Always attempt the hide: `homePanelVisible` is best-effort and must never
+    // block hiding an overlay that would otherwise cover the map.
+    template.hidePanel { _, _ in }
+  }
+
+  // MARK: CPInterfaceControllerDelegate
+
+  func templateDidAppear(_ template: CPTemplate, animated: Bool) {
+    guard template === mapTemplate else { return }
+    // The full-screen map window can lose its content across template
+    // transitions; re-assert it before (re)showing the panel.
+    mapViewHost.reassertWindowContent()
+    refreshHomePanel()
+  }
+
+  func templateDidDisappear(_ template: CPTemplate, animated: Bool) {
+    guard template === mapTemplate else { return }
+    if #available(iOS 27.0, *) {
+      hideHomePanel()
+    }
+  }
+
+  /// Start/Add Stop chooser mirroring the phone's place card.
+  private func presentDestinationActions(name: String?, lat: Double, lng: Double) {
+    let startItem = CPListItem(
+      text: "Start Navigation",
+      detailText: name,
+      image: UIImage(systemName: "car.fill")
+    )
+    startItem.handler = { [weak self] _, done in
+      PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
+      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      done()
+    }
+    let addStopItem = CPListItem(
+      text: "Add Stop",
+      detailText: "Add to your current drive",
+      image: UIImage(systemName: "plus.circle.fill")
+    )
+    addStopItem.handler = { [weak self] _, done in
+      PolarisCarPlay.emitSearchResultAddStop(name: name, lat: lat, lng: lng)
+      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      done()
+    }
+    let section = CPListSection(items: [startItem, addStopItem])
+    let detail = CPListTemplate(title: name ?? "Destination", sections: [section])
+    interfaceController?.pushTemplate(detail, animated: true, completion: nil)
+  }
+
+  /// Circular colored row icon for the pre-search list (Apple Maps style):
+  /// blue house for Home, brown briefcase for Work, red pin for saved places,
+  /// grey clock for recents. Returns nil for typed-query rows (no icon).
+  private static func searchIcon(for kind: String) -> UIImage? {
+    let color: UIColor
+    let symbol: String
+    switch kind {
+    case "home":
+      color = UIColor(red: 0, green: 0x7A / 255, blue: 0xFF / 255, alpha: 1)
+      symbol = "house.fill"
+    case "work":
+      color = UIColor(red: 0xA2 / 255, green: 0x84 / 255, blue: 0x5E / 255, alpha: 1)
+      symbol = "briefcase.fill"
+    case "recent":
+      color = UIColor(red: 0x8E / 255, green: 0x8E / 255, blue: 0x93 / 255, alpha: 1)
+      symbol = "clock.fill"
+    case "pin":
+      color = UIColor(red: 0xFF / 255, green: 0x3B / 255, blue: 0x30 / 255, alpha: 1)
+      symbol = "mappin"
+    default:
+      return nil
+    }
+    let size = CGSize(width: 40, height: 40)
+    let format = UIGraphicsImageRendererFormat()
+    format.opaque = false
+    return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+      let circle = UIBezierPath(ovalIn: CGRect(origin: .zero, size: size))
+      color.setFill()
+      circle.fill()
+      if let glyph = UIImage(systemName: symbol), glyph.size.width > 0 {
+        let scale = min(20 / glyph.size.width, 20 / glyph.size.height)
+        let drawSize = CGSize(width: glyph.size.width * scale, height: glyph.size.height * scale)
+        let rect = CGRect(
+          x: (size.width - drawSize.width) / 2,
+          y: (size.height - drawSize.height) / 2,
+          width: drawSize.width,
+          height: drawSize.height)
+        glyph.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: rect)
+      }
+    }
   }
 
   private func finishPendingSearch() {
@@ -1378,39 +1618,16 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   func searchTemplate(_ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void) {
-    // Show a detail sheet mirroring the phone's place card: navigate now or
-    // add as a stop on the active drive (JS falls back to fresh navigation
-    // when idle).
     completionHandler()
+    // Show a detail sheet mirroring the phone's place card: navigate now or add
+    // as a stop on the active drive (JS falls back to fresh navigation when
+    // idle).
     guard
       let userInfo = item.userInfo as? [String: Any],
       let lat = userInfo["lat"] as? Double,
       let lng = userInfo["lng"] as? Double
     else { return }
-    let name = userInfo["name"] as? String
-    let startItem = CPListItem(
-      text: "Start Navigation",
-      detailText: name,
-      image: UIImage(systemName: "car.fill")
-    )
-    startItem.handler = { [weak self] _, done in
-      PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
-      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
-      done()
-    }
-    let addStopItem = CPListItem(
-      text: "Add Stop",
-      detailText: "Add to your current drive",
-      image: UIImage(systemName: "plus.circle.fill")
-    )
-    addStopItem.handler = { [weak self] _, done in
-      PolarisCarPlay.emitSearchResultAddStop(name: name, lat: lat, lng: lng)
-      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
-      done()
-    }
-    let section = CPListSection(items: [startItem, addStopItem])
-    let detail = CPListTemplate(title: name ?? "Destination", sections: [section])
-    interfaceController?.pushTemplate(detail, animated: true, completion: nil)
+    presentDestinationActions(name: userInfo["name"] as? String, lat: lat, lng: lng)
   }
 
   // MARK: CPMapTemplateDelegate
@@ -1487,9 +1704,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
     // Snap back to the vehicle only if the driver was actually looking around.
-    // A dismissal while already following (e.g. the system closing the
-    // interface when a route preview appears) must not clobber a route fit.
-    if !mapViewHost.isFollowing {
+    // A dismissal while the camera is already following, or while a whole-route
+    // fit is active (the system closes the interface when a route preview
+    // appears), must not clobber the route fit.
+    if !mapViewHost.isFollowing && !mapViewHost.isRouteOverviewActive {
       mapViewHost.recenter()
     }
     updateRecenterButton()
@@ -1576,10 +1794,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   func mapTemplateDidCancelNavigation(_ mapTemplate: CPMapTemplate) {
-    // The driver ended the trip from CarPlay; mirror the phone's state so the
-    // phone stops navigating instead of silently continuing.
-    endNavigation()
-    PolarisCarPlay.emitNavigationCancelled()
+    // The driver ended the trip from CarPlay (system control); mirror the
+    // phone's state so the phone stops navigating instead of silently
+    // continuing.
+    endNavigationFromCarPlay()
   }
 
   // MARK: CPSessionConfigurationDelegate

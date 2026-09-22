@@ -21,6 +21,7 @@ jest.mock('react-native', () => {
         showReroutingAlert: jest.fn(),
         hideNavigationAlert: jest.fn(),
         pushSearchResults: jest.fn(),
+        updateHomeSuggestions: jest.fn(),
         updateMapCenter: jest.fn(),
         updateMapStyle: jest.fn(),
         isConnected: jest.fn().mockResolvedValue(false),
@@ -81,6 +82,10 @@ jest.mock('../../src/services/search/unifiedSearch', () => ({ unifiedSearch: jes
 jest.mock('../../src/services/routing/routingService', () => ({ computeRoute: jest.fn() }));
 jest.mock('../../src/services/favorites/favoritesService', () => ({
   getFavorites: jest.fn(() => []),
+  subscribeFavorites: jest.fn(() => jest.fn()),
+}));
+jest.mock('../../src/services/search/searchHistoryService', () => ({
+  getSearchHistory: jest.fn(() => []),
 }));
 jest.mock('../../src/services/traffic/incidentAhead', () => ({
   findIncidentsAhead: jest.fn(() => []),
@@ -97,6 +102,7 @@ import { useNavigationStore } from '../../src/stores/navigationStore';
 import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingStore';
 import { useTrafficStore } from '../../src/stores/trafficStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
+import { useCarPlayStore } from '../../src/stores/carPlayStore';
 import { toCarPlaySpeedLimit } from '../../src/services/carplay/carPlayManager';
 import { formatDistance } from '../../src/utils/units';
 import { encodePolyline } from '../../src/utils/polyline';
@@ -104,6 +110,7 @@ import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 import { unifiedSearch } from '../../src/services/search/unifiedSearch';
 import { computeRoute } from '../../src/services/routing/routingService';
 import { getFavorites } from '../../src/services/favorites/favoritesService';
+import { getSearchHistory } from '../../src/services/search/searchHistoryService';
 import { findIncidentsAhead } from '../../src/services/traffic/incidentAhead';
 import type { ValhallaRoute } from '../../src/models/route';
 
@@ -188,6 +195,8 @@ describe('CarPlayManager', () => {
     useTrafficStore.getState().setNormalizedSegments([]);
     useSettingsStore.getState().setUseMetric(false);
     useSettingsStore.getState().setThemeMode('system');
+    (getFavorites as jest.Mock).mockReturnValue([]);
+    (getSearchHistory as jest.Mock).mockReturnValue([]);
     eventListeners = {};
     NativeModules.PolarisCarPlay.isConnected.mockResolvedValue(false);
 
@@ -257,10 +266,13 @@ describe('CarPlayManager', () => {
   it('tracks connected state', () => {
     initCarPlay();
     expect(isCarPlayConnected()).toBe(false);
+    expect(useCarPlayStore.getState().connected).toBe(false);
     fireEvent('carPlayConnected');
     expect(isCarPlayConnected()).toBe(true);
+    expect(useCarPlayStore.getState().connected).toBe(true);
     fireEvent('carPlayDisconnected');
     expect(isCarPlayConnected()).toBe(false);
+    expect(useCarPlayStore.getState().connected).toBe(false);
   });
 
   it('centers the idle CarPlay map on the driver on connect and on locate', async () => {
@@ -828,7 +840,7 @@ describe('CarPlayManager', () => {
     );
   });
 
-  it('shows saved places for an empty search query', async () => {
+  it('pushes saved places as home suggestions on connect', async () => {
     (getFavorites as jest.Mock).mockReturnValue([
       {
         id: 'home',
@@ -852,11 +864,78 @@ describe('CarPlayManager', () => {
 
     initCarPlay();
     fireEvent('carPlayConnected');
-    fireEvent('searchQuery', { query: '' });
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([
-      { name: 'Home', subtitle: '1 Main St, Town', lat: 40.7, lng: -73.9 },
+    // Pinned/Recents live in the floating map panel, not the search template.
+    expect(NativeModules.PolarisCarPlay.updateHomeSuggestions).toHaveBeenCalledWith([
+      {
+        name: 'Home',
+        subtitle: 'Close by',
+        lat: 40.7,
+        lng: -73.9,
+        kind: 'home',
+        section: 'pinned',
+      },
+    ]);
+
+    // An empty query clears the search list so the keyboard isn't covering it.
+    fireEvent('searchQuery', { query: '' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([]);
+    expect(unifiedSearch).not.toHaveBeenCalled();
+  });
+
+  it('pushes pinned and recent places as home suggestions on connect', async () => {
+    (getFavorites as jest.Mock).mockReturnValue([
+      {
+        id: 'home',
+        kind: 'home',
+        label: 'Home',
+        entry: { lat: 40.7, lng: -73.9, text: '1 Main St' },
+      },
+      {
+        id: 'work',
+        kind: 'work',
+        label: 'Work',
+        entry: { lat: 40.71, lng: -73.91, text: '2 Office Rd' },
+      },
+    ]);
+    (getSearchHistory as jest.Mock).mockReturnValue([
+      {
+        entry: { id: 9, text: '31 Bretton Rd', lat: 40.72, lng: -73.92, city: 'Town', state: 'NY' },
+        query: 'bretton',
+      },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(NativeModules.PolarisCarPlay.updateHomeSuggestions).toHaveBeenCalledWith([
+      {
+        name: 'Home',
+        subtitle: 'Close by',
+        lat: 40.7,
+        lng: -73.9,
+        kind: 'home',
+        section: 'pinned',
+      },
+      {
+        name: 'Work',
+        subtitle: '2 Office Rd',
+        lat: 40.71,
+        lng: -73.91,
+        kind: 'work',
+        section: 'pinned',
+      },
+      {
+        name: '31 Bretton Rd',
+        subtitle: 'Town, NY',
+        lat: 40.72,
+        lng: -73.92,
+        kind: 'recent',
+        section: 'recent',
+      },
     ]);
     expect(unifiedSearch).not.toHaveBeenCalled();
   });

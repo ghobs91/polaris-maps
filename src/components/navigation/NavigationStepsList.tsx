@@ -1,9 +1,82 @@
 import React, { useMemo } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassView } from '../common/GlassView';
 import type { ValhallaManeuver, ValhallaRoute } from '../../models/route';
 import { formatDistance } from '../../utils/units';
+
+interface NavigationStepsContentProps {
+  route: ValhallaRoute | null;
+  currentStepIndex: number;
+  /** Extra style for the scrolling list (e.g. content padding). */
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  /** Style for the list itself. */
+  style?: StyleProp<ViewStyle>;
+}
+
+/**
+ * The maneuver list itself (no chrome), shared by the steps modal and the
+ * CarPlay companion view on the phone. Highlights the current step.
+ */
+export function NavigationStepsContent({
+  route,
+  currentStepIndex,
+  contentContainerStyle,
+  style,
+}: NavigationStepsContentProps) {
+  const maneuvers = useMemo<ValhallaManeuver[]>(
+    () => route?.legs.flatMap((leg) => leg.maneuvers) ?? [],
+    [route],
+  );
+
+  if (maneuvers.length === 0) {
+    return <Text style={styles.empty}>No steps available</Text>;
+  }
+
+  return (
+    <FlatList
+      data={maneuvers}
+      style={style}
+      keyExtractor={(_, index) => String(index)}
+      showsVerticalScrollIndicator={false}
+      initialScrollIndex={Math.max(0, currentStepIndex - 1)}
+      getItemLayout={(_, index) => ({ length: 56, offset: 56 * index, index })}
+      contentContainerStyle={contentContainerStyle}
+      renderItem={({ item, index }) => {
+        const isCurrent = index === currentStepIndex;
+        return (
+          <View style={[styles.row, isCurrent && styles.rowCurrent]}>
+            <View style={[styles.index, isCurrent && styles.indexCurrent]}>
+              <Text style={[styles.indexText, isCurrent && styles.indexTextCurrent]}>
+                {index + 1}
+              </Text>
+            </View>
+            <View style={styles.body}>
+              <Text
+                style={[styles.instruction, isCurrent && styles.instructionCurrent]}
+                numberOfLines={2}
+              >
+                {item.instruction || item.verbalPreTransition || 'Continue'}
+              </Text>
+              {typeof item.distanceMeters === 'number' && item.distanceMeters > 0 ? (
+                <Text style={styles.distance}>{formatDistance(item.distanceMeters)}</Text>
+              ) : null}
+            </View>
+          </View>
+        );
+      }}
+    />
+  );
+}
 
 interface NavigationStepsListProps {
   visible: boolean;
@@ -19,11 +92,6 @@ export function NavigationStepsList({
   currentStepIndex,
   onClose,
 }: NavigationStepsListProps) {
-  const maneuvers = useMemo<ValhallaManeuver[]>(
-    () => route?.legs.flatMap((leg) => leg.maneuvers) ?? [],
-    [route],
-  );
-
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -40,40 +108,7 @@ export function NavigationStepsList({
             </Pressable>
           </View>
 
-          {maneuvers.length === 0 ? (
-            <Text style={styles.empty}>No steps available</Text>
-          ) : (
-            <FlatList
-              data={maneuvers}
-              keyExtractor={(_, index) => String(index)}
-              showsVerticalScrollIndicator={false}
-              initialScrollIndex={Math.max(0, currentStepIndex - 1)}
-              getItemLayout={(_, index) => ({ length: 56, offset: 56 * index, index })}
-              renderItem={({ item, index }) => {
-                const isCurrent = index === currentStepIndex;
-                return (
-                  <View style={[styles.row, isCurrent && styles.rowCurrent]}>
-                    <View style={[styles.index, isCurrent && styles.indexCurrent]}>
-                      <Text style={[styles.indexText, isCurrent && styles.indexTextCurrent]}>
-                        {index + 1}
-                      </Text>
-                    </View>
-                    <View style={styles.body}>
-                      <Text
-                        style={[styles.instruction, isCurrent && styles.instructionCurrent]}
-                        numberOfLines={2}
-                      >
-                        {item.instruction || item.verbalPreTransition || 'Continue'}
-                      </Text>
-                      {typeof item.distanceMeters === 'number' && item.distanceMeters > 0 ? (
-                        <Text style={styles.distance}>{formatDistance(item.distanceMeters)}</Text>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              }}
-            />
-          )}
+          <NavigationStepsContent route={route} currentStepIndex={currentStepIndex} />
         </GlassView>
       </View>
     </Modal>

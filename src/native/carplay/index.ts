@@ -77,6 +77,11 @@ export function pushSearchResults(results: CarPlaySearchResult[]): void {
   NativeModule?.pushSearchResults(results);
 }
 
+/** Pre-search Pinned/Recents suggestions for the floating CarPlay map panel. */
+export function updateHomeSuggestions(items: CarPlaySearchResult[]): void {
+  (NativeModule as any)?.updateHomeSuggestions?.(items);
+}
+
 export function updateMapCenter(lat: number, lng: number, heading: number): void {
   NativeModule?.updateMapCenter(lat, lng, heading);
 }
