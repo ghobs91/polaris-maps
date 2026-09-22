@@ -34,7 +34,6 @@ import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
 import { getReviewsForPlace } from '../../services/poi/reviewService';
 import { mergeRatings, type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
-import { WebsitePhotosCarousel } from './WebsitePhotosCarousel';
 import { normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
 import {
   fetchWebsiteActions,
@@ -598,18 +597,24 @@ export function POIInfoCard() {
 
   // Street-level preview thumbnail (Mapillary first, then open Panoramax).
   const [streetViewThumb, setStreetViewThumb] = useState<string | null>(null);
+  // Whether the street-view lookup completed with at least one panorama.
+  const [streetViewFound, setStreetViewFound] = useState(false);
   // Detected order / reserve / menu links on the venue website.
   const [websiteActions, setWebsiteActions] = useState<WebsiteAction[]>([]);
 
   useEffect(() => {
     setStreetViewThumb(null);
+    setStreetViewFound(false);
     if (!poi || !isOnline) return;
     let cancelled = false;
     findStreetViewPanoramas(poi.lat, poi.lng, { limit: 1 })
       .then((panos) => {
         if (cancelled) return;
         const first = panos[0];
-        if (first) setStreetViewThumb(first.thumbnailUrl ?? first.imageUrl);
+        if (first) {
+          setStreetViewFound(true);
+          setStreetViewThumb(first.thumbnailUrl ?? first.imageUrl ?? null);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -985,8 +990,9 @@ export function POIInfoCard() {
       });
     }
 
-    // When a street-view thumbnail is pinned above, it is the way in.
-    if (!streetViewThumb) {
+    // Only surface Street View when imagery actually exists. A pinned thumbnail
+    // is the entry when a preview is available; otherwise the pill is.
+    if (streetViewFound && !streetViewThumb) {
       items.push({
         key: 'streetview',
         icon: 'camera-outline',
@@ -1018,6 +1024,7 @@ export function POIInfoCard() {
     parsed?.menuUrl,
     websiteActions,
     streetViewThumb,
+    streetViewFound,
     handleDirections,
     handlePhone,
     handleWebsite,
@@ -1183,15 +1190,13 @@ export function POIInfoCard() {
               ))}
             </ScrollView>
 
-            {/* ── Website photos (on-device headless browse of POI website) ─── */}
-            <WebsitePhotosCarousel websiteUrl={parsed.website} resetKey={poi.id} />
-
-            {/* ── Open-licensed supplements (Wikimedia Commons / Panoramax) ─── */}
+            {/* ── Photos: POI website + open-licensed supplements (Wikimedia) ── */}
             <PlaceMediaCarousel
               lat={poi.lat}
               lng={poi.lng}
               name={poi.name}
               osmId={String(poi.id)}
+              websiteUrl={parsed.website}
               tags={poi.tags}
               resetKey={poi.id}
               online={isOnline}

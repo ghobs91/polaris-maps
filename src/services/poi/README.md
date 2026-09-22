@@ -86,5 +86,5 @@ Gun.js sync → other peers
 - [`src/components/map/POILayer.tsx`](../../components/map/POILayer.tsx) — Map pill badge rendering
 - [`src/stores/osmPoiStore.ts`](../../stores/osmPoiStore.ts) — Viewport POIs, selected POI, enrichment, category search
 - [`src/stores/poiStore.ts`](../../stores/poiStore.ts) — Overture/local places, reviews, pending edits
-- [`src/components/map/WebsitePhotosCarousel.tsx`](../../components/map/WebsitePhotosCarousel.tsx) — Primary place-media carousel, sourced on-device from the POI website's OpenGraph metadata
+- [`src/components/poi/PlaceMediaCarousel.tsx`](../../components/poi/PlaceMediaCarousel.tsx) — Single place-media carousel: on-device POI-website photos merged with open-licensed Wikimedia Commons media
 - [`app/poi/`](../../../app/poi/) — POI detail, edit, OSM edit, and review screens

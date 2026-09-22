@@ -61,6 +61,12 @@ jest.mock('../../src/services/places/placeDetailCache', () => ({
   putPlaceDetail: jest.fn().mockResolvedValue(true),
 }));
 
+const mockFetchWebsitePhotos = jest.fn();
+jest.mock('../../src/services/poi/websitePhotosService', () => ({
+  fetchWebsitePhotos: (...args: unknown[]) => mockFetchWebsitePhotos(...args),
+  normalizeWebsiteUrl: (url: string | null | undefined) => url ?? null,
+}));
+
 import { PlaceMediaCarousel } from '../../src/components/poi/PlaceMediaCarousel';
 
 function renderCarousel() {
@@ -80,6 +86,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockGetConnectivity.mockReturnValue({ isConnected: true, quality: 'good', type: 'wifi' });
   mockGetPlaceDetail.mockResolvedValue(null);
+  mockFetchWebsitePhotos.mockResolvedValue([]);
   mockDefaultSupplements.mockReturnValue([
     { id: 'wikimedia', fetch: jest.fn().mockResolvedValue(mockItems) },
   ]);
@@ -121,7 +128,7 @@ describe('PlaceMediaCarousel', () => {
     const screen = renderCarousel();
 
     await waitFor(() => expect(screen.getByTestId('place-media-empty')).toBeTruthy());
-    expect(screen.getByText('Open-licensed photos are unavailable offline')).toBeTruthy();
+    expect(screen.getByText('Photos are unavailable offline')).toBeTruthy();
   });
 
   it('re-fetches open media when connectivity returns', async () => {
@@ -167,5 +174,31 @@ describe('PlaceMediaCarousel', () => {
 
     await waitFor(() => expect(screen.queryByTestId('place-media-section')).toBeNull());
     expect(screen.queryByTestId('place-media-empty')).toBeNull();
+  });
+
+  it('merges website photos with open-licensed media into one carousel', async () => {
+    mockFetchWebsitePhotos.mockResolvedValue([
+      'https://example.com/site/one.jpg',
+      'https://example.com/site/two.jpg',
+    ]);
+
+    const screen = render(
+      <PlaceMediaCarousel
+        lat={48.8584}
+        lng={2.2945}
+        name="Eiffel Tower"
+        osmId="243"
+        websiteUrl="https://example.com"
+        tags={{}}
+        resetKey={2}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('place-media-thumb-0')).toBeTruthy());
+
+    // 2 website photos + 2 open-licensed items, all in a single strip.
+    expect(screen.getAllByTestId(/^place-media-thumb-\d+$/)).toHaveLength(4);
+    expect(screen.getAllByText('From the web · example.com')).toHaveLength(2);
+    expect(screen.getByText('Wikimedia Commons')).toBeTruthy();
   });
 });

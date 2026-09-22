@@ -12,14 +12,21 @@ import {
   getPlaceDetail,
   putPlaceDetail,
 } from '../../services/places/placeDetailCache';
-import { collectPlaceMedia, type PlaceMediaItem } from '../../services/poi/placeMediaService';
+import {
+  collectPlaceMedia,
+  type PlaceMediaItem,
+  type PlaceMediaProvider,
+} from '../../services/poi/placeMediaService';
 import { defaultPlaceMediaSupplements } from '../../services/poi/placeMediaProviders';
+import { fetchWebsitePhotos, normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
 
 interface PlaceMediaCarouselProps {
   lat: number;
   lng: number;
   name?: string;
   osmId?: string;
+  /** POI homepage; its photos are merged into the same carousel. */
+  websiteUrl?: string | null;
   tags: Record<string, string>;
   /** Remount/reset key — pass the POI id so stale media never lingers. */
   resetKey: string | number;
@@ -38,6 +45,7 @@ export function PlaceMediaCarousel({
   lng,
   name,
   osmId,
+  websiteUrl,
   tags,
   resetKey,
   online,
@@ -60,6 +68,21 @@ export function PlaceMediaCarousel({
     }),
     [tags, osmId, lat, lng, name],
   );
+
+  const pageUrl = useMemo(
+    () => (websiteUrl ? normalizeWebsiteUrl(websiteUrl) : null),
+    [websiteUrl],
+  );
+
+  const webAttribution = useMemo(() => {
+    if (!pageUrl) return undefined;
+    try {
+      const host = new URL(pageUrl).hostname.replace(/^www\./, '');
+      return host ? `From the web · ${host}` : 'From the web';
+    } catch {
+      return 'From the web';
+    }
+  }, [pageUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +110,24 @@ export function PlaceMediaCarousel({
     }
 
     const query = { lat, lng, name, tags };
-    collectPlaceMedia(query, { supplements: defaultPlaceMediaSupplements() })
+    const websiteProvider: PlaceMediaProvider | undefined = pageUrl
+      ? {
+          id: 'website',
+          async fetch() {
+            const urls = await fetchWebsitePhotos(pageUrl);
+            return urls.map((url) => ({
+              url,
+              source: 'website',
+              thumbnailUrl: url,
+              attribution: webAttribution,
+            }));
+          },
+        }
+      : undefined;
+    collectPlaceMedia(query, {
+      websiteProvider,
+      supplements: defaultPlaceMediaSupplements(),
+    })
       .then(async (media) => {
         if (cancelled) return;
         setItems(media);
@@ -114,7 +154,7 @@ export function PlaceMediaCarousel({
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, lat, lng, name, tags, resetKey, online]);
+  }, [cacheKey, lat, lng, name, tags, resetKey, online, pageUrl, webAttribution]);
 
   const visible = useMemo(() => items.filter((item) => !failed.has(item.url)), [items, failed]);
   const current = viewerIndex !== null ? visible[viewerIndex] : undefined;
@@ -139,7 +179,7 @@ export function PlaceMediaCarousel({
         <Text style={styles.title}>Photos</Text>
         <View style={[styles.emptyState, { borderColor: colors.border }]}>
           <Ionicons name="cloud-offline-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.emptyText}>Open-licensed photos are unavailable offline</Text>
+          <Text style={styles.emptyText}>Photos are unavailable offline</Text>
         </View>
       </View>
     );
@@ -147,7 +187,7 @@ export function PlaceMediaCarousel({
 
   return (
     <View style={styles.section} testID="place-media-section">
-      <Text style={styles.title}>Open photos</Text>
+      <Text style={styles.title}>Photos</Text>
       <FlatList
         data={visible}
         horizontal
