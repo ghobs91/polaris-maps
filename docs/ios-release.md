@@ -40,6 +40,10 @@ Hosted EAS Build remains available as a fallback for CI or when you specifically
 ## Prerequisites
 
 - macOS with **Xcode 16+** installed (download from App Store)
+- A **release** (or RC) Xcode for TestFlight uploads — App Store Connect rejects
+  binaries built with a beta Xcode/SDK (`Unsupported SDK or Xcode version`, code
+  `90534`). If you also have `Xcode-beta.app`, force the release toolchain with
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for archive/export/upload.
 - **pnpm** (the project's package manager)
 - **Ruby** (system Ruby is fine)
 - **Bundler** (`gem install bundler` if not present)
@@ -140,11 +144,21 @@ The app uses these entitlements (configured in `ios/PolarisMaps/PolarisMaps.enti
 # Set up once
 export APP_STORE_CONNECT_KEY_ID="your_key_id"
 export APP_STORE_CONNECT_ISSUER_ID="your_issuer_id"
-export APP_STORE_CONNECT_KEY_PATH="$HOME/.appstoreconnect/AuthKey_XXXXXX.p8"
+export APP_STORE_CONNECT_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_XXXXXX.p8"
 
 # Build and upload
 pnpm ios:beta
 ```
+
+> **Keep the `.p8` in `~/.appstoreconnect/private_keys/` — never in `~/Downloads`,
+> `~/Desktop`, or `~/Documents`.** macOS TCC (privacy protection) gates those folders:
+> a process can `stat` the key but fail to open it with `Operation not permitted`
+> (`rb_sysopen`), and the grant is reset periodically (app updates, signing changes).
+> That produces a recurring "API key mismatch" that is really a **permissions** failure
+> — the key ID and issuer are usually still correct. `~/.appstoreconnect/private_keys/`
+> is not TCC-gated and is where `altool`/Xcode look by default. Note API keys are
+> **download-once**: if the `.p8` is truly lost you must create a new key, which gets a
+> new `KEY_ID` (the `ISSUER_ID` is team-wide and does not change).
 
 **What happens:**
 
@@ -216,8 +230,11 @@ Releasing to the App Store is **always a manual process** — no automation will
 
 ### Version Numbers
 
-- **Marketing version** (`0.1.0`): Managed in `app.json` → `expo.version`. Bump manually when cutting a release.
-- **Build number** (`26`): Managed in Xcode project (`CURRENT_PROJECT_VERSION`). Fastlane auto-increments before each upload. EAS also auto-increments when using its build profile.
+- **Marketing version** (`0.1.0`): Managed in `app.json` → `expo.version`. Bump manually when cutting a release. This is what ships in `CFBundleShortVersionString`; the Xcode `MARKETING_VERSION` build setting is overridden by the embedded Expo config.
+- **Build number** (`CFBundleVersion`): For this Expo project, `xcodebuild -exportArchive` **auto-manages** it — `ExportOptions.plist` omits `manageAppVersionAndBuildNumber`, which defaults to `true`, so Xcode sets the next available build number for that marketing version on App Store Connect (it can differ from the archive's local value, and from any `agvtool bump`).
+  - `xcrun agvtool bump -all` only changes the local project/Info.plist and is **cosmetic** here; it is reverted/overridden at export. Don't rely on it for the shipped number.
+  - To pin a deterministic build number, set `manageAppVersionAndBuildNumber` to `false` in `ExportOptions.plist` and choose an explicit unused number (or set `ios.buildNumber` in `app.json` and let `expo prebuild` propagate it).
+  - The Fastlane `beta` lane is the reliable path: its `bump_build` lane sets the number to `latest_testflight_build_number + 1` (see `fastlane/Fastfile`), so the shipped build is always unique.
 
 ## GitHub Actions (Optional CI)
 
@@ -297,6 +314,29 @@ Verify your API key is not expired and has the **App Manager** role. Test with:
 ```bash
 bundle exec fastlane spaceauth -u your@apple.id
 ```
+
+### Key file "Operation not permitted" (rb_sysopen), or `test -r` reports it missing
+
+The `.p8` is in a **TCC-protected folder** (`~/Downloads`, `~/Desktop`, `~/Documents`).
+macOS privacy protection lets `stat` read metadata but blocks opening the file, so the
+key looks missing or wrong when it isn't. Move it to `~/.appstoreconnect/private_keys/`
+and update `APP_STORE_CONNECT_KEY_PATH`. Do **not** regenerate the key — the `KEY_ID`
+is fine. Granting Full Disk Access to your terminal also works but storing keys outside
+protected folders is the durable fix.
+
+### Upload fails with "Unsupported SDK or Xcode version" (code 90534)
+
+The archive was built with a **beta** Xcode/SDK. Rebuild with the release Xcode:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild archive -workspace ios/PolarisMaps.xcworkspace -scheme PolarisMaps \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath ios/build/App.xcarchive -derivedDataPath ios/build/DerivedData \
+  -allowProvisioningUpdates
+```
+
+…and export/upload with the same `DEVELOPER_DIR`.
 
 ## Keeping EAS as a Fallback
 
