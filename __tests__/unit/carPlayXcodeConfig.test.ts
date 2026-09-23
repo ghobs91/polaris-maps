@@ -136,14 +136,23 @@ describe('CarPlay iOS configuration', () => {
     );
   });
 
-  it('keeps asynchronous search results connected to the CarPlay completion handler', () => {
+  it('keeps staged search results connected to the CarPlay completion handler', () => {
     const nativeModule = readRepoFile('plugins/native/PolarisMaps/PolarisCarPlay.swift');
 
     expect(nativeModule).toContain('private var pendingSearchCompletion');
     expect(nativeModule).toContain('finishPendingSearch()');
-    expect(nativeModule).toContain('searchItems = items\n    finishPendingSearch()');
+    // Staged batches are scoped to the query the driver is typing.
+    expect(nativeModule).toContain(
+      'func replaceSearchResults(_ items: [CarPlaySearchItem], query: String, isFinal: Bool)',
+    );
+    // The first non-empty batch completes early (local-first); the final batch
+    // completes again so the full ranked list replaces the partial one.
+    expect(nativeModule).toContain('completion(makeSearchListItems(from: items))');
+    expect(nativeModule).toContain('if isFinal {');
     expect(nativeModule).toContain('pendingSearchCompletion = completionHandler');
     expect(nativeModule).toContain('completionHandler: @escaping ([CPListItem]) -> Void');
+    // No client-side substring re-filtering of the ranked pipeline results.
+    expect(nativeModule).not.toContain('listItems(for searchText');
   });
 
   it('keeps the committed ios/ CarPlay sources in sync with the plugin sources', () => {

@@ -776,7 +776,7 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateRouteTraffic).toHaveBeenLastCalledWith([]);
   });
 
-  it('pushes search results to CarPlay', async () => {
+  it('pushes staged, rich search results to CarPlay', async () => {
     (unifiedSearch as jest.Mock).mockResolvedValue([
       {
         name: 'Coffee Shop',
@@ -802,14 +802,43 @@ describe('CarPlayManager', () => {
     fireEvent('carPlayConnected');
     fireEvent('searchQuery', { query: 'coffee' });
 
-    // Let the async search resolve
-    await new Promise((r) => setTimeout(r, 10));
+    // Local-first pass fires immediately, then the debounced full merge.
+    await new Promise((r) => setTimeout(r, 300));
 
+    // The local-only phase is queried first (fast, offline)…
+    expect(unifiedSearch).toHaveBeenCalledWith(
+      'coffee',
+      expect.objectContaining({ localOnly: true }),
+    );
+    // …then the full staged pipeline for the same query.
     expect(unifiedSearch).toHaveBeenCalledWith('coffee', expect.any(Object));
-    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([
-      { name: 'Coffee Shop', subtitle: '123 Main St', lat: 40.75, lng: -73.98 },
-      { name: 'Tea House', subtitle: '456 Oak Ave', lat: 40.76, lng: -73.97 },
-    ]);
+
+    const expected = [
+      {
+        name: 'Coffee Shop',
+        subtitle: '0.3 mi · 123 Main St',
+        lat: 40.75,
+        lng: -73.98,
+        kind: 'poi',
+      },
+      {
+        name: 'Tea House',
+        subtitle: '0.7 mi · 456 Oak Ave',
+        lat: 40.76,
+        lng: -73.97,
+        kind: 'poi',
+      },
+    ];
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith(
+      expected,
+      'coffee',
+      false,
+    );
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith(
+      expected,
+      'coffee',
+      true,
+    );
   });
 
   it('previews navigation to a dashboard favorite', async () => {
@@ -881,7 +910,7 @@ describe('CarPlayManager', () => {
     // An empty query clears the search list so the keyboard isn't covering it.
     fireEvent('searchQuery', { query: '' });
     await new Promise((r) => setTimeout(r, 0));
-    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([]);
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([], '', true);
     expect(unifiedSearch).not.toHaveBeenCalled();
   });
 
@@ -1033,6 +1062,6 @@ describe('CarPlayManager', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([]);
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([], 'pizza', true);
   });
 });

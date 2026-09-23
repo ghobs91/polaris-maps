@@ -97,8 +97,9 @@ export interface CarPlaySearchResult {
   subtitle: string;
   lat: number;
   lng: number;
-  /** Row icon kind for the pre-search list (Apple Maps style). */
-  kind?: 'home' | 'work' | 'pin' | 'recent';
+  /** Row icon kind: pre-search `home`/`work`/`pin`/`recent`, or a POI
+   *  category key (`osmSubtype`/`osmType`/result type) for typed results. */
+  kind?: string;
   /** Section the row belongs to; absent for typed-query results (flat list). */
   section?: 'pinned' | 'recent';
 }
@@ -121,7 +122,7 @@ export interface Spec extends TurboModule {
   updateRouteTraffic(ranges: Array<object>): void;
   showReroutingAlert(): void;
   hideNavigationAlert(): void;
-  pushSearchResults(results: Array<object>): void;
+  pushSearchResults(results: Array<object>, query: string, final: boolean): void;
   updateHomeSuggestions(items: Array<object>): void;
   updateMapCenter(lat: number, lng: number, heading: number): void;
   updateMapStyle(styleJson: string): void;

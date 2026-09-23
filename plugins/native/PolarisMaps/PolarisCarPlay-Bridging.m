@@ -28,7 +28,9 @@ RCT_EXTERN_METHOD(showReroutingAlert)
 
 RCT_EXTERN_METHOD(hideNavigationAlert)
 
-RCT_EXTERN_METHOD(pushSearchResults:(NSArray *)results)
+RCT_EXTERN_METHOD(pushSearchResults:(NSArray *)results
+                  query : (NSString *)query
+                  isFinal : (BOOL)isFinal)
 
 RCT_EXTERN_METHOD(updateHomeSuggestions:(NSArray *)items)
 

@@ -32,10 +32,12 @@ import { decodePolyline } from '../../utils/polyline';
 import { getFavorites, subscribeFavorites } from '../favorites/favoritesService';
 import { getSearchHistory } from '../search/searchHistoryService';
 import { useCarPlayStore } from '../../stores/carPlayStore';
+import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
 import { INCIDENT_TYPE_LABELS } from '../traffic/incidentWire';
 import { haversineMeters } from '../../utils/routeSnap';
 import type { CarPlaySearchResult, CarPlayIncidentMarker } from '../../native/carplay';
+import type { UnifiedSearchResult } from '../search/unifiedSearch';
 import type { EmitterSubscription } from 'react-native';
 
 let initialized = false;
@@ -62,6 +64,8 @@ let arrivalShown = false;
 let lastIncidentCheckAt = 0;
 let warnedIncidentIds = new Set<string>();
 let lastIncidentSignature = '';
+/** Last GPS fix, cached so search ranking can promote nearby places. */
+let carPlayUserLocation: { lat: number; lng: number } | null = null;
 
 /** Throttle for the incident look-ahead, matching the phone's banner. */
 const INCIDENT_CHECK_INTERVAL_MS = 10_000;
@@ -133,6 +137,7 @@ export function teardownCarPlay(): void {
   lastIncidentSignature = '';
   lastDistanceBucket = null;
   lastTrafficSignature = '';
+  carPlayUserLocation = null;
 }
 
 /** Whether CarPlay is currently connected. */
@@ -434,14 +439,11 @@ async function onDashboardFavorite({ kind }: { kind?: string }): Promise<void> {
   if (!connected || !kind) return;
   const favorite = getFavorites().find((entry) => entry.kind === kind);
   if (!favorite) return;
-  const { viewport } = useMapStore.getState();
+  const origin = await resolveRouteOrigin();
   const prefs = useSettingsStore.getState().routePreferences;
   try {
     const routes = await computeRoute(
-      [
-        { lat: viewport.lat, lng: viewport.lng },
-        { lat: favorite.entry.lat, lng: favorite.entry.lng },
-      ],
+      [origin, { lat: favorite.entry.lat, lng: favorite.entry.lng }],
       'auto',
       {
         avoidTolls: prefs.avoidTolls,
@@ -703,6 +705,7 @@ async function pushUserLocation(): Promise<void> {
     // GPS call is in flight, and its camera fit must win.
     const last = await Location.getLastKnownPositionAsync();
     if (last && locationPushAllowed()) {
+      carPlayUserLocation = { lat: last.coords.latitude, lng: last.coords.longitude };
       CarPlay.updateMapCenter(last.coords.latitude, last.coords.longitude, 0);
       pushed = true;
     }
@@ -710,6 +713,7 @@ async function pushUserLocation(): Promise<void> {
       accuracy: Location.Accuracy.Balanced,
     });
     if (locationPushAllowed()) {
+      carPlayUserLocation = { lat: current.coords.latitude, lng: current.coords.longitude };
       CarPlay.updateMapCenter(current.coords.latitude, current.coords.longitude, 0);
       pushed = true;
     }
@@ -741,40 +745,90 @@ function getSearchSession(): SearchSession {
   if (!searchSession) {
     searchSession = createSearchSession({
       limit: 12,
+      // Shorter than the phone's 300 ms: CarPlay delivers a completion per
+      // keystroke, so a snappier full phase keeps suggestions current.
+      debounceMs: 200,
       getContext: () => {
         const { viewport } = useMapStore.getState();
-        return { lat: viewport.lat, lng: viewport.lng, zoom: viewport.zoom };
+        const bounds = useOsmPoiStore.getState().viewportBounds;
+        return {
+          lat: viewport.lat,
+          lng: viewport.lng,
+          zoom: viewport.zoom,
+          viewportBounds: bounds
+            ? {
+                south: bounds.minLat,
+                north: bounds.maxLat,
+                west: bounds.minLng,
+                east: bounds.maxLng,
+              }
+            : undefined,
+          userLocation: carPlayUserLocation ?? undefined,
+        };
       },
-      onResults: (results) => {
+      onResults: (results, meta) => {
         if (!connected) return;
         CarPlay.pushSearchResults(
-          results.slice(0, 12).map((r) => ({
-            name: r.name,
-            subtitle: r.subtitle,
-            lat: r.lat,
-            lng: r.lng,
-          })),
+          results.slice(0, 12).map(toCarPlaySearchResult),
+          meta.query,
+          meta.final,
         );
       },
       onError: () => {
-        if (connected) CarPlay.pushSearchResults([]);
+        if (connected) {
+          CarPlay.pushSearchResults([], searchSession?.getLastQuery() ?? '', true);
+        }
       },
     });
   }
   return searchSession;
 }
 
-async function onSearchQuery({ query }: { query: string }) {
+/** Maps a ranked unified result to a CarPlay row (rich subtitle + icon kind). */
+function toCarPlaySearchResult(result: UnifiedSearchResult): CarPlaySearchResult {
+  const subtitleParts: string[] = [];
+  if (result.distanceKm > 0) subtitleParts.push(formatDistance(result.distanceKm * 1000));
+  if (result.brand && result.brand !== result.name) subtitleParts.push(result.brand);
+  if (result.subtitle) subtitleParts.push(result.subtitle);
+  return {
+    name: result.name,
+    subtitle: subtitleParts.join(' · '),
+    lat: result.lat,
+    lng: result.lng,
+    // Drives the native category icon; the phone's `getPoiCategory` equivalent.
+    kind: result.osmSubtype ?? result.osmType ?? result.type,
+  };
+}
+
+function onSearchQuery({ query }: { query: string }) {
   if (!connected) return;
   // Empty query: clear the search list. Saved/recents places live in the
   // floating map panel (`pushHomeSuggestions`), so the keyboard never covers
   // a list of suggestions.
   if (!query.trim()) {
     searchSession?.cancel();
-    CarPlay.pushSearchResults([]);
+    CarPlay.pushSearchResults([], '', true);
     return;
   }
-  await getSearchSession().submit(query);
+  ensureSearchUserLocation();
+  // Staged, local-first search: the local pass resolves in milliseconds and
+  // the debounced network merge follows, exactly like the phone's search.
+  getSearchSession().search(query);
+}
+
+/** Lazily caches a GPS fix so search ranking can promote nearby places. */
+function ensureSearchUserLocation(): void {
+  if (carPlayUserLocation) return;
+  void (async () => {
+    try {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      carPlayUserLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    } catch {
+      // Ignore GPS failures during search.
+    }
+  })();
 }
 
 /** Pushes the Pinned/Recents suggestions for the floating CarPlay map panel. */
@@ -814,6 +868,30 @@ function emptyQueryResults(): CarPlaySearchResult[] {
   return [...pinned, ...recents];
 }
 
+/**
+ * Route origin for CarPlay destinations: the live navigation position while
+ * driving, otherwise the driver's GPS fix, falling back to the phone's map
+ * viewport. Mirrors the phone, which never routes from a panned map centre.
+ */
+async function resolveRouteOrigin(): Promise<{ lat: number; lng: number }> {
+  const navPosition = useNavigationTrackingStore.getState().navPosition;
+  if (navPosition != null) return { lat: navPosition[1], lng: navPosition[0] };
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status === 'granted') {
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      carPlayUserLocation = { lat: current.coords.latitude, lng: current.coords.longitude };
+      return carPlayUserLocation;
+    }
+  } catch {
+    // Fall through to the viewport.
+  }
+  const { viewport } = useMapStore.getState();
+  return { lat: viewport.lat, lng: viewport.lng };
+}
+
 async function onSearchResultSelected(result: { name?: string; lat?: number; lng?: number }) {
   if (!connected) return;
 
@@ -822,24 +900,16 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
   const name = result.name ?? 'Destination';
   if (lat == null || lng == null) return;
 
-  // Get current location from map viewport as origin
-  const { viewport } = useMapStore.getState();
+  const origin = await resolveRouteOrigin();
   const prefs = useSettingsStore.getState().routePreferences;
 
   try {
-    const routes = await computeRoute(
-      [
-        { lat: viewport.lat, lng: viewport.lng },
-        { lat, lng },
-      ],
-      'auto',
-      {
-        avoidTolls: prefs.avoidTolls,
-        avoidHighways: prefs.avoidHighways,
-        avoidFerries: prefs.avoidFerries,
-        alternates: 2,
-      },
-    );
+    const routes = await computeRoute([origin, { lat, lng }], 'auto', {
+      avoidTolls: prefs.avoidTolls,
+      avoidHighways: prefs.avoidHighways,
+      avoidFerries: prefs.avoidFerries,
+      alternates: 2,
+    });
 
     const route = routes[0];
     if (!route) return;
@@ -873,13 +943,8 @@ async function onSearchResultAddStop(result: { name?: string; lat?: number; lng?
     return;
   }
 
-  // Origin from live nav position (like the phone), viewport as fallback.
-  const navPosition = useNavigationTrackingStore.getState().navPosition;
-  const { viewport } = useMapStore.getState();
-  const origin =
-    navPosition != null
-      ? { lat: navPosition[1], lng: navPosition[0] }
-      : { lat: viewport.lat, lng: viewport.lng };
+  // Origin from the live nav position (like the phone), GPS/viewport fallback.
+  const origin = await resolveRouteOrigin();
 
   try {
     const prefs = useSettingsStore.getState().routePreferences;

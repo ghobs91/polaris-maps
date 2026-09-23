@@ -182,9 +182,11 @@ class PolarisCarPlay: RCTEventEmitter {
     }
   }
 
-  @objc func pushSearchResults(_ results: NSArray) {
+  @objc func pushSearchResults(_ results: NSArray, query: String, isFinal: Bool) {
     let items = Self.parseSearchItems(results)
-    DispatchQueue.main.async { Self.mapTemplateManager.replaceSearchResults(items) }
+    DispatchQueue.main.async {
+      Self.mapTemplateManager.replaceSearchResults(items, query: query, isFinal: isFinal)
+    }
   }
 
   /// Pre-search suggestions (Pinned + Recents) for the floating map panel.
@@ -1405,9 +1407,25 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   // MARK: Search
 
-  func replaceSearchResults(_ items: [CarPlaySearchItem]) {
+  /// Applies a staged batch of results for the query the driver is typing.
+  ///
+  /// `isFinal` marks the last emission for that query. The first non-empty
+  /// batch completes the pending search request immediately (local-first
+  /// suggestions), and the final batch completes it again so the full ranked
+  /// list replaces the partial one. Results for a superseded query (the driver
+  /// typed on) are ignored.
+  func replaceSearchResults(_ items: [CarPlaySearchItem], query: String, isFinal: Bool) {
+    // JS trims the query before searching, so compare trimmed on both sides.
+    guard query.trimmingCharacters(in: .whitespaces) == activeSearchText.trimmingCharacters(in: .whitespaces)
+    else { return }
     searchItems = items
-    finishPendingSearch()
+    guard let completion = pendingSearchCompletion else { return }
+    if !items.isEmpty || isFinal {
+      completion(makeSearchListItems(from: items))
+    }
+    if isFinal {
+      pendingSearchCompletion = nil
+    }
   }
 
   /// Pre-search suggestions (Pinned + Recents) for the floating map panel.
@@ -1423,16 +1441,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     return listItem
   }
 
-  /// Rows for the search template. Only typed queries produce rows — the
-  /// pre-search Pinned/Recents list lives in the floating map panel instead, so
-  /// the keyboard never covers a list of suggestions.
-  private func listItems(for searchText: String) -> [CPListItem] {
-    let query = searchText.lowercased()
-    guard !query.isEmpty else { return [] }
-    let matches = searchItems.filter {
-      $0.name.lowercased().contains(query) || $0.subtitle.lowercased().contains(query)
-    }
-    return matches.prefix(12).map { makeListItem(from: $0) }
+  /// Rows for the search template, preserving the JS relevance order. Results
+  /// are shown exactly as the unified pipeline ranked them — no client-side
+  /// substring re-filtering, so semantic matches (e.g. "coffee" → "Starbucks")
+  /// and category/address hits are not dropped.
+  private func makeSearchListItems(from items: [CarPlaySearchItem]) -> [CPListItem] {
+    items.prefix(12).map { makeListItem(from: $0) }
   }
 
   /// Items grouped by `section`, preserving first-seen order.
@@ -1554,9 +1568,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     interfaceController?.pushTemplate(detail, animated: true, completion: nil)
   }
 
-  /// Circular colored row icon for the pre-search list (Apple Maps style):
-  /// blue house for Home, brown briefcase for Work, red pin for saved places,
-  /// grey clock for recents. Returns nil for typed-query rows (no icon).
+  /// Circular colored row icon (Apple Maps style): a blue house for Home, a
+  /// brown briefcase for Work, a red pin for saved places, a grey clock for
+  /// recents, and category-tinted glyphs for typed-query POI results (mirrors
+  /// the phone's `getPoiCategory`, with a neutral pin fallback).
   private static func searchIcon(for kind: String) -> UIImage? {
     let color: UIColor
     let symbol: String
@@ -1573,8 +1588,51 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     case "pin":
       color = UIColor(red: 0xFF / 255, green: 0x3B / 255, blue: 0x30 / 255, alpha: 1)
       symbol = "mappin"
+    case "restaurant", "food_court", "fast_food", "deli", "sandwich":
+      color = iconColor("#FF6B35")
+      symbol = "fork.knife"
+    case "cafe", "coffee_shop", "bakery":
+      color = iconColor("#8B5E3C")
+      symbol = "cup.and.saucer.fill"
+    case "bar", "pub", "nightclub":
+      color = iconColor("#9B4DCA")
+      symbol = "wineglass.fill"
+    case "fuel":
+      color = iconColor("#F2994A")
+      symbol = "fuelpump.fill"
+    case "charging_station":
+      color = iconColor("#27AE60")
+      symbol = "bolt.fill"
+    case "parking":
+      color = iconColor("#607D8B")
+      symbol = "parkingsign.circle.fill"
+    case "supermarket", "convenience", "shop":
+      color = iconColor("#27AE60")
+      symbol = "cart.fill"
+    case "hotel", "hostel", "motel":
+      color = iconColor("#2D9CDB")
+      symbol = "bed.double.fill"
+    case "pharmacy", "hospital", "clinic", "doctors", "dentist", "veterinary":
+      color = iconColor("#EB5757")
+      symbol = "cross.case.fill"
+    case "bank", "atm":
+      color = iconColor("#2D9CDB")
+      symbol = "banknote.fill"
+    case "railway", "station":
+      color = iconColor("#2D9CDB")
+      symbol = "tram.fill"
+    case "tourism", "attraction", "museum", "viewpoint":
+      color = iconColor("#F2C94C")
+      symbol = "star.fill"
+    case "leisure", "park", "garden":
+      color = iconColor("#27AE60")
+      symbol = "leaf.fill"
+    case "amenity":
+      color = iconColor("#FF6B35")
+      symbol = "mappin.circle.fill"
     default:
-      return nil
+      color = iconColor("#8E8E93")
+      symbol = "mappin.circle.fill"
     }
     let size = CGSize(width: 40, height: 40)
     let format = UIGraphicsImageRendererFormat()
@@ -1596,10 +1654,15 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     }
   }
 
+  /// Phone palette color from a hex string, falling back to system grey.
+  private static func iconColor(_ hex: String) -> UIColor {
+    UIColor(hexString: hex) ?? UIColor(white: 0x8E / 255, alpha: 1)
+  }
+
   private func finishPendingSearch() {
     guard let completion = pendingSearchCompletion else { return }
     pendingSearchCompletion = nil
-    completion(listItems(for: activeSearchText))
+    completion(makeSearchListItems(from: searchItems))
   }
 
   // MARK: CPSearchTemplateDelegate
@@ -1613,7 +1676,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // delegate for each keystroke, while the JS search pipeline is async.
     finishPendingSearch()
     activeSearchText = searchText
+    searchItems = []
     pendingSearchCompletion = completionHandler
+    // An empty field has no query to run; resolve immediately so the keyboard
+    // isn't left behind a spinner.
+    guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
+      finishPendingSearch()
+      return
+    }
     PolarisCarPlay.emitSearchQuery(searchText)
   }
 

@@ -73,8 +73,14 @@ export function hideNavigationAlert(): void {
   (NativeModule as any)?.hideNavigationAlert?.();
 }
 
-export function pushSearchResults(results: CarPlaySearchResult[]): void {
-  NativeModule?.pushSearchResults(results);
+/** Push a staged batch of typed-query results. `query` scopes the batch to the
+ *  text the driver is typing and `final` marks the last emission for it. */
+export function pushSearchResults(
+  results: CarPlaySearchResult[],
+  query: string,
+  final: boolean,
+): void {
+  (NativeModule as any)?.pushSearchResults?.(results, query, final);
 }
 
 /** Pre-search Pinned/Recents suggestions for the floating CarPlay map panel. */
