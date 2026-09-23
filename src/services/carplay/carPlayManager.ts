@@ -9,7 +9,7 @@
  * - Connecting/disconnecting lifecycle
  */
 
-import { Appearance, Platform } from 'react-native';
+import { AppState, Appearance, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as CarPlay from '../../native/carplay';
 import type { CarPlayStartNavigationData } from '../../native/carplay';
@@ -66,6 +66,9 @@ let warnedIncidentIds = new Set<string>();
 let lastIncidentSignature = '';
 /** Last GPS fix, cached so search ranking can promote nearby places. */
 let carPlayUserLocation: { lat: number; lng: number } | null = null;
+/** Idle-map location watcher (follows the car like Apple/Google Maps). */
+let idleLocationSubscription: Location.LocationSubscription | null = null;
+let idleLocationStarting = false;
 
 /** Throttle for the incident look-ahead, matching the phone's banner. */
 const INCIDENT_CHECK_INTERVAL_MS = 10_000;
@@ -138,6 +141,8 @@ export function teardownCarPlay(): void {
   lastDistanceBucket = null;
   lastTrafficSignature = '';
   carPlayUserLocation = null;
+  stopIdleLocationUpdates();
+  idleLocationStarting = false;
 }
 
 /** Whether CarPlay is currently connected. */
@@ -187,6 +192,49 @@ function onConnected() {
   // host's (0, 0) default ("blank ocean"). No-op while navigating, where the
   // tracking pipeline already owns the camera.
   void pushUserLocation();
+  // Keep following the car while idle (like Apple/Google Maps).
+  void ensureIdleLocationUpdates();
+}
+
+/**
+ * Starts the idle-map location watcher when CarPlay is connected and no trip is
+ * active, so the head-unit map follows the car instead of freezing on the last
+ * Locate fix. Suppressed while navigating or previewing a route, where the
+ * tracking pipeline / route fit owns the camera.
+ */
+async function ensureIdleLocationUpdates(): Promise<void> {
+  if (!connected || idleLocationSubscription || idleLocationStarting) return;
+  idleLocationStarting = true;
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (!connected || status !== 'granted') return;
+    const subscription = await Location.watchPositionAsync(
+      // Idle map: low-frequency, low-accuracy is plenty (and cheap).
+      { accuracy: Location.Accuracy.Balanced, distanceInterval: 25, timeInterval: 5000 },
+      (location) => {
+        if (!connected || !locationPushAllowed()) return;
+        carPlayUserLocation = {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+        };
+        CarPlay.updateMapCenter(location.coords.latitude, location.coords.longitude, 0);
+      },
+    );
+    if (!connected) {
+      subscription.remove();
+      return;
+    }
+    idleLocationSubscription = subscription;
+  } catch {
+    // Permission denied/unavailable — the Locate button still requests a fix.
+  } finally {
+    idleLocationStarting = false;
+  }
+}
+
+function stopIdleLocationUpdates(): void {
+  idleLocationSubscription?.remove();
+  idleLocationSubscription = null;
 }
 
 function onDisconnected() {
@@ -217,10 +265,22 @@ function onDisconnected() {
   lastIncidentSignature = '';
   lastDistanceBucket = null;
   lastTrafficSignature = '';
+  // Drop the cached fix so a reconnect re-reads the driver's live position
+  // instead of reusing a stale one for search ranking / route origin.
+  carPlayUserLocation = null;
+  stopIdleLocationUpdates();
 }
 
 function syncNavigationState(state: ReturnType<typeof useNavigationStore.getState>) {
   if (!connected) return;
+
+  // The idle map follows the car; once a trip is active the tracking pipeline
+  // owns the camera (and the idle watcher would just burn battery).
+  if (state.isNavigating) {
+    stopIdleLocationUpdates();
+  } else {
+    void ensureIdleLocationUpdates();
+  }
 
   if (!state.isNavigating || !state.activeRoute || !state.currentManeuver || !state.destination) {
     clearMapCenterUpdate();
@@ -660,15 +720,29 @@ function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getSt
     lng: state.navPosition[0],
     heading: state.navBearing,
   };
+  // While the app is suspended (phone locked, screen off) JS timers do not
+  // fire before iOS re-suspends the process: a throttled push would sit
+  // pending forever and CarPlay would stay frozen at the lock-time position.
+  // Push every fix immediately when not active; the foreground keeps the
+  // throttle to coalesce the screen's ~60fps interpolation writes.
+  if (AppState.currentState !== 'active') {
+    flushMapCenter();
+    return;
+  }
   if (mapCenterUpdateTimer !== null) return;
 
-  mapCenterUpdateTimer = setTimeout(() => {
+  mapCenterUpdateTimer = setTimeout(flushMapCenter, 100);
+}
+
+function flushMapCenter() {
+  if (mapCenterUpdateTimer !== null) {
+    clearTimeout(mapCenterUpdateTimer);
     mapCenterUpdateTimer = null;
-    const center = pendingMapCenter;
-    pendingMapCenter = null;
-    if (!center || !connected || !useNavigationStore.getState().isNavigating) return;
-    CarPlay.updateMapCenter(center.lat, center.lng, center.heading);
-  }, 100);
+  }
+  const center = pendingMapCenter;
+  pendingMapCenter = null;
+  if (!center || !connected || !useNavigationStore.getState().isNavigating) return;
+  CarPlay.updateMapCenter(center.lat, center.lng, center.heading);
 }
 
 function clearMapCenterUpdate() {

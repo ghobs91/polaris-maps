@@ -20,11 +20,6 @@ import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import { buildRouteAlternatives } from '@/services/routing/routeAlternatives';
-import {
-  ArrivalDetector,
-  distanceToTargetMeters,
-  targetForLeg,
-} from '@/services/navigation/arrivalService';
 import { navigationModeCapabilities, navigationModeForCosting } from '@/utils/navigationMode';
 import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
 import { CurrentSpeedBadge } from '@/components/navigation/CurrentSpeedBadge';
@@ -34,7 +29,6 @@ import { useCarPlayStore } from '@/stores/carPlayStore';
 import { OverSpeedMonitor } from '@/services/navigation/speedAlerts';
 import { formatDuration } from '@/utils/units';
 import {
-  startTracking,
   processFix,
   getAnchor,
   getGpsSegmentIndex,
@@ -45,21 +39,12 @@ import {
   isOffRouteActive,
   getGpsCourse,
   getGpsSpeed,
-  setTrackingRoutePreferences,
 } from '@/services/navigation/trackingService';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
-import {
-  announceArrival,
-  announceManeuver,
-  announceNavigationStart,
-  announceOffRoute,
-  announceRerouted,
-  repeatLastAnnouncement,
-  stopNavigationSpeech,
-} from '@/services/tts';
+import { repeatLastAnnouncement, stopNavigationSpeech } from '@/services/tts';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassView } from '@/components/common/GlassView';
 import * as Haptics from 'expo-haptics';
@@ -91,9 +76,6 @@ export default function NavigationScreen() {
   const muted = useNavigationStore((s) => s.muted);
   const setMuted = useNavigationStore((s) => s.setMuted);
   const hasArrived = useNavigationStore((s) => s.hasArrived);
-  const setArrived = useNavigationStore((s) => s.setArrived);
-  const navigationAutoAdvanceLegs = useSettingsStore((s) => s.navigationAutoAdvanceLegs);
-  const navigationAutoEnd = useSettingsStore((s) => s.navigationAutoEnd);
   // While CarPlay is attached the car screen drives the map; the phone becomes
   // the companion (step list + add-stop search), like Apple Maps.
   const carPlayConnected = useCarPlayStore((s) => s.connected);
@@ -129,12 +111,10 @@ export default function NavigationScreen() {
   // Manage iOS Live Activity (Dynamic Island) while navigating
   useLiveActivity();
 
-  // Voice guidance: a single "starting navigation" prompt when the session
-  // begins. Advance-distance prompts are driven by the live distance-to-turn
-  // (see the ladder effect below).
-  useEffect(() => {
-    if (isNavigating) announceNavigationStart(destination?.name);
-  }, [isNavigating, destination?.name]);
+  // The "starting navigation" prompt is owned by the global navigationVoice
+  // service (initialized in the root layout), which also covers trips started
+  // from CarPlay when this screen is never mounted. Announcing it here too
+  // reset the dedupe and spoke it twice.
 
   // Haptic feedback at turn points — success at the destination, medium on turns.
   const prevStepIndexRef = useRef<number | null>(null);
@@ -163,107 +143,34 @@ export default function NavigationScreen() {
   // false (or until it starts) the screen runs its own foreground watcher.
   const backgroundSessionActive = useNavigationTrackingStore((s) => s.backgroundSessionActive);
 
-  // Advance-distance voice prompt ladder, driven by the snapped distance-to-turn.
-  useEffect(() => {
-    if (!isNavigating || !currentManeuver || distanceToTurn == null) return;
-    const instruction = currentManeuver.verbalPreTransition || currentManeuver.instruction;
-    if (!instruction?.trim()) return;
-    announceManeuver(
-      `${currentStepIndex}:${currentManeuver.instruction ?? ''}`,
-      distanceToTurn,
-      instruction,
-    );
-  }, [isNavigating, currentStepIndex, currentManeuver, distanceToTurn]);
+  // Voice guidance (start, advance-distance ladder, off-route/reroute, arrival)
+  // is owned by the global navigationVoice service, which also covers trips
+  // started from CarPlay while this screen is never mounted.
 
-  // Spoken off-route / reroute-complete prompts on transition edges.
-  const wasReroutingRef = useRef(false);
+  // Reset the arrival summary when a navigation session starts or ends.
+  // Detection, waypoint advance, and auto-end live in the headless
+  // arrivalCoordinator so they run on every surface, not only while mounted.
   useEffect(() => {
-    if (!isNavigating) {
-      wasReroutingRef.current = false;
-      return;
-    }
-    if (isRerouting && !wasReroutingRef.current) {
-      wasReroutingRef.current = true;
-      announceOffRoute();
-    } else if (!isRerouting && wasReroutingRef.current) {
-      wasReroutingRef.current = false;
-      announceRerouted();
-    }
-  }, [isNavigating, isRerouting]);
-
-  // Reset arrival trackers when a navigation session starts or ends.
-  useEffect(() => {
-    if (isNavigating) {
-      startedAtRef.current = Date.now();
-      waypointArrivalRef.current.reset();
-      destinationArrivalRef.current.reset();
-      setShowArrival(false);
-    } else {
-      setShowArrival(false);
-      if (arrivalTimeoutRef.current) {
-        clearTimeout(arrivalTimeoutRef.current);
-        arrivalTimeoutRef.current = null;
-      }
-    }
+    setShowArrival(false);
+    if (isNavigating) startedAtRef.current = Date.now();
   }, [isNavigating]);
 
-  useEffect(
-    () => () => {
-      if (arrivalTimeoutRef.current) clearTimeout(arrivalTimeoutRef.current);
-    },
-    [],
-  );
-
-  // Arrival detection: intermediate waypoints advance (or prompt), and the
-  // final destination declares arrival, announces it, and optionally ends.
+  // Present the arrival summary + haptic when the coordinator declares arrival.
   useEffect(() => {
-    if (!isNavigating || !navPosition) return;
+    if (!isNavigating || !hasArrived) return;
+    setShowArrival(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }, [isNavigating, hasArrived]);
 
-    const onFinalLeg = currentLegIndex >= waypoints.length;
-    if (onFinalLeg) {
-      if (!destination || hasArrived) return;
-      const arrived = destinationArrivalRef.current.update({
-        distanceToTargetMeters: distanceToTargetMeters(navPosition, destination),
-        remainingMetersToTarget: remainingDistanceMeters,
-      });
-      if (!arrived) return;
-
-      setArrived(true);
-      setShowArrival(true);
-      announceArrival(destination.name);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (navigationAutoEnd) {
-        if (arrivalTimeoutRef.current) clearTimeout(arrivalTimeoutRef.current);
-        arrivalTimeoutRef.current = setTimeout(() => stopNavigation(), 8000);
-      }
-      return;
+  // Waypoint reached haptic: the coordinator advances the leg, so a leg-index
+  // increase is the visible edge.
+  const prevLegIndexRef = useRef(currentLegIndex);
+  useEffect(() => {
+    if (isNavigating && currentLegIndex > prevLegIndexRef.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-
-    const target = targetForLeg(waypoints, destination, currentLegIndex);
-    if (!target) return;
-    const reachedWaypoint = waypointArrivalRef.current.update({
-      distanceToTargetMeters: distanceToTargetMeters(navPosition, target),
-      remainingMetersToTarget: null,
-    });
-    if (!reachedWaypoint) return;
-
-    waypointArrivalRef.current.reset();
-    if (navigationAutoAdvanceLegs) advanceLeg();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, [
-    isNavigating,
-    navPosition,
-    currentLegIndex,
-    waypoints,
-    destination,
-    remainingDistanceMeters,
-    hasArrived,
-    navigationAutoAdvanceLegs,
-    navigationAutoEnd,
-    advanceLeg,
-    setArrived,
-    stopNavigation,
-  ]);
+    prevLegIndexRef.current = currentLegIndex;
+  }, [isNavigating, currentLegIndex]);
 
   // Current speed + over-speed alert (driving only), sampled once a second.
   useEffect(() => {
@@ -302,10 +209,7 @@ export default function NavigationScreen() {
   const [isOverSpeed, setIsOverSpeed] = useState(false);
   const overSpeedRef = useRef(new OverSpeedMonitor());
   const wasOverSpeedRef = useRef(false);
-  const waypointArrivalRef = useRef(new ArrivalDetector());
-  const destinationArrivalRef = useRef(new ArrivalDetector());
   const startedAtRef = useRef<number | null>(null);
-  const arrivalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapRef = useRef<MapViewHandle>(null);
   const navPositionRef = useRef<[number, number] | null>(null);
   navPositionRef.current = navPosition;
@@ -426,6 +330,13 @@ export default function NavigationScreen() {
     }
   }, [isNavigating, activeRoute, navPosition]);
 
+  // Resume follow mode at the start of every trip. This screen stays mounted
+  // between trips, so a pan during the previous one left the camera parked
+  // off-route for the whole next trip until the driver tapped re-center.
+  useEffect(() => {
+    if (isNavigating) setFollowCamera(true);
+  }, [isNavigating]);
+
   // Rounded grid cell (~11 m) so the add-stop panel doesn't see a new search
   // center object on every GPS tick (it would restart detour math endlessly).
   // The string is referentially stable until the user moves to a new cell.
@@ -447,11 +358,12 @@ export default function NavigationScreen() {
   // updating navigationStore + navigationTrackingStore. This loop only does
   // presentation work: dead-reckoning interpolation between GPS ticks at
   // ~60fps for Google/Apple-Maps-style gliding.
+  //
+  // The pipeline itself is started by `backgroundSessionCoordinator` (which
+  // owns the navigation lifecycle globally) rather than here, so trips started
+  // from CarPlay or any other surface track even when this screen is unmounted.
   useEffect(() => {
     if (!isNavigating || !activeRoute) return;
-
-    setTrackingRoutePreferences(useSettingsStore.getState().routePreferences);
-    startTracking(activeRoute);
 
     if (getRouteCoords().length < 2) return;
 
@@ -591,22 +503,37 @@ export default function NavigationScreen() {
 
     // Foreground fallback watcher: runs until/unless the managed background
     // location session takes over delivering fixes (both feed processFix).
+    // `watchPositionAsync` resolves asynchronously; if the effect is torn down
+    // before it does (unmount, or `backgroundSessionActive` flipping), remove
+    // the subscription immediately instead of leaking a live GPS watcher.
+    let cancelled = false;
     if (!backgroundSessionActive) {
       (async () => {
-        subscription = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.BestForNavigation,
-            distanceInterval: 5,
-            timeInterval: 1000,
-          },
-          (location) => {
-            processFix(location);
-          },
-        );
+        try {
+          const sub = await Location.watchPositionAsync(
+            {
+              accuracy: Location.Accuracy.BestForNavigation,
+              distanceInterval: 5,
+              timeInterval: 1000,
+            },
+            (location) => {
+              processFix(location);
+            },
+          );
+          if (cancelled) {
+            sub.remove();
+            return;
+          }
+          subscription = sub;
+        } catch {
+          // Location unavailable/denied — the background session (if any) or a
+          // later permission grant still drives the pipeline.
+        }
       })();
     }
 
     return () => {
+      cancelled = true;
       subscription?.remove();
       if (interpolationRafRef.current !== null) {
         cancelAnimationFrame(interpolationRafRef.current);

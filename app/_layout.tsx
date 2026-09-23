@@ -11,6 +11,7 @@ import { hasCompletedConsent } from '@/services/identity/consent';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { initNavigationVoice } from '@/services/tts/navigationVoice';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
+import { initArrivalCoordinator } from '@/services/navigation/arrivalCoordinator';
 import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
 import {
   initTrafficP2P,
@@ -52,6 +53,9 @@ function RootLayoutInner() {
     // Speak turn-by-turn prompts even when the navigation screen isn't mounted
     // (e.g. a trip started from CarPlay).
     initNavigationVoice();
+    // Detect arrival / advance waypoints headlessly, so auto-end and the
+    // arrival card work on every surface, not only while the screen is mounted.
+    initArrivalCoordinator();
     // Show aggregate offline-download progress in a Live Activity while the
     // app is backgrounded during an active region download.
     initDownloadLiveActivity();

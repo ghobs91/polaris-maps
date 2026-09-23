@@ -4,6 +4,7 @@ import type { ValhallaManeuver, ValhallaRoute } from '../../models/route';
 import { decodePolyline } from '../../utils/polyline';
 import {
   snapToRoute,
+  computeBearing,
   computeRemainingMeters,
   haversineMeters,
   angleDifferenceDeg,
@@ -14,6 +15,7 @@ import {
 } from '../../utils/routeSnap';
 import { reroute } from '../routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 
 /** Avoidance preferences forwarded to the reroute request. Injected via
  *  `setTrackingRoutePreferences` (rather than importing the settings store)
@@ -139,6 +141,13 @@ export function stopTracking(): void {
   lastGpsRemaining = null;
   rerouteFailureCount = 0;
   nextRerouteAllowedAt = 0;
+  // Clear the published live state too: otherwise the next trip opens with the
+  // previous trip's final puck position, bearing and distance countdown until
+  // the first GPS fix arrives.
+  const trackingStore = useNavigationTrackingStore.getState();
+  trackingStore.setNavPosition(null);
+  trackingStore.setNavBearing(0);
+  trackingStore.setDistanceToTurn(null);
 }
 
 export function isTracking(): boolean {
@@ -497,4 +506,30 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   if (nextStep < allManeuvers.length && segmentIndex >= allManeuvers[nextStep].beginShapeIndex) {
     store.advanceStep();
   }
+
+  // Publish the live position/bearing/distance for consumers rendered outside
+  // this screen (CarPlay, instrument cluster). The navigation screen's
+  // interpolation loop is the only other writer, and it does not run while the
+  // app is backgrounded or the phone is locked — CarPlay would stay frozen at
+  // the position from lock time until the next foreground frame.
+  const trackingStore = useNavigationTrackingStore.getState();
+  const anchor = drAnchor;
+  if (!anchor) return;
+  const routeBearingAtAnchor = computeBearing(
+    coords[anchor.segIdx],
+    coords[Math.min(anchor.segIdx + 1, coords.length - 1)],
+  );
+  // Point along the real GPS course when it disagrees with the route
+  // (wrong-way or off-route), matching the screen's interpolation loop.
+  const gpsDisagrees =
+    lastGpsHeading != null &&
+    (wrongWayActive || angleDifferenceDeg(routeBearingAtAnchor, lastGpsHeading) > 90);
+  trackingStore.setNavPosition(anchor.pos);
+  trackingStore.setNavBearing(gpsDisagrees ? lastGpsHeading! : routeBearingAtAnchor);
+  const liveStepIndex = useNavigationStore.getState().currentStepIndex;
+  const stepEndIdx = Math.min(
+    allManeuvers[liveStepIndex]?.endShapeIndex ?? coords.length - 1,
+    coords.length - 1,
+  );
+  trackingStore.setDistanceToTurn(distToIndex(anchor.pos, anchor.segIdx, stepEndIdx));
 }

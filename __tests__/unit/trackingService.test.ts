@@ -21,6 +21,7 @@ jest.mock('expo-haptics', () => ({
 
 import type { ValhallaManeuver, ValhallaRoute } from '../../src/models/route';
 import { useNavigationStore } from '../../src/stores/navigationStore';
+import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingStore';
 import {
   startTracking,
   processFix,
@@ -189,6 +190,21 @@ describe('trackingService — lifecycle', () => {
     expect(getGpsSegmentIndex()).toBe(0);
     expect(getRouteCoords()).toEqual([]);
   });
+
+  it('stopTracking clears the published live state so trips do not leak into each other', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+    processFix(makeFix({ lat: (A[1] + B[1]) / 2, lng: A[0], speed: 12 }));
+    expect(useNavigationTrackingStore.getState().navPosition).not.toBeNull();
+
+    stopTracking();
+
+    const tracking = useNavigationTrackingStore.getState();
+    expect(tracking.navPosition).toBeNull();
+    expect(tracking.navBearing).toBe(0);
+    expect(tracking.distanceToTurn).toBeNull();
+  });
 });
 
 describe('trackingService — happy path fix processing', () => {
@@ -249,6 +265,28 @@ describe('trackingService — happy path fix processing', () => {
     processFix(makeFix({ lat: A[1] + 0.0001, lng: A[0], speed: 10 }));
 
     expect(useNavigationStore.getState().currentStepIndex).toBe(0);
+  });
+
+  it('publishes the live position/bearing/countdown for background consumers', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+
+    // Headless delivery (phone locked / screen off) must feed the shared
+    // tracking store: the screen's interpolation loop does not run in the
+    // background, and CarPlay would otherwise stay frozen at the lock-time
+    // position until the phone is unlocked.
+    processFix(makeFix({ lat: (A[1] + B[1]) / 2, lng: A[0], speed: 12 }), { background: true });
+
+    const tracking = useNavigationTrackingStore.getState();
+    expect(tracking.navPosition).not.toBeNull();
+    expect(tracking.navPosition![0]).toBeCloseTo(A[0], 4);
+    expect(tracking.navPosition![1]).toBeCloseTo((A[1] + B[1]) / 2, 4);
+    // Northbound route → heading-up camera faces north.
+    expect(tracking.navBearing).toBeCloseTo(0, 1);
+    // Distance to the end of the current step, so the banner counts down too.
+    expect(tracking.distanceToTurn).toBeGreaterThan(0);
+    expect(tracking.distanceToTurn!).toBeLessThan(route.summary.distanceMeters);
   });
 });
 

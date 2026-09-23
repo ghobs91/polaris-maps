@@ -888,6 +888,17 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       updateMuteButton()
     }
 
+    // Refresh the speed-limit sign and native lane guidance on every update.
+    // The steady-state path below returns early, so doing this only in the
+    // rebuild branch meant the first maneuver (and the first after a reroute)
+    // never showed a speed limit or native lanes.
+    mapViewHost.showSpeedLimit(value: update.speedLimitValue, unit: update.speedLimitUnit)
+    let nativeLanes = supportsNativeLaneGuidance(update.laneGuidance)
+    if #available(iOS 17.4, *) {
+      session.currentLaneGuidance =
+        nativeLanes ? update.laneGuidance.flatMap { makeLaneGuidance($0) } : nil
+    }
+
     // Steady-state path: the maneuver pair hasn't changed, so only refresh
     // numbers in place. Replacing `upcomingManeuvers` on every tick makes the
     // guidance card visibly flicker.
@@ -907,7 +918,6 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     }
 
     var upcoming: [CPManeuver] = []
-    let nativeLanes = supportsNativeLaneGuidance(update.laneGuidance)
     if !update.displayInstruction.isEmpty {
       upcoming.append(
         makeManeuver(
@@ -939,11 +949,6 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     guard !upcoming.isEmpty else { return }
     maneuverSignature = update.signature
     session.upcomingManeuvers = upcoming
-    if #available(iOS 17.4, *) {
-      session.currentLaneGuidance =
-        nativeLanes ? update.laneGuidance.flatMap { makeLaneGuidance($0) } : nil
-    }
-    mapViewHost.showSpeedLimit(value: update.speedLimitValue, unit: update.speedLimitUnit)
     if let trip = activeTrip {
       template.update(
         travelEstimates(distanceMeters: update.remainingDistanceMeters, seconds: update.etaSeconds),
@@ -975,6 +980,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     previewTrip = nil
     previewRoutes = []
     previewDestination = nil
+    // Leave the whole-route overview state behind with the trip, or the next
+    // trip's overview button starts inverted.
+    isOverview = false
+    overviewButton?.image = UIImage(systemName: "map.fill")
     setNavigating(false)
     removeRoute()
   }
@@ -1678,10 +1687,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activeSearchText = searchText
     searchItems = []
     pendingSearchCompletion = completionHandler
-    // An empty field has no query to run; resolve immediately so the keyboard
-    // isn't left behind a spinner.
+    // An empty field has no query to run: show the Pinned/Recents suggestions
+    // instead. They are the only pre-search surface on iOS < 27 (the floating
+    // map panel is 27+), and Apple/Google Maps show saved places here too.
     guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
-      finishPendingSearch()
+      pendingSearchCompletion = nil
+      completionHandler(makeSearchListItems(from: homeSuggestions))
       return
     }
     PolarisCarPlay.emitSearchQuery(searchText)
@@ -1868,6 +1879,19 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // phone's state so the phone stops navigating instead of silently
     // continuing.
     endNavigationFromCarPlay()
+  }
+
+  /// The system dismissed a navigation alert — a duration-based incident
+  /// warning timed out, or the driver tapped a button. Clear our record so the
+  /// next reroute/incident alert is not suppressed for the rest of the trip.
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate,
+    didDismissNavigationAlert navigationAlert: CPNavigationAlert,
+    dismissalContext: CPNavigationAlertDismissalContext
+  ) {
+    if activeAlert === navigationAlert {
+      activeAlert = nil
+    }
   }
 
   // MARK: CPSessionConfigurationDelegate

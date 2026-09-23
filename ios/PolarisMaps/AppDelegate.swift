@@ -1,4 +1,5 @@
 internal import Expo
+import AVFAudio
 import CarPlay
 import React
 import ReactAppDependencyProvider
@@ -15,6 +16,8 @@ class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    configureNavigationAudioSession()
+
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -25,6 +28,29 @@ class AppDelegate: ExpoAppDelegate {
     // The window is created and React Native is started by `SceneDelegate`
     // under the scene-based lifecycle (required by the iOS 27 SDK).
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  /// Configures the shared audio session for spoken turn-by-turn guidance.
+  ///
+  /// expo-speech (`AVSpeechSynthesizer`) never sets a category, so iOS keeps the
+  /// default `soloAmbient`: prompts are muted by the ring/silent switch and stop
+  /// when the app is backgrounded or the screen is locked — even though the app
+  /// declares the `audio` UIBackgroundMode. `.playback` + `.voicePrompt` with
+  /// ducking is the category Apple recommends for navigation prompts, so
+  /// guidance keeps speaking while locked and other audio is only ducked while
+  /// a prompt plays. Setting the category (not activating the session) leaves
+  /// music untouched until the synthesizer actually speaks.
+  private func configureNavigationAudioSession() {
+    do {
+      try AVAudioSession.sharedInstance().setCategory(
+        .playback,
+        mode: .voicePrompt,
+        options: [.duckOthers, .mixWithOthers]
+      )
+    } catch {
+      // Non-fatal: guidance still works in the foreground with the default
+      // session, so a failure here must never block app launch.
+    }
   }
 
   public func application(

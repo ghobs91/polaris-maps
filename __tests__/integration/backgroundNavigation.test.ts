@@ -64,6 +64,7 @@ jest.mock('../../src/services/storage/mmkv', () => ({
   __esModule: true,
   storage: {
     getBoolean: (key: string) => mockMmkvStore.get(key),
+    getString: () => undefined,
     set: (key: string, value: boolean) => {
       mockMmkvStore.set(key, value);
     },
@@ -100,7 +101,9 @@ import {
 } from '../../src/services/navigation/backgroundLocationTask';
 import { useNavigationStore } from '../../src/stores/navigationStore';
 import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingStore';
+import { initNavigationBackgroundSession } from '../../src/services/navigation/backgroundSessionCoordinator';
 import {
+  getRouteCoords,
   isTracking,
   startTracking,
   stopTracking,
@@ -362,6 +365,47 @@ describe('stale session reconciliation (startup)', () => {
 
     expect(mockHasStartedLocationUpdates).not.toHaveBeenCalled();
     expect(mockStopLocationUpdates).not.toHaveBeenCalled();
+  });
+});
+
+describe('navigation tracking lifecycle (global coordinator)', () => {
+  it('activates the shared pipeline without the navigation screen mounted, and clears it on end', () => {
+    // Expo Router bottom tabs are lazy-mounted, so a trip started from CarPlay
+    // never mounts the navigation screen. The coordinator must own the
+    // pipeline lifecycle so fixes are not silently dropped.
+    mockGetBackgroundPermissions.mockResolvedValue(granted());
+    initNavigationBackgroundSession();
+
+    const route = makeTrackedRoute();
+    useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
+
+    expect(isTracking()).toBe(true);
+    expect(getRouteCoords().length).toBeGreaterThanOrEqual(2);
+
+    useNavigationStore.getState().stopNavigation();
+
+    expect(isTracking()).toBe(false);
+  });
+
+  it('re-activates the pipeline when the active route is replaced', () => {
+    mockGetBackgroundPermissions.mockResolvedValue(granted());
+    initNavigationBackgroundSession();
+
+    const route = makeTrackedRoute();
+    useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
+    const firstGeometry = getRouteCoords();
+
+    const replacement = {
+      ...makeTrackedRoute(),
+      geometry: encodePolyline([
+        [-74.0, 40.7],
+        [-73.99, 40.71],
+      ]),
+    };
+    useNavigationStore.getState().replaceRoute(replacement);
+
+    expect(isTracking()).toBe(true);
+    expect(getRouteCoords()).not.toEqual(firstGeometry);
   });
 });
 

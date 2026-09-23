@@ -63,8 +63,8 @@ class PolarisValhalla: NSObject {
 
             do {
                 let request = self.buildRouteRequest(waypoints: waypoints, costing: costing as String, options: options)
-                let response = try valhalla.route(request: request)
-                let mapped = self.mapRouteResponseToNative(response, waypoints: waypoints)
+                let (response, extras) = try self.routeWithExtras(valhalla, request: request)
+                let mapped = self.mapRouteResponseToNative(response, waypoints: waypoints, extras: extras)
                 resolve(mapped)
             } catch let error {
                 reject("VALHALLA_ROUTE_ERROR", "Route computation failed: \(error.localizedDescription)", error)
@@ -98,8 +98,8 @@ class PolarisValhalla: NSObject {
                     format: .json
                 )
 
-                let response = try valhalla.route(request: request)
-                let mapped = self.mapSingleRouteToNative(response)
+                let (response, extras) = try self.routeWithExtras(valhalla, request: request)
+                let mapped = self.mapSingleRouteToNative(response, extras: extras)
                 resolve(mapped)
             } catch let error {
                 reject("VALHALLA_REROUTE_ERROR", "Reroute failed: \(error.localizedDescription)", error)
@@ -193,13 +193,62 @@ class PolarisValhalla: NSObject {
         }
     }
 
-    private func mapRouteResponseToNative(_ response: RouteResponse, waypoints: NSArray) -> [[String: Any]] {
-        // Valhalla can return alternates, but valhalla-mobile currently returns a single trip.
-        // We wrap it in an array for consistency with the multi-route API.
-        return [mapSingleRouteToNative(response)]
+    /// Runs a route request and also returns the raw-JSON maneuver extras the
+    /// typed `RouteResponse` model drops: posted speed limit and lane guidance.
+    /// The JS adapter (`src/native/routeMapping.ts`) already maps both when
+    /// present, so offline routes keep their speed sign and lane strip.
+    private func routeWithExtras(
+        _ valhalla: Valhalla, request: RouteRequest
+    ) throws -> (RouteResponse, [[[String: Any]]]) {
+        let requestData = try JSONEncoder().encode(request)
+        guard let requestStr = String(data: requestData, encoding: .utf8) else {
+            throw NSError(
+                domain: "PolarisValhalla", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Route request was not UTF-8"])
+        }
+        let resultStr = valhalla.route(rawRequest: requestStr)
+        guard let resultData = resultStr.data(using: .utf8) else {
+            throw NSError(
+                domain: "PolarisValhalla", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Route response was not UTF-8"])
+        }
+        let response = try JSONDecoder().decode(RouteResponse.self, from: resultData)
+        return (response, PolarisValhalla.maneuverExtras(from: resultData))
     }
 
-    private func mapSingleRouteToNative(_ response: RouteResponse) -> [String: Any] {
+    /// Per-leg, per-maneuver `speed_limit` / `lanes` pulled from the raw JSON,
+    /// aligned with `trip.legs[].maneuvers[]` order.
+    private static func maneuverExtras(from data: Data) -> [[[String: Any]]] {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let trip = root["trip"] as? [String: Any],
+            let legs = trip["legs"] as? [[String: Any]]
+        else { return [] }
+        return legs.map { leg in
+            (leg["maneuvers"] as? [[String: Any]] ?? []).map { maneuver in
+                var extras: [String: Any] = [:]
+                if let speed = maneuver["speed_limit"] as? NSNumber {
+                    extras["speed_limit"] = speed
+                }
+                if let lanes = maneuver["lanes"] as? [[String: Any]] {
+                    extras["lanes"] = lanes
+                }
+                return extras
+            }
+        }
+    }
+
+    private func mapRouteResponseToNative(
+        _ response: RouteResponse, waypoints: NSArray, extras: [[[String: Any]]] = []
+    ) -> [[String: Any]] {
+        // Valhalla can return alternates, but valhalla-mobile currently returns a single trip.
+        // We wrap it in an array for consistency with the multi-route API.
+        return [mapSingleRouteToNative(response, extras: extras)]
+    }
+
+    private func mapSingleRouteToNative(
+        _ response: RouteResponse, extras: [[[String: Any]]] = []
+    ) -> [String: Any] {
         let trip = response.trip
         let summary = trip.summary
 
@@ -224,8 +273,9 @@ class PolarisValhalla: NSObject {
 
         let legs: [[String: Any]] = trip.legs.enumerated().map { (legIdx, leg) in
             let offset = multiLeg ? (shapeOffsets[legIdx]) : 0
-            let maneuvers: [[String: Any]] = leg.maneuvers.map { m in
-                [
+            let legExtras = extras.indices.contains(legIdx) ? extras[legIdx] : []
+            let maneuvers: [[String: Any]] = leg.maneuvers.enumerated().map { (maneuverIdx, m) in
+                var dict: [String: Any] = [
                     "type": mapManeuverType(m.type),
                     "instruction": m.instruction,
                     "distance_meters": m.length * 1000,
@@ -235,7 +285,14 @@ class PolarisValhalla: NSObject {
                     "street_names": m.streetNames ?? [],
                     "verbal_pre_transition": m.verbalPreTransitionInstruction ?? "",
                     "verbal_post_transition": m.verbalPostTransitionInstruction as Any,
-                ] as [String: Any]
+                ]
+                // Speed limit / lanes the typed model drops.
+                if legExtras.indices.contains(maneuverIdx) {
+                    for (key, value) in legExtras[maneuverIdx] {
+                        dict[key] = value
+                    }
+                }
+                return dict
             }
 
             let legSummary = leg.summary

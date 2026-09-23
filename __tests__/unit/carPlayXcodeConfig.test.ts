@@ -106,11 +106,14 @@ describe('CarPlay iOS configuration', () => {
       '<key>com.apple.developer.carplay-navigation</key>',
     );
     expect(simulatorEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
-    // Debug device builds carry the entitlement so the CarPlay Simulator (real
-    // device) lists the app; the development profile authorizes it.
-    expect(debugEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
-    expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
-    expect(releaseEntitlements).not.toContain('<key>com.apple.developer.carplay-navigation</key>');
+    // Device builds carry the navigation entitlement (turn-by-turn app) and
+    // must NOT carry the map-only carplay-maps key, which App Review rejects
+    // without approval. The provisioning profile must authorize the navigation
+    // entitlement (regenerate it if signing complains).
+    expect(debugEntitlements).toContain('<key>com.apple.developer.carplay-navigation</key>');
+    expect(debugEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
+    expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-navigation</key>');
+    expect(releaseEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
   });
 
   it('buffers CarPlay scene state until the React Native module attaches', () => {
@@ -254,6 +257,25 @@ describe('CarPlay iOS configuration', () => {
       // route decodes to the wrong hemisphere while the camera follows GPS.
       expect(mapView).toContain('(dLat & 1) != 0 ? ~(dLat >> 1) : (dLat >> 1)');
       expect(mapView).not.toContain('~(dLat >> 1) ^');
+    }
+  });
+
+  it('keeps first-maneuver guidance and repeatable navigation alerts working', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      // Speed limit + native lanes refresh on every update, including the
+      // steady-state path that the first maneuver takes — not only on rebuild.
+      expect(nativeModule).toContain('mapViewHost.showSpeedLimit(value: update.speedLimitValue');
+      // A duration-based alert that auto-dismisses must clear the manager's
+      // record, or it suppresses every later incident/reroute alert.
+      expect(nativeModule).toContain(
+        'didDismissNavigationAlert navigationAlert: CPNavigationAlert',
+      );
+      // Empty search field shows Pinned/Recents, the only pre-search surface on
+      // iOS < 27 where the floating map panel doesn't exist.
+      expect(nativeModule).toContain(
+        'completionHandler(makeSearchListItems(from: homeSuggestions))',
+      );
     }
   });
 

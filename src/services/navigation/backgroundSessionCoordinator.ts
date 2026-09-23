@@ -5,15 +5,23 @@ import {
   startBackgroundNavSession,
   stopBackgroundNavSession,
 } from './backgroundLocationTask';
-import { setTrackingRoutePreferences, stopTracking } from './trackingService';
+import { setTrackingRoutePreferences, startTracking, stopTracking } from './trackingService';
 
 let subscribed = false;
+/** Geometry of the route the shared tracking pipeline is currently following. */
+let trackedGeometry: string | null = null;
 
 /**
- * Keeps the iOS background navigation session in sync with navigation state.
+ * Keeps the iOS background navigation session AND the shared tracking pipeline
+ * in sync with navigation state.
  *
- * Subscribes to navigationStore so the session starts/stops no matter who
- * triggers `startNavigation`/`stopNavigation` (search panel, CarPlay, …).
+ * Subscribes to navigationStore so tracking starts/stops no matter who triggers
+ * `startNavigation`/`stopNavigation` (search panel, CarPlay, …) and no matter
+ * whether the navigation screen is mounted. The screen's own effect previously
+ * owned `startTracking`, but Expo Router bottom tabs are lazy-mounted: a trip
+ * started from CarPlay (or any headless path) never mounted that screen, so
+ * every fix was dropped and the head unit map froze at the route start.
+ *
  * Lives outside the store to keep it free of native-module imports (which
  * break non-native test environments).
  *
@@ -30,6 +38,20 @@ export function initNavigationBackgroundSession(): void {
 
   let wasNavigating = useNavigationStore.getState().isNavigating;
   useNavigationStore.subscribe((state) => {
+    // Start (or re-start on a route replacement) the shared tracking pipeline
+    // as soon as a trip is active, independent of any UI mount.
+    if (state.isNavigating && state.activeRoute) {
+      if (state.activeRoute.geometry !== trackedGeometry) {
+        trackedGeometry = state.activeRoute.geometry;
+        setTrackingRoutePreferences(useSettingsStore.getState().routePreferences);
+        startTracking(state.activeRoute);
+      }
+    } else if (trackedGeometry !== null) {
+      // Trip ended or its route was cleared — stop the shared pipeline.
+      trackedGeometry = null;
+      stopTracking();
+    }
+
     if (state.isNavigating === wasNavigating) return;
     wasNavigating = state.isNavigating;
     if (state.isNavigating) {
@@ -41,10 +63,8 @@ export function initNavigationBackgroundSession(): void {
       // foreground-only via the screen's watcher.
       void startBackgroundNavSession();
     } else {
-      // End the background location session and clear the shared tracking
-      // pipeline when navigation ends.
+      // End the background location session when navigation ends.
       void stopBackgroundNavSession();
-      stopTracking();
     }
   });
 }

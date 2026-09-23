@@ -1,8 +1,14 @@
 // Mock native modules
+let mockAppState = 'active';
 jest.mock('react-native', () => {
   const addListener = jest.fn().mockReturnValue({ remove: jest.fn() });
   return {
     Platform: { OS: 'ios' },
+    AppState: {
+      get currentState() {
+        return mockAppState;
+      },
+    },
     Appearance: {
       getColorScheme: jest.fn(() => 'light'),
       addChangeListener: jest.fn(() => ({ remove: jest.fn() })),
@@ -43,6 +49,7 @@ jest.mock('expo-location', () => ({
   getCurrentPositionAsync: jest.fn().mockResolvedValue({
     coords: { latitude: 40.7128, longitude: -74.006 },
   }),
+  watchPositionAsync: jest.fn().mockResolvedValue({ remove: jest.fn() }),
 }));
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(),
@@ -92,6 +99,7 @@ jest.mock('../../src/services/traffic/incidentAhead', () => ({
 }));
 
 import { NativeModules } from 'react-native';
+import * as Location from 'expo-location';
 import {
   initCarPlay,
   teardownCarPlay,
@@ -195,6 +203,7 @@ describe('CarPlayManager', () => {
     useTrafficStore.getState().setNormalizedSegments([]);
     useSettingsStore.getState().setUseMetric(false);
     useSettingsStore.getState().setThemeMode('system');
+    mockAppState = 'active';
     (getFavorites as jest.Mock).mockReturnValue([]);
     (getSearchHistory as jest.Mock).mockReturnValue([]);
     eventListeners = {};
@@ -288,6 +297,43 @@ describe('CarPlayManager', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7128, -74.006, 0);
+  });
+
+  it('follows the car on the idle CarPlay map', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    (NativeModules.PolarisCarPlay.updateMapCenter as jest.Mock).mockClear();
+
+    const calls = (Location.watchPositionAsync as jest.Mock).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const onUpdate = calls[calls.length - 1][1] as (loc: unknown) => void;
+    onUpdate({ coords: { latitude: 40.7, longitude: -74.0, heading: 90, speed: 10 } });
+
+    // Idle map is north-up, so the pushed heading is 0.
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 0);
+  });
+
+  it('pushes each fix to the CarPlay map immediately while the phone is locked', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    jest.clearAllMocks();
+
+    // Locked/backgrounded: a throttled setTimeout would never fire before iOS
+    // re-suspends the process, leaving CarPlay frozen until unlock.
+    mockAppState = 'background';
+    useNavigationTrackingStore.getState().setNavPosition([-73.98, 40.75]);
+    useNavigationTrackingStore.getState().setNavBearing(42);
+
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenLastCalledWith(
+      40.75,
+      -73.98,
+      42,
+    );
   });
 
   it('hydrates an already-connected native CarPlay session during init', async () => {

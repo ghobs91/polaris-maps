@@ -32,8 +32,9 @@ const NATIVE_FILES = [
 ];
 
 const ENTITLEMENTS_FILES = [
-  { name: 'PolarisMaps.Debug.entitlements', carplay: true },
-  { name: 'PolarisMaps.SimulatorCarPlay.entitlements', carplay: false },
+  { name: 'PolarisMaps.Debug.entitlements', carplayNavigation: true },
+  { name: 'PolarisMaps.entitlements', carplayNavigation: true },
+  { name: 'PolarisMaps.SimulatorCarPlay.entitlements', carplayNavigation: false },
 ];
 
 const CARPLAY_SCENE_ROLE = 'CPTemplateApplicationSceneSessionRoleApplication';
@@ -59,28 +60,31 @@ function copyFiles() {
 }
 
 function writeEntitlementsFiles() {
-  // Debug (device) builds carry com.apple.developer.carplay-maps so a local
-  // Xcode run is picked up by the CarPlay Simulator; the matching development
-  // profile authorizes it. Simulator entitlements stay clean because simulator
-  // re-signing happens ad-hoc in scripts/resign-carplay-simulator-app.sh.
-  const contentsFor = (carplay) => `<?xml version="1.0" encoding="UTF-8"?>
+  // Device builds (Debug and Release) carry com.apple.developer.carplay-navigation
+  // because this is a turn-by-turn navigation app; the matching provisioning
+  // profile must authorize it (regenerate the profile if signing complains).
+  // com.apple.developer.carplay-maps is deliberately NOT used: it is for
+  // map-only apps and an unapproved key is rejected on App Store submission.
+  // Simulator entitlements stay clean because simulator re-signing merges both
+  // CarPlay keys ad-hoc in scripts/resign-carplay-simulator-app.sh.
+  const contentsFor = (carplayNavigation) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
     <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>${
-      carplay
+      carplayNavigation
         ? `
-    <key>com.apple.developer.carplay-maps</key>
+    <key>com.apple.developer.carplay-navigation</key>
     <true/>`
         : ''
     }
   </dict>
 </plist>
 `;
-  for (const { name, carplay } of ENTITLEMENTS_FILES) {
+  for (const { name, carplayNavigation } of ENTITLEMENTS_FILES) {
     const dest = path.join(IOS_DIR, 'PolarisMaps', name);
-    fs.writeFileSync(dest, contentsFor(carplay));
+    fs.writeFileSync(dest, contentsFor(carplayNavigation));
     console.log('[withCarPlay] Wrote ' + dest);
   }
 }

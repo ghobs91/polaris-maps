@@ -6,7 +6,7 @@ import UIKit
 
 /// Which CarPlay surface a map host renders into. The dashboard tile is the
 /// small secondary map in CarPlay's split view, so it skips the speed-limit
-/// overlay and uses a flat north-up follow camera.
+/// overlay; its follow camera matches the full-screen map's heading-up view.
 enum CarPlayMapMode {
   case full
   case dashboard
@@ -96,9 +96,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// True once a real position has arrived; guards against locating to (0, 0).
   private(set) var hasCenter = false
   /// True while a navigation session is active; switches to the pitched
-  /// heading-up follow camera (the dashboard tile stays flat/north-up) and
-  /// swaps the idle location dot for the nav puck (matching the phone, which
-  /// shows the puck only in navigation mode).
+  /// heading-up follow camera on every surface (full screen and dashboard
+  /// tile) and swaps the idle location dot for the nav puck (matching the
+  /// phone, which shows the puck only in navigation mode).
   var isNavigating = false {
     didSet {
       if oldValue != isNavigating { updateVehicleMarkers() }
@@ -780,10 +780,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   }
 
   private func applyFollowCamera(_ view: MLNMapView, heading: Double) {
-    if isNavigating && mode == .full {
-      // Heading-up pitched follow camera (phone: zoom 17, pitch 60). The
-      // target is pushed ahead of the vehicle so the puck sits low with the
-      // road ahead in view.
+    if isNavigating {
+      // Heading-up pitched follow camera (phone: zoom 17, pitch 60), shared by
+      // the full-screen map and the dashboard split tile so both face the
+      // direction of travel like the phone. The target is pushed ahead of the
+      // vehicle so the puck sits low with the road ahead in view.
       let target = coordinate(
         from: currentCoordinate, distanceMeters: Self.forwardOffsetMeters, bearing: heading)
       view.camera = MLNMapCamera(
@@ -793,7 +794,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
         heading: heading
       )
     } else {
-      // Idle locate and the dashboard split tile: flat, north-up, centered.
+      // Idle locate: flat, north-up, centered.
       view.setCenter(currentCoordinate, zoomLevel: Self.idleZoom, direction: 0, animated: false)
     }
   }
