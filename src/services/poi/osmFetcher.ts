@@ -1,5 +1,5 @@
 import { overpassFetch } from '../overpassClient';
-import { throwIfAborted } from '../search/abortUtils';
+import { throwIfAborted, withTimeout } from '../search/abortUtils';
 
 // ---------------------------------------------------------------------------
 // Bbox-keyed response cache
@@ -11,7 +11,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 20;
 
 /** Client-side timeout for Overpass API requests (ms). */
-const OVERPASS_TIMEOUT_MS = 8_000;
+const OVERPASS_TIMEOUT_MS = 5_000;
+
+/** Client-side timeout for each Nominatim request (ms). Nominatim is a
+ * last-resort fallback and must not hold the viewport merge open. */
+const NOMINATIM_TIMEOUT_MS = 3_000;
 
 interface CacheEntry {
   pois: OsmPoi[];
@@ -19,6 +23,9 @@ interface CacheEntry {
 }
 
 const bboxCache = new Map<string, CacheEntry>();
+/** Shared in-flight Overpass requests, keyed by bbox, so a prefetch and the
+ * fetch that follows a gesture settle don't serialize on the throttle. */
+const bboxInFlight = new Map<string, Promise<OsmPoi[]>>();
 
 function bboxKey(south: number, west: number, north: number, east: number): string {
   const r = (n: number) => Math.round(n * 100) / 100;
@@ -47,6 +54,7 @@ function cacheSet(key: string, pois: OsmPoi[]): void {
 /** Exposed for testing only. */
 export function clearOsmCache(): void {
   bboxCache.clear();
+  bboxInFlight.clear();
 }
 
 export interface OsmPoi {
@@ -65,7 +73,7 @@ export interface OsmPoi {
  * Fetch named POIs from the OSM Overpass API for a bounding box.
  * Only called when zoom >= 15 (POI_MIN_ZOOM) to avoid huge result sets.
  */
-export async function fetchOsmPois(
+export function fetchOsmPois(
   south: number,
   west: number,
   north: number,
@@ -74,8 +82,30 @@ export async function fetchOsmPois(
   // Return cached results if we've fetched this bbox recently
   const key = bboxKey(south, west, north, east);
   const cached = cacheGet(key);
-  if (cached) return cached;
+  if (cached) return Promise.resolve(cached);
 
+  // Share an in-flight request for the same bbox (e.g. a mid-gesture prefetch
+  // and the fetch that runs once the gesture settles).
+  const pending = bboxInFlight.get(key);
+  if (pending) return pending;
+
+  const promise = fetchOsmPoisUncached(south, west, north, east, key);
+  bboxInFlight.set(key, promise);
+  void promise
+    .finally(() => {
+      if (bboxInFlight.get(key) === promise) bboxInFlight.delete(key);
+    })
+    .catch(() => {});
+  return promise;
+}
+
+async function fetchOsmPoisUncached(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  key: string,
+): Promise<OsmPoi[]> {
   const bbox = `${south},${west},${north},${east}`;
   // Include both node and way elements — shops inside shopping centers are
   // almost always mapped as ways (polygon outlines) in OSM, not nodes.
@@ -395,6 +425,7 @@ export async function fetchNominatimPois(
 
   await Promise.all(
     queries.map(async (q) => {
+      const { signal, cleanup } = withTimeout(undefined, NOMINATIM_TIMEOUT_MS);
       try {
         const params = new URLSearchParams({
           q,
@@ -409,6 +440,7 @@ export async function fetchNominatimPois(
           `https://nominatim.openstreetmap.org/search?${params.toString()}`,
           {
             headers: { 'User-Agent': 'PolarisMaps/1.0', Accept: 'application/json' },
+            signal,
           },
         );
         if (!response.ok) return;
@@ -447,7 +479,9 @@ export async function fetchNominatimPois(
           });
         }
       } catch {
-        // Individual query failed — continue with others
+        // Individual query failed or timed out — continue with others
+      } finally {
+        cleanup();
       }
     }),
   );

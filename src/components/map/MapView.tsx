@@ -70,6 +70,8 @@ const LOW_ZOOM_CACHED_CAP = 300;
 const LOW_ZOOM_ONLINE_CAP = 200;
 /** Debounce for the POI fetch (Overpass is cached, so repeat visits are instant). */
 const OSM_FETCH_DEBOUNCE_MS = 300;
+/** How long the camera must hold still mid-gesture before warming POI caches. */
+const POI_PREFETCH_DEBOUNCE_MS = 500;
 const POI_ZOOM_REUSE_THRESHOLD = 0.35;
 const NAVIGATION_CAMERA_PITCH = 60;
 const NAVIGATION_CAMERA_TOP_PADDING = 0.5;
@@ -243,6 +245,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const lastProgrammaticMove = useRef(0);
   // Debounce timer for OSM POI fetching
   const poiFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounce timer + guard for mid-gesture cache warming
+  const poiPrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const poiPrefetchInFlight = useRef(false);
   // Abort controller to cancel stale in-flight fetches when viewport changes
   const abortRef = useRef<AbortController | null>(null);
   // Track the last loaded coverage separately from the current in-flight fetch
@@ -263,6 +268,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const [camera, setCamera] = useState({ bearing: 0, pitch: 0, zoom: 17, lat: 0 });
   const reduceMotion = useReducedMotion();
   const poiCount = useOsmPoiStore((s) => s.pois.length);
+  // True while a search-result override is replacing the viewport POIs.
+  const categorySearchActive = useOsmPoiStore((s) => s.categorySearchResults != null);
   const lastZoomRef = useRef(17);
 
   // Sync external followCamera prop into ref
@@ -358,6 +365,45 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     return unsub;
   }, []);
 
+  // Warm the Overpass bbox + Overture tile caches for a viewport without
+  // touching the store. Runs when the camera holds still mid-gesture so the
+  // fetch that follows the settle is served from cache. Fire-and-forget.
+  const prefetchViewportPois = useCallback(
+    (rawBounds: [[number, number], [number, number]], zoom: number) => {
+      if (navigationMode || zoom < POI_CLUSTER_MIN_ZOOM) return;
+      if (useOsmPoiStore.getState().categorySearchResults) return;
+      if (!getConnectivity().isConnected) return;
+      if (poiPrefetchInFlight.current) return;
+
+      const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
+      const MIN_FETCH_SPAN_DEG = 0.008;
+      const latSpan = maxLat - minLat;
+      const lngSpan = maxLng - minLng;
+      const latPad = latSpan < MIN_FETCH_SPAN_DEG ? (MIN_FETCH_SPAN_DEG - latSpan) / 2 : 0;
+      const lngPad = lngSpan < MIN_FETCH_SPAN_DEG ? (MIN_FETCH_SPAN_DEG - lngSpan) / 2 : 0;
+      const south = minLat - latPad;
+      const north = maxLat + latPad;
+      const west = minLng - lngPad;
+      const east = maxLng + lngPad;
+
+      const lowZoom = zoom < POI_MIN_ZOOM;
+      const work: Promise<unknown>[] = [
+        fetchOverturePlaces(south, west, north, east, lowZoom ? LOW_ZOOM_ONLINE_CAP : 500).catch(
+          () => [] as OsmPoi[],
+        ),
+      ];
+      if (!lowZoom) {
+        work.push(fetchOsmPois(south, west, north, east).catch(() => [] as OsmPoi[]));
+      }
+
+      poiPrefetchInFlight.current = true;
+      void Promise.all(work).finally(() => {
+        poiPrefetchInFlight.current = false;
+      });
+    },
+    [navigationMode],
+  );
+
   // Clear stale POI pills as soon as zoom changes significantly. Without this,
   // the old fixed-pixel pills converge and visually overlap during the animation
   // since onRegionDidChange only fires when the gesture fully settles.
@@ -374,6 +420,18 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         setCurrentZoom(zoom);
       }
       if (navigationMode || zoomClearedRef.current) return;
+
+      // Warm caches if the user holds the camera still during the gesture.
+      const changingBounds: [[number, number], [number, number]] | undefined =
+        event?.properties?.visibleBounds;
+      if (changingBounds && event?.properties?.isUserInteraction) {
+        if (poiPrefetchTimer.current) clearTimeout(poiPrefetchTimer.current);
+        poiPrefetchTimer.current = setTimeout(() => {
+          poiPrefetchTimer.current = null;
+          prefetchViewportPois(changingBounds, zoom);
+        }, POI_PREFETCH_DEBOUNCE_MS);
+      }
+
       const { currentZoom, categorySearchResults } = useOsmPoiStore.getState();
       if (!categorySearchResults && Math.abs(zoom - currentZoom) >= 1) {
         useOsmPoiStore.getState().setPois([]);
@@ -394,13 +452,19 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         zoomClearedRef.current = true;
       }
     },
-    [navigationMode, onFollowCameraChange],
+    [navigationMode, onFollowCameraChange, prefetchViewportPois],
   );
 
   const handleRegionDidChange = useCallback(
     (event: any) => {
       // Reset the zoom-clear guard so the next gesture can clear again.
       zoomClearedRef.current = false;
+
+      // The gesture settled; the real fetch below supersedes any pending warm-up.
+      if (poiPrefetchTimer.current) {
+        clearTimeout(poiPrefetchTimer.current);
+        poiPrefetchTimer.current = null;
+      }
 
       // Don't fetch POIs while actively navigating — camera moves constantly and
       // POI annotations would fight the nav UI.
@@ -638,6 +702,41 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }, OSM_FETCH_DEBOUNCE_MS);
     },
     [navigationMode],
+  );
+
+  // A search override replaces the viewport POIs without updating the fetch
+  // bookkeeping. Once it ends, the POIs in the store no longer correspond to
+  // `lastLoadedFetchBounds`, so invalidate the reuse guard — otherwise panning
+  // back over an already-fetched area is skipped and shows no POIs.
+  const prevCategorySearchActiveRef = useRef(categorySearchActive);
+  useEffect(() => {
+    const wasActive = prevCategorySearchActiveRef.current;
+    prevCategorySearchActiveRef.current = categorySearchActive;
+    // The search override owns the map; drop any pending cache warm-up.
+    if (poiPrefetchTimer.current) {
+      clearTimeout(poiPrefetchTimer.current);
+      poiPrefetchTimer.current = null;
+    }
+    if (!wasActive || categorySearchActive) return;
+    if (poiFetchTimer.current) {
+      clearTimeout(poiFetchTimer.current);
+      poiFetchTimer.current = null;
+    }
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    lastLoadedFetchBounds.current = null;
+    inFlightFetchBounds.current = null;
+  }, [categorySearchActive]);
+
+  // Clear pending POI timers on unmount so a late callback can't touch state.
+  useEffect(
+    () => () => {
+      if (poiFetchTimer.current) clearTimeout(poiFetchTimer.current);
+      if (poiPrefetchTimer.current) clearTimeout(poiPrefetchTimer.current);
+    },
+    [],
   );
 
   const handlePress = useCallback(

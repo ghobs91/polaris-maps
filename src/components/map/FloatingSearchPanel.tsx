@@ -1389,6 +1389,9 @@ export function FloatingSearchPanel({
       Keyboard.dismiss();
       clearSearch();
       setResults([]);
+      // Selecting a match ends the search session. Without clearing this, the
+      // store keeps overriding the viewport POIs and MapView skips every fetch.
+      useOsmPoiStore.getState().clearCategorySearch();
 
       // Transit station — open the transit stop card directly
       if (result.entry.type === 'station') {
