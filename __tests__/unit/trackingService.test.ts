@@ -33,7 +33,7 @@ import {
   distToIndex,
   isOffRouteActive,
 } from '../../src/services/navigation/trackingService';
-import { haversineMeters } from '../../src/utils/routeSnap';
+import { haversineMeters, snapToRoute } from '../../src/utils/routeSnap';
 
 // ── Fixtures ────────────────────────────────────────────────────────
 
@@ -276,6 +276,51 @@ describe('trackingService — snap continuity', () => {
     const anchor = getAnchor()!;
     expect(anchor.segIdx).toBe(0);
     expect(anchor.pos[1]).toBeCloseTo(40.0, 4);
+  });
+});
+
+describe('trackingService — external route replacement', () => {
+  // Route A: 40 vertices ~11 m apart heading north (dense, like a real route).
+  const routeACoords: [number, number][] = Array.from({ length: 40 }, (_, i) => [
+    -74.0,
+    40.7 + i * 0.0001,
+  ]);
+  // Replacement route (traffic reroute / alternate / add-stop): same origin,
+  // then heads north-east — a different geometry from A's later segments.
+  const routeBCoords: [number, number][] = Array.from({ length: 30 }, (_, i) => [
+    -74.0 + i * 0.0001,
+    40.702 + i * 0.0001,
+  ]);
+
+  it('re-derives the anchor and segment hint from the next fix after a replaceRoute', () => {
+    const routeA = makeRoute(routeACoords);
+    startNav(routeA);
+    startTracking(routeA);
+
+    // Drive A up to vertex ~20 at ~11 m/s, one fix per second.
+    for (let i = 0; i <= 20; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: 40.7 + i * 0.0001, lng: -74.0, speed: 11.1 }));
+    }
+    expect(getGpsSegmentIndex()).toBe(20);
+
+    // A traffic-style replacement swaps the store route, then the navigation
+    // screen effect re-runs startTracking with the new geometry. The tracker's
+    // anchor and segment hint still belong to the OLD route.
+    const routeB = makeRoute(routeBCoords);
+    useNavigationStore.getState().replaceRoute(routeB);
+    startTracking(routeB);
+
+    // Next fix: the user is exactly at the new route's origin.
+    nowMs += 1000;
+    const fix = makeFix({ lat: routeBCoords[0][1], lng: routeBCoords[0][0], speed: 11.1 });
+    processFix(fix);
+
+    // The stale segment hint must not pull the snap (and thus the puck) tens
+    // of metres up the new route.
+    const fixSnap = snapToRoute([fix.coords.longitude, fix.coords.latitude], getRouteCoords());
+    expect(getGpsSegmentIndex()).toBe(fixSnap.segmentIndex);
+    expect(haversineMeters(getAnchor()!.pos, fixSnap.snapped)).toBeLessThan(2);
   });
 });
 

@@ -43,6 +43,7 @@ export interface DrAnchor {
 }
 
 let coords: [number, number][] = [];
+let trackedGeometry = '';
 let allManeuvers: ValhallaManeuver[] = [];
 let activeRouteSummaryDistanceMeters = 0;
 let activeRouteSummaryDurationSeconds = 0;
@@ -89,6 +90,18 @@ const WRONG_WAY_BACKWARD_GROWTH_METERS = 10;
  * resets all per-route state. Safe to call again on reroutes (replaces state).
  */
 export function startTracking(route: ValhallaRoute): void {
+  // A route replacement from outside this module (traffic reroute, alternate
+  // selection, add/remove stop) hands us new geometry while drAnchor and
+  // gpsSegmentIndex still refer to the previous route: projecting the puck
+  // from that stale anchor glided it off the new route. Drop both so the next
+  // fix re-derives them. This module's own reroute path adopts its new route
+  // (and re-anchors) before the caller re-runs startTracking with the same
+  // geometry, so that fresh anchor survives.
+  if (route.geometry !== trackedGeometry) {
+    drAnchor = null;
+    gpsSegmentIndex = 0;
+  }
+  trackedGeometry = route.geometry;
   coords = decodePolyline(route.geometry);
   allManeuvers = route.legs.flatMap((l) => l.maneuvers);
   activeRouteSummaryDistanceMeters = route.summary.distanceMeters;
@@ -110,6 +123,7 @@ export function startTracking(route: ValhallaRoute): void {
 export function stopTracking(): void {
   trackingActive = false;
   coords = [];
+  trackedGeometry = '';
   allManeuvers = [];
   activeRouteSummaryDistanceMeters = 0;
   activeRouteSummaryDurationSeconds = 0;
