@@ -32,9 +32,9 @@ const NATIVE_FILES = [
 ];
 
 const ENTITLEMENTS_FILES = [
-  { name: 'PolarisMaps.Debug.entitlements', carplayNavigation: true },
-  { name: 'PolarisMaps.entitlements', carplayNavigation: true },
-  { name: 'PolarisMaps.SimulatorCarPlay.entitlements', carplayNavigation: false },
+  { name: 'PolarisMaps.Debug.entitlements', carplay: true },
+  { name: 'PolarisMaps.entitlements', carplay: true },
+  { name: 'PolarisMaps.SimulatorCarPlay.entitlements', carplay: false },
 ];
 
 const CARPLAY_SCENE_ROLE = 'CPTemplateApplicationSceneSessionRoleApplication';
@@ -60,31 +60,32 @@ function copyFiles() {
 }
 
 function writeEntitlementsFiles() {
-  // Device builds (Debug and Release) carry com.apple.developer.carplay-navigation
-  // because this is a turn-by-turn navigation app; the matching provisioning
-  // profile must authorize it (regenerate the profile if signing complains).
-  // com.apple.developer.carplay-maps is deliberately NOT used: it is for
-  // map-only apps and an unapproved key is rejected on App Store submission.
-  // Simulator entitlements stay clean because simulator re-signing merges both
+  // Device builds (Debug and Release) carry com.apple.developer.carplay-maps.
+  // This App ID holds Apple's "CarPlay Navigation" capability, which Apple
+  // provisions as the carplay-maps entitlement — a freshly generated App Store
+  // profile for com.polarismaps.app contains carplay-maps, NOT
+  // carplay-navigation, so requesting the latter fails code signing with
+  // "Entitlement ... not found and could not be included in profile".
+  // Simulator entitlements stay clean because simulator re-signing merges the
   // CarPlay keys ad-hoc in scripts/resign-carplay-simulator-app.sh.
-  const contentsFor = (carplayNavigation) => `<?xml version="1.0" encoding="UTF-8"?>
+  const contentsFor = (carplay) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
     <string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>${
-      carplayNavigation
+      carplay
         ? `
-    <key>com.apple.developer.carplay-navigation</key>
+    <key>com.apple.developer.carplay-maps</key>
     <true/>`
         : ''
     }
   </dict>
 </plist>
 `;
-  for (const { name, carplayNavigation } of ENTITLEMENTS_FILES) {
+  for (const { name, carplay } of ENTITLEMENTS_FILES) {
     const dest = path.join(IOS_DIR, 'PolarisMaps', name);
-    fs.writeFileSync(dest, contentsFor(carplayNavigation));
+    fs.writeFileSync(dest, contentsFor(carplay));
     console.log('[withCarPlay] Wrote ' + dest);
   }
 }

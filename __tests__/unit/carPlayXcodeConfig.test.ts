@@ -106,14 +106,14 @@ describe('CarPlay iOS configuration', () => {
       '<key>com.apple.developer.carplay-navigation</key>',
     );
     expect(simulatorEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
-    // Device builds carry the navigation entitlement (turn-by-turn app) and
-    // must NOT carry the map-only carplay-maps key, which App Review rejects
-    // without approval. The provisioning profile must authorize the navigation
-    // entitlement (regenerate it if signing complains).
-    expect(debugEntitlements).toContain('<key>com.apple.developer.carplay-navigation</key>');
-    expect(debugEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
-    expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-navigation</key>');
-    expect(releaseEntitlements).not.toContain('<key>com.apple.developer.carplay-maps</key>');
+    // Device builds carry carplay-maps: this App ID's "CarPlay Navigation"
+    // capability is provisioned by Apple as the carplay-maps entitlement, so a
+    // generated App Store profile for the bundle id grants carplay-maps and
+    // NOT carplay-navigation. Requesting the latter fails code signing.
+    expect(debugEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
+    expect(debugEntitlements).not.toContain('<key>com.apple.developer.carplay-navigation</key>');
+    expect(releaseEntitlements).toContain('<key>com.apple.developer.carplay-maps</key>');
+    expect(releaseEntitlements).not.toContain('<key>com.apple.developer.carplay-navigation</key>');
   });
 
   it('buffers CarPlay scene state until the React Native module attaches', () => {
@@ -268,9 +268,7 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).toContain('mapViewHost.showSpeedLimit(value: update.speedLimitValue');
       // A duration-based alert that auto-dismisses must clear the manager's
       // record, or it suppresses every later incident/reroute alert.
-      expect(nativeModule).toContain(
-        'didDismissNavigationAlert navigationAlert: CPNavigationAlert',
-      );
+      expect(nativeModule).toContain('didDismiss navigationAlert: CPNavigationAlert');
       // Empty search field shows Pinned/Recents, the only pre-search surface on
       // iOS < 27 where the floating map panel doesn't exist.
       expect(nativeModule).toContain(

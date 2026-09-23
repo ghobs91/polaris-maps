@@ -1886,8 +1886,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   /// next reroute/incident alert is not suppressed for the rest of the trip.
   func mapTemplate(
     _ mapTemplate: CPMapTemplate,
-    didDismissNavigationAlert navigationAlert: CPNavigationAlert,
-    dismissalContext: CPNavigationAlertDismissalContext
+    didDismiss navigationAlert: CPNavigationAlert,
+    dismissalContext: CPNavigationAlert.DismissalContext
   ) {
     if activeAlert === navigationAlert {
       activeAlert = nil
