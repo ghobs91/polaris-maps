@@ -1,13 +1,19 @@
 /**
- * Custom MapLibre light-mode style inspired by Apple Maps' light appearance.
+ * Custom MapLibre light-mode style tuned to Apple Maps' light appearance.
+ *
+ * Apple Maps' light look is a warm cream base with clearly readable mid-gray
+ * structure: buildings, arterials and road casings are distinctly darker than
+ * the land, so features stay legible on bright CarPlay head units instead of
+ * washing out into a near-white field.
  *
  * Characteristics:
- *   - Neutral off-white land (#F2F1EC) — Apple Maps' light land tone
- *   - Soft sky-blue water (#A6D0EC)
- *   - Grey-blue highways (motorway/trunk) with stronger visual hierarchy
- *   - White local roads with warm grey casings
- *   - Fresh green parks (#C3E6B0) and woodland (#A8D68C)
- *   - Dark slate labels with light halos for readability
+ *   - Warm cream land (#F4F1E9)
+ *   - Soft sky-blue water (#A0CCE9)
+ *   - Warm mid-gray buildings (#D7D3C8) at higher fill opacity
+ *   - Muted warm-gray motorways/trunks with lighter halos; white local roads
+ *     with gray casings
+ *   - Fresh green parks (#C7E4A9) and woodland (#A6D286)
+ *   - Dark slate labels with land-colored halos for readability
  *
  * Uses OpenFreeMap vector tiles (OpenMapTiles schema). No API key required.
  */
@@ -42,7 +48,7 @@ const style = {
           4,
           '#EEECE7',
           5,
-          '#F2F1EC',
+          '#F4F1E9',
         ],
       },
     },
@@ -206,9 +212,9 @@ const style = {
           4,
           '#7DA862',
           5,
-          '#A8D68C',
+          '#A6D286',
           6,
-          '#A8D68C',
+          '#A6D286',
         ],
         'fill-opacity': ['interpolate', ['linear'], ['zoom'], 0, 1.0, 4, 1.0, 5, 0.5, 6, 0.5],
       },
@@ -290,7 +296,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['==', 'class', 'residential'],
-      paint: { 'fill-color': '#E2E0DA', 'fill-opacity': 0.32 },
+      paint: { 'fill-color': '#E5E1D6', 'fill-opacity': 0.36 },
     },
     {
       id: 'landuse-commercial',
@@ -298,7 +304,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['in', 'class', 'commercial', 'retail'],
-      paint: { 'fill-color': '#DEDCD5', 'fill-opacity': 0.32 },
+      paint: { 'fill-color': '#E3DFD4', 'fill-opacity': 0.36 },
     },
     {
       id: 'landuse-industrial',
@@ -306,7 +312,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['==', 'class', 'industrial'],
-      paint: { 'fill-color': '#E9E7E1', 'fill-opacity': 0.3 },
+      paint: { 'fill-color': '#E8E4D9', 'fill-opacity': 0.32 },
     },
     {
       id: 'landuse-park',
@@ -314,7 +320,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['in', 'class', 'park', 'garden', 'playground'],
-      paint: { 'fill-color': '#C3E6B0', 'fill-opacity': 0.56 },
+      paint: { 'fill-color': '#C7E4A9', 'fill-opacity': 0.6 },
     },
     {
       id: 'landuse-cemetery',
@@ -322,7 +328,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['==', 'class', 'cemetery'],
-      paint: { 'fill-color': '#CBE8BC', 'fill-opacity': 0.36 },
+      paint: { 'fill-color': '#CBE5B8', 'fill-opacity': 0.4 },
     },
     {
       id: 'landuse-hospital',
@@ -330,7 +336,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['==', 'class', 'hospital'],
-      paint: { 'fill-color': '#EFE6EC', 'fill-opacity': 0.3 },
+      paint: { 'fill-color': '#EFE7EA', 'fill-opacity': 0.32 },
     },
     {
       id: 'landuse-school',
@@ -338,7 +344,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['==', 'class', 'school'],
-      paint: { 'fill-color': '#E8E3EE', 'fill-opacity': 0.3 },
+      paint: { 'fill-color': '#E9E4EC', 'fill-opacity': 0.32 },
     },
     {
       id: 'landuse-stadium',
@@ -346,7 +352,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'landuse',
       filter: ['in', 'class', 'stadium', 'pitch'],
-      paint: { 'fill-color': '#B7DDA0', 'fill-opacity': 0.44 },
+      paint: { 'fill-color': '#B6DB99', 'fill-opacity': 0.48 },
     },
 
     // Park overlay (named parks from dedicated source layer)
@@ -355,7 +361,7 @@ const style = {
       type: 'fill',
       source: 'openmaptiles',
       'source-layer': 'park',
-      paint: { 'fill-color': '#C3E6B0', 'fill-opacity': 0.54 },
+      paint: { 'fill-color': '#C7E4A9', 'fill-opacity': 0.58 },
     },
 
     // ───────────────────── Water ─────────────────────
@@ -364,7 +370,7 @@ const style = {
       type: 'fill',
       source: 'openmaptiles',
       'source-layer': 'water',
-      paint: { 'fill-color': '#A6D0EC' },
+      paint: { 'fill-color': '#A0CCE9' },
     },
     {
       id: 'waterway',
@@ -372,7 +378,7 @@ const style = {
       source: 'openmaptiles',
       'source-layer': 'waterway',
       paint: {
-        'line-color': '#A6D0EC',
+        'line-color': '#A0CCE9',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 14, 2, 18, 4],
       },
     },
@@ -385,8 +391,8 @@ const style = {
       'source-layer': 'building',
       minzoom: 13,
       paint: {
-        'fill-color': '#E6E4DD',
-        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, 0.58, 17, 0.78],
+        'fill-color': '#D7D3C8',
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14, 0.4, 15, 0.78, 17, 0.9],
       },
     },
     // Subtle ground shadow beneath extruded buildings
@@ -398,7 +404,7 @@ const style = {
       minzoom: 14,
       paint: {
         'fill-color': '#000000',
-        'fill-opacity': 0.08,
+        'fill-opacity': 0.1,
         'fill-translate': [2, 2],
       },
     },
@@ -409,10 +415,10 @@ const style = {
       'source-layer': 'building',
       minzoom: 14,
       paint: {
-        'fill-extrusion-color': '#E6E4DD',
+        'fill-extrusion-color': '#D7D3C8',
         'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 10],
         'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.85, 17, 0.95],
+        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.88, 17, 0.96],
         'fill-extrusion-vertical-gradient': true,
       },
     },
@@ -425,7 +431,7 @@ const style = {
       'source-layer': 'aeroway',
       filter: ['==', 'class', 'runway'],
       paint: {
-        'line-color': '#E7E5DE',
+        'line-color': '#DED9CE',
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 14, 6, 18, 20],
       },
     },
@@ -449,7 +455,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['in', 'class', 'service', 'track']],
       paint: {
-        'line-color': '#E6E4DD',
+        'line-color': '#D7D3C8',
         'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 18, 3],
         'line-dasharray': [3, 3],
       },
@@ -473,7 +479,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'secondary']],
       paint: {
-        'line-color': '#E7E5DE',
+        'line-color': '#DED9CE',
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 14, 2, 18, 8],
         'line-dasharray': [3, 3],
       },
@@ -485,7 +491,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'primary']],
       paint: {
-        'line-color': '#C8C8C2',
+        'line-color': '#BFBAB0',
         'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 14, 3, 18, 10],
         'line-dasharray': [3, 3],
       },
@@ -497,7 +503,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'trunk']],
       paint: {
-        'line-color': '#B0B1B8',
+        'line-color': '#B0ACA2',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 14, 3, 18, 12],
         'line-dasharray': [3, 3],
       },
@@ -509,7 +515,7 @@ const style = {
       'source-layer': 'transportation',
       filter: ['all', ['==', 'brunnel', 'tunnel'], ['==', 'class', 'motorway']],
       paint: {
-        'line-color': '#A4A5AC',
+        'line-color': '#A19D93',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 14, 4, 18, 14],
         'line-dasharray': [3, 3],
       },
@@ -526,7 +532,7 @@ const style = {
       minzoom: 5,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#E2E0DA',
+        'line-color': '#DCD7CC',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 2.5, 14, 6, 18, 18],
       },
     },
@@ -539,7 +545,7 @@ const style = {
       minzoom: 6,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#E2E0DA',
+        'line-color': '#DCD7CC',
         'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 10, 2, 14, 5, 18, 16],
       },
     },
@@ -552,7 +558,7 @@ const style = {
       minzoom: 7,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#DEDCD5',
+        'line-color': '#D8D3C8',
         'line-width': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 14, 4, 18, 13],
       },
     },
@@ -565,8 +571,34 @@ const style = {
       minzoom: 9,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#DEDCD5',
+        'line-color': '#D8D3C8',
         'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.5, 14, 3, 18, 11],
+      },
+    },
+    {
+      id: 'road-minor-casing',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'transportation',
+      filter: ['all', ['!has', 'brunnel'], ['in', 'class', 'minor', 'tertiary']],
+      minzoom: 10,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#DAD5CA',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.6, 14, 2.4, 16, 5, 18, 9.5],
+      },
+    },
+    {
+      id: 'road-service-casing',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'transportation',
+      filter: ['all', ['!has', 'brunnel'], ['==', 'class', 'service']],
+      minzoom: 13,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#DAD5CA',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.6, 16, 2.3, 18, 5.5],
       },
     },
 
@@ -580,7 +612,7 @@ const style = {
       minzoom: 14,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#E7E5DE',
+        'line-color': '#DED9CE',
         'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.5, 18, 2],
         'line-dasharray': [2, 2],
       },
@@ -646,7 +678,7 @@ const style = {
       minzoom: 5,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#9A9BA2',
+        'line-color': '#A8A49A',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.3, 10, 1.5, 14, 3.5, 18, 13],
       },
     },
@@ -659,7 +691,7 @@ const style = {
       minzoom: 4,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#8A8B93',
+        'line-color': '#9C988E',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 8, 1, 14, 4, 18, 16],
       },
     },
@@ -671,7 +703,7 @@ const style = {
       filter: ['==', 'class', 'rail'],
       minzoom: 10,
       paint: {
-        'line-color': '#C0BDB6',
+        'line-color': '#BDB8AD',
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.3, 14, 1.2, 18, 3],
       },
     },
@@ -683,7 +715,7 @@ const style = {
       filter: ['==', 'class', 'rail'],
       minzoom: 10,
       paint: {
-        'line-color': '#E6E4DD',
+        'line-color': '#D7D3C8',
         'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.3, 14, 1, 18, 2.5],
         'line-dasharray': [3, 4],
       },
@@ -702,7 +734,7 @@ const style = {
       ],
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
-        'line-color': '#E2E0DA',
+        'line-color': '#DCD7CC',
         'line-width': [
           'interpolate',
           ['linear'],
@@ -784,7 +816,7 @@ const style = {
       filter: ['all', ['==', 'brunnel', 'bridge'], ['==', 'class', 'trunk']],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#9A9BA2',
+        'line-color': '#A8A49A',
         'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 14, 3.5, 18, 12],
       },
     },
@@ -796,7 +828,7 @@ const style = {
       filter: ['all', ['==', 'brunnel', 'bridge'], ['==', 'class', 'motorway']],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#8A8B93',
+        'line-color': '#9C988E',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 14, 4, 18, 14],
       },
     },
@@ -809,7 +841,7 @@ const style = {
       'source-layer': 'boundary',
       filter: ['==', 'admin_level', 2],
       paint: {
-        'line-color': '#C0BDB6',
+        'line-color': '#BDB8AD',
         'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 10, 2],
         'line-dasharray': [3, 2],
       },
@@ -822,7 +854,7 @@ const style = {
       filter: ['==', 'admin_level', 4],
       minzoom: 4,
       paint: {
-        'line-color': '#E7E5DE',
+        'line-color': '#DED9CE',
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.3, 10, 1],
         'line-dasharray': [2, 2],
       },
@@ -844,7 +876,7 @@ const style = {
       },
       paint: {
         'text-color': '#3E6E8C',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.5,
       },
     },
@@ -863,7 +895,7 @@ const style = {
       },
       paint: {
         'text-color': '#3E6E8C',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.2,
       },
     },
@@ -881,7 +913,7 @@ const style = {
       },
       paint: {
         'text-color': '#3E6E8C',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1,
       },
     },
@@ -899,7 +931,7 @@ const style = {
       },
       paint: {
         'text-color': '#3E6E8C',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 0.8,
       },
     },
@@ -921,7 +953,7 @@ const style = {
       },
       paint: {
         'text-color': '#33363C',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.5,
       },
     },
@@ -941,7 +973,7 @@ const style = {
       },
       paint: {
         'text-color': '#3A3A38',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.2,
       },
     },
@@ -961,7 +993,7 @@ const style = {
       },
       paint: {
         'text-color': '#4A4A48',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1,
       },
     },
@@ -984,7 +1016,7 @@ const style = {
       },
       paint: {
         'text-color': '#2A2A28',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.5,
       },
     },
@@ -1006,7 +1038,7 @@ const style = {
       },
       paint: {
         'text-color': '#2A2A28',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.5,
       },
     },
@@ -1028,7 +1060,7 @@ const style = {
       },
       paint: {
         'text-color': '#3A3A38',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.2,
       },
     },
@@ -1047,7 +1079,7 @@ const style = {
       },
       paint: {
         'text-color': '#1A1A18',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.5,
       },
     },
@@ -1066,7 +1098,7 @@ const style = {
       },
       paint: {
         'text-color': '#2A2A28',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1.2,
       },
     },
@@ -1085,7 +1117,7 @@ const style = {
       },
       paint: {
         'text-color': '#3A3A38',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1,
       },
     },
@@ -1106,7 +1138,7 @@ const style = {
       },
       paint: {
         'text-color': '#4A4A48',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1,
       },
     },
@@ -1127,7 +1159,7 @@ const style = {
       },
       paint: {
         'text-color': '#5A5A58',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1,
       },
     },
@@ -1152,7 +1184,7 @@ const style = {
       },
       paint: {
         'text-color': '#3A3A38',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 1,
       },
     },
@@ -1171,7 +1203,7 @@ const style = {
       },
       paint: {
         'text-color': '#5A5A58',
-        'text-halo-color': '#F2F1EC',
+        'text-halo-color': '#F4F1E9',
         'text-halo-width': 0.8,
       },
     },

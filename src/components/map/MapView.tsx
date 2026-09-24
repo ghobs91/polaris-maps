@@ -836,7 +836,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       return buildOfflineStyle(base, {
         sourceId: offlinePack.sourceId,
         tileBaseUrl: offlinePack.tileBaseUrl,
-        fallbackBackground: isDark ? '#18262E' : '#F2F1EC',
+        fallbackBackground: isDark ? '#18262E' : '#F4F1E9',
       });
     } catch {
       return null;
