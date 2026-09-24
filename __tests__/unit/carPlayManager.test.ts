@@ -890,6 +890,48 @@ describe('CarPlayManager', () => {
     );
   });
 
+  it('runs the full search without the debounce while the phone is locked', async () => {
+    (unifiedSearch as jest.Mock).mockResolvedValue([
+      {
+        name: 'Coffee Shop',
+        subtitle: '123 Main St',
+        lat: 40.75,
+        lng: -73.98,
+        score: 80,
+        distanceKm: 0.5,
+        type: 'poi',
+      },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    // Locked / screen-off phone: the app runs in the background and iOS
+    // suspends JS timers, so a debounced network phase would never fire.
+    mockAppState = 'background';
+    jest.useFakeTimers();
+    try {
+      fireEvent('searchQuery', { query: 'coffee' });
+
+      // The full (network) pipeline must already be in flight synchronously —
+      // no debounce timer may be required to reach it.
+      const fullCall = (unifiedSearch as jest.Mock).mock.calls.find(
+        ([, opts]) => (opts as { localOnly?: boolean }).localOnly !== true,
+      );
+      expect(fullCall?.[0]).toBe('coffee');
+
+      // Flush microtasks only; timers stay frozen. The final batch still lands.
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith(
+        expect.any(Array),
+        'coffee',
+        true,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('previews navigation to a dashboard favorite', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);

@@ -889,9 +889,20 @@ function onSearchQuery({ query }: { query: string }) {
     return;
   }
   ensureSearchUserLocation();
-  // Staged, local-first search: the local pass resolves in milliseconds and
-  // the debounced network merge follows, exactly like the phone's search.
-  getSearchSession().search(query);
+  const session = getSearchSession();
+  // While the phone is locked / screen-off the app runs in the background and
+  // iOS suspends JS timers, so the debounced network merge below would never
+  // fire — CarPlay would show only the instant local pass (usually empty) and
+  // look like "no results". Run the full search immediately when not active,
+  // mirroring the `syncMapCenter` background bypass; the foreground keeps the
+  // phone's local-first debounce to coalesce keystrokes.
+  if (AppState.currentState === 'active') {
+    // Staged, local-first search: the local pass resolves in milliseconds and
+    // the debounced network merge follows, exactly like the phone's search.
+    session.search(query);
+  } else {
+    void session.submit(query);
+  }
 }
 
 /** Lazily caches a GPS fix so search ranking can promote nearby places. */
