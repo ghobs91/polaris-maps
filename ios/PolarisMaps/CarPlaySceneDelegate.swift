@@ -21,6 +21,13 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
   ) {
     PolarisCarPlay.sceneDidDisconnect(interfaceController: interfaceController)
   }
+
+  /// Covers a cold launch from the CarPlay home screen: re-assert the map and
+  /// retry its built-in style so the screen isn't blank until the phone app is
+  /// opened and pushes the phone style.
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    PolarisCarPlay.sceneDidBecomeActive()
+  }
 }
 
 /// CarPlay Dashboard widget (iOS 13.4+). Provides the two shortcut buttons the

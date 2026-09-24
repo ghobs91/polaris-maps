@@ -88,6 +88,14 @@ class PolarisCarPlay: RCTEventEmitter {
     DispatchQueue.main.async { Self.attachPendingSceneIfNeeded() }
   }
 
+  /// The CarPlay scene became active (fires on a cold launch from the CarPlay
+  /// home screen too). Re-assert the map window and retry the built-in style if
+  /// it never loaded — otherwise a cold launch shows a blank map until the
+  /// phone app is opened and pushes the phone style.
+  static func sceneDidBecomeActive() {
+    DispatchQueue.main.async { Self.mapTemplateManager.refreshPresentation() }
+  }
+
   static func sceneDidDisconnect(interfaceController: CPInterfaceController) {
     DispatchQueue.main.async {
       mapTemplateManager.deactivate()
@@ -554,7 +562,15 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
     sessionConfiguration = CPSessionConfiguration(delegate: self)
 
-    interfaceController.setRootTemplate(template, animated: false, completion: nil)
+    // Presenting the root template can clear the CPWindow's content (the map),
+    // so re-assert it as soon as the template is up, and once more shortly
+    // after in case the system clears it during the presentation animation.
+    interfaceController.setRootTemplate(template, animated: false) { [weak self] _, _ in
+      self?.mapViewHost.reassertWindowContent()
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.mapViewHost.reassertWindowContent()
+    }
   }
 
   func deactivate() {
@@ -587,6 +603,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
+  }
+
+  /// CarPlay scene activation / cold-launch recovery: re-assert the map window
+  /// and retry the built-in style when JS never pushed one.
+  func refreshPresentation() {
+    mapViewHost.refreshPresentation()
   }
 
   // MARK: Map hosts (template + CarPlay Dashboard split view)

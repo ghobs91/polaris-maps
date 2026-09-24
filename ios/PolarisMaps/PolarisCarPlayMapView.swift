@@ -33,8 +33,37 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     fatalError("init(coder:) has not been implemented")
   }
 
-  /// Same default style as the phone-side light map (src/constants/config.ts).
-  private static let styleURL = URL(string: "https://tiles.openfreemap.org/styles/liberty")!
+  /// Self-contained default style (raster tiles, no remote style document) so a
+  /// cold launch from the CarPlay home screen paints a map without a one-shot
+  /// style fetch that iOS can abort while the phone app is suspended. JS
+  /// replaces it with the phone's resolved style once the bridge attaches.
+  private static let defaultStyleJSON = """
+    {
+      "version": 8,
+      "name": "Polaris CarPlay Default",
+      "sources": {
+        "cartoLight": {
+          "type": "raster",
+          "tiles": [
+            "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+            "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+            "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
+          ],
+          "tileSize": 256,
+          "attribution": "© OpenStreetMap contributors © CARTO",
+          "maxzoom": 20
+        }
+      },
+      "layers": [
+        {
+          "id": "carto-light-raster",
+          "type": "raster",
+          "source": "cartoLight",
+          "paint": { "raster-opacity": 1 }
+        }
+      ]
+    }
+    """
 
   /// Phone parity: white casing + cyan core (DEFAULT_ROUTE_COLOR #2FD4F2,
   /// see TrafficRouteLayer).
@@ -124,7 +153,6 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
     let view = MLNMapView(frame: window.bounds)
     view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    view.styleURL = Self.styleURL
     view.delegate = self
     view.showsUserLocation = false
     view.logoView.isHidden = true
@@ -133,6 +161,10 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
     self.view = view
     window.rootViewController = self
+
+    // Paint immediately with the self-contained style; JS swaps in the phone
+    // style when the bridge attaches.
+    applyStyle(json: Self.defaultStyleJSON)
 
     let badge = SpeedLimitBadge()
     badge.isHidden = true
@@ -188,6 +220,14 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     } else if view.superview == nil {
       self.view = view
     }
+    layoutOverlays()
+  }
+
+  /// Called when the CarPlay scene becomes active: re-assert the window content
+  /// so a cold launch from the CarPlay home screen isn't left blank by a
+  /// template presentation that replaced the window's root view controller.
+  func refreshPresentation() {
+    reassertWindowContent()
     layoutOverlays()
   }
 
