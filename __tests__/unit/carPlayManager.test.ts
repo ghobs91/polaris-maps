@@ -351,8 +351,8 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
       expect.objectContaining({
         isNavigating: true,
-        instruction: 'Head north on Main St',
-        maneuverType: 'start',
+        instruction: 'Turn right onto Oak Ave',
+        maneuverType: 'turn_right',
       }),
     );
   });
@@ -377,8 +377,8 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
       expect.objectContaining({
         isNavigating: true,
-        instruction: 'Head north on Main St',
-        maneuverType: 'start',
+        instruction: 'Turn right onto Oak Ave',
+        maneuverType: 'turn_right',
       }),
     );
   });
@@ -444,9 +444,11 @@ describe('CarPlayManager', () => {
     jest.clearAllMocks();
 
     const route = makeRoute();
-    // Enrich the first maneuver the way the routing pipeline does.
-    route.legs[0].maneuvers[0] = {
-      ...route.legs[0].maneuvers[0],
+    // Enrich the guidance (next) maneuver the way the routing pipeline does:
+    // guidance is the maneuver the live countdown points at, not the segment
+    // already reached.
+    route.legs[0].maneuvers[1] = {
+      ...route.legs[0].maneuvers[1],
       speedLimitMph: 25,
       laneGuidance: {
         laneCount: 3,
@@ -462,10 +464,10 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
       expect.objectContaining({
         isNavigating: true,
-        instruction: 'Head north on Main St',
-        displayInstruction: 'Head north on Main Street',
-        maneuverType: 'start',
-        // Live tracking countdown wins over the static 200 m route value.
+        instruction: 'Turn right onto Oak Ave',
+        displayInstruction: 'Turn right onto Oak Avenue',
+        maneuverType: 'turn_right',
+        // Live tracking countdown wins over the static route value.
         distanceToTurnMeters: 87,
         speedLimitValue: 25,
         speedLimitUnit: 'mph',
@@ -507,11 +509,11 @@ describe('CarPlayManager', () => {
     useNavigationStore
       .getState()
       .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
-    // First maneuver: 200 m in 30 s; halfway there → ~15 s left.
+    // Guidance maneuver (turn right): 800 m in 90 s; at 100 m → 11.25 s left.
     useNavigationTrackingStore.getState().setDistanceToTurn(100);
 
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenLastCalledWith(
-      expect.objectContaining({ distanceToTurnMeters: 100, durationToTurnSeconds: 15 }),
+      expect.objectContaining({ distanceToTurnMeters: 100, durationToTurnSeconds: 11.25 }),
     );
   });
 
@@ -763,7 +765,8 @@ describe('CarPlayManager', () => {
     initCarPlay();
     fireEvent('carPlayConnected');
     const route = makeRoute();
-    route.legs[0].maneuvers[0] = { ...route.legs[0].maneuvers[0], speedLimitMph: 25 };
+    // Guidance maneuver (the one shown on the card) carries the limit.
+    route.legs[0].maneuvers[1] = { ...route.legs[0].maneuvers[1], speedLimitMph: 25 };
     useNavigationStore
       .getState()
       .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');

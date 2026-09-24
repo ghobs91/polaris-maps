@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNavigationStore } from '@/stores/navigationStore';
+import { guidanceManeuverIndex } from '@/utils/navigationManeuvers';
 import type { CostingModel } from '@/models/route';
 import {
   startActivity,
@@ -48,9 +49,11 @@ export function useLiveActivity() {
       const s = useNavigationStore.getState();
       if (!isActive()) return;
 
-      const instruction = s.currentManeuver!.verbalPreTransition || s.currentManeuver!.instruction;
-      const streetName = s.currentManeuver!.streetNames?.[0];
-      const maneuverIdx = s.currentStepIndex;
+      const allManeuvers = s.activeRoute!.legs.flatMap((l) => l.maneuvers);
+      const maneuverIdx = guidanceManeuverIndex(s.currentStepIndex, allManeuvers);
+      const maneuver = allManeuvers[maneuverIdx] ?? s.currentManeuver!;
+      const instruction = maneuver.verbalPreTransition || maneuver.instruction;
+      const streetName = maneuver.streetNames?.[0];
       const now = Date.now();
 
       if (!activityRef.current.started) {
@@ -60,7 +63,7 @@ export function useLiveActivity() {
         startActivity({
           etaSeconds: s.etaSeconds!,
           remainingDistanceMeters: s.remainingDistanceMeters!,
-          maneuverType: s.currentManeuver!.type,
+          maneuverType: maneuver.type,
           maneuverInstruction: instruction,
           streetName,
           destinationName: destinationName(s.destination, s.costing),
@@ -75,7 +78,7 @@ export function useLiveActivity() {
         updateActivity({
           etaSeconds: s.etaSeconds!,
           remainingDistanceMeters: s.remainingDistanceMeters!,
-          maneuverType: s.currentManeuver!.type,
+          maneuverType: maneuver.type,
           maneuverInstruction: instruction,
           streetName,
         });

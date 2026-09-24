@@ -1,4 +1,4 @@
-import { Alert, AppState, Platform } from 'react-native';
+import { Alert, AppState, Linking, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import type { LocationObject } from 'expo-location';
@@ -73,6 +73,30 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   }
 });
 
+// Shown at most once per app run: after a "Not Now" / deferred grant the OS
+// status can stay "undetermined" forever, so the explainer never fires again
+// and locked guidance silently stops. This points the driver at Settings.
+let settingsNudgeShown = false;
+
+/** Point the driver at Settings when "Always" is the only thing missing. */
+function nudgeBackgroundSettings(): void {
+  if (settingsNudgeShown) return;
+  settingsNudgeShown = true;
+  Alert.alert(
+    'Keep guidance while locked',
+    'Turn-by-turn directions pause when your phone is locked until Location access is set to "Always".',
+    [
+      { text: 'Not Now', style: 'cancel' },
+      { text: 'Open Settings', onPress: () => void Linking.openSettings() },
+    ],
+  );
+}
+
+/** Test-only: reset the once-per-run Settings nudge. */
+export function resetBackgroundSettingsNudge(): void {
+  settingsNudgeShown = false;
+}
+
 /** Resolve after showing the pre-prompt explainer. False if dismissed. */
 function showBackgroundPermissionExplainer(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -106,12 +130,21 @@ export async function startBackgroundNavSession(): Promise<boolean> {
 
     const background = await Location.getBackgroundPermissionsAsync();
     let granted = background.granted;
+    let askedThisCall = false;
     if (!granted && background.canAskAgain && background.status === 'undetermined') {
-      // Respect a previous "Not Now" — never nag on every launch.
-      if (storage.getBoolean(EXPLAINER_DISMISSED_KEY)) return false;
+      // Respect a previous "Not Now" — never nag on every launch, but still
+      // point the driver at Settings once per run (the OS status can stay
+      // "undetermined" forever, so the explainer never returns).
+      if (storage.getBoolean(EXPLAINER_DISMISSED_KEY)) {
+        nudgeBackgroundSettings();
+        return false;
+      }
       // We already asked once (explainer + OS request) without a grant.
-      // Stay silent; the user can enable "Always" in Settings.
-      if (storage.getBoolean(BACKGROUND_REQUEST_ATTEMPTED_KEY)) return false;
+      if (storage.getBoolean(BACKGROUND_REQUEST_ATTEMPTED_KEY)) {
+        nudgeBackgroundSettings();
+        return false;
+      }
+      askedThisCall = true;
       const proceed = await showBackgroundPermissionExplainer();
       if (!proceed) {
         storage.set(EXPLAINER_DISMISSED_KEY, true);
@@ -121,10 +154,18 @@ export async function startBackgroundNavSession(): Promise<boolean> {
       const requested = await Location.requestBackgroundPermissionsAsync();
       granted = requested.granted;
     }
-    if (!granted) return false;
+    if (!granted) {
+      // "While Using" (or a deferred Always) — the only fix is Settings. Don't
+      // stack a second alert on top of the explainer we just showed.
+      if (!askedThisCall) nudgeBackgroundSettings();
+      return false;
+    }
 
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.BestForNavigation,
+      // AutomotiveNavigation keeps iOS delivering in-car fixes (and stops it
+      // from pausing when it thinks the vehicle is stationary).
+      activityType: Location.ActivityType.AutomotiveNavigation,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
     });

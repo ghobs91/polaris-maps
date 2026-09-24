@@ -21,6 +21,7 @@ const mockRequestBackgroundPermissions = jest.fn();
 jest.mock('expo-location', () => ({
   __esModule: true,
   Accuracy: { BestForNavigation: 6, High: 5, Balanced: 3 },
+  ActivityType: { Other: 1, AutomotiveNavigation: 2, Fitness: 3, OtherNavigation: 4, Airborne: 5 },
   startLocationUpdatesAsync: (...args: unknown[]) => mockStartLocationUpdates(...args),
   stopLocationUpdatesAsync: (...args: unknown[]) => mockStopLocationUpdates(...args),
   hasStartedLocationUpdatesAsync: (...args: unknown[]) => mockHasStartedLocationUpdates(...args),
@@ -84,8 +85,10 @@ jest.mock('react-native', () => ({
     get currentState() {
       return mockAppState;
     },
+    addEventListener: jest.fn(() => ({ remove: jest.fn() })),
   },
   Alert: { alert: jest.fn() },
+  Linking: { openSettings: jest.fn() },
   TurboModuleRegistry: { get: () => null },
   NativeModules: {},
 }));
@@ -96,6 +99,7 @@ const TaskManager = require('expo-task-manager');
 import {
   BACKGROUND_LOCATION_TASK,
   reconcileStaleBackgroundSession,
+  resetBackgroundSettingsNudge,
   startBackgroundNavSession,
   stopBackgroundNavSession,
 } from '../../src/services/navigation/backgroundLocationTask';
@@ -182,6 +186,7 @@ function offRouteFix() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  resetBackgroundSettingsNudge();
   mockMmkvStore.clear();
   mockPlatformOs = 'ios';
   mockAppState = 'background';
@@ -250,7 +255,10 @@ describe('background navigation session — start', () => {
 
     const started = await startBackgroundNavSession();
 
-    expect(Alert.alert).not.toHaveBeenCalled();
+    // No second explainer/OS request — but the driver is pointed at Settings
+    // once (the OS status stays "undetermined", so locked guidance would
+    // otherwise die silently).
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
     expect(mockRequestBackgroundPermissions).not.toHaveBeenCalled();
     expect(started).toBe(false);
   });
@@ -278,9 +286,10 @@ describe('background navigation session — start', () => {
     const second = await startBackgroundNavSession();
 
     expect(second).toBe(false);
-    expect(Alert.alert).not.toHaveBeenCalled();
+    // No second OS request, but the once-per-run Settings nudge fires.
     expect(mockRequestBackgroundPermissions).not.toHaveBeenCalled();
     expect(mockStartLocationUpdates).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
   });
 
   it('starts the session on a later launch once Always is granted in Settings', async () => {
@@ -294,13 +303,14 @@ describe('background navigation session — start', () => {
     expect(mockStartLocationUpdates).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back without prompting when background permission was previously denied', async () => {
+  it('points at Settings without re-requesting when background permission was previously denied', async () => {
     mockGetBackgroundPermissions.mockResolvedValue(denied());
 
     const started = await startBackgroundNavSession();
 
     expect(started).toBe(false);
-    expect(Alert.alert).not.toHaveBeenCalled();
+    // The OS can no longer be asked, so the once-per-run Settings nudge fires.
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
     expect(mockRequestBackgroundPermissions).not.toHaveBeenCalled();
     expect(mockStartLocationUpdates).not.toHaveBeenCalled();
   });

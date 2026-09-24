@@ -1,4 +1,6 @@
+import { AppState } from 'react-native';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import {
   reconcileStaleBackgroundSession,
@@ -35,6 +37,16 @@ export function initNavigationBackgroundSession(): void {
   // app was killed mid-navigation). Without this the OS relaunches the app
   // in the background for location delivery indefinitely.
   void reconcileStaleBackgroundSession();
+
+  // Re-assert the managed session whenever the app comes back to the
+  // foreground while navigating: a transient start failure — or an "Always"
+  // grant made in Settings — should take effect without restarting navigation.
+  AppState.addEventListener('change', (status) => {
+    if (status !== 'active') return;
+    if (!useNavigationStore.getState().isNavigating) return;
+    if (useNavigationTrackingStore.getState().backgroundSessionActive) return;
+    void startBackgroundNavSession();
+  });
 
   let wasNavigating = useNavigationStore.getState().isNavigating;
   useNavigationStore.subscribe((state) => {

@@ -11,6 +11,7 @@
 
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
+import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
 import {
   announceArrival,
   announceManeuver,
@@ -68,13 +69,14 @@ function evaluate(): void {
 
   const distance = tracking.distanceToTurn;
   if (distance != null) {
-    const instruction = nav.currentManeuver.verbalPreTransition || nav.currentManeuver.instruction;
+    // The live distance counts down to the NEXT maneuver's begin, so announce
+    // that one — announcing the segment already reached is one step behind.
+    const allManeuvers = nav.activeRoute.legs.flatMap((l) => l.maneuvers);
+    const guidanceIdx = guidanceManeuverIndex(nav.currentStepIndex, allManeuvers);
+    const guidance = allManeuvers[guidanceIdx] ?? nav.currentManeuver;
+    const instruction = guidance.verbalPreTransition || guidance.instruction;
     if (instruction?.trim()) {
-      announceManeuver(
-        `${nav.currentStepIndex}:${nav.currentManeuver.instruction ?? ''}`,
-        distance,
-        instruction,
-      );
+      announceManeuver(`${guidanceIdx}:${guidance.instruction ?? ''}`, distance, instruction);
     }
   }
 }

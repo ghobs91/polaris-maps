@@ -13,6 +13,16 @@ interface NavigationTrackingState {
   setNavPosition: (pos: [number, number] | null) => void;
   setNavBearing: (bearing: number) => void;
   setDistanceToTurn: (meters: number | null) => void;
+  /**
+   * Publish position, bearing and countdown in one update. Writing them
+   * separately lets consumers (CarPlay camera/puck) observe a new position
+   * paired with the previous bearing — which makes the puck jitter.
+   */
+  setLiveState: (
+    navPosition: [number, number] | null,
+    navBearing: number,
+    distanceToTurn: number | null,
+  ) => void;
   setBackgroundSessionActive: (active: boolean) => void;
 }
 
@@ -25,5 +35,7 @@ export const useNavigationTrackingStore = create<NavigationTrackingState>()((set
   setNavPosition: (navPosition) => set({ navPosition }),
   setNavBearing: (navBearing) => set({ navBearing }),
   setDistanceToTurn: (distanceToTurn) => set({ distanceToTurn }),
+  setLiveState: (navPosition, navBearing, distanceToTurn) =>
+    set({ navPosition, navBearing, distanceToTurn }),
   setBackgroundSessionActive: (backgroundSessionActive) => set({ backgroundSessionActive }),
 }));

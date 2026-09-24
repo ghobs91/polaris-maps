@@ -36,6 +36,7 @@ import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
 import { INCIDENT_TYPE_LABELS } from '../traffic/incidentWire';
 import { haversineMeters } from '../../utils/routeSnap';
+import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
 import type { CarPlaySearchResult, CarPlayIncidentMarker } from '../../native/carplay';
 import type { UnifiedSearchResult } from '../search/unifiedSearch';
 import type { EmitterSubscription } from 'react-native';
@@ -321,9 +322,12 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
   }
 
   const allManeuvers = state.activeRoute.legs.flatMap((l) => l.maneuvers);
-  const nextManeuver = allManeuvers[state.currentStepIndex + 1];
+  // Guidance is the next maneuver (the live distance counts down to its begin);
+  // the store's step index is the segment already reached.
+  const guidanceIdx = guidanceManeuverIndex(state.currentStepIndex, allManeuvers);
+  const maneuver = allManeuvers[guidanceIdx] ?? state.currentManeuver;
+  const nextManeuver = allManeuvers[guidanceIdx + 1];
   const tracking = useNavigationTrackingStore.getState();
-  const maneuver = state.currentManeuver;
   const rerouting = state.isRerouting || state.hasDeviated;
   syncRerouteAlert(rerouting);
   const liveDistance = tracking.distanceToTurn ?? maneuver.distanceMeters;

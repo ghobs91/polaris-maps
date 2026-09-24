@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, AppState } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -17,6 +17,7 @@ import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
 import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils/navigationStops';
+import { guidanceManeuverIndex } from '@/utils/navigationManeuvers';
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import { buildRouteAlternatives } from '@/services/routing/routeAlternatives';
@@ -39,6 +40,7 @@ import {
   isOffRouteActive,
   getGpsCourse,
   getGpsSpeed,
+  setForegroundInterpolationActive,
 } from '@/services/navigation/trackingService';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
@@ -367,6 +369,14 @@ export default function NavigationScreen() {
 
     if (getRouteCoords().length < 2) return;
 
+    // While this loop is driving (screen mounted, app active) it is the sole
+    // publisher of the live state; `processFix` publishes only when it is not,
+    // so the two writers never interleave and jitter the puck.
+    setForegroundInterpolationActive(AppState.currentState === 'active');
+    const appStateSub = AppState.addEventListener('change', (status) => {
+      setForegroundInterpolationActive(status === 'active');
+    });
+
     const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
     let subscription: Location.LocationSubscription | null = null;
 
@@ -449,8 +459,6 @@ export default function NavigationScreen() {
           }
           const t = Math.min((now - bearingStartTime) / BEARING_DURATION_MS, 1.0);
           smoothBearingRef.current = interpolateBearing(bearingStart, bearingTarget, t);
-          trackingStore.setNavPosition(curPos);
-          trackingStore.setNavBearing(smoothBearingRef.current);
         } else {
           // Stationary, or frozen while off-route — hold at anchor position
           // (live GPS when deviated). Point the puck along the real GPS
@@ -467,10 +475,8 @@ export default function NavigationScreen() {
               }
               const t = Math.min((now - bearingStartTime) / BEARING_DURATION_MS, 1.0);
               smoothBearingRef.current = interpolateBearing(bearingStart, bearingTarget, t);
-              trackingStore.setNavBearing(smoothBearingRef.current);
             }
           }
-          trackingStore.setNavPosition(curPos);
         }
 
         // Advance maneuver step when the GPS-confirmed position crosses
@@ -494,7 +500,13 @@ export default function NavigationScreen() {
           allManeuvers[liveStepIndex]?.endShapeIndex ?? coords.length - 1,
           coords.length - 1,
         );
-        trackingStore.setDistanceToTurn(distToIndex(curPos, curSegIdx, stepEndIdx));
+        // Publish atomically so CarPlay never sees a new position paired with
+        // the previous bearing (which makes the puck jitter).
+        trackingStore.setLiveState(
+          curPos,
+          smoothBearingRef.current,
+          distToIndex(curPos, curSegIdx, stepEndIdx),
+        );
       }
       interpolationRafRef.current = requestAnimationFrame(interpolate);
     };
@@ -535,6 +547,8 @@ export default function NavigationScreen() {
     return () => {
       cancelled = true;
       subscription?.remove();
+      appStateSub.remove();
+      setForegroundInterpolationActive(false);
       if (interpolationRafRef.current !== null) {
         cancelAnimationFrame(interpolationRafRef.current);
         interpolationRafRef.current = null;
@@ -556,7 +570,12 @@ export default function NavigationScreen() {
   }
 
   const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
-  const nextManeuver = allManeuvers[currentStepIndex + 1] ?? null;
+  // The store's step index is the segment the vehicle has already reached; the
+  // live distance counts down to the next maneuver's begin, so that is what the
+  // banner/voice must show (otherwise the instruction is one step behind).
+  const guidanceIdx = guidanceManeuverIndex(currentStepIndex, allManeuvers);
+  const guidance = allManeuvers[guidanceIdx] ?? currentManeuver;
+  const following = allManeuvers[guidanceIdx + 1] ?? null;
 
   // CarPlay companion: the car shows the map, so the phone shows the step list
   // and an add-stop search bar instead of duplicating the map HUD.
@@ -565,7 +584,7 @@ export default function NavigationScreen() {
       <View style={styles.container}>
         <CarPlayNavigationCompanion
           route={activeRoute}
-          currentStepIndex={currentStepIndex}
+          currentStepIndex={guidanceIdx}
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           destinationName={destination?.name}
@@ -664,12 +683,10 @@ export default function NavigationScreen() {
         <View style={styles.bannerRow}>
           <View style={styles.bannerFlex}>
             <NextTurnBanner
-              maneuver={currentManeuver}
-              nextManeuver={nextManeuver}
+              maneuver={guidance}
+              nextManeuver={following}
               distanceToTurnMeters={distanceToTurn ?? undefined}
-              laneGuidance={
-                modeCapabilities.laneGuidance ? currentManeuver?.laneGuidance : undefined
-              }
+              laneGuidance={modeCapabilities.laneGuidance ? guidance?.laneGuidance : undefined}
             />
           </View>
           {modeCapabilities.speedometer && (
@@ -796,7 +813,7 @@ export default function NavigationScreen() {
       <NavigationStepsList
         visible={showSteps}
         route={activeRoute}
-        currentStepIndex={currentStepIndex}
+        currentStepIndex={guidanceIdx}
         onClose={() => setShowSteps(false)}
       />
     </View>
