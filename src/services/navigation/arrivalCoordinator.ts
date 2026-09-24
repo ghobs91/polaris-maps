@@ -22,13 +22,35 @@ let unsubscribe: (() => void) | null = null;
 const waypointDetector = new ArrivalDetector();
 const destinationDetector = new ArrivalDetector();
 let autoEndTimer: ReturnType<typeof setTimeout> | null = null;
+let arrivedAt: number | null = null;
 let wasNavigating = false;
+
+/** Grace period before an arrived trip auto-ends (lets the card be seen). */
+const AUTO_END_DELAY_MS = 8000;
 
 function clearAutoEnd(): void {
   if (autoEndTimer) {
     clearTimeout(autoEndTimer);
     autoEndTimer = null;
   }
+  arrivedAt = null;
+}
+
+/**
+ * Auto-end the arrived trip once the grace period has elapsed. Driven from
+ * both the timer (reliable while the app is active) and `evaluate()` on every
+ * location fix — iOS suspends JS timers while the phone is locked/screen-off,
+ * so a timer-only auto-end left a CarPlay trip active until the phone woke.
+ */
+function maybeAutoEnd(): void {
+  const nav = useNavigationStore.getState();
+  if (!nav.isNavigating || !nav.hasArrived) {
+    clearAutoEnd();
+    return;
+  }
+  if (arrivedAt === null || Date.now() - arrivedAt < AUTO_END_DELAY_MS) return;
+  clearAutoEnd();
+  nav.stopNavigation();
 }
 
 /** Recompute arrival/leg progression from the two stores. Cheap and idempotent. */
@@ -53,8 +75,13 @@ function evaluate(): void {
     clearAutoEnd();
   }
 
-  // No fix yet, or arrival already latched.
-  if (!tracking.navPosition || nav.hasArrived) return;
+  // Arrival already latched: advance the (possibly timer-suspended) auto-end.
+  if (nav.hasArrived) {
+    maybeAutoEnd();
+    return;
+  }
+  // No fix yet.
+  if (!tracking.navPosition) return;
 
   const onFinalLeg = nav.currentLegIndex >= nav.waypoints.length;
   if (onFinalLeg) {
@@ -67,7 +94,8 @@ function evaluate(): void {
     nav.setArrived(true);
     if (useSettingsStore.getState().navigationAutoEnd) {
       clearAutoEnd();
-      autoEndTimer = setTimeout(() => useNavigationStore.getState().stopNavigation(), 8000);
+      arrivedAt = Date.now();
+      autoEndTimer = setTimeout(maybeAutoEnd, AUTO_END_DELAY_MS);
     }
     return;
   }

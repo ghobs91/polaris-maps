@@ -6,6 +6,14 @@ jest.mock('react-native-mmkv', () => ({
     getBoolean: jest.fn(),
   })),
 }));
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}));
+jest.mock('expo-crypto', () => ({
+  randomUUID: jest.fn(() => '1234567890abcdef1234567890abcdef'),
+}));
 
 import type { ValhallaRoute } from '../../src/models/route';
 import { useNavigationStore } from '../../src/stores/navigationStore';
@@ -74,6 +82,30 @@ describe('arrivalCoordinator', () => {
       expect(useNavigationStore.getState().isNavigating).toBe(false);
     } finally {
       jest.useRealTimers();
+    }
+  });
+
+  it('auto-ends on a later fix when the auto-end timer is suspended (phone locked)', () => {
+    // Simulate a locked phone: the wall clock advances but the 8s setTimeout
+    // never fires. The auto-end must be driven by the wall clock on the next
+    // location fix instead (background fixes keep arriving while locked).
+    const realNow = Date.now();
+    let now = realNow;
+    const spy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      useNavigationStore.getState().startNavigation(makeRoute(), [], DESTINATION, 'auto');
+      useNavigationStore.getState().updateEta(0, 20);
+
+      feedFix(DESTINATION.lat, DESTINATION.lng);
+      expect(useNavigationStore.getState().hasArrived).toBe(true);
+      expect(useNavigationStore.getState().isNavigating).toBe(true);
+
+      now += 9000; // timer still pending — no timers advanced
+      feedFix(DESTINATION.lat, DESTINATION.lng);
+
+      expect(useNavigationStore.getState().isNavigating).toBe(false);
+    } finally {
+      spy.mockRestore();
     }
   });
 

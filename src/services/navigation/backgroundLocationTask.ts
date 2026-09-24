@@ -54,14 +54,14 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     // The managed session is the only fix source while it runs (the screen
     // skips its own watcher when backgroundSessionActive), so fixes delivered
     // while the app is foregrounded must be treated as foreground fixes —
-    // otherwise deviations are flagged but never rerouted until the session
-    // stops. Only true background delivery skips network I/O (iOS watchdog).
+    // otherwise haptics are suppressed on a screen-on fix. Reroutes run either
+    // way (single-flight, backoff-guarded in processFix).
     const background = AppState.currentState !== 'active';
 
     for (const location of locations) {
       try {
-        // Background mode: no network reroutes or haptics (watchdog risk).
-        // Deviations are flagged so a foreground fix reroutes on return.
+        // Background mode: reroutes still run so a locked phone isn't stranded
+        // off-route; haptics are skipped (phone stowed).
         processFix(location, { background });
       } catch {
         // One malformed fix must never kill the headless task.

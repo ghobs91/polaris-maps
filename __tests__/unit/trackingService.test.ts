@@ -19,6 +19,7 @@ jest.mock('expo-haptics', () => ({
   NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
 }));
 
+import * as Haptics from 'expo-haptics';
 import type { ValhallaManeuver, ValhallaRoute } from '../../src/models/route';
 import { useNavigationStore } from '../../src/stores/navigationStore';
 import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingStore';
@@ -493,29 +494,33 @@ describe('trackingService — off-route detection & rerouting', () => {
     }
   });
 
-  it('defers reroute in background: flags deviation, skips network, still updates ETA', () => {
+  it('reroutes in the background but skips haptics', async () => {
     startNav(makeRoute());
     startTracking(makeRoute());
-    mockReroute.mockResolvedValue(makeRoute());
+
+    const newRoute = makeRoute([
+      [A[0] + 0.01, A[1]],
+      [A[0] + 0.01, B[1]],
+    ]);
+    mockReroute.mockResolvedValue(newRoute);
 
     const bg = { background: true } as const;
     processFix(farOffRouteFix(), bg);
     processFix(farOffRouteFix(), bg);
     processFix(farOffRouteFix(), bg);
 
-    // No network reroute from a headless background task (watchdog risk).
-    expect(mockReroute).not.toHaveBeenCalled();
-    // Deviation is flagged so the next foreground fix reroutes immediately…
+    // A locked phone still reroutes (single-flight, backoff-guarded) so the
+    // driver isn't left on a stale route until they unlock.
+    expect(mockReroute).toHaveBeenCalledTimes(1);
     expect(useNavigationStore.getState().hasDeviated).toBe(true);
-    // …and the anchor/ETA pipeline still advanced on the same fixes.
+    // The anchor/ETA pipeline still advanced on the same fixes.
     expect(getAnchor()).not.toBeNull();
     expect(useNavigationStore.getState().remainingDistanceMeters).not.toBeNull();
 
-    // Foreground fix with the deviated flag set reroutes on the threshold.
-    processFix(farOffRouteFix());
-    processFix(farOffRouteFix());
-    processFix(farOffRouteFix());
-    expect(mockReroute).toHaveBeenCalledTimes(1);
+    await Promise.resolve(); // flush .then
+    expect(useNavigationStore.getState().activeRoute).toBe(newRoute);
+    // Background reroutes skip haptics (phone stowed).
+    expect(Haptics.notificationAsync).not.toHaveBeenCalled();
   });
 
   it('does not trigger overlapping reroutes', async () => {
