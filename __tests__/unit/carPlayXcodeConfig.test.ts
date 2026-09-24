@@ -158,6 +158,20 @@ describe('CarPlay iOS configuration', () => {
     expect(nativeModule).not.toContain('listItems(for searchText');
   });
 
+  it('buffers a search query typed before the RN module attaches', () => {
+    // A cold launch from the CarPlay home screen can run the native template
+    // with no React Native module, when `emit` is a no-op. A query typed then
+    // must not be dropped.
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      expect(nativeModule).toContain('private static var pendingSearchQuery');
+      expect(nativeModule).toContain('pendingSearchQuery = query');
+      // Replayed right after carPlayConnected, so JS's connected flag is set.
+      expect(nativeModule).toContain('if let query = pendingSearchQuery');
+      expect(nativeModule).toContain('emit("searchQuery", ["query": query])');
+    }
+  });
+
   it('keeps the committed ios/ CarPlay sources in sync with the plugin sources', () => {
     // CI builds ios/ without running prebuild, so withCarPlay's copy step is
     // bypassed: both copies must be identical by hand.

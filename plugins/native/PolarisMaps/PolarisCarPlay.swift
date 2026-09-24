@@ -18,6 +18,11 @@ class PolarisCarPlay: RCTEventEmitter {
   private static var pendingWindow: CPWindow?
   private static var pendingDashboardWindow: UIWindow?
   private static var isSceneConnected = false
+  /// A search query typed before the RN bridge attached (cold launch). The
+  /// CarPlay template can be live with no React Native module, when `emit` is
+  /// a no-op — buffered here and replayed once JS attaches, mirroring the
+  /// `carPlayConnected` replay.
+  private static var pendingSearchQuery: String?
   private static weak var instance: PolarisCarPlay?
 
   private static let mapTemplateManager = CarPlayTemplateManager()
@@ -54,6 +59,12 @@ class PolarisCarPlay: RCTEventEmitter {
       interfaceController: pendingInterfaceController!, window: pendingWindow!)
     emitContentStyle(dark: mapTemplateManager.contentStyleIsDark)
     emit("carPlayConnected", ["connected": true])
+    // Replay a query the driver typed before JS attached (cold launch), now
+    // that `carPlayConnected` has set the manager's connected flag.
+    if let query = pendingSearchQuery {
+      pendingSearchQuery = nil
+      emit("searchQuery", ["query": query])
+    }
   }
 
   /// Attaches the buffered CarPlay Dashboard window to a second map host so
@@ -102,6 +113,7 @@ class PolarisCarPlay: RCTEventEmitter {
       pendingInterfaceController = nil
       pendingWindow = nil
       pendingDashboardWindow = nil
+      pendingSearchQuery = nil
       isSceneConnected = false
       emit("carPlayDisconnected", ["connected": false])
     }
@@ -1995,6 +2007,12 @@ enum LaneStripImage {
 
 extension PolarisCarPlay {
   fileprivate static func emitSearchQuery(_ query: String) {
+    // No RN module yet (cold launch): buffer the latest query so it still runs
+    // once JS attaches instead of being dropped.
+    guard instance != nil else {
+      pendingSearchQuery = query
+      return
+    }
     emit("searchQuery", ["query": query])
   }
 
