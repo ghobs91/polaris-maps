@@ -12,6 +12,10 @@ import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { initNavigationVoice } from '@/services/tts/navigationVoice';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
 import { initArrivalCoordinator } from '@/services/navigation/arrivalCoordinator';
+import {
+  initFixDrivenRefresh,
+  teardownFixDrivenRefresh,
+} from '@/services/navigation/fixDrivenRefresh';
 import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
 import {
   initTrafficP2P,
@@ -56,6 +60,9 @@ function RootLayoutInner() {
     // Detect arrival / advance waypoints headlessly, so auto-end and the
     // arrival card work on every surface, not only while the screen is mounted.
     initArrivalCoordinator();
+    // Keep traffic/ETA and congestion reroutes fresh on a locked phone, where
+    // the periodic setInterval monitors don't fire (driven off location fixes).
+    initFixDrivenRefresh();
     // Show aggregate offline-download progress in a Live Activity while the
     // app is backgrounded during an active region download.
     initDownloadLiveActivity();
@@ -109,6 +116,7 @@ function RootLayoutInner() {
       disposeRerouteMonitor();
       disposeIncidentExchange();
       disposeTrafficP2P();
+      teardownFixDrivenRefresh();
     };
   }, []);
 

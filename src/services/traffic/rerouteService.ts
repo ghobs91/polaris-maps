@@ -14,12 +14,28 @@ import {
 
 let checkInterval: ReturnType<typeof setInterval> | null = null;
 let lastRerouteAt = 0;
+/** Wall-clock of the last congestion check (see the fix-driven path). */
+let lastCheckAt = 0;
 
 export function startRerouteMonitor(): void {
   if (checkInterval) return;
   checkInterval = setInterval(() => {
-    void checkForReroute();
+    runCongestionCheckIfDue();
   }, CONGESTION_CHECK_INTERVAL_MS);
+}
+
+/**
+ * Run the congestion check if the interval has elapsed.
+ *
+ * The foreground monitor uses `setInterval`, which iOS suspends while the
+ * phone is locked; background navigation calls this on each location fix
+ * instead (see `fixDrivenRefresh`). Shares `lastCheckAt` with the monitor so
+ * the two never overlap.
+ */
+export function runCongestionCheckIfDue(now: number = Date.now()): void {
+  if (now - lastCheckAt < CONGESTION_CHECK_INTERVAL_MS) return;
+  lastCheckAt = now;
+  void checkForReroute();
 }
 
 export function stopRerouteMonitor(): void {
@@ -28,6 +44,7 @@ export function stopRerouteMonitor(): void {
     checkInterval = null;
   }
   lastRerouteAt = 0;
+  lastCheckAt = 0;
 }
 
 function collectTrafficObservations(): TrafficObservation[] {

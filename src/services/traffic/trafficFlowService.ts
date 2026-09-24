@@ -48,6 +48,8 @@ import { fetchOpenTrafficSegments, type FeedBounds } from './openTrafficFeed';
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 let routeFetchInProgress = false;
+/** Wall-clock of the last route-aligned traffic refresh (see the fix-driven path). */
+let lastRouteRefreshAt = 0;
 
 /**
  * Index observed segments into the historical condition index under the
@@ -322,7 +324,28 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
 
 /** Fetch route-aligned traffic immediately. */
 export async function fetchRouteTrafficImmediate(routeCoords: [number, number][]): Promise<void> {
+  lastRouteRefreshAt = Date.now();
   await fetchAndUpdateRouteTraffic(routeCoords);
+}
+
+/**
+ * Refresh route traffic if the interval has elapsed.
+ *
+ * The foreground periodic refresh uses `setInterval`, but iOS suspends JS
+ * timers when the screen locks, so a locked phone never refreshes and ETA /
+ * traffic colours go stale. Location fixes keep arriving, so background
+ * navigation calls this on each fix (see `fixDrivenRefresh`). Shares
+ * `lastRouteRefreshAt` with the interval so the two never double-fetch.
+ */
+export function refreshRouteTrafficIfStale(
+  routeCoords: [number, number][],
+  now: number = Date.now(),
+): boolean {
+  if (routeFetchInProgress) return false;
+  if (now - lastRouteRefreshAt < TRAFFIC_REFRESH_INTERVAL_MS) return false;
+  lastRouteRefreshAt = now;
+  void fetchAndUpdateRouteTraffic(routeCoords);
+  return true;
 }
 
 /**
@@ -332,7 +355,7 @@ export async function fetchRouteTrafficImmediate(routeCoords: [number, number][]
 export function startRoutePeriodicRefresh(routeCoords: [number, number][]): void {
   stopPeriodicRefresh();
   refreshInterval = setInterval(() => {
-    fetchAndUpdateRouteTraffic(routeCoords);
+    refreshRouteTrafficIfStale(routeCoords);
   }, TRAFFIC_REFRESH_INTERVAL_MS);
 }
 
