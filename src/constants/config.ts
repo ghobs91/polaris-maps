@@ -11,10 +11,6 @@
 /** OpenFreeMap MapLibre style URL — global vector tiles, no download needed. */
 export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
-/** CARTO Dark Matter MapLibre style — used when the app is in dark mode. No API key required. */
-export const MAP_STYLE_URL_DARK =
-  'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
-
 /** OpenFreeMap TileJSON endpoint for the planet vector tile source. */
 export const OPENFREEMAP_TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
 

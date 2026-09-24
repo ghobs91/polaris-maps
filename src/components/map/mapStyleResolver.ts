@@ -11,58 +11,42 @@ interface ResolveMapStyleArgs {
   styleLoadFailed: boolean;
 }
 
-const IOS26_COMPAT_LIGHT_STYLE_JSON = JSON.stringify({
-  version: 8,
-  name: 'Polaris iOS26 Compat Light',
-  sources: {
-    osm: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
-      maxzoom: 19,
-    },
-  },
-  layers: [
-    {
-      id: 'osm-raster',
-      type: 'raster',
-      source: 'osm',
-      paint: {
-        'raster-opacity': 1,
+function buildCompatStyle(isDark: boolean): string {
+  return JSON.stringify({
+    version: 8,
+    name: isDark ? 'Polaris iOS26 Compat Dark' : 'Polaris iOS26 Compat Light',
+    sources: {
+      osm: {
+        type: 'raster',
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© OpenStreetMap contributors',
+        maxzoom: 19,
       },
     },
-  ],
-});
+    layers: [
+      {
+        id: 'osm-raster',
+        type: 'raster',
+        source: 'osm',
+        // Dark mode dims and desaturates the raster so it stays legible; the
+        // raster compat style has no dark tile source of its own.
+        paint: isDark
+          ? {
+              'raster-opacity': 1,
+              'raster-brightness-max': 0.55,
+              'raster-saturation': -0.25,
+            }
+          : {
+              'raster-opacity': 1,
+            },
+      },
+    ],
+  });
+}
 
-const IOS26_COMPAT_DARK_STYLE_JSON = JSON.stringify({
-  version: 8,
-  name: 'Polaris iOS26 Compat Dark',
-  sources: {
-    cartoDarkMatter: {
-      type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-      ],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors © CARTO',
-      maxzoom: 20,
-    },
-  },
-  layers: [
-    {
-      id: 'carto-dark-raster',
-      type: 'raster',
-      source: 'cartoDarkMatter',
-      paint: {
-        'raster-opacity': 1,
-      },
-    },
-  ],
-});
+const IOS26_COMPAT_LIGHT_STYLE_JSON = buildCompatStyle(false);
+const IOS26_COMPAT_DARK_STYLE_JSON = buildCompatStyle(true);
 
 export function resolveMapStyle({
   mapStylePref,

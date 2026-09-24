@@ -55,7 +55,8 @@ describe('resolveMapStyle', () => {
 
     const parsedStyle = JSON.parse(resolvedStyle);
     expect(parsedStyle.name).toBe('Polaris iOS26 Compat Dark');
-    expect(parsedStyle.sources.cartoDarkMatter.tiles[0]).toContain('dark_all');
+    expect(parsedStyle.sources.osm.tiles[0]).toContain('tile.openstreetmap.org');
+    expect(parsedStyle.layers[0].paint['raster-brightness-max']).toBeLessThan(1);
   });
 
   it('returns the light terrain style with a free topographic source', () => {

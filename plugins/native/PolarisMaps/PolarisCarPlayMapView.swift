@@ -42,23 +42,19 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       "version": 8,
       "name": "Polaris CarPlay Default",
       "sources": {
-        "cartoLight": {
+        "osm": {
           "type": "raster",
-          "tiles": [
-            "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-            "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-            "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"
-          ],
+          "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
           "tileSize": 256,
-          "attribution": "© OpenStreetMap contributors © CARTO",
-          "maxzoom": 20
+          "attribution": "© OpenStreetMap contributors",
+          "maxzoom": 19
         }
       },
       "layers": [
         {
-          "id": "carto-light-raster",
+          "id": "osm-raster",
           "type": "raster",
-          "source": "cartoLight",
+          "source": "osm",
           "paint": { "raster-opacity": 1 }
         }
       ]
