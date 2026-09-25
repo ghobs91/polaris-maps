@@ -817,7 +817,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   private func applyFollowCamera(_ view: MLNMapView, heading: Double) {
     if isNavigating {
-      // Heading-up pitched follow camera (phone: zoom 17, pitch 60), shared by
+      // Heading-up pitched follow camera (phone: zoom 17, pitch 55), shared by
       // the full-screen map and the dashboard split tile so both face the
       // direction of travel like the phone. The target is pushed ahead of the
       // vehicle so the puck sits low with the road ahead in view.
@@ -826,7 +826,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       view.camera = MLNMapCamera(
         lookingAtCenter: target,
         acrossDistance: Self.followDistance,
-        pitch: 60,
+        pitch: 55,
         heading: heading
       )
     } else {

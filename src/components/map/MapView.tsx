@@ -73,7 +73,7 @@ const OSM_FETCH_DEBOUNCE_MS = 300;
 /** How long the camera must hold still mid-gesture before warming POI caches. */
 const POI_PREFETCH_DEBOUNCE_MS = 500;
 const POI_ZOOM_REUSE_THRESHOLD = 0.35;
-const NAVIGATION_CAMERA_PITCH = 60;
+const NAVIGATION_CAMERA_PITCH = 55;
 const NAVIGATION_CAMERA_TOP_PADDING = 0.5;
 
 /** ~30 m threshold for considering two POIs as duplicates. */
