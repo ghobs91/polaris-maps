@@ -464,18 +464,24 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   // Clamp to reasonable road speed (0–55 m/s ≈ 200 km/h)
   speedMps = Math.min(Math.max(speedMps, 0), 55);
 
-  // Never move the marker backwards — unless the user is driving the wrong
-  // way. In that case the GPS-snapped position legitimately moves backwards
-  // along the route, and holding the DR projection ahead is exactly what
-  // makes the puck glide forward while the car reverses relative to it.
-  // Once a deviation is CONFIRMED (same consecutive-reading threshold as the
-  // reroute), anchor to LIVE GPS (not the snapped point) and freeze
+  // Never move the marker backwards — unless the user is CONFIRMED to be
+  // driving the wrong way. In that case the GPS-snapped position legitimately
+  // moves backwards along the route, and holding the DR projection ahead is
+  // exactly what makes the puck glide forward while the car reverses relative
+  // to it. Once a deviation is CONFIRMED (same consecutive-reading threshold as
+  // the reroute), anchor to LIVE GPS (not the snapped point) and freeze
   // dead-reckoning advance: projecting forward along the stale route is what
   // made the puck glide down the original road while the car drove away,
-  // feeding the rerouter a stale origin on every retry. A single noisy
-  // off-route reading must NOT do this — it yanked the puck off the road
-  // while the user was still on route.
-  const suspectedWrongWay = wrongWayCount > 0;
+  // feeding the rerouter a stale origin on every retry.
+  //
+  // Use the CONFIRMED `wrongWayActive`, not a single `wrongWayCount` reading:
+  // one noisy snap-back (GPS noise landing on the previous polyline segment)
+  // momentarily grows the remaining distance and increments the counter, and
+  // letting that one reading abandon DR yanked the puck ~a segment backwards
+  // on the locked/background publish path — visible as rapid forward/backward
+  // shaking while the foreground loop (which already gates on
+  // `isWrongWayDriving()`) stayed smooth.
+  const suspectedWrongWay = wrongWayActive;
   const offRouteConfirmed = isOffRoute(distFromRoute, offRouteCount);
   const prevAnchor = drAnchor;
   if (offRouteConfirmed) {

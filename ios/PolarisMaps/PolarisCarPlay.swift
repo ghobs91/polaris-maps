@@ -53,7 +53,14 @@ class PolarisCarPlay: RCTEventEmitter {
   }
 
   private static func emit(_ event: String, _ body: Any) {
-    instance?.sendEvent(withName: event, body: body)
+    guard let instance else {
+      // JS-backed CarPlay controls silently do nothing without the bridge.
+      // Log it so a device-console capture can tell a missing bridge apart
+      // from a tap that never reached the app.
+      NSLog("[PolarisCarPlay] dropping %@: React Native module not attached", event)
+      return
+    }
+    instance.sendEvent(withName: event, body: body)
   }
 
   /// Publishes a buffered scene connection. Always activates on the main
@@ -117,6 +124,7 @@ class PolarisCarPlay: RCTEventEmitter {
   /// as a CarPlay connection on its own: the Dashboard can be the only scene
   /// attached, and its Home/Work shortcut buttons are JS-driven.
   static func dashboardSceneDidConnect(window: UIWindow) {
+    NSLog("[PolarisCarPlay] dashboard scene connected")
     isDashboardSceneConnected = true
     pendingDashboardWindow = window
     DispatchQueue.main.async {
@@ -126,6 +134,7 @@ class PolarisCarPlay: RCTEventEmitter {
   }
 
   static func dashboardSceneDidDisconnect() {
+    NSLog("[PolarisCarPlay] dashboard scene disconnected")
     DispatchQueue.main.async {
       Self.isDashboardSceneConnected = false
       Self.mapTemplateManager.detachDashboard()
@@ -146,6 +155,7 @@ class PolarisCarPlay: RCTEventEmitter {
   // MARK: - Scene lifecycle (called by CarPlaySceneDelegate)
 
   static func sceneDidConnect(interfaceController: CPInterfaceController, window: CPWindow) {
+    NSLog("[PolarisCarPlay] template scene connected")
     pendingInterfaceController = interfaceController
     pendingWindow = window
     isSceneConnected = true
@@ -161,6 +171,7 @@ class PolarisCarPlay: RCTEventEmitter {
   }
 
   static func sceneDidDisconnect(interfaceController: CPInterfaceController) {
+    NSLog("[PolarisCarPlay] template scene disconnected")
     DispatchQueue.main.async {
       Self.isSceneConnected = false
       Self.pendingInterfaceController = nil
@@ -851,6 +862,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   /// Ends the trip from a CarPlay control and mirrors the state to the phone.
   private func endNavigationFromCarPlay() {
+    NSLog("[PolarisCarPlay] end navigation from CarPlay")
     endNavigation()
     PolarisCarPlay.emitNavigationCancelled()
   }
@@ -2012,6 +2024,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // The driver ended the trip from CarPlay (system control); mirror the
     // phone's state so the phone stops navigating instead of silently
     // continuing.
+    NSLog("[PolarisCarPlay] system cancelled navigation")
     endNavigationFromCarPlay()
   }
 
@@ -2147,6 +2160,7 @@ extension PolarisCarPlay {
   /// Called from the dashboard scene delegate (separate file), so it must be
   /// internal rather than fileprivate.
   static func emitDashboardFavorite(_ kind: String) {
+    NSLog("[PolarisCarPlay] dashboard shortcut tapped: %@", kind)
     emit("carPlayDashboardFavorite", ["kind": kind])
   }
 

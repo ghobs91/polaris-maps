@@ -325,6 +325,44 @@ describe('trackingService — display-awake publish gate', () => {
   });
 });
 
+describe('trackingService — locked-path anchor continuity', () => {
+  it('does not let a single noisy snap-back yank the anchor backwards', () => {
+    // ~1.1 km northbound route with a vertex mid-way.
+    const route = makeRoute([
+      [-74.0, 40.7],
+      [-74.0, 40.705],
+      [-74.0, 40.71],
+    ]);
+    startNav(route);
+    startTracking(route);
+
+    // Drive forward for a few fixes so the anchor is established ahead.
+    for (let i = 0; i < 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: 40.702 + i * 0.0001, lng: A[0], speed: 13, heading: 0 }), {
+        background: true,
+      });
+    }
+    const before = useNavigationTrackingStore.getState().navPosition!;
+    const anchorBefore = getAnchor()!;
+
+    // Next fix snaps ~11 m BACK onto the previous polyline segment (GPS noise
+    // at a vertex) with no usable course. The remaining distance grows past the
+    // wrong-way growth threshold, which used to abandon dead reckoning and
+    // anchor at the raw snapped point — the locked/background publish path then
+    // jumped the puck backwards (rapid forward/backward shaking).
+    nowMs += 1000;
+    processFix(makeFix({ lat: 40.702 - 0.0001, lng: A[0], speed: 13, heading: -1 }), {
+      background: true,
+    });
+
+    const after = useNavigationTrackingStore.getState().navPosition!;
+    // Northbound route: the published latitude must not go backwards.
+    expect(after[1]).toBeGreaterThanOrEqual(before[1]);
+    expect(getAnchor()!.pos[1]).toBeGreaterThanOrEqual(anchorBefore.pos[1]);
+  });
+});
+
 describe('trackingService — snap continuity', () => {
   // Route that doubles back near its start: the final (southbound) segment
   // passes within ~11 m of the first (eastbound) segment.

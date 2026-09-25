@@ -504,9 +504,13 @@ function onNavigationCancelled(): void {
  * directly, like Apple Maps. A route preview is useless here — it renders on
  * the full-screen template, which the driver isn't looking at while the
  * Dashboard split view is up.
+ *
+ * No `connected` guard: the native event itself proves the Dashboard scene is
+ * attached, and the JS mirror can lag behind a scene connect that happened
+ * while the phone was locked.
  */
 async function onDashboardFavorite({ kind }: { kind?: string }): Promise<void> {
-  if (!connected || !kind) return;
+  if (!kind) return;
   const favorite = getFavorites().find((entry) => entry.kind === kind);
   if (!favorite) return;
   const origin = await resolveRouteOrigin();
@@ -964,22 +968,57 @@ function emptyQueryResults(): CarPlaySearchResult[] {
   return [...pinned, ...recents];
 }
 
+/** How long a one-shot GPS fix may hold up a CarPlay-initiated route. */
+const ROUTE_ORIGIN_FIX_TIMEOUT_MS = 4000;
+
+/** Resolves with `null` when `promise` doesn't settle within `ms` (timer cleared). */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
 /**
  * Route origin for CarPlay destinations: the live navigation position while
  * driving, otherwise the driver's GPS fix, falling back to the phone's map
  * viewport. Mirrors the phone, which never routes from a panned map centre.
+ *
+ * A locked phone can take a long time to answer a one-shot fix request (and
+ * without "Always" it may never answer while backgrounded), so prefer the
+ * cached CarPlay fix / OS last-known fix and bound the fresh request — a
+ * Dashboard Home/Work tap must not hang waiting for GPS.
  */
 async function resolveRouteOrigin(): Promise<{ lat: number; lng: number }> {
   const navPosition = useNavigationTrackingStore.getState().navPosition;
   if (navPosition != null) return { lat: navPosition[1], lng: navPosition[0] };
+  // Idle-map follow / search / Locate already cached a recent fix.
+  if (carPlayUserLocation) return carPlayUserLocation;
   try {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (status === 'granted') {
-      const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      carPlayUserLocation = { lat: current.coords.latitude, lng: current.coords.longitude };
-      return carPlayUserLocation;
+      const last = await Location.getLastKnownPositionAsync();
+      if (last) {
+        carPlayUserLocation = { lat: last.coords.latitude, lng: last.coords.longitude };
+        return carPlayUserLocation;
+      }
+      const current = await withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        ROUTE_ORIGIN_FIX_TIMEOUT_MS,
+      );
+      if (current) {
+        carPlayUserLocation = { lat: current.coords.latitude, lng: current.coords.longitude };
+        return carPlayUserLocation;
+      }
     }
   } catch {
     // Fall through to the viewport.
