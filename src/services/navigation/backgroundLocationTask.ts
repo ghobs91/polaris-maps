@@ -1,8 +1,9 @@
-import { Alert, AppState, Linking, Platform } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import type { LocationObject } from 'expo-location';
 import { processFix } from './trackingService';
+import { isForegroundInterpolationActive } from './foregroundActivity';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { storage } from '../storage/mmkv';
@@ -54,9 +55,11 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     // The managed session is the only fix source while it runs (the screen
     // skips its own watcher when backgroundSessionActive), so fixes delivered
     // while the app is foregrounded must be treated as foreground fixes —
-    // otherwise haptics are suppressed on a screen-on fix. Reroutes run either
-    // way (single-flight, backoff-guarded in processFix).
-    const background = AppState.currentState !== 'active';
+    // otherwise haptics are suppressed on a screen-on fix. `AppState` cannot
+    // decide this: with CarPlay attached it stays `active` while the phone
+    // display sleeps, so gate on the screen loop actually ticking instead.
+    // Reroutes run either way (single-flight, backoff-guarded in processFix).
+    const background = !isForegroundInterpolationActive();
 
     for (const location of locations) {
       try {

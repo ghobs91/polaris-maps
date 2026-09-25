@@ -14,12 +14,12 @@
  * Call once during app startup (root layout).
  */
 
-import { AppState } from 'react-native';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { decodePolyline } from '../../utils/polyline';
 import { refreshRouteTrafficIfStale } from '../traffic/trafficFlowService';
 import { runCongestionCheckIfDue } from '../traffic/rerouteService';
+import { isForegroundInterpolationActive } from './foregroundActivity';
 
 let initialized = false;
 let navUnsubscribe: (() => void) | null = null;
@@ -38,8 +38,11 @@ function syncRouteCoords(): void {
 }
 
 function onTrackingUpdate(): void {
-  // Foreground is covered by the screen hook's interval.
-  if (AppState.currentState === 'active') return;
+  // A ticking interpolation loop means the phone display is awake and the
+  // screen hook's interval is covering freshness. It also stops when the
+  // display sleeps while CarPlay keeps the app active, where `AppState` stays
+  // `active` and the interval never fires — so gate on the loop, not AppState.
+  if (isForegroundInterpolationActive()) return;
   const coords = routeCoords;
   if (!coords) return;
   refreshRouteTrafficIfStale(coords);

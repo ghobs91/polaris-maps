@@ -16,6 +16,10 @@ import {
 import { reroute } from '../routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
+import {
+  isForegroundInterpolationActive,
+  resetForegroundInterpolationHeartbeat,
+} from './foregroundActivity';
 
 /** Avoidance preferences forwarded to the reroute request. Injected via
  *  `setTrackingRoutePreferences` (rather than importing the settings store)
@@ -50,17 +54,6 @@ let allManeuvers: ValhallaManeuver[] = [];
 let activeRouteSummaryDistanceMeters = 0;
 let activeRouteSummaryDurationSeconds = 0;
 let trackingActive = false;
-/**
- * True while the navigation screen's interpolation loop owns the published live
- * state (screen mounted AND app active). `processFix` then skips publishing so
- * the two writers never interleave.
- */
-let foregroundInterpolationActive = false;
-
-/** Called by the navigation screen while its interpolation loop is driving. */
-export function setForegroundInterpolationActive(active: boolean): void {
-  foregroundInterpolationActive = active;
-}
 
 // Dead-reckoning anchor state (moved from NavigationScreen refs so headless
 // background location tasks can drive the same pipeline).
@@ -152,6 +145,9 @@ export function stopTracking(): void {
   lastGpsRemaining = null;
   rerouteFailureCount = 0;
   nextRerouteAllowedAt = 0;
+  // A fresh trip must not inherit a stale "the screen's loop is ticking" state
+  // from the previous one.
+  resetForegroundInterpolationHeartbeat();
   // Clear the published live state too: otherwise the next trip opens with the
   // previous trip's final puck position, bearing and distance countdown until
   // the first GPS fix arrives.
@@ -516,13 +512,15 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   }
 
   // Publish the live position/bearing/distance for consumers rendered outside
-  // this screen (CarPlay, instrument cluster). While the navigation screen is
-  // mounted and active its interpolation loop is the sole publisher (smooth,
-  // 60fps); this path publishes when headless or backgrounded so CarPlay keeps
-  // moving while the phone is locked. Only one writer is active at a time, and
-  // the three values go out in a single store update so consumers never see a
-  // new position paired with the previous bearing (which jitters the puck).
-  if (foregroundInterpolationActive) return;
+  // this screen (CarPlay, instrument cluster). While the navigation screen's
+  // display-driven interpolation loop is actually ticking it is the sole
+  // publisher (smooth, 60fps) and we must not interleave. Once it stops — the
+  // phone display sleeps (even though CarPlay keeps the app active and fixes
+  // flowing), the screen unmounts, or the app is suspended — this path
+  // publishes instead so CarPlay keeps moving while the phone is locked. The
+  // three values go out in a single store update so consumers never see a new
+  // position paired with the previous bearing (which jitters the puck).
+  if (isForegroundInterpolationActive()) return;
   const trackingStore = useNavigationTrackingStore.getState();
   const anchor = drAnchor;
   if (!anchor) return;

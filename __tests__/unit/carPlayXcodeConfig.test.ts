@@ -125,7 +125,25 @@ describe('CarPlay iOS configuration', () => {
     expect(nativeModule).toContain('private static var pendingInterfaceController');
     expect(nativeModule).toContain('private static var isSceneConnected = false');
     expect(nativeModule).toContain('attachPendingSceneIfNeeded()');
-    expect(nativeModule).toContain('resolve(Self.isSceneConnected)');
+    expect(nativeModule).toContain('resolve(Self.isAnySceneConnected)');
+  });
+
+  it('treats the CarPlay Dashboard scene as a connection of its own', () => {
+    // The Dashboard scene can be the only CarPlay scene attached (and can
+    // outlive the full-screen template scene). Its Home/Work shortcut buttons
+    // are JS-driven, so a Dashboard-only session must reach `carPlayConnected`
+    // and still be able to start navigation without a `CPMapTemplate`.
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      expect(nativeModule).toContain('private static var isDashboardSceneConnected = false');
+      expect(nativeModule).toContain('Self.publishSceneConnectionIfNeeded()');
+      expect(nativeModule).toContain('Self.publishSceneDisconnectionIfNeeded()');
+      expect(nativeModule).toContain('resolve(Self.isAnySceneConnected)');
+      // Dashboard map survives a template-scene disconnect; the trip start no
+      // longer requires a template.
+      expect(nativeModule).toContain('func detachTemplateScene()');
+      expect(nativeModule).toContain('if let template = mapTemplate {');
+    }
   });
 
   it('attaches the buffered CarPlay scene on the main thread', () => {

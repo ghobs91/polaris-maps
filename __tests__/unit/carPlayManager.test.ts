@@ -932,7 +932,7 @@ describe('CarPlayManager', () => {
     }
   });
 
-  it('previews navigation to a dashboard favorite', async () => {
+  it('starts navigation to a dashboard favorite', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
     (getFavorites as jest.Mock).mockReturnValue([
@@ -954,10 +954,12 @@ describe('CarPlayManager', () => {
       'auto',
       expect.objectContaining({ alternates: 2 }),
     );
-    expect(useNavigationStore.getState().routePreview).not.toBeNull();
-    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
-      expect.objectContaining({ destinationName: 'Work' }),
-    );
+    // The Dashboard shortcut starts the trip directly: a route preview would
+    // render on the full-screen template, which the driver isn't looking at.
+    const nav = useNavigationStore.getState();
+    expect(nav.isNavigating).toBe(true);
+    expect(nav.destination).toEqual({ lat: 40.7, lng: -73.9, name: 'Work' });
+    expect(nav.routePreview).toBeNull();
   });
 
   it('pushes saved places as home suggestions on connect', async () => {

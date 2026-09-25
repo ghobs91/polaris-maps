@@ -16,7 +16,7 @@ The CarPlay manager bridges the app's navigation and search capabilities to the 
    - Lane guidance: native `CPLaneGuidance` (17.4+, via `linkedLaneGuidance`/`currentLaneGuidance`) built from the phone's lane model, with the rasterized lane strip as a fallback on older systems; highway exit labels (`exitNumber`/`exitBranch`) feed `CPManeuver.highwayExitLabel`
    - Arrival: when the phone declares arrival, CarPlay shows a "You have arrived" card; **Done** ends the trip on both surfaces
    - Incidents: the nearest crowd-reported incident ahead is announced once per incident via a transient navigation alert (reuses `findIncidentsAhead`, mirrors `IncidentAheadBanner`), and all active incidents are drawn as the same circular per-type badges as `IncidentLayer`
-2. **Other CarPlay surfaces** — the Dashboard (iOS 13.4+) renders a second live map (same style/route/traffic/incidents as the main template) into its window so the Apple/Google-style split view shows the map beside the turn card and Now Playing; when idle it exposes Home/Work shortcut buttons that preview navigation. The instrument cluster (iOS 15.4+) mirrors the active navigation session's maneuvers with an idle caption. Scene roles + delegates are declared in `Info.plist` / `CarPlaySceneDelegate.swift`.
+2. **Other CarPlay surfaces** — the Dashboard (iOS 13.4+) renders a second live map (same style/route/traffic/incidents as the main template) into its window so the Apple/Google-style split view shows the map beside the turn card and Now Playing; its Home/Work shortcut buttons start navigation to that favorite directly (like Apple Maps), including when the Dashboard scene is the only CarPlay scene attached. The instrument cluster (iOS 15.4+) mirrors the active navigation session's maneuvers with an idle caption. Scene roles + delegates are declared in `Info.plist` / `CarPlaySceneDelegate.swift`.
 3. **Trip preview** — selecting a destination shows an Apple/Google-style preview with one `CPRouteChoice` per computed route (primary + up to two alternatives drawn grey on the map), with the map zoomed out to fit the entire route (inset so it clears the route-choice panel). Picking one and tapping **Go** emits `carPlayRouteStart`, and JS starts the matching phone-side navigation. An in-progress phone preview is mirrored on connect.
 4. **Map interaction** — pan (rotary `panWith…` and touch `didUpdatePanGestureWithTranslation`), pinch-zoom, and rotate stop the follow camera and open the system panning interface; recentering (or dismissing the interface) snaps back to vehicle-follow. The recenter map-button icon reflects follow state. **Locate** asks JS for a fresh GPS fix (`carPlayLocateRequest` → `Location.getCurrentPositionAsync`, falling back to the phone viewport) and centers the idle map; on connect JS pushes the driver's position so the map never starts at the native host's `(0, 0)` default. When idle the follow camera is flat/north-up; during navigation it is pitched heading-up (the dashboard tile stays flat).
 5. **Search forwarding** — CarPlay search queries are routed through the shared staged pipeline (`createSearchSession` → `src/services/search/unifiedSearch.ts`): the local-only pass resolves in milliseconds for instant auto-suggest while typing, then the debounced full network merge replaces it. While the phone is locked/screen-off iOS suspends JS timers (same constraint the map-center push works around), so the network phase is run immediately instead of waiting on the debounce — otherwise CarPlay would show only the (often empty) local pass. Batches are tagged with the query they answer and a `final` flag, so the native template only completes on the batch that matches what the driver is typing — and it renders the pipeline's ranking verbatim (no substring re-filtering, so semantic matches like "coffee" → "Starbucks" survive). Rows are rich: distance + brand/address subtitle and a category-tinted POI icon mirroring the phone's `getPoiCategory`. The search context carries the live viewport bounds and GPS fix (ranking parity), and selecting a result routes from the live navigation position / GPS fix rather than the panned map centre. The phone's **Pinned** (Home / Work / saved pins, colored circular icons) and **Recents** (search history) places are shown in a **floating overlay on the idle map** (`CPMapPanel`, iOS 27 — `mapTemplate.showPanel`), refreshed on connect and whenever favorites change, instead of sitting behind the search keyboard. Selecting a result (or a panel row) offers **Start Navigation** or **Add Stop** (adds an intermediate waypoint to the active drive like the phone's add-destination panel, or starts a preview when idle)
@@ -37,8 +37,17 @@ iOS suspends JS timers (and can suspend the whole app) when the phone is
 locked or the screen is off, so any CarPlay-facing JS must avoid relying on
 `setTimeout`/`setInterval` alone. The areas that need it:
 
-- **Map follow** — `syncMapCenter` flushes every fix immediately instead of
-  using the foreground 100 ms throttle.
+- **Live position/countdown** — the navigation screen's interpolation loop is
+  display-driven (`requestAnimationFrame`) and stops ticking when the phone
+  display sleeps. `foregroundActivity.ts` tracks whether it is actually
+  ticking; `processFix` publishes the live position/bearing/countdown whenever
+  it is not. `AppState` cannot be used for this: with CarPlay attached the app
+  stays `active` (the CarPlay scene keeps it foreground) while the phone
+  screen is locked, which previously froze the CarPlay map at the lock-time
+  position.
+- **Map follow** — `syncMapCenter` flushes every fix immediately whenever the
+  interpolation loop is not ticking, instead of using the foreground 100 ms
+  throttle.
 - **Search** — `onSearchQuery` calls `session.submit()` instead of `search()`
   when `AppState` is not `active`, running the full network merge on the same
   tick rather than behind the 200 ms debounce (otherwise only the instant
@@ -46,15 +55,19 @@ locked or the screen is off, so any CarPlay-facing JS must avoid relying on
 - **Arrival auto-end** — `arrivalCoordinator` drives the 8 s grace period off
   the wall clock on each location fix, not just the timer, so a locked phone
   still ends the trip.
+- **Traffic refresh** — `fixDrivenRefresh` runs the throttled traffic refresh
+  and congestion check off each fix whenever the interpolation loop is not
+  ticking, since the screen hook's 60 s interval cannot fire with the display
+  asleep.
 
 Known limitations while locked (intentional, to stay inside the iOS watchdog;
-see `trackingService` / `backgroundLocationTask`): off-route and congestion
-reroutes are deferred to the foreground, and the 60 s traffic refresh interval
-does not fire, so ETA/traffic colours can go stale. The native CarPlay template
-keeps rendering with a built-in map style even when the RN bridge is not
-attached (cold launch from the CarPlay home screen), but JS-backed features
-(search, starting navigation) require the app to be running — opening the phone
-app attaches the bridge and replays `carPlayConnected`.
+see `trackingService` / `backgroundLocationTask`): reroutes run but are
+single-flight and backoff-guarded, and some presentation-only refreshes wait
+for the foreground. The native CarPlay template keeps rendering with a
+built-in map style even when the RN bridge is not attached (cold launch from
+the CarPlay home screen), but JS-backed features (search, starting navigation)
+require the app to be running — opening the phone app attaches the bridge and
+replays `carPlayConnected`.
 
 ## Related Files
 

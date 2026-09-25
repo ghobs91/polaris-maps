@@ -21,6 +21,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { buildCarPlayTrafficRanges, trafficRangesSignature } from './carPlayTrafficRanges';
 import { createSearchSession, type SearchSession } from '../search/searchSession';
 import { computeRoute } from '../routing/routingService';
+import { isForegroundInterpolationActive } from '../navigation/foregroundActivity';
 import { formatDistance } from '../../utils/units';
 import { resolveMapStyle, setLayerVisibilityInStyle } from '../../components/map/mapStyleResolver';
 import {
@@ -498,7 +499,12 @@ function onNavigationCancelled(): void {
   if (nav.isNavigating) nav.stopNavigation();
 }
 
-/** CarPlay dashboard shortcut (Home/Work): preview navigation to that favorite. */
+/**
+ * CarPlay dashboard shortcut (Home/Work): start navigation to that favorite
+ * directly, like Apple Maps. A route preview is useless here — it renders on
+ * the full-screen template, which the driver isn't looking at while the
+ * Dashboard split view is up.
+ */
 async function onDashboardFavorite({ kind }: { kind?: string }): Promise<void> {
   if (!connected || !kind) return;
   const favorite = getFavorites().find((entry) => entry.kind === kind);
@@ -520,7 +526,7 @@ async function onDashboardFavorite({ kind }: { kind?: string }): Promise<void> {
     if (!route) return;
     useNavigationStore
       .getState()
-      .setRoutePreview(
+      .startNavigation(
         route,
         routes.slice(1),
         { lat: favorite.entry.lat, lng: favorite.entry.lng, name: favorite.label },
@@ -724,12 +730,13 @@ function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getSt
     lng: state.navPosition[0],
     heading: state.navBearing,
   };
-  // While the app is suspended (phone locked, screen off) JS timers do not
-  // fire before iOS re-suspends the process: a throttled push would sit
-  // pending forever and CarPlay would stay frozen at the lock-time position.
-  // Push every fix immediately when not active; the foreground keeps the
-  // throttle to coalesce the screen's ~60fps interpolation writes.
-  if (AppState.currentState !== 'active') {
+  // While the phone screen is awake its display-driven interpolation loop is
+  // ticking and publishes ~60fps; keep the throttle to coalesce those writes.
+  // Once the loop stops — the phone display sleeps, including while CarPlay
+  // keeps the app running and `AppState` reports `active` — a throttled push
+  // could sit pending until iOS re-suspends the process, leaving CarPlay
+  // frozen at the lock-time position. Push every fix immediately then.
+  if (!isForegroundInterpolationActive()) {
     flushMapCenter();
     return;
   }

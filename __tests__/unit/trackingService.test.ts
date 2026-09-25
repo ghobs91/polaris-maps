@@ -36,6 +36,7 @@ import {
   isOffRouteActive,
 } from '../../src/services/navigation/trackingService';
 import { haversineMeters, snapToRoute } from '../../src/utils/routeSnap';
+import { markForegroundInterpolationTick } from '../../src/services/navigation/foregroundActivity';
 
 // ── Fixtures ────────────────────────────────────────────────────────
 
@@ -288,6 +289,39 @@ describe('trackingService — happy path fix processing', () => {
     // Distance to the end of the current step, so the banner counts down too.
     expect(tracking.distanceToTurn).toBeGreaterThan(0);
     expect(tracking.distanceToTurn!).toBeLessThan(route.summary.distanceMeters);
+  });
+});
+
+describe('trackingService — display-awake publish gate', () => {
+  it('lets the screen loop own publishing while it is ticking', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+
+    // Phone display on: the navigation screen's ~60fps loop is publishing, so
+    // the fix must not interleave a second writer (visible puck jitter).
+    markForegroundInterpolationTick();
+    processFix(makeFix({ lat: (A[1] + B[1]) / 2, lng: A[0], speed: 12 }));
+
+    expect(useNavigationTrackingStore.getState().navPosition).toBeNull();
+    // The fix was still fully processed (anchor/ETA advanced).
+    expect(getAnchor()).not.toBeNull();
+  });
+
+  it('publishes from fixes once the display sleeps with CarPlay still active', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+
+    markForegroundInterpolationTick();
+    // Display sleeps: the display-driven loop stops ticking, while the app
+    // stays `active` because the CarPlay scene keeps it foreground.
+    const realNow = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(realNow + 5000);
+
+    processFix(makeFix({ lat: (A[1] + B[1]) / 2, lng: A[0], speed: 12 }), { background: true });
+
+    expect(useNavigationTrackingStore.getState().navPosition).not.toBeNull();
   });
 });
 

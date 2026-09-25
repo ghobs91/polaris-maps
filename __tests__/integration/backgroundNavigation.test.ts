@@ -94,6 +94,7 @@ jest.mock('react-native', () => ({
 }));
 
 import { Alert } from 'react-native';
+import * as Haptics from 'expo-haptics';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const TaskManager = require('expo-task-manager');
 import {
@@ -554,25 +555,24 @@ describe('background navigation task handler', () => {
     expect(useNavigationStore.getState().hasDeviated).toBe(false);
   });
 
-  it('defers the reroute while the app is backgrounded, then reroutes on return', async () => {
+  it('reroutes while the phone is locked, skipping haptics', async () => {
     mockAppState = 'background';
     const route = makeTrackedRoute();
     useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
     startTracking(route);
+    mockReroute.mockResolvedValue(route);
 
     const fix = offRouteFix();
     await getHandler()({ data: { locations: [fix, fix, fix] } });
+    await Promise.resolve();
+    await Promise.resolve();
 
-    // No network I/O from headless delivery — only the deviation flag.
-    expect(mockReroute).not.toHaveBeenCalled();
-    expect(useNavigationStore.getState().hasDeviated).toBe(true);
-
-    // Back in the foreground, the next fix reroutes immediately (the
-    // off-route counter is already past the threshold).
-    mockAppState = 'active';
-    mockReroute.mockResolvedValue(route);
-    await getHandler()({ data: { locations: [fix] } });
-
+    // A locked phone still reroutes (single-flight, backoff-guarded) so the
+    // driver isn't stranded off-route until they unlock; haptics are skipped
+    // because the phone is stowed.
     expect(mockReroute).toHaveBeenCalledTimes(1);
+    expect(Haptics.notificationAsync).not.toHaveBeenCalled();
+    expect(useNavigationStore.getState().isRerouting).toBe(false);
+    expect(useNavigationStore.getState().hasDeviated).toBe(false);
   });
 });

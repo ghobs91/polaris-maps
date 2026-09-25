@@ -31,6 +31,10 @@ import {
   initFixDrivenRefresh,
   teardownFixDrivenRefresh,
 } from '../../src/services/navigation/fixDrivenRefresh';
+import {
+  markForegroundInterpolationTick,
+  resetForegroundInterpolationHeartbeat,
+} from '../../src/services/navigation/foregroundActivity';
 
 const ROUTE = {
   summary: { distanceMeters: 1000, durationSeconds: 600, hasToll: false, hasFerry: false },
@@ -45,6 +49,7 @@ function feedFix(): void {
 beforeEach(() => {
   jest.clearAllMocks();
   teardownFixDrivenRefresh();
+  resetForegroundInterpolationHeartbeat();
   mockAppState = 'active';
   useNavigationStore.setState({ isNavigating: false, activeRoute: null });
   useNavigationTrackingStore.getState().setNavPosition(null);
@@ -52,6 +57,7 @@ beforeEach(() => {
 
 afterEach(() => {
   teardownFixDrivenRefresh();
+  resetForegroundInterpolationHeartbeat();
   useNavigationStore.setState({ isNavigating: false, activeRoute: null });
   useNavigationTrackingStore.getState().setNavPosition(null);
 });
@@ -69,15 +75,30 @@ describe('fixDrivenRefresh', () => {
     expect(mockCongestionCheck).toHaveBeenCalledTimes(1);
   });
 
-  it('does nothing while the app is active (the screen hook owns refresh)', () => {
+  it('does nothing while the screen interpolation loop is ticking (the screen hook owns refresh)', () => {
     useNavigationStore.setState({ isNavigating: true, activeRoute: ROUTE });
     initFixDrivenRefresh();
     mockAppState = 'active';
+    // Phone display on: the navigation screen's interpolation loop is ticking.
+    markForegroundInterpolationTick();
 
     feedFix();
 
     expect(mockRefresh).not.toHaveBeenCalled();
     expect(mockCongestionCheck).not.toHaveBeenCalled();
+  });
+
+  it('refreshes on a fix when the display sleeps with CarPlay keeping AppState active', () => {
+    useNavigationStore.setState({ isNavigating: true, activeRoute: ROUTE });
+    initFixDrivenRefresh();
+    // Locked phone with CarPlay attached: the app stays `active` while the
+    // display-driven loop stops ticking, so the interval never fires.
+    mockAppState = 'active';
+
+    feedFix();
+
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(mockCongestionCheck).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing when no route is active', () => {

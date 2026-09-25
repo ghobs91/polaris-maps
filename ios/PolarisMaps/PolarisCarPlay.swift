@@ -18,6 +18,14 @@ class PolarisCarPlay: RCTEventEmitter {
   private static var pendingWindow: CPWindow?
   private static var pendingDashboardWindow: UIWindow?
   private static var isSceneConnected = false
+  /// The Dashboard scene can connect without the full-screen template scene
+  /// (and outlive it): the driver can start a trip from its Home/Work
+  /// shortcut buttons while the app is not open on the CarPlay screen, so it
+  /// is tracked separately.
+  private static var isDashboardSceneConnected = false
+  /// True once `carPlayConnected` has been delivered for the current CarPlay
+  /// session, whether the template or the Dashboard scene brought it up.
+  private static var hasPublishedSceneConnection = false
   /// A search query typed before the RN bridge attached (cold launch). The
   /// CarPlay template can be live with no React Native module, when `emit` is
   /// a no-op — buffered here and replayed once JS attaches, mirroring the
@@ -27,9 +35,19 @@ class PolarisCarPlay: RCTEventEmitter {
 
   private static let mapTemplateManager = CarPlayTemplateManager()
 
+  /// True while any CarPlay scene (full-screen template or Dashboard) is
+  /// connected to the app.
+  private static var isAnySceneConnected: Bool {
+    isSceneConnected || isDashboardSceneConnected
+  }
+
   override init() {
     super.init()
     Self.instance = self
+    // Activation is safe before JS attaches (the template is native), but the
+    // connection event waits for `startObserving` so it isn't emitted into a
+    // void: RCTEventEmitter drops events with no listeners, which would also
+    // consume a buffered search query.
     Self.attachPendingSceneIfNeeded()
     Self.attachPendingDashboardIfNeeded()
   }
@@ -48,7 +66,7 @@ class PolarisCarPlay: RCTEventEmitter {
   /// template scene, never the phone window scene — so React Native (and this
   /// module) can attach much later. Gating on `instance` left the app icon
   /// unresponsive; the template is purely native, and `carPlayConnected` is
-  /// replayed to JS once the module attaches (see `startObserving`/`init`).
+  /// replayed to JS once the module attaches and starts observing.
   static func attachPendingSceneIfNeeded() {
     guard pendingInterfaceController != nil, pendingWindow != nil else { return }
     guard Thread.isMainThread else {
@@ -57,6 +75,21 @@ class PolarisCarPlay: RCTEventEmitter {
     }
     mapTemplateManager.activate(
       interfaceController: pendingInterfaceController!, window: pendingWindow!)
+    publishSceneConnectionIfNeeded()
+  }
+
+  /// Publishes `carPlayConnected` once per CarPlay session, from whichever
+  /// scene connected first (full-screen template or Dashboard) — and replays
+  /// it when the React Native module attaches later. A query typed before JS
+  /// attached is replayed right after, now that the manager's connected flag
+  /// is set.
+  private static func publishSceneConnectionIfNeeded() {
+    guard instance != nil, isAnySceneConnected, !hasPublishedSceneConnection else { return }
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { Self.publishSceneConnectionIfNeeded() }
+      return
+    }
+    hasPublishedSceneConnection = true
     emitContentStyle(dark: mapTemplateManager.contentStyleIsDark)
     emit("carPlayConnected", ["connected": true])
     // Replay a query the driver typed before JS attached (cold launch), now
@@ -67,17 +100,37 @@ class PolarisCarPlay: RCTEventEmitter {
     }
   }
 
+  /// Tears the session down and notifies JS once no CarPlay scene remains.
+  private static func publishSceneDisconnectionIfNeeded() {
+    guard !isAnySceneConnected else { return }
+    mapTemplateManager.deactivate()
+    pendingDashboardWindow = nil
+    pendingSearchQuery = nil
+    if hasPublishedSceneConnection {
+      hasPublishedSceneConnection = false
+      emit("carPlayDisconnected", ["connected": false])
+    }
+  }
+
   /// Attaches the buffered CarPlay Dashboard window to a second map host so
-  /// the split view shows the Polaris map (Apple/Google Maps parity).
+  /// the split view shows the Polaris map (Apple/Google Maps parity). Counts
+  /// as a CarPlay connection on its own: the Dashboard can be the only scene
+  /// attached, and its Home/Work shortcut buttons are JS-driven.
   static func dashboardSceneDidConnect(window: UIWindow) {
+    isDashboardSceneConnected = true
     pendingDashboardWindow = window
-    DispatchQueue.main.async { Self.attachPendingDashboardIfNeeded() }
+    DispatchQueue.main.async {
+      Self.attachPendingDashboardIfNeeded()
+      Self.publishSceneConnectionIfNeeded()
+    }
   }
 
   static func dashboardSceneDidDisconnect() {
     DispatchQueue.main.async {
-      mapTemplateManager.detachDashboard()
-      pendingDashboardWindow = nil
+      Self.isDashboardSceneConnected = false
+      Self.mapTemplateManager.detachDashboard()
+      Self.pendingDashboardWindow = nil
+      Self.publishSceneDisconnectionIfNeeded()
     }
   }
 
@@ -109,13 +162,15 @@ class PolarisCarPlay: RCTEventEmitter {
 
   static func sceneDidDisconnect(interfaceController: CPInterfaceController) {
     DispatchQueue.main.async {
-      mapTemplateManager.deactivate()
-      pendingInterfaceController = nil
-      pendingWindow = nil
-      pendingDashboardWindow = nil
-      pendingSearchQuery = nil
-      isSceneConnected = false
-      emit("carPlayDisconnected", ["connected": false])
+      Self.isSceneConnected = false
+      Self.pendingInterfaceController = nil
+      Self.pendingWindow = nil
+      if Self.isDashboardSceneConnected {
+        // The Dashboard scene can outlive the full-screen one: keep its map
+        // host (and the active trip it renders) alive.
+        Self.mapTemplateManager.detachTemplateScene()
+      }
+      Self.publishSceneDisconnectionIfNeeded()
     }
   }
 
@@ -136,6 +191,14 @@ class PolarisCarPlay: RCTEventEmitter {
 
   override func startObserving() {
     Self.attachPendingSceneIfNeeded()
+    // A fresh JS runtime (first attach, or a fast refresh) needs the current
+    // connection state even if an earlier publish went to a previous runtime —
+    // `init` may have emitted before JS subscribed, and RCTEventEmitter drops
+    // events with no listeners.
+    if Self.isAnySceneConnected {
+      Self.hasPublishedSceneConnection = false
+    }
+    Self.publishSceneConnectionIfNeeded()
     Self.attachPendingDashboardIfNeeded()
   }
 
@@ -249,7 +312,7 @@ class PolarisCarPlay: RCTEventEmitter {
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    resolve(Self.isSceneConnected)
+    resolve(Self.isAnySceneConnected)
   }
 }
 
@@ -574,6 +637,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
     sessionConfiguration = CPSessionConfiguration(delegate: self)
 
+    // Reconnecting while the Dashboard scene kept the session alive leaves JS
+    // believing CarPlay was never disconnected, so replay the current
+    // style/route/camera into the fresh full-screen host.
+    configureHost(mapViewHost)
+
     // Presenting the root template can clear the CPWindow's content (the map),
     // so re-assert it as soon as the template is up, and once more shortly
     // after in case the system clears it during the presentation animation.
@@ -583,6 +651,36 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       self?.mapViewHost.reassertWindowContent()
     }
+  }
+
+  /// Drops the full-screen template scene while keeping the Dashboard map host
+  /// (and the active trip it renders) alive: the Dashboard scene can outlive
+  /// the template scene.
+  func detachTemplateScene() {
+    mapViewHost.deactivate()
+    templateWindow = nil
+    interfaceController = nil
+    mapTemplate = nil
+    searchTemplate = nil
+    sessionConfiguration = nil
+    navigationSession = nil
+    activeTrip = nil
+    activePolyline = ""
+    maneuverSignature = ""
+    activeAlert = nil
+    isMuted = false
+    isOverview = false
+    muteButton = nil
+    overviewButton = nil
+    recenterButton = nil
+    recenterBarButton = nil
+    searchMapButton = nil
+    endMapButton = nil
+    searchItems = []
+    activeSearchText = ""
+    pendingSearchCompletion = nil
+    homePanel = nil
+    homePanelVisible = false
   }
 
   func deactivate() {
@@ -840,10 +938,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   // MARK: Navigation
 
   func startNavigation(with data: NSDictionary) {
-    guard
-      let payload = CarPlayStartNavigationPayload(from: data),
-      let template = mapTemplate
-    else { return }
+    // The Dashboard scene can start a trip on its own (its Home/Work shortcut
+    // buttons): the map still renders into the Dashboard window, only the
+    // full-screen template's navigation session is skipped.
+    guard let payload = CarPlayStartNavigationPayload(from: data) else { return }
     useMetric = payload.useMetric
 
     // Ignore duplicate starts for the route already on screen. Restarting the
@@ -891,17 +989,19 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
     presentRoute(encodedPolyline: payload.encodedPolyline, destination: destinationCoordinate)
     setNavigating(true)
-    navigationSession = template.startNavigationSession(for: trip)
     activeTrip = trip
     activePolyline = payload.encodedPolyline
 
-    // Publish overall trip estimates so the arrival pill shows a real ETA
-    // instead of "now".
-    let tripEstimates = CPTravelEstimates(
-      distanceRemaining: distanceMeasurement(totalDistance),
-      timeRemaining: totalTime
-    )
-    template.updateEstimates(tripEstimates, for: trip)
+    if let template = mapTemplate {
+      navigationSession = template.startNavigationSession(for: trip)
+      // Publish overall trip estimates so the arrival pill shows a real ETA
+      // instead of "now".
+      let tripEstimates = CPTravelEstimates(
+        distanceRemaining: distanceMeasurement(totalDistance),
+        timeRemaining: totalTime
+      )
+      template.updateEstimates(tripEstimates, for: trip)
+    }
 
     // Show the full maneuver list from the start — the current maneuver is
     // index 0, and per-update sync narrows it to the live pair.

@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, AppState } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -40,8 +40,8 @@ import {
   isOffRouteActive,
   getGpsCourse,
   getGpsSpeed,
-  setForegroundInterpolationActive,
 } from '@/services/navigation/trackingService';
+import { markForegroundInterpolationTick } from '@/services/navigation/foregroundActivity';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
@@ -369,14 +369,6 @@ export default function NavigationScreen() {
 
     if (getRouteCoords().length < 2) return;
 
-    // While this loop is driving (screen mounted, app active) it is the sole
-    // publisher of the live state; `processFix` publishes only when it is not,
-    // so the two writers never interleave and jitter the puck.
-    setForegroundInterpolationActive(AppState.currentState === 'active');
-    const appStateSub = AppState.addEventListener('change', (status) => {
-      setForegroundInterpolationActive(status === 'active');
-    });
-
     const allManeuvers = activeRoute.legs.flatMap((l) => l.maneuvers);
     let subscription: Location.LocationSubscription | null = null;
 
@@ -394,6 +386,11 @@ export default function NavigationScreen() {
     let bearingStartTime = performance.now();
 
     const interpolate = (now: number) => {
+      // Heartbeat for the shared tracking pipeline: while this display-driven
+      // loop is ticking it owns the published live state. It stops with the
+      // phone display (locking the phone, even with CarPlay attached), and
+      // `processFix` then publishes from the GPS fixes instead.
+      markForegroundInterpolationTick();
       const anchor = getAnchor();
       const trackingStore = useNavigationTrackingStore.getState();
       // Read the tracked geometry live every frame: after a reroute the
@@ -547,8 +544,6 @@ export default function NavigationScreen() {
     return () => {
       cancelled = true;
       subscription?.remove();
-      appStateSub.remove();
-      setForegroundInterpolationActive(false);
       if (interpolationRafRef.current !== null) {
         cancelAnimationFrame(interpolationRafRef.current);
         interpolationRafRef.current = null;
