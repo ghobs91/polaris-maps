@@ -112,6 +112,10 @@ import { useTrafficStore } from '../../src/stores/trafficStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useCarPlayStore } from '../../src/stores/carPlayStore';
 import { toCarPlaySpeedLimit } from '../../src/services/carplay/carPlayManager';
+import {
+  markForegroundInterpolationTick,
+  resetForegroundInterpolationHeartbeat,
+} from '../../src/services/navigation/foregroundActivity';
 import { formatDistance } from '../../src/utils/units';
 import { encodePolyline } from '../../src/utils/polyline';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
@@ -204,6 +208,7 @@ describe('CarPlayManager', () => {
     useSettingsStore.getState().setUseMetric(false);
     useSettingsStore.getState().setThemeMode('system');
     mockAppState = 'active';
+    resetForegroundInterpolationHeartbeat();
     (getFavorites as jest.Mock).mockReturnValue([]);
     (getSearchHistory as jest.Mock).mockReturnValue([]);
     eventListeners = {};
@@ -849,6 +854,9 @@ describe('CarPlayManager', () => {
 
     initCarPlay();
     fireEvent('carPlayConnected');
+    // Phone display awake: the interpolation loop is ticking, so the session
+    // keeps its local-first pass + debounced network merge.
+    markForegroundInterpolationTick();
     fireEvent('searchQuery', { query: 'coffee' });
 
     // Local-first pass fires immediately, then the debounced full merge.
@@ -906,9 +914,12 @@ describe('CarPlayManager', () => {
     initCarPlay();
     fireEvent('carPlayConnected');
 
-    // Locked / screen-off phone: the app runs in the background and iOS
-    // suspends JS timers, so a debounced network phase would never fire.
-    mockAppState = 'background';
+    // Locked / screen-off phone with CarPlay attached: `AppState` still reports
+    // `active` (the CarPlay scene keeps the process alive) but the
+    // display-driven loop is stopped, so iOS stalls the event loop and a
+    // debounced network phase would never fire. The heartbeat — not AppState —
+    // must decide to run the full search immediately.
+    mockAppState = 'active';
     jest.useFakeTimers();
     try {
       fireEvent('searchQuery', { query: 'coffee' });

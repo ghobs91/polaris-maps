@@ -22,10 +22,25 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     PolarisCarPlay.sceneDidDisconnect(interfaceController: interfaceController)
   }
 
+  /// Navigation apps receive the window variant of the disconnect callback.
+  /// UIKit only calls the variant the delegate implements, so implementing both
+  /// guarantees the app tears its CarPlay state down on every OS version.
+  func templateApplicationScene(
+    _ templateApplicationScene: CPTemplateApplicationScene,
+    didDisconnect interfaceController: CPInterfaceController,
+    from window: CPWindow
+  ) {
+    PolarisCarPlay.sceneDidDisconnect(interfaceController: interfaceController)
+  }
+
   /// Covers a cold launch from the CarPlay home screen: re-assert the map and
   /// retry its built-in style so the screen isn't blank until the phone app is
   /// opened and pushes the phone style.
   func sceneDidBecomeActive(_ scene: UIScene) {
+    PolarisCarPlay.sceneDidBecomeActive()
+  }
+
+  func sceneWillEnterForeground(_ scene: UIScene) {
     PolarisCarPlay.sceneDidBecomeActive()
   }
 }

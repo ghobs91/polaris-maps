@@ -9,7 +9,7 @@
  * - Connecting/disconnecting lifecycle
  */
 
-import { AppState, Appearance, Platform } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as CarPlay from '../../native/carplay';
 import type { CarPlayStartNavigationData } from '../../native/carplay';
@@ -901,13 +901,14 @@ function onSearchQuery({ query }: { query: string }) {
   }
   ensureSearchUserLocation();
   const session = getSearchSession();
-  // While the phone is locked / screen-off the app runs in the background and
-  // iOS suspends JS timers, so the debounced network merge below would never
-  // fire — CarPlay would show only the instant local pass (usually empty) and
-  // look like "no results". Run the full search immediately when not active,
-  // mirroring the `syncMapCenter` background bypass; the foreground keeps the
-  // phone's local-first debounce to coalesce keystrokes.
-  if (AppState.currentState === 'active') {
+  // While the phone display sleeps (~the display-driven interpolation loop
+  // stops ticking) iOS stalls the event loop, so the debounced network merge
+  // below would never fire — CarPlay would show only the instant local pass
+  // (usually empty) and look like "no results". Run the full search
+  // immediately then, mirroring the `syncMapCenter` bypass. `AppState` cannot
+  // decide this: with CarPlay attached it stays `active` while the phone
+  // screen is locked, which kept taking the debounced branch.
+  if (isForegroundInterpolationActive()) {
     // Staged, local-first search: the local pass resolves in milliseconds and
     // the debounced network merge follows, exactly like the phone's search.
     session.search(query);

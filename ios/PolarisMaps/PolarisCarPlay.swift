@@ -278,6 +278,9 @@ class PolarisCarPlay: RCTEventEmitter {
 
   @objc func pushSearchResults(_ results: NSArray, query: String, isFinal: Bool) {
     let items = Self.parseSearchItems(results)
+    NSLog(
+      "[PolarisCarPlay] pushSearchResults '\(query)' raw=\(results.count) parsed=\(items.count) final=\(isFinal)"
+    )
     DispatchQueue.main.async {
       Self.mapTemplateManager.replaceSearchResults(items, query: query, isFinal: isFinal)
     }
@@ -600,6 +603,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var homeSuggestions: [CarPlaySearchItem] = []
   private var activeSearchText = ""
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
+  /// Bounds a JS search round-trip so the list settles instead of spinning
+  /// forever when the bridge never answers.
+  private var searchDeadlineTimer: Timer?
   private var appliedStyleHash = 0
   /// The floating Pinned/Recents overlay (iOS 27 `CPMapPanel`). Stored as
   /// `Any?` so the property itself doesn't require the iOS 27 availability.
@@ -624,12 +630,24 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var useMetric = false
 
   func activate(interfaceController: CPInterfaceController, window: CPWindow) {
-    guard self.interfaceController == nil else { return }
+    if self.interfaceController != nil {
+      // Same scene re-activating: nothing to rebuild.
+      if self.interfaceController === interfaceController, templateWindow === window { return }
+      // A reconnect can arrive without a matching disconnect callback (older
+      // builds only implemented the no-window disconnect variant), leaving a
+      // stale interface controller and a window the system has already
+      // cleared. Tear the stale full-screen scene down and build a fresh one;
+      // the route/camera/style caches are preserved so the new host repaints
+      // immediately.
+      NSLog("[PolarisCarPlay] replacing stale template scene")
+      detachTemplateScene()
+    }
     self.interfaceController = interfaceController
     interfaceController.delegate = self
     templateWindow = window
 
     mapViewHost.activate(in: window)
+    mapViewHost.isNavigating = navigationActive
 
     let template = CPMapTemplate()
     template.mapDelegate = self
@@ -653,6 +671,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // style/route/camera into the fresh full-screen host.
     configureHost(mapViewHost)
 
+    // Reconnecting mid-trip: re-open the navigation session so the guidance
+    // card resumes instead of showing only the bare route until the next JS
+    // update arrives.
+    if navigationActive, let trip = activeTrip {
+      navigationSession = template.startNavigationSession(for: trip)
+    }
+
     // Presenting the root template can clear the CPWindow's content (the map),
     // so re-assert it as soon as the template is up, and once more shortly
     // after in case the system clears it during the presentation animation.
@@ -664,9 +689,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     }
   }
 
-  /// Drops the full-screen template scene while keeping the Dashboard map host
-  /// (and the active trip it renders) alive: the Dashboard scene can outlive
-  /// the template scene.
+  /// Drops the full-screen template scene while keeping the trip/route/camera
+  /// caches (and the Dashboard map host) alive: the Dashboard scene can outlive
+  /// the template scene, and a reconnect that arrives without a disconnect
+  /// callback still needs the cached state to repaint immediately.
   func detachTemplateScene() {
     mapViewHost.deactivate()
     templateWindow = nil
@@ -675,11 +701,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchTemplate = nil
     sessionConfiguration = nil
     navigationSession = nil
-    activeTrip = nil
-    activePolyline = ""
     maneuverSignature = ""
     activeAlert = nil
-    isMuted = false
     isOverview = false
     muteButton = nil
     overviewButton = nil
@@ -690,6 +713,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
+    searchDeadlineTimer?.invalidate()
+    searchDeadlineTimer = nil
     homePanel = nil
     homePanelVisible = false
   }
@@ -724,6 +749,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
+    searchDeadlineTimer?.invalidate()
+    searchDeadlineTimer = nil
   }
 
   /// CarPlay scene activation / cold-launch recovery: re-assert the map window
@@ -1569,14 +1596,35 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   /// suggestions), and the final batch completes it again so the full ranked
   /// list replaces the partial one. Results for a superseded query (the driver
   /// typed on) are ignored.
+  private func normalizedSearchText(_ text: String) -> String {
+    text.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   func replaceSearchResults(_ items: [CarPlaySearchItem], query: String, isFinal: Bool) {
-    // JS trims the query before searching, so compare trimmed on both sides.
-    guard query.trimmingCharacters(in: .whitespaces) == activeSearchText.trimmingCharacters(in: .whitespaces)
-    else { return }
+    // JS trims the query before searching, so compare normalized on both
+    // sides. Newlines matter: a keyboard "Search" commit can append one, and a
+    // mismatch here silently drops every batch for the query.
+    let normalized = normalizedSearchText(query)
+    guard normalized == normalizedSearchText(activeSearchText) else {
+      NSLog(
+        "[PolarisCarPlay] search batch '\(normalized)' (\(items.count), final=\(isFinal)) ignored; active query is '\(activeSearchText)'"
+      )
+      return
+    }
     searchItems = items
-    guard let completion = pendingSearchCompletion else { return }
+    guard let completion = pendingSearchCompletion else {
+      NSLog(
+        "[PolarisCarPlay] search batch '\(normalized)' (\(items.count), final=\(isFinal)) has no pending request"
+      )
+      return
+    }
     if !items.isEmpty || isFinal {
       completion(makeSearchListItems(from: items))
+      // The request has been answered: a later final batch still replaces the
+      // list (the pending completion stays set), but the deadline must not
+      // force it empty after the driver already has rows.
+      searchDeadlineTimer?.invalidate()
+      searchDeadlineTimer = nil
     }
     if isFinal {
       pendingSearchCompletion = nil
@@ -1815,6 +1863,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   private func finishPendingSearch() {
+    searchDeadlineTimer?.invalidate()
+    searchDeadlineTimer = nil
     guard let completion = pendingSearchCompletion else { return }
     pendingSearchCompletion = nil
     completion(makeSearchListItems(from: searchItems))
@@ -1833,15 +1883,28 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activeSearchText = searchText
     searchItems = []
     pendingSearchCompletion = completionHandler
+    NSLog("[PolarisCarPlay] search text '%@'", searchText)
     // An empty field has no query to run: show the Pinned/Recents suggestions
     // instead. They are the only pre-search surface on iOS < 27 (the floating
     // map panel is 27+), and Apple/Google Maps show saved places here too.
-    guard !searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
+    guard !normalizedSearchText(searchText).isEmpty else {
       pendingSearchCompletion = nil
       completionHandler(makeSearchListItems(from: homeSuggestions))
       return
     }
     PolarisCarPlay.emitSearchQuery(searchText)
+    // Fallback: if the JS bridge never answers (bridge not attached, pipeline
+    // error), surface the current (usually empty) list so the driver isn't
+    // left on a spinner. The pending completion stays armed, so a late network
+    // batch still replaces the list when it lands.
+    searchDeadlineTimer?.invalidate()
+    searchDeadlineTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) {
+      [weak self] _ in
+      guard let self, let completion = self.pendingSearchCompletion else { return }
+      NSLog("[PolarisCarPlay] search '\(self.activeSearchText)' timed out; showing current list")
+      self.searchDeadlineTimer = nil
+      completion(self.makeSearchListItems(from: self.searchItems))
+    }
   }
 
   func searchTemplate(_ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void) {

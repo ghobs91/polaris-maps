@@ -52,6 +52,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       },
       "layers": [
         {
+          "id": "background",
+          "type": "background",
+          "paint": { "background-color": "#E8EAED" }
+        },
+        {
           "id": "osm-raster",
           "type": "raster",
           "source": "osm",
@@ -85,9 +90,12 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private static let destinationImageName = "polaris-destination-flag"
   /// Across-distance in meters approximating the phone's zoom-17 nav camera.
   private static let followDistance: CLLocationDistance = 350
-  /// Camera target sits this far ahead of the vehicle so the puck renders low
-  /// with route ahead visible (phone uses a 50% top padding for the same).
-  private static let forwardOffsetMeters: Double = 100
+  /// Where the vehicle puck sits vertically during navigation, as a fraction
+  /// of the map view height. Low enough to show the road ahead (phone parity),
+  /// high enough that the puck and its halo clear CarPlay's floating trip/ETA
+  /// bar on both the full-screen map and the shorter dashboard tile. A fixed
+  /// metre offset can't do this: the same offset lands lower on tall aspects.
+  private static let followScreenFraction: CGFloat = 0.62
 
   private var mapView: MLNMapView?
   private var routeCoordinates: [CLLocationCoordinate2D] = []
@@ -108,6 +116,30 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// camera back to the vehicle and clobber the whole-route fit.
   private var routeOverviewActive = false
   private var lastHeading: Double = 0
+  // Follow smoothing: JS pushes route-snapped fixes at display rate while the
+  // phone screen is awake, but only at the raw GPS rate (≈1 Hz) once the
+  // display sleeps, even though CarPlay keeps rendering. The display link
+  // interpolates camera + puck toward each new fix so locked-phone navigation
+  // glides instead of jumping once per second.
+  private var targetCoordinate: CLLocationCoordinate2D?
+  private var targetHeading: Double = 0
+  private var displayLink: CADisplayLink?
+  private var animationStart: CFTimeInterval = 0
+  private var animationDuration: TimeInterval = 0
+  private var animationFromCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+  private var animationFromHeading: Double = 0
+  private var lastCameraPushTime: CFTimeInterval = 0
+  // Presentation watchdog: re-asserts the CPWindow content and retries a style
+  // that never finished loading (the system can clear the window's root view
+  // across template transitions, and a cold-launch style fetch can abort).
+  private var watchdogTimer: Timer?
+  private var lastAppliedStyleJson: String?
+  private var styleReloadSerial = 0
+  private var styleRetryCount = 0
+  private var styleRequestedAt: CFTimeInterval = 0
+  /// Grace period before a style that has neither loaded nor failed is
+  /// considered stalled (a slow first load must not be force-reloaded).
+  private static let styleRetryGraceSeconds: CFTimeInterval = 8
   private var speedSign: SpeedLimitBadge?
   // Map-plane nav puck (phone parity): the same polygon groups the phone's
   // MapView renders, as MapLibre fill layers so the puck tilts and
@@ -117,6 +149,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private var puckLayerIds: [String] = []
   private var pendingStyleJson: String?
   private var lastStyleFileURL: URL?
+  /// Set when the style failed to load so the watchdog can retry it even
+  /// though `styleLoaded` was re-armed to let route layers rebuild.
+  private var styleLoadFailed = false
 
   /// True once a real position has arrived; guards against locating to (0, 0).
   private(set) var hasCenter = false
@@ -126,7 +161,17 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// phone, which shows the puck only in navigation mode).
   var isNavigating = false {
     didSet {
-      if oldValue != isNavigating { updateVehicleMarkers() }
+      guard oldValue != isNavigating else { return }
+      if !isNavigating {
+        // Idle doesn't need the follow animation; snap to the last target so
+        // the location dot can't drift after guidance ends.
+        stopFollowAnimation()
+        if let target = targetCoordinate {
+          currentCoordinate = target
+          lastHeading = targetHeading
+        }
+      }
+      updateVehicleMarkers()
     }
   }
 
@@ -136,6 +181,8 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// before the first GPS fix).
   func seedCoordinate(_ coordinate: CLLocationCoordinate2D) {
     currentCoordinate = coordinate
+    targetCoordinate = coordinate
+    targetHeading = lastHeading
     hasCenter = true
     // Show the vehicle marker at the route start before the first GPS fix.
     updateVehicleMarkers()
@@ -177,9 +224,13 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       pendingStyleJson = nil
       applyStyle(json: pending)
     }
+
+    startWatchdog()
   }
 
   func deactivate() {
+    stopWatchdog()
+    stopFollowAnimation()
     clearRoute()
     incidentMarkers = []
     incidentSourceIds = []
@@ -189,6 +240,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       try? FileManager.default.removeItem(at: previous)
     }
     lastStyleFileURL = nil
+    lastAppliedStyleJson = nil
+    styleReloadSerial = 0
+    styleRetryCount = 0
     styleLoaded = false
     removeVehicleMarkers()
     speedSign?.removeFromSuperview()
@@ -221,10 +275,12 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   /// Called when the CarPlay scene becomes active: re-assert the window content
   /// so a cold launch from the CarPlay home screen isn't left blank by a
-  /// template presentation that replaced the window's root view controller.
+  /// template presentation that replaced the window's root view controller,
+  /// and retry the style when the launch-time load never finished.
   func refreshPresentation() {
     reassertWindowContent()
     layoutOverlays()
+    retryStyleLoadIfNeeded()
   }
 
   /// Applies a MapLibre style JSON (the phone's resolved style) so the
@@ -233,7 +289,12 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// reloads when the style URL changes. Custom route sources/layers are
   /// rebuilt from `didFinishLoading` after the swap.
   func applyStyle(json: String) {
+    applyStyle(json: json, forceReload: false)
+  }
+
+  private func applyStyle(json: String, forceReload: Bool) {
     guard !json.isEmpty else { return }
+    lastAppliedStyleJson = json
     guard mapView != nil else {
       pendingStyleJson = json
       return
@@ -241,8 +302,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     var hasher = Hasher()
     hasher.combine(json)
     let tag = String(format: "%08x", UInt32(truncatingIfNeeded: hasher.finalize()))
+    // A forced retry gets a fresh file name: re-assigning the same style URL
+    // that previously failed to load is a no-op in MapLibre.
+    let suffix = forceReload ? "-r\(styleReloadSerial)" : ""
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-      "polaris-carplay-style-\(tag).json")
+      "polaris-carplay-style-\(tag)\(suffix).json")
     if url != lastStyleFileURL {
       guard let data = json.data(using: .utf8) else { return }
       do {
@@ -257,8 +321,44 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       // Park the load flag before swapping; didFinishLoading re-arms it and
       // draws anything pending.
       styleLoaded = false
+      styleRequestedAt = CACurrentMediaTime()
       mapView?.styleURL = url
     }
+  }
+
+  /// Re-applies the last style when it failed outright or stalled (cold launch
+  /// style fetches can be aborted while the phone app is suspended). Bounded so
+  /// a genuinely broken style isn't reloaded forever.
+  private func retryStyleLoadIfNeeded() {
+    guard let json = lastAppliedStyleJson, styleRetryCount < 5 else { return }
+    let stalled =
+      !styleLoaded && CACurrentMediaTime() - styleRequestedAt > Self.styleRetryGraceSeconds
+    guard styleLoadFailed || stalled else { return }
+    styleRetryCount += 1
+    styleReloadSerial += 1
+    styleLoadFailed = false
+    applyStyle(json: json, forceReload: true)
+  }
+
+  private func startWatchdog() {
+    stopWatchdog()
+    let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+      self?.watchdogTick()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    watchdogTimer = timer
+  }
+
+  private func stopWatchdog() {
+    watchdogTimer?.invalidate()
+    watchdogTimer = nil
+  }
+
+  private func watchdogTick() {
+    // The system can clear the CPWindow's content across template
+    // transitions; keep re-asserting while attached. Safe to call repeatedly.
+    reassertWindowContent()
+    retryStyleLoadIfNeeded()
   }
 
   /// Puck stays pinned to the camera focal point (screen center); the speed
@@ -803,8 +903,37 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     // (0, 0) is the Atlantic off West Africa — never a real fix. Ignoring it
     // keeps the pre-fix default from parking the map in "blank ocean".
     if lat == 0 && lng == 0 { return }
-    currentCoordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    let now = CACurrentMediaTime()
+    let hadTarget = targetCoordinate != nil
+    let elapsed = now - lastCameraPushTime
+    lastCameraPushTime = now
+    targetCoordinate = coordinate
+    targetHeading = heading
     hasCenter = true
+
+    // Interpolate over the interval the next fix is likely to need. While JS
+    // pushes at display rate (phone awake) this is a frame or two — effectively
+    // a passthrough. Once the phone display sleeps and only ≈1 Hz GPS fixes
+    // arrive, the same duration turns each fix into a one-second glide.
+    let shouldSnap =
+      !hadTarget || !followVehicle || !isNavigating || elapsed > 1.6 || mapView == nil
+    animationFromCoordinate = currentCoordinate
+    animationFromHeading = lastHeading
+    animationDuration = shouldSnap ? 0 : min(max(elapsed, 0), 1.5)
+    animationStart = now
+    if animationDuration <= 0.001 {
+      stopFollowAnimation()
+      applyFollowFrame(coordinate: coordinate, heading: heading)
+    } else {
+      startFollowAnimation()
+    }
+  }
+
+  /// Applies one rendered follow frame (camera + puck) for the interpolated
+  /// position. Called per display-link tick while a push is being smoothed.
+  private func applyFollowFrame(coordinate: CLLocationCoordinate2D, heading: Double) {
+    currentCoordinate = coordinate
     lastHeading = heading
     // Move the follow camera first so the puck is sized from the camera that's
     // actually in effect. Updating markers before the camera made a recenter
@@ -815,20 +944,78 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     updateVehicleMarkers()
   }
 
+  private func startFollowAnimation() {
+    guard displayLink == nil, mapView != nil else { return }
+    let link = CADisplayLink(target: self, selector: #selector(followAnimationTick))
+    link.add(to: .main, forMode: .common)
+    displayLink = link
+  }
+
+  private func stopFollowAnimation() {
+    displayLink?.invalidate()
+    displayLink = nil
+  }
+
+  @objc private func followAnimationTick() {
+    guard let target = targetCoordinate else {
+      stopFollowAnimation()
+      return
+    }
+    let now = CACurrentMediaTime()
+    let progress =
+      animationDuration > 0
+      ? min(max((now - animationStart) / animationDuration, 0), 1)
+      : 1
+    let coordinate = CLLocationCoordinate2D(
+      latitude: animationFromCoordinate.latitude
+        + (target.latitude - animationFromCoordinate.latitude) * progress,
+      longitude: animationFromCoordinate.longitude
+        + (target.longitude - animationFromCoordinate.longitude) * progress)
+    let heading = interpolateHeading(
+      from: animationFromHeading, to: targetHeading, progress: progress)
+    applyFollowFrame(coordinate: coordinate, heading: heading)
+    if progress >= 1 {
+      stopFollowAnimation()
+    }
+  }
+
+  /// Shortest-arc heading interpolation so crossing north doesn't spin the map.
+  private func interpolateHeading(from: Double, to: Double, progress: Double) -> Double {
+    var delta = (to - from).truncatingRemainder(dividingBy: 360)
+    if delta > 180 { delta -= 360 }
+    if delta < -180 { delta += 360 }
+    return from + delta * progress
+  }
+
   private func applyFollowCamera(_ view: MLNMapView, heading: Double) {
     if isNavigating {
       // Heading-up pitched follow camera (phone: zoom 17, pitch 55), shared by
       // the full-screen map and the dashboard split tile so both face the
-      // direction of travel like the phone. The target is pushed ahead of the
-      // vehicle so the puck sits low with the road ahead in view.
-      let target = coordinate(
-        from: currentCoordinate, distanceMeters: Self.forwardOffsetMeters, bearing: heading)
+      // direction of travel like the phone. The vehicle is then placed at a
+      // fixed fraction of the view height: a fixed metre offset ahead of the
+      // target can't guarantee that across the full map and dashboard aspects,
+      // which previously parked the puck under the floating ETA bar.
       view.camera = MLNMapCamera(
-        lookingAtCenter: target,
+        lookingAtCenter: currentCoordinate,
         acrossDistance: Self.followDistance,
         pitch: 55,
         heading: heading
       )
+      let targetY = view.bounds.height * Self.followScreenFraction
+      let vehiclePoint = view.convert(currentCoordinate, toPointTo: view)
+      let deltaY = vehiclePoint.y - targetY
+      if view.bounds.height > 0, abs(deltaY) > 1 {
+        let correctedTarget = view.convert(
+          CGPoint(x: view.bounds.midX, y: view.bounds.midY + deltaY),
+          toCoordinateFrom: view
+        )
+        view.camera = MLNMapCamera(
+          lookingAtCenter: correctedTarget,
+          acrossDistance: Self.followDistance,
+          pitch: 55,
+          heading: heading
+        )
+      }
     } else {
       // Idle locate: flat, north-up, centered.
       view.setCenter(currentCoordinate, zoomLevel: Self.idleZoom, direction: 0, animated: false)
@@ -838,6 +1025,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func recenter() {
     followVehicle = true
     routeOverviewActive = false
+    stopFollowAnimation()
+    if let target = targetCoordinate {
+      currentCoordinate = target
+      lastHeading = targetHeading
+    }
     guard let view = mapView, hasCenter else { return }
     applyFollowCamera(view, heading: lastHeading)
     // Re-size the puck for the follow camera immediately; otherwise it keeps
@@ -932,23 +1124,6 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       .truncatingRemainder(dividingBy: 360)
   }
 
-  private func coordinate(
-    from origin: CLLocationCoordinate2D, distanceMeters: Double, bearing: Double
-  ) -> CLLocationCoordinate2D {
-    let radius = 6_371_000.0
-    let bearingRad = bearing * .pi / 180
-    let latRad = origin.latitude * .pi / 180
-    let lngRad = origin.longitude * .pi / 180
-    let angular = distanceMeters / radius
-    let newLat = asin(sin(latRad) * cos(angular) + cos(latRad) * sin(angular) * cos(bearingRad))
-    let newLng = lngRad
-      + atan2(
-        sin(bearingRad) * sin(angular) * cos(latRad),
-        cos(angular) - sin(latRad) * sin(newLat)
-      )
-    return CLLocationCoordinate2D(latitude: newLat * 180 / .pi, longitude: newLng * 180 / .pi)
-  }
-
   func zoom(by factor: Double) {
     guard let view = mapView else { return }
     view.zoomLevel = min(max(view.zoomLevel + log2(factor), 3), 19)
@@ -1000,13 +1175,18 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
     styleLoaded = true
+    styleLoadFailed = false
+    styleRetryCount = 0
     rebuildRouteLayers()
     rebuildIncidentLayers()
   }
 
   func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {
     // Never leave a route parked forever behind a failed style: sources and
-    // layers can still be added and will paint if tiles arrive later.
+    // layers can still be added and will paint if tiles arrive later. The
+    // watchdog retries the style itself (a cold-launch fetch can be aborted
+    // while the phone app is suspended).
+    styleLoadFailed = true
     styleLoaded = true
     rebuildRouteLayers()
     rebuildIncidentLayers()
