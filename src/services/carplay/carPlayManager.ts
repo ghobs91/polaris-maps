@@ -23,7 +23,8 @@ import { createSearchSession, type SearchSession } from '../search/searchSession
 import { computeRoute } from '../routing/routingService';
 import { isForegroundInterpolationActive } from '../navigation/foregroundActivity';
 import { formatDistance } from '../../utils/units';
-import { resolveMapStyle, setLayerVisibilityInStyle } from '../../components/map/mapStyleResolver';
+import { resolveMapStyle } from '../../components/map/mapStyleResolver';
+import { applyNavigationFocus } from '../map/navFocusStyle';
 import {
   averageRouteTrafficColor,
   ETA_COLOR_ORANGE,
@@ -275,6 +276,11 @@ function onDisconnected() {
 
 function syncNavigationState(state: ReturnType<typeof useNavigationStore.getState>) {
   if (!connected) return;
+
+  // Starting or ending a trip swaps the basemap between browse and navigation
+  // focus, exactly like the phone. Dedupes internally, so the extra call on
+  // every navigation-store change is free.
+  syncMapStyle();
 
   // The idle map follows the car; once a trip is active the tracking pipeline
   // owns the camera (and the idle watcher would just burn battery).
@@ -631,9 +637,9 @@ export function formatCarPlayRouteSummary(distanceMeters: number, durationSecond
 
 /**
  * Pushes the phone's resolved map style (dark/light, satellite preference,
- * housenumbers hidden in navigation like the phone) to the CarPlay map.
- * No-ops unless the resolved style actually changed — the JSON is large and
- * the store subscribers fire on every GPS tick.
+ * navigation focus while a trip is active) to the CarPlay map. No-ops unless
+ * the resolved style actually changed — the JSON is large and the store
+ * subscribers fire on every GPS tick.
  */
 export function syncMapStyle(): void {
   if (!connected) return;
@@ -643,12 +649,15 @@ export function syncMapStyle(): void {
   // matches the car rather than the phone's theme.
   const isDark = carPlayDark ?? (themeMode === 'dark' || (themeMode === 'system' && systemDark));
   const mapStylePref = useMapStore.getState().mapStyle;
-  const key = `${isDark ? 'dark' : 'light'}:${mapStylePref}`;
+  const isNavigating = useNavigationStore.getState().isNavigating;
+  const key = `${isDark ? 'dark' : 'light'}:${mapStylePref}:${isNavigating ? 'nav' : 'browse'}`;
   if (key === lastMapStyleKey) return;
   lastMapStyleKey = key;
   try {
     let style = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false });
-    style = setLayerVisibilityInStyle(style, 'housenumber', 'none');
+    if (isNavigating) {
+      style = applyNavigationFocus(style, isDark);
+    }
     CarPlay.updateMapStyle(style);
   } catch {
     lastMapStyleKey = null;
