@@ -65,16 +65,5 @@ export function resolveMapStyle({
   return isDark ? DARK_MAP_STYLE_JSON : LIGHT_MAP_STYLE_JSON;
 }
 
-/** Set the visibility of a layer in a serialised style JSON. */
-export function setLayerVisibilityInStyle(
-  styleJson: string,
-  layerId: string,
-  visibility: 'visible' | 'none',
-): string {
-  const style = JSON.parse(styleJson);
-  const layer = style.layers?.find((l: { id: string }) => l.id === layerId);
-  if (layer) {
-    layer.layout = { ...layer.layout, visibility };
-  }
-  return JSON.stringify(style);
-}
+// Navigation-focus rewriting (hidden labels, faded ground cover, dark-mode
+// water) lives in `src/services/map/navFocusStyle.ts`.

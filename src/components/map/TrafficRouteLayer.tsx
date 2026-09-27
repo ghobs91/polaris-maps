@@ -7,9 +7,17 @@ import {
 } from '../../services/traffic/routeTrafficService';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { decodePolyline } from '../../utils/polyline';
+import { useTheme } from '../../contexts/ThemeContext';
+import { buildRibbon, type RibbonBand } from './routeRibbon';
 
 interface TrafficRouteLayerProps {
   geometry: string;
+  /**
+   * Widens the ribbon so it covers the carriageway it is drawn on. The road
+   * fills grow under navigation too, and a ribbon narrower than its own road
+   * reads as a stripe painted on the asphalt rather than the route.
+   */
+  navigationMode?: boolean;
 }
 
 /**
@@ -19,9 +27,13 @@ interface TrafficRouteLayerProps {
  * Always shows a plain blue fallback line immediately so the route is visible
  * while traffic data is loading or if no data is available.  Once the traffic
  * store has normalized segments nearby, colored segments are rendered on top.
+ *
+ * Both sources render the identical band stack so the crossfade from fallback
+ * to traffic colours is invisible. See `routeRibbon` for the widths.
  */
-export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
+export function TrafficRouteLayer({ geometry, navigationMode = false }: TrafficRouteLayerProps) {
   const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
+  const { isDark } = useTheme();
 
   // Decode once for the fallback plain line
   const coordinates = useMemo(() => decodePolyline(geometry), [geometry]);
@@ -51,6 +63,16 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
 
   const hasTraffic = !!trafficGeoJSON;
 
+  const baseBands = useMemo(
+    () => buildRibbon('route-base', DEFAULT_ROUTE_COLOR, isDark, !hasTraffic, navigationMode),
+    [isDark, hasTraffic, navigationMode],
+  );
+
+  const trafficBands = useMemo(
+    () => buildRibbon('route-traffic', ['get', 'color'] as any, isDark, hasTraffic, navigationMode),
+    [isDark, hasTraffic, navigationMode],
+  );
+
   // Empty shape for the traffic source so it's always mounted — avoids
   // MapLibre unmount/remount issues when switching from fallback to colored.
   const emptyTrafficShape = useMemo(
@@ -58,30 +80,26 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
     [],
   );
 
+  const renderBands = (bands: RibbonBand[]) =>
+    bands.map((band) => (
+      <MapLibreGL.LineLayer
+        key={band.id}
+        id={band.id}
+        style={{
+          lineColor: band.color as any,
+          lineWidth: band.width as any,
+          lineCap: 'round',
+          lineJoin: 'round',
+          lineOpacity: band.opacity,
+        }}
+      />
+    ));
+
   return (
     <>
-      {/* Plain blue fallback — visible only while traffic data is loading */}
+      {/* Plain fallback ribbon — visible only while traffic data is loading */}
       <MapLibreGL.ShapeSource id="route-base" shape={fallbackShape}>
-        <MapLibreGL.LineLayer
-          id="route-base-casing"
-          style={{
-            lineColor: '#ffffff',
-            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
-            lineCap: 'round',
-            lineJoin: 'round',
-            lineOpacity: hasTraffic ? 0 : 1,
-          }}
-        />
-        <MapLibreGL.LineLayer
-          id="route-base-line"
-          style={{
-            lineColor: DEFAULT_ROUTE_COLOR,
-            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
-            lineCap: 'round',
-            lineJoin: 'round',
-            lineOpacity: hasTraffic ? 0 : 1,
-          }}
-        />
+        {renderBands(baseBands)}
       </MapLibreGL.ShapeSource>
 
       {/* Traffic-colored segments — always mounted so MapLibre layers
@@ -90,26 +108,7 @@ export function TrafficRouteLayer({ geometry }: TrafficRouteLayerProps) {
         id="route-traffic"
         shape={(trafficGeoJSON || emptyTrafficShape) as any}
       >
-        <MapLibreGL.LineLayer
-          id="route-traffic-casing"
-          style={{
-            lineColor: '#ffffff',
-            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 7, 17, 11] as any,
-            lineCap: 'round',
-            lineJoin: 'round',
-            lineOpacity: hasTraffic ? 1 : 0,
-          }}
-        />
-        <MapLibreGL.LineLayer
-          id="route-traffic-line"
-          style={{
-            lineColor: ['get', 'color'] as any,
-            lineWidth: ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 4.5, 17, 7.5] as any,
-            lineCap: 'round',
-            lineJoin: 'round',
-            lineOpacity: hasTraffic ? 1 : 0,
-          }}
-        />
+        {renderBands(trafficBands)}
       </MapLibreGL.ShapeSource>
     </>
   );

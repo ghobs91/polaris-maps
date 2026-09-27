@@ -35,7 +35,8 @@ import { IncidentLayer } from './IncidentLayer';
 import { MapChrome } from './MapChrome';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
-import { resolveMapStyle, setLayerVisibilityInStyle } from './mapStyleResolver';
+import { resolveMapStyle } from './mapStyleResolver';
+import { applyNavigationFocus } from '../../services/map/navFocusStyle';
 import {
   getConnectivity,
   type ConnectionQuality,
@@ -831,7 +832,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     try {
       let base = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false });
       if (navigationMode) {
-        base = setLayerVisibilityInStyle(base, 'housenumber', 'none');
+        base = applyNavigationFocus(base, isDark);
       }
       return buildOfflineStyle(base, {
         sourceId: offlinePack.sourceId,
@@ -844,7 +845,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }, [offlinePack, mapStylePref, isDark, navigationMode]);
 
   // Resolve the map style based on user preference and dark mode.
-  // Hide house numbers when in navigation mode.
+  // Navigation derives a focus variant that hides context labels and fades
+  // ground cover so the route stays the only high-chroma object on screen.
   const vectorOrRasterStyle = useMemo(() => {
     let style = resolveMapStyle({
       mapStylePref,
@@ -852,7 +854,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       styleLoadFailed: useOfflineFallback,
     });
     if (navigationMode) {
-      style = setLayerVisibilityInStyle(style, 'housenumber', 'none');
+      style = applyNavigationFocus(style, isDark);
     }
     return style;
   }, [mapStylePref, isDark, useOfflineFallback, navigationMode]);
@@ -911,6 +913,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (!navigationMode || !navPosition) return null;
     const lat = navPosition[1];
     return {
+      glow: buildNavPuckGlowGeoJSON(navPosition, navBearing, lat, currentZoom),
       halo: buildNavPuckHaloGeoJSON(navPosition, navBearing, lat, currentZoom),
       shadow: buildNavPuckShadowGeoJSON(navPosition, navBearing, lat, currentZoom),
       arrowBody: buildNavPuckArrowBodyGeoJSON(navPosition, navBearing, lat, currentZoom),
@@ -986,7 +989,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           </MapLibreGL.ShapeSource>
         )}
 
-        {routeGeometry && <TrafficRouteLayer geometry={routeGeometry} />}
+        {routeGeometry && (
+          <TrafficRouteLayer geometry={routeGeometry} navigationMode={navigationMode} />
+        )}
 
         {/* Destination flag — parity with the CarPlay map's checkered flag. */}
         {destination && (
@@ -1010,6 +1015,19 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             mixed point/polygon features in one layer). */}
         {navigationMode && navPosition && navPuckShapes && (
           <>
+            {/* Soft outer glow, behind the halo so the halo's hard rim sits on
+                top of a falloff instead of meeting the basemap directly. */}
+            <MapLibreGL.ShapeSource id="navPuckGlow" shape={navPuckShapes.glow}>
+              <MapLibreGL.FillLayer
+                id="navPuckGlowFill"
+                style={
+                  {
+                    fillColor: HALO_GLOW_COLOR,
+                  } as any
+                }
+              />
+            </MapLibreGL.ShapeSource>
+
             {/* Halo: map-plane ellipse so it foreshortens/rotates with the 3D map
                  alongside the arrow (unlike a screen-space CircleLayer, which
                  stays a flat disc). Drawn behind everything else. */}
@@ -1164,7 +1182,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
         <TransitLayer />
 
-        <POILayer />
+        {/* POI badges are hidden while navigating: the focus style strips the
+            basemap's own POI labels, and pills on top of the route would
+            undo that. Transit stays mounted (toggled by style visibility) to
+            avoid a GPU re-upload. */}
+        {!navigationMode && <POILayer />}
 
         <IncidentLayer />
       </MapLibreGL.MapView>
@@ -1199,7 +1221,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       )}
 
       <Text style={styles.srSummary} accessibilityRole="text">
-        {`Map view. ${poiCount} nearby places visible.${navigationMode ? ' Navigating.' : ''}`}
+        {navigationMode ? 'Map view. Navigating.' : `Map view. ${poiCount} nearby places visible.`}
       </Text>
     </View>
   );
@@ -1230,6 +1252,71 @@ const HALO_RIM_FORWARD_PX = 20;
 const HALO_RIM_LATERAL_PX = 16;
 const HALO_FILL_FORWARD_PX = 18;
 const HALO_FILL_LATERAL_PX = 14;
+// Soft outer glow. The rim/fill pair gives a hard edge where it meets the map;
+// one larger ellipse at low opacity fakes a falloff so the puck reads as lit
+// rather than stuck onto the basemap.
+const HALO_GLOW_FORWARD_PX = 27;
+const HALO_GLOW_LATERAL_PX = 21;
+/** The halo fill's colour, dialled down until it reads as falloff. */
+const HALO_GLOW_COLOR = 'rgba(0, 145, 214, 0.16)';
+
+/**
+ * Centre of the halo group: the nav position shifted back so the halo sits on
+ * the arrow's bounding-box centre rather than on the GPS fix. Shared by the
+ * glow and the rim/fill pair so they stay concentric.
+ */
+function haloCenter(
+  position: [number, number],
+  bearing: number,
+  lat: number,
+  zoom: number,
+): { lng: number; lat: number } {
+  const [lng] = position;
+  const m = getMetersPerDegree(lat);
+  const haloShiftPx = ARROW_CENTERING_PX - (ARROW_TIP_PX + ARROW_BASE_PX) / 2;
+  const haloShiftM = pxToMeters(haloShiftPx, lat, zoom);
+  const rad = (bearing * Math.PI) / 180;
+  return {
+    lng: lng - (haloShiftM * Math.sin(rad)) / m.lng,
+    lat: lat - (haloShiftM * Math.cos(rad)) / m.lat,
+  };
+}
+
+/**
+ * The soft glow ellipse behind the puck. Kept out of the halo's own
+ * FeatureCollection on purpose: every FillLayer over a collection paints *all*
+ * of its features, so a third larger ellipse there would be lit up at full rim
+ * brightness by the rim layer instead of staying a falloff.
+ */
+function buildNavPuckGlowGeoJSON(
+  position: [number, number],
+  bearing: number,
+  lat: number,
+  zoom: number,
+): {
+  type: 'Feature';
+  properties: Record<string, never>;
+  geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
+} {
+  const center = haloCenter(position, bearing, lat, zoom);
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        buildEllipseRing(
+          center.lng,
+          center.lat,
+          bearing,
+          zoom,
+          HALO_GLOW_FORWARD_PX,
+          HALO_GLOW_LATERAL_PX,
+        ),
+      ],
+    },
+  };
+}
 
 /**
  * Convert a screen-pixel dimension to ground meters at the given zoom/latitude.
@@ -1423,17 +1510,9 @@ function buildNavPuckHaloGeoJSON(
     geometry: { type: 'Polygon'; coordinates: [Array<[number, number]>] };
   }>;
 } {
-  const [lng] = position;
-  const m = getMetersPerDegree(lat);
-
-  // Center the halo on the arrow's bounding-box center so the triangle sits
-  // evenly inside it: bbox midpoint is (TIP + BASE) / 2 forward of nav, and
-  // the arrow ring itself is shifted back by ARROW_CENTERING_PX.
-  const haloShiftPx = ARROW_CENTERING_PX - (ARROW_TIP_PX + ARROW_BASE_PX) / 2;
-  const haloShiftM = pxToMeters(haloShiftPx, lat, zoom);
-  const rad = (bearing * Math.PI) / 180;
-  const haloLng = lng - (haloShiftM * Math.sin(rad)) / m.lng;
-  const haloLat = lat - (haloShiftM * Math.cos(rad)) / m.lat;
+  // Centre the halo on the arrow's bounding-box centre so the triangle sits
+  // evenly inside it, rather than on the raw GPS fix.
+  const { lng: haloLng, lat: haloLat } = haloCenter(position, bearing, lat, zoom);
 
   const rim = {
     type: 'Feature' as const,
