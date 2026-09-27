@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatDistance, formatDuration } from '../../utils/units';
+import { nav } from '../../constants/theme';
 
 interface ArrivalSummaryProps {
   destinationName?: string;
@@ -22,7 +23,7 @@ export function ArrivalSummary({
   return (
     <View style={styles.overlay} pointerEvents="box-none">
       <View style={styles.card} accessibilityRole="summary">
-        <Ionicons name="checkmark-circle" size={44} color="#34C759" />
+        <Ionicons name="checkmark-circle" size={44} color={nav.success} />
         <Text style={styles.title}>You have arrived</Text>
         {destinationName ? (
           <Text style={styles.destination} numberOfLines={1}>
@@ -97,7 +98,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
     alignSelf: 'stretch',
     alignItems: 'center',
-    backgroundColor: '#0A84FF',
+    backgroundColor: nav.accent,
     borderRadius: 12,
     paddingVertical: 12,
   },

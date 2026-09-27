@@ -37,3 +37,25 @@ export function followingManeuver(
   const index = guidanceManeuverIndex(currentStepIndex, maneuvers);
   return maneuvers[index + 1] ?? null;
 }
+
+/**
+ * Name of the road the vehicle is travelling on right now.
+ *
+ * `currentStepIndex` identifies the segment the vehicle has already reached,
+ * and a maneuver's `streetNames` is the street that maneuver turns onto — the
+ * same reading {@link followingManeuver} relies on for the banner's "Then"
+ * row. So the maneuver at the current index names the road being driven; the
+ * next maneuver's street is what the banner is already announcing, which is
+ * why this is not simply the guidance maneuver's name.
+ *
+ * Returns null when the road is unnamed or not yet known, so callers can drop
+ * the pill rather than render an empty one.
+ */
+export function currentRoadName(
+  currentStepIndex: number,
+  maneuvers: ReadonlyArray<ValhallaManeuver>,
+): string | null {
+  const current = maneuvers[currentStepIndex];
+  const name = current?.streetNames?.[0]?.trim();
+  return name ? name : null;
+}

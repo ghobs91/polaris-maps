@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { EtaDisplay } from './EtaDisplay';
 import { GlassView } from '../common/GlassView';
 import type { NextStop, UpcomingStop } from '../../utils/navigationStops';
-import { spacing, borderRadius, sheet as sheetTokens } from '../../constants/theme';
+import { spacing, borderRadius, nav, sheet as sheetTokens } from '../../constants/theme';
 
 const SHEET_MAX_HEIGHT = 320;
 const LIST_MAX_HEIGHT = 240;
@@ -106,7 +106,7 @@ export function NavigationHud({
       return (
         <View key="destination" style={styles.stopRow} testID="hud-destination">
           <View style={[styles.stopIcon, styles.destinationIcon]}>
-            <Ionicons name="navigate" size={15} color="#0A84FF" />
+            <Ionicons name="navigate" size={15} color={nav.accent} />
           </View>
           <View style={styles.stopInfo}>
             <Text style={styles.stopName} numberOfLines={1}>
@@ -127,7 +127,7 @@ export function NavigationHud({
         testID={`hud-stop-${stop.waypointIndex}`}
       >
         <View style={[styles.stopIcon, styles.stopIconOrange]}>
-          <Ionicons name="flag" size={14} color="#FF9500" />
+          <Ionicons name="flag" size={14} color={nav.warning} />
         </View>
         <View style={styles.stopInfo}>
           <Text style={styles.stopName} numberOfLines={1}>
@@ -148,7 +148,7 @@ export function NavigationHud({
             <Ionicons
               name="chevron-up"
               size={20}
-              color={isFirst ? 'rgba(255,255,255,0.25)' : '#fff'}
+              color={isFirst ? nav.textDisabled : nav.textPrimary}
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -163,7 +163,7 @@ export function NavigationHud({
             <Ionicons
               name="chevron-down"
               size={20}
-              color={isLast ? 'rgba(255,255,255,0.25)' : '#fff'}
+              color={isLast ? nav.textDisabled : nav.textPrimary}
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -173,7 +173,7 @@ export function NavigationHud({
             accessibilityRole="button"
             accessibilityLabel={`Remove ${stop.name}`}
           >
-            <Ionicons name="remove-circle" size={22} color="#FF453A" />
+            <Ionicons name="remove-circle" size={22} color={nav.danger} />
           </TouchableOpacity>
         </View>
       </View>
@@ -214,7 +214,7 @@ export function NavigationHud({
           accessibilityLabel="Add another stop"
           accessibilityHint="Search for another stop along your route"
         >
-          <Ionicons name="add" size={22} color="#0A84FF" />
+          <Ionicons name="add" size={22} color={nav.accent} />
           <Text style={styles.addStopText}>Add Stop</Text>
         </TouchableOpacity>
       </Animated.View>
@@ -234,7 +234,7 @@ export function NavigationHud({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: 'rgba(28,28,45,0.72)',
+    backgroundColor: nav.sheet,
     borderRadius: borderRadius.xxl,
     overflow: 'hidden',
     paddingTop: 6,
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: nav.separator,
   },
   stopIcon: {
     width: 34,
@@ -282,23 +282,23 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   stopIconOrange: {
-    backgroundColor: 'rgba(255,149,0,0.18)',
+    backgroundColor: nav.warningWash,
   },
   destinationIcon: {
-    backgroundColor: 'rgba(10,132,255,0.18)',
+    backgroundColor: nav.accentWash,
   },
   stopInfo: {
     flex: 1,
     marginRight: 8,
   },
   stopName: {
-    color: '#fff',
+    color: nav.textPrimary,
     fontSize: 15,
     fontWeight: '600',
     lineHeight: 20,
   },
   stopEta: {
-    color: 'rgba(255,255,255,0.55)',
+    color: nav.textMuted,
     fontSize: 13,
     marginTop: 1,
   },
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   addStopText: {
-    color: '#0A84FF',
+    color: nav.accent,
     fontSize: 16,
     fontWeight: '600',
   },

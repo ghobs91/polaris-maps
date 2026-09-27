@@ -24,7 +24,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useMapStore } from '../../stores/mapStore';
 import { decodePolyline } from '../../utils/polyline';
 import { formatDistance } from '../../utils/units';
-import { spacing } from '../../constants/theme';
+import { spacing, nav } from '../../constants/theme';
 
 function detourKey(r: { lat: number; lng: number }): string {
   return `${r.lat.toFixed(5)},${r.lng.toFixed(5)}`;
@@ -359,7 +359,7 @@ export function AddDestinationPanel({
           onPress={() => handleSelect(item)}
         >
           <View style={styles.resultIcon}>
-            <Ionicons name="location-outline" size={20} color="#409CFF" />
+            <Ionicons name="location-outline" size={20} color={nav.accent} />
           </View>
           <View style={styles.resultTextContainer}>
             <Text style={styles.resultName} numberOfLines={1}>
@@ -418,7 +418,7 @@ export function AddDestinationPanel({
                 placeholderTextColor="rgba(255,255,255,0.4)"
                 autoCorrect={false}
                 returnKeyType="search"
-                selectionColor="#409CFF"
+                selectionColor={nav.accent}
               />
               {query.length > 0 && (
                 <TouchableOpacity onPress={() => handleChangeText('')} activeOpacity={0.7}>
@@ -435,7 +435,7 @@ export function AddDestinationPanel({
               <Ionicons
                 name={isListening ? 'mic' : 'mic-outline'}
                 size={22}
-                color={isListening ? '#EF4444' : '#fff'}
+                color={isListening ? nav.danger : nav.textPrimary}
               />
             </TouchableOpacity>
 
@@ -459,14 +459,14 @@ export function AddDestinationPanel({
 
           {isListening && (
             <View style={styles.listeningBanner}>
-              <ActivityIndicator color="#409CFF" />
+              <ActivityIndicator color={nav.accent} />
               <Text style={styles.listeningText}>Listening...</Text>
             </View>
           )}
 
           {loading && !isListening && (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#409CFF" />
+              <ActivityIndicator color={nav.accent} />
             </View>
           )}
 
@@ -565,10 +565,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   micButtonActive: {
-    backgroundColor: 'rgba(239,68,68,0.2)',
+    backgroundColor: nav.dangerSubtle,
   },
   cancelText: {
-    color: '#409CFF',
+    color: nav.accent,
     fontSize: 16,
     fontWeight: '500',
   },
@@ -608,7 +608,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   editSearchText: {
-    color: '#409CFF',
+    color: nav.accent,
     fontSize: 14,
     fontWeight: '500',
   },
@@ -628,7 +628,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(64,156,255,0.14)',
+    backgroundColor: nav.accentWash,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   resultDetour: {
-    color: '#4ADE80',
+    color: nav.success,
     fontSize: 13,
     fontWeight: '600',
     marginTop: 2,

@@ -6,6 +6,7 @@ import { findIncidentsAhead } from '../../services/traffic/incidentAhead';
 import { INCIDENT_TYPE_ICONS, INCIDENT_TYPE_LABELS } from '../../services/traffic/incidentWire';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { useTrafficStore } from '../../stores/trafficStore';
+import { nav } from '../../constants/theme';
 import type { TrafficIncident } from '../../models/traffic';
 
 const CHECK_INTERVAL_MS = 10_000;
@@ -54,7 +55,11 @@ export function IncidentAheadBanner() {
 
   return (
     <View style={styles.banner} accessibilityRole="alert" accessibilityLabel={`${label} ahead`}>
-      <Ionicons name={INCIDENT_TYPE_ICONS[warning.type] as never} size={16} color="#FFFFFF" />
+      <Ionicons
+        name={INCIDENT_TYPE_ICONS[warning.type] as never}
+        size={16}
+        color={nav.textPrimary}
+      />
       <Text style={styles.text}>{label} ahead</Text>
     </View>
   );
@@ -66,14 +71,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,59,48,0.92)',
+    backgroundColor: nav.dangerWash,
     borderRadius: 12,
     paddingVertical: 8,
     paddingHorizontal: 12,
     marginBottom: 8,
   },
   text: {
-    color: '#FFFFFF',
+    color: nav.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },

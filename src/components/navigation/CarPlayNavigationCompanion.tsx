@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationStepsContent } from './NavigationStepsList';
 import { formatDistance, formatDuration } from '../../utils/units';
 import { useTheme } from '../../contexts/ThemeContext';
+import { nav } from '../../constants/theme';
 import type { ValhallaRoute } from '../../models/route';
 
 interface CarPlayNavigationCompanionProps {
@@ -105,12 +106,12 @@ const styles = StyleSheet.create({
   destination: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
   summary: { color: 'rgba(255,255,255,0.6)', fontSize: 14, marginTop: 2 },
   endButton: {
-    backgroundColor: 'rgba(255,59,48,0.18)',
+    backgroundColor: nav.dangerSubtle,
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 16,
   },
-  endText: { color: '#FF453A', fontSize: 15, fontWeight: '700' },
+  endText: { color: nav.danger, fontSize: 15, fontWeight: '700' },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',

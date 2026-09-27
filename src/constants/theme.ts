@@ -83,6 +83,81 @@ export const darkColors = {
   },
 } as const;
 
+/**
+ * Navigation HUD palette.
+ *
+ * The guidance surfaces stay dark over the map in both app themes — the glass
+ * materials on the banner, HUD and steps list are all pinned to
+ * `colorScheme="dark"` — so these are single tokens rather than the light/dark
+ * pairs in {@link colors} / {@link darkColors}.
+ *
+ * Everything the navigation HUD paints should come from here. The point is
+ * one hue per meaning: a control that means "end the trip" must not render as
+ * one red on the banner, a second on the ETA bar and a third on the speed
+ * badge, which is what happened while these were per-file literals.
+ */
+export const nav = {
+  // ── Surfaces ──
+  /** Turn-by-turn guidance card floating over the map. */
+  surface: 'rgba(26,47,62,0.72)',
+  /** Opaque form of {@link nav.surface}, for text and icons drawn on it. */
+  surfaceSolid: '#1A2F3E',
+  /** Bottom sheet pinned under the map (ETA bar + stops). */
+  sheet: 'rgba(28,28,45,0.72)',
+  /** Opaque panels that cover the map: arrival summary, incident report. */
+  panel: 'rgba(28,28,30,0.98)',
+  /** Speed badge plate. */
+  badge: 'rgba(28,28,30,0.92)',
+
+  // ── Text ──
+  textPrimary: '#FFFFFF',
+  textSecondary: 'rgba(255,255,255,0.6)',
+  textMuted: 'rgba(255,255,255,0.55)',
+  /** Disabled glyph in the stops list's reorder controls. */
+  textDisabled: 'rgba(255,255,255,0.25)',
+
+  // ── Lines ──
+  /** Hairline separating rows inside a guidance surface. */
+  separator: 'rgba(255,255,255,0.1)',
+  /** Divider between lane arrows. */
+  divider: 'rgba(255,255,255,0.15)',
+  /** Outline on a control that needs its own edge. */
+  border: 'rgba(255,255,255,0.25)',
+
+  // ── Controls ──
+  /** Tinted circular button on the glass: preview, share, add stop. */
+  control: 'rgba(255,255,255,0.12)',
+
+  // ── Semantics ──
+  /**
+   * Interactive accent. Every navigation surface is dark, so this is the
+   * light-on-dark primary rather than the app's {@link colors.primary}.
+   */
+  accent: darkColors.primaryLight,
+  /** Tinted fill behind an accent glyph, and the current steps-list row. */
+  accentWash: 'rgba(64,156,255,0.18)',
+  warning: darkColors.warning,
+  warningWash: 'rgba(255,159,10,0.18)',
+  danger: darkColors.error,
+  /**
+   * Danger colour for text on a light surface (the speed sign's white field).
+   * {@link nav.danger} is tuned for dark surfaces and washes out on white,
+   * the same way `colors.primary` would on the HUD's glass.
+   */
+  dangerInk: '#C5221F',
+  /** Filled destructive control: Exit, End. */
+  dangerWash: 'rgba(255,69,58,0.92)',
+  /** Tinted fill behind a destructive glyph. */
+  dangerSubtle: 'rgba(255,69,58,0.18)',
+  success: darkColors.success,
+
+  // ── Lane guidance ──
+  // Lane arrows are drawn thin when inactive; 0.35 read as too faint at that
+  // stroke weight, so the dim one sits a little above the old value.
+  laneActive: '#FFFFFF',
+  laneInactive: 'rgba(255,255,255,0.45)',
+} as const;
+
 export type AppColors = typeof colors;
 
 export type AppColorsLoose = {

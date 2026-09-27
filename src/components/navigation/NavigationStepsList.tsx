@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassView } from '../common/GlassView';
+import { nav } from '../../constants/theme';
 import type { ValhallaManeuver, ValhallaRoute } from '../../models/route';
 import { formatDistance } from '../../utils/units';
 
@@ -146,7 +147,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 10,
   },
-  rowCurrent: { backgroundColor: 'rgba(64,156,255,0.18)' },
+  rowCurrent: { backgroundColor: nav.accentWash },
   index: {
     width: 26,
     height: 26,
@@ -155,7 +156,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  indexCurrent: { backgroundColor: '#0A84FF' },
+  indexCurrent: { backgroundColor: nav.accent },
   indexText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '700' },
   indexTextCurrent: { color: '#fff' },
   body: { flex: 1 },

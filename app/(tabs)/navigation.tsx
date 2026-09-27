@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
-import { NextTurnBanner, NavigationHud, SpeedLimitSign } from '@/components/navigation';
+import { NextTurnBanner, NavigationHud } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import { IncidentAheadBanner } from '@/components/navigation/IncidentAheadBanner';
@@ -17,13 +17,14 @@ import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
 import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils/navigationStops';
-import { guidanceManeuverIndex } from '@/utils/navigationManeuvers';
+import { guidanceManeuverIndex, currentRoadName } from '@/utils/navigationManeuvers';
 import { computeBearing, angleDifferenceDeg } from '@/utils/routeSnap';
 import { computeRoute } from '@/services/routing/routingService';
 import { buildRouteAlternatives } from '@/services/routing/routeAlternatives';
 import { navigationModeCapabilities, navigationModeForCosting } from '@/utils/navigationMode';
 import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
-import { CurrentSpeedBadge } from '@/components/navigation/CurrentSpeedBadge';
+import { SpeedCluster } from '@/components/navigation/SpeedCluster';
+import { CurrentRoadPill } from '@/components/navigation/CurrentRoadPill';
 import { NavigationStepsList } from '@/components/navigation/NavigationStepsList';
 import { CarPlayNavigationCompanion } from '@/components/navigation/CarPlayNavigationCompanion';
 import { useCarPlayStore } from '@/stores/carPlayStore';
@@ -571,6 +572,9 @@ export default function NavigationScreen() {
   const guidanceIdx = guidanceManeuverIndex(currentStepIndex, allManeuvers);
   const guidance = allManeuvers[guidanceIdx] ?? currentManeuver;
   const following = allManeuvers[guidanceIdx + 1] ?? null;
+  // Conversely the segment already reached is the road under the car, which is
+  // what the map pill names — the banner is already announcing the next one.
+  const currentRoad = currentRoadName(currentStepIndex, allManeuvers);
 
   // CarPlay companion: the car shows the map, so the phone shows the step list
   // and an add-stop search bar instead of duplicating the map HUD.
@@ -684,14 +688,31 @@ export default function NavigationScreen() {
               laneGuidance={modeCapabilities.laneGuidance ? guidance?.laneGuidance : undefined}
             />
           </View>
-          {modeCapabilities.speedometer && (
-            <CurrentSpeedBadge speedMph={currentSpeedMph} over={isOverSpeed} />
-          )}
-          {modeCapabilities.speedLimit && currentManeuver?.speedLimitMph != null && (
-            <SpeedLimitSign speedLimitMph={currentManeuver.speedLimitMph} />
-          )}
         </View>
       </View>
+
+      {/* Speed limit + current speed + the road being travelled, on the band
+          above the ETA bar: sign on the left, road centred in what's left,
+          and the action rail on the right. Hidden with the rail while the
+          stops sheet is expanded. */}
+      {!hudExpanded && (
+        <View style={[styles.bottomBand, { bottom: insets.bottom + spacing.md + 110 }]}>
+          {/* Gated on either capability so the sign survives if a future mode
+              posts a limit without a speedometer. */}
+          {(modeCapabilities.speedometer || modeCapabilities.speedLimit) && (
+            <SpeedCluster
+              speedLimitMph={
+                modeCapabilities.speedLimit ? (currentManeuver?.speedLimitMph ?? null) : null
+              }
+              speedMph={modeCapabilities.speedometer ? currentSpeedMph : null}
+              over={isOverSpeed}
+            />
+          )}
+          <View style={styles.roadPillSlot} pointerEvents="none">
+            <CurrentRoadPill roadName={currentRoad} />
+          </View>
+        </View>
+      )}
 
       {/* Expandable bottom HUD pinned above the safe area. */}
       <View style={[styles.etaContainer, { bottom: insets.bottom + spacing.md }]}>
@@ -850,6 +871,19 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     },
     bannerFlex: {
       flex: 1,
+    },
+    bottomBand: {
+      position: 'absolute',
+      left: spacing.md,
+      // Clears the 52pt action rail on the right plus its gutter.
+      right: spacing.md + 64,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+    },
+    roadPillSlot: {
+      flex: 1,
+      alignItems: 'center',
     },
     etaContainer: {
       position: 'absolute',

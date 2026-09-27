@@ -6,6 +6,7 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { decodePolyline } from '../../utils/polyline';
 import type { NextStop } from '../../utils/navigationStops';
+import { nav } from '../../constants/theme';
 import {
   averageRouteTrafficColor,
   ETA_COLOR_GREEN,
@@ -15,8 +16,6 @@ interface EtaDisplayProps {
   etaSeconds: number | null;
   remainingDistanceMeters: number | null;
   onExit?: () => void;
-  onPreview?: () => void;
-  isPreviewMode?: boolean;
   onAddDestination?: () => void;
   /** Destination name for share message */
   destinationName?: string;
@@ -29,8 +28,6 @@ export function EtaDisplay({
   etaSeconds,
   remainingDistanceMeters,
   onExit,
-  onPreview,
-  isPreviewMode,
   onAddDestination,
   destinationName,
   nextStop,
@@ -95,7 +92,7 @@ export function EtaDisplay({
     >
       {showingNextStop && (
         <View style={styles.nextStopRow}>
-          <Ionicons name="flag-outline" size={14} color="#FF9500" />
+          <Ionicons name="flag-outline" size={14} color={nav.warning} />
           <Text style={styles.nextStopLabel} numberOfLines={1}>
             Next · {nextStop.name}
           </Text>
@@ -134,19 +131,6 @@ export function EtaDisplay({
           </Text>
         </View>
         <View style={styles.buttons}>
-          {onPreview && (
-            <TouchableOpacity
-              style={[styles.previewBtn, isPreviewMode && styles.previewBtnActive]}
-              onPress={onPreview}
-              activeOpacity={0.85}
-            >
-              <Ionicons
-                name={isPreviewMode ? 'pause' : 'play'}
-                size={18}
-                color={isPreviewMode ? '#fff' : 'rgba(255,255,255,0.75)'}
-              />
-            </TouchableOpacity>
-          )}
           {onAddDestination && (
             <TouchableOpacity
               style={styles.addDestBtn}
@@ -157,9 +141,9 @@ export function EtaDisplay({
               accessibilityRole="button"
             >
               <View style={styles.addDestIconContainer}>
-                <Ionicons name="location-outline" size={18} color="#fff" />
+                <Ionicons name="location-outline" size={18} color={nav.textPrimary} />
                 <View style={styles.addDestPlusBadge}>
-                  <Ionicons name="add" size={10} color="#fff" />
+                  <Ionicons name="add" size={10} color={nav.textPrimary} />
                 </View>
               </View>
             </TouchableOpacity>
@@ -186,7 +170,7 @@ export function EtaDisplay({
             accessibilityHint="Share your destination and ETA"
             accessibilityRole="button"
           >
-            <Ionicons name="share-outline" size={18} color="#fff" />
+            <Ionicons name="share-outline" size={18} color={nav.textPrimary} />
           </TouchableOpacity>
           {onExit && (
             <TouchableOpacity
@@ -220,7 +204,7 @@ const styles = StyleSheet.create({
   },
   nextStopLabel: {
     flex: 1,
-    color: '#fff',
+    color: nav.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -232,7 +216,7 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
   },
   skipStopText: {
-    color: '#409CFF',
+    color: nav.accent,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -245,14 +229,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   eta: {
-    fontSize: 32,
+    // Tabular figures keep the countdown from jittering as the digits change.
+    fontVariant: ['tabular-nums'],
+    fontSize: 34,
     fontWeight: '700',
-    color: '#4ADE80',
-    lineHeight: 36,
+    color: ETA_COLOR_GREEN,
+    lineHeight: 38,
   },
   sub: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.55)',
+    fontSize: 16,
+    color: nav.textSecondary,
     marginTop: 3,
   },
   buttons: {
@@ -260,22 +246,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  previewBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  previewBtnActive: {
-    backgroundColor: 'rgba(74,222,128,0.25)',
-  },
   shareBtn: {
     width: 44,
     height: 44,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: nav.control,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -283,7 +258,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: nav.control,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -301,12 +276,12 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#409CFF',
+    backgroundColor: nav.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   exitBtn: {
-    backgroundColor: '#EF4444',
+    backgroundColor: nav.danger,
     paddingHorizontal: 26,
     paddingVertical: 14,
     borderRadius: 999,
@@ -314,6 +289,6 @@ const styles = StyleSheet.create({
   exitText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: nav.textPrimary,
   },
 });

@@ -59,4 +59,27 @@ describe('NextTurnBanner', () => {
       screen.getByText('Turn left onto Main Street', { includeHiddenElements: true }),
     ).toBeTruthy();
   });
+
+  it('leads with the numeral and sets the unit as a smaller nested suffix', () => {
+    const screen = render(<NextTurnBanner maneuver={{ ...exitManeuver, distanceMeters: 2575 }} />);
+
+    // 2575 m ≈ 1.6 mi. The two halves still read as one string...
+    expect(screen.getByText('1.6 mi', { includeHiddenElements: true })).toBeTruthy();
+    // ...but the unit is its own Text node, which is what lets the banner size
+    // the numeral up and the unit down.
+    expect(screen.getByText(' mi', { includeHiddenElements: true })).toBeTruthy();
+  });
+
+  it('prefers the live countdown distance over the static route value', () => {
+    const screen = render(
+      <NextTurnBanner
+        maneuver={{ ...exitManeuver, distanceMeters: 8046 }}
+        distanceToTurnMeters={1609}
+      />,
+    );
+
+    // Only the live ~1 mi figure is shown, not the maneuver's 5 mi.
+    expect(screen.getByText('1.0 mi', { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByText('5.0 mi', { includeHiddenElements: true })).toBeNull();
+  });
 });

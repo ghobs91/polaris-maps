@@ -35,6 +35,34 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
+ * Split a distance into its numeral and unit.
+ *
+ * The navigation banner leads with the number and sets the unit as a smaller
+ * suffix, so it needs the two apart. Imperial/metric selection matches
+ * {@link formatDistance} exactly because that function is built on this one.
+ *
+ * @param metric Override the preference (used by tests and pure callers).
+ */
+export function formatDistanceParts(
+  meters: number,
+  metric?: boolean,
+): { value: string; unit: string } {
+  const useMetric = metric ?? useSettingsStore.getState().useMetric;
+
+  if (!useMetric) {
+    const miles = meters / METERS_PER_MILE;
+    if (miles < 0.1) {
+      const feet = Math.round(meters / METERS_PER_FOOT / 50) * 50 || 50;
+      return { value: `${feet}`, unit: 'ft' };
+    }
+    return { value: miles.toFixed(1), unit: 'mi' };
+  }
+
+  if (meters < 1000) return { value: `${Math.round(meters)}`, unit: 'm' };
+  return { value: (meters / 1000).toFixed(1), unit: 'km' };
+}
+
+/**
  * Format a distance in meters for display using the user's unit preference
  * (single source of truth — not the device locale).
  * Imperial: feet below 0.1 mi, miles above.
@@ -43,17 +71,6 @@ export function formatDuration(seconds: number): string {
  * @param metric Override the preference (used by tests and pure callers).
  */
 export function formatDistance(meters: number, metric?: boolean): string {
-  const useMetric = metric ?? useSettingsStore.getState().useMetric;
-
-  if (!useMetric) {
-    const miles = meters / METERS_PER_MILE;
-    if (miles < 0.1) {
-      const feet = Math.round(meters / METERS_PER_FOOT / 50) * 50 || 50;
-      return `${feet} ft`;
-    }
-    return `${miles.toFixed(1)} mi`;
-  }
-
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
+  const { value, unit } = formatDistanceParts(meters, metric);
+  return `${value} ${unit}`;
 }

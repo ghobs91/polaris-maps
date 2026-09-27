@@ -15,6 +15,7 @@ import {
   INCIDENT_TYPE_ICONS,
 } from '../../services/traffic/incidentReportService';
 import { reportIncident } from '../../services/traffic/incidentExchangeService';
+import { nav } from '../../constants/theme';
 import type { IncidentType } from '../../models/traffic';
 
 const INCIDENT_TYPES: IncidentType[] = [
@@ -90,7 +91,7 @@ export function IncidentReportPanel({ visible, onClose, position }: IncidentRepo
 
           {submitted ? (
             <View style={styles.successContainer}>
-              <Ionicons name="checkmark-circle" size={48} color="#4ADE80" />
+              <Ionicons name="checkmark-circle" size={48} color={nav.success} />
               <Text style={styles.successText}>Report submitted</Text>
               <Text style={styles.successSubtext}>Thanks for helping the community</Text>
             </View>
@@ -220,8 +221,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   typeChipActive: {
-    backgroundColor: 'rgba(64,156,255,0.2)',
-    borderColor: '#409CFF',
+    backgroundColor: nav.accentWash,
+    borderColor: nav.accent,
   },
   typeLabel: {
     fontSize: 14,
@@ -243,7 +244,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   submitBtn: {
-    backgroundColor: '#409CFF',
+    backgroundColor: nav.accent,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
@@ -259,7 +260,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 13,
-    color: '#FF6B6B',
+    color: nav.danger,
     marginTop: 12,
   },
   successContainer: {
