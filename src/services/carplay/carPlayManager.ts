@@ -744,10 +744,11 @@ function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getSt
     heading: state.navBearing,
   };
   // While the phone screen is awake its display-driven interpolation loop is
-  // ticking and publishes ~60fps; keep the throttle to coalesce those writes.
-  // Once the loop stops — the phone display sleeps, including while CarPlay
-  // keeps the app running and `AppState` reports `active` — a throttled push
-  // could sit pending until iOS re-suspends the process, leaving CarPlay
+  // ticking and publishes ~60fps; throttle to ~30Hz so the native follow glide
+  // is re-targeted often enough to stay smooth, without a bridge write per
+  // frame. Once the loop stops — the phone display sleeps, including while
+  // CarPlay keeps the app running and `AppState` reports `active` — a throttled
+  // push could sit pending until iOS re-suspends the process, leaving CarPlay
   // frozen at the lock-time position. Push every fix immediately then.
   if (!isForegroundInterpolationActive()) {
     flushMapCenter();
@@ -755,7 +756,7 @@ function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getSt
   }
   if (mapCenterUpdateTimer !== null) return;
 
-  mapCenterUpdateTimer = setTimeout(flushMapCenter, 100);
+  mapCenterUpdateTimer = setTimeout(flushMapCenter, 33);
 }
 
 function flushMapCenter() {

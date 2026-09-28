@@ -118,12 +118,28 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private var lastHeading: Double = 0
   // Follow smoothing: JS pushes route-snapped fixes at display rate while the
   // phone screen is awake, but only at the raw GPS rate (≈1 Hz) once the
-  // display sleeps, even though CarPlay keeps rendering. The display link
-  // interpolates camera + puck toward each new fix so locked-phone navigation
-  // glides instead of jumping once per second.
+  // display sleeps, even though CarPlay keeps rendering. A ticker interpolates
+  // camera + puck toward each new fix so locked-phone navigation glides
+  // instead of jumping once per second.
+  //
+  // The ticker must not be tied to the phone's own display: `CADisplayLink`
+  // created with the default initializer follows the main screen, whose vsync
+  // stops when the phone locks — exactly when the glide is needed. So the
+  // link is created from the CarPlay window scene (iOS 27+) or its screen
+  // (older), with a run-loop timer fallback for a vsync clock that never
+  // delivers (see `useTimerTicker`).
   private var targetCoordinate: CLLocationCoordinate2D?
   private var targetHeading: Double = 0
   private var displayLink: CADisplayLink?
+  /// Run-loop 60 Hz timer driving the glide once the vsync clock is known to
+  /// be stalled (phone display asleep). Stays switched on for the rest of the
+  /// host's lifetime: re-probing vsync every push would stall a glide each
+  /// time it fails.
+  private var timerTicker: Timer?
+  private var useTimerTicker = false
+  /// Last tick from whichever ticker is driving the glide; a stale value on
+  /// the next push means the vsync clock has stopped.
+  private var lastFollowTickAt: CFTimeInterval = 0
   private var animationStart: CFTimeInterval = 0
   private var animationDuration: TimeInterval = 0
   private var animationFromCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
@@ -152,6 +168,22 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Set when the style failed to load so the watchdog can retry it even
   /// though `styleLoaded` was re-armed to let route layers rebuild.
   private var styleLoadFailed = false
+
+  /// Temporary verification counters for the locked-phone follow ticker:
+  /// reports one `[PolarisCarPlayRate]` line per second so a device capture
+  /// shows whether vsync, the fallback timer, or neither is driving frames,
+  /// how often JS pushes arrive, their worst gap, and how many were snaps.
+  /// Remove once the locked-phone glide is confirmed on device.
+  private var rateLinkTicks = 0
+  private var rateTimerTicks = 0
+  private var ratePushes = 0
+  private var rateSnaps = 0
+  private var rateMaxPushGap: CFTimeInterval = 0
+  private var rateReportAt: CFTimeInterval = 0
+  /// The vsync source is chosen (and logged) once per host session; a glide
+  /// creates its link on every push, so logging there would spam the console.
+  private var vsyncSource = "none"
+  private var vsyncSourceLogged = false
 
   /// True once a real position has arrived; guards against locating to (0, 0).
   private(set) var hasCenter = false
@@ -231,6 +263,16 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   func deactivate() {
     stopWatchdog()
     stopFollowAnimation()
+    useTimerTicker = false
+    lastFollowTickAt = 0
+    rateLinkTicks = 0
+    rateTimerTicks = 0
+    ratePushes = 0
+    rateSnaps = 0
+    rateMaxPushGap = 0
+    rateReportAt = 0
+    vsyncSource = "none"
+    vsyncSourceLogged = false
     clearRoute()
     incidentMarkers = []
     incidentSourceIds = []
@@ -373,6 +415,85 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       width: 52,
       height: 68
     )
+  }
+
+  // MARK: Follow ticker (vsync with a timer fallback)
+
+  /// A display link bound to the CarPlay window's display, so it keeps firing
+  /// while the phone screen is locked. Falls back to the process-default link
+  /// when the scene isn't available.
+  private func makeFollowDisplayLink() -> CADisplayLink {
+    let selector = #selector(followAnimationTick)
+    func announce(_ source: String) {
+      vsyncSource = source
+      guard !vsyncSourceLogged else { return }
+      vsyncSourceLogged = true
+      NSLog("[PolarisCarPlayRate] mode=\(mode == .full ? "full" : "dash") vsync source=\(source)")
+    }
+    guard let scene = carPlayWindow?.windowScene else {
+      announce("default")
+      return CADisplayLink(target: self, selector: selector)
+    }
+    if #available(iOS 27.0, *) {
+      if let link = scene.displayLink(target: self, selector: selector) {
+        announce("windowScene")
+        return link
+      }
+    }
+    if let link = scene.screen.displayLink(withTarget: self, selector: selector) {
+      announce("screen")
+      return link
+    }
+    announce("default")
+    return CADisplayLink(target: self, selector: selector)
+  }
+
+  /// Starts the run-loop timer that carries the glide when the vsync clock is
+  /// stalled. Safe to call repeatedly.
+  private func startTimerTicker() {
+    guard timerTicker == nil else { return }
+    let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+      self?.followAnimationTick()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    timerTicker = timer
+  }
+
+  /// Switches the glide to the timer clock after a stalled vsync tick. Called
+  /// from `updateCenter`, which runs on every push — including while the
+  /// phone is locked, when the watchdog timer itself may not be delivered.
+  /// The threshold is deliberately below one fix interval: a vsync clock that
+  /// only ticks at a few Hz (rather than not at all) still cannot carry the
+  /// glide, and the timer is never worse than a slow link.
+  private func switchToTimerTickerIfStalled() {
+    guard !useTimerTicker else { return }
+    let now = CACurrentMediaTime()
+    guard lastFollowTickAt > 0, now - lastFollowTickAt > 0.35 else { return }
+    useTimerTicker = true
+    displayLink?.invalidate()
+    displayLink = nil
+    startTimerTicker()
+    NSLog("[PolarisCarPlayRate] vsync stalled; using run-loop timer")
+  }
+
+  /// Temporary verification log for the locked-phone glide: one line per
+  /// second showing which clock is driving frames, the JS push rate and worst
+  /// gap, and how many pushes had to snap instead of gliding.
+  private func reportRateIfDue() {
+    let now = CACurrentMediaTime()
+    if rateReportAt == 0 { rateReportAt = now }
+    guard now - rateReportAt >= 1 else { return }
+    rateReportAt = now
+    let app = UIApplication.shared.applicationState.rawValue
+    let scene = carPlayWindow?.windowScene?.activationState.rawValue ?? 99
+    NSLog(
+      "[PolarisCarPlayRate] mode=\(mode == .full ? "full" : "dash") src=\(vsyncSource) link=\(rateLinkTicks)/s timer=\(rateTimerTicks)/s push=\(ratePushes)/s gap=\(String(format: "%.1f", rateMaxPushGap))s snap=\(rateSnaps)/s app=\(app) scene=\(scene) ticker=\(useTimerTicker ? "timer" : "link")"
+    )
+    rateLinkTicks = 0
+    rateTimerTicks = 0
+    ratePushes = 0
+    rateSnaps = 0
+    rateMaxPushGap = 0
   }
 
   // MARK: Route
@@ -905,22 +1026,40 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     if lat == 0 && lng == 0 { return }
     let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
     let now = CACurrentMediaTime()
+    ratePushes += 1
+    reportRateIfDue()
     let hadTarget = targetCoordinate != nil
     let elapsed = now - lastCameraPushTime
+    let hadPreviousPush = lastCameraPushTime > 0
     lastCameraPushTime = now
+    if hadPreviousPush { rateMaxPushGap = max(rateMaxPushGap, elapsed) }
     targetCoordinate = coordinate
     targetHeading = heading
     hasCenter = true
 
     // Interpolate over the interval the next fix is likely to need. While JS
     // pushes at display rate (phone awake) this is a frame or two — effectively
-    // a passthrough. Once the phone display sleeps and only ≈1 Hz GPS fixes
-    // arrive, the same duration turns each fix into a one-second glide.
+    // a passthrough. Once the phone display sleeps and only sparse GPS fixes
+    // arrive, the same duration turns each fix into a glide; the cap is wide
+    // enough that a 2–3 s background fix gap still glides (a snap there would
+    // read as a per-fix jump) but a resumed-from-suspension gap still snaps.
     let shouldSnap =
-      !hadTarget || !followVehicle || !isNavigating || elapsed > 1.6 || mapView == nil
+      !hadTarget || !followVehicle || !isNavigating || elapsed > 3.0 || mapView == nil
+    if isNavigating, followVehicle {
+      // A push is the only event guaranteed to wake the app while locked, so
+      // this is where a stalled vsync clock is detected and replaced.
+      switchToTimerTickerIfStalled()
+    } else {
+      // Snapped/idle frames don't drive the ticker; don't let their staleness
+      // trip the stall detector on the next real glide.
+      lastFollowTickAt = 0
+    }
+    if shouldSnap, isNavigating, followVehicle {
+      rateSnaps += 1
+    }
     animationFromCoordinate = currentCoordinate
     animationFromHeading = lastHeading
-    animationDuration = shouldSnap ? 0 : min(max(elapsed, 0), 1.5)
+    animationDuration = shouldSnap ? 0 : min(max(elapsed, 0), 3.0)
     animationStart = now
     if animationDuration <= 0.001 {
       stopFollowAnimation()
@@ -945,18 +1084,35 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   }
 
   private func startFollowAnimation() {
-    guard displayLink == nil, mapView != nil else { return }
-    let link = CADisplayLink(target: self, selector: #selector(followAnimationTick))
+    guard mapView != nil else { return }
+    if useTimerTicker {
+      startTimerTicker()
+      return
+    }
+    guard displayLink == nil else { return }
+    let link = makeFollowDisplayLink()
     link.add(to: .main, forMode: .common)
     displayLink = link
+    // Anchor the stall detector: if this link never delivers (phone display
+    // asleep), the next push switches to the timer ticker.
+    lastFollowTickAt = CACurrentMediaTime()
   }
 
   private func stopFollowAnimation() {
     displayLink?.invalidate()
     displayLink = nil
+    timerTicker?.invalidate()
+    timerTicker = nil
   }
 
   @objc private func followAnimationTick() {
+    if useTimerTicker {
+      rateTimerTicks += 1
+    } else {
+      rateLinkTicks += 1
+    }
+    lastFollowTickAt = CACurrentMediaTime()
+    reportRateIfDue()
     guard let target = targetCoordinate else {
       stopFollowAnimation()
       return
