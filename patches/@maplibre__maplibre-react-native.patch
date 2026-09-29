@@ -119,6 +119,27 @@ index d1f24aee0f089c94d4b11f5c115b3a1900c561b1..d77f8cbc9d5fe9fd30398444c7bf353a
  
  @class CameraUpdateQueue;
  @class MLRNImages;
+diff --git a/ios/MLRN/MLRNMapView.m b/ios/MLRN/MLRNMapView.m
+index 28c79d501db6296ad488e76fafe6a471d05af54a..f350298886d58d3afc9781095b25798fee57d2b0 100644
+--- a/ios/MLRN/MLRNMapView.m
++++ b/ios/MLRN/MLRNMapView.m
+@@ -203,8 +203,15 @@ - (void)setSourceVisibility:(BOOL)visible
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
+ - (void)insertReactSubview:(id<RCTComponent>)subview atIndex:(NSInteger)atIndex {
++  // Under the Fabric legacy interop layer a nested map child can be mounted
++  // before its contentView exists, so `subview` may be nil. Inserting nil into
++  // `_reactSubviews` raises NSInvalidArgumentException ("object cannot be nil").
++  if (subview == nil) {
++    return;
++  }
+   [self addToMap:subview];
+-  [_reactSubviews insertObject:(UIView *)subview atIndex:(NSUInteger)atIndex];
++  NSUInteger safeIndex = MIN((NSUInteger)atIndex, _reactSubviews.count);
++  [_reactSubviews insertObject:(UIView *)subview atIndex:safeIndex];
+ }
+ #pragma clang diagnostic pop
+ 
 diff --git a/ios/MLRN/MLRNMapViewManager.h b/ios/MLRN/MLRNMapViewManager.h
 index 461b8c730672ffea1c823c6030099078d57feb37..37fa5975cb4e2bf50c433dd48c11f601842a7c24 100644
 --- a/ios/MLRN/MLRNMapViewManager.h

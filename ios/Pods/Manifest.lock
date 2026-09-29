@@ -2645,7 +2645,7 @@ DEPENDENCIES:
   - "EXUpdatesInterface (from `../node_modules/.pnpm/expo-updates-interface@57.0.1_expo@57.0.8/node_modules/expo-updates-interface/ios`)"
   - "FBLazyVector (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/Libraries/FBLazyVector`)"
   - "hermes-engine (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)"
-  - "maplibre-react-native (from `../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=e2a1f3f3602d234cbc26180d4f51da753d0ef_c916f9ac9172406b597bf7fb8dccea98/node_modules/@maplibre/maplibre-react-native`)"
+  - "maplibre-react-native (from `../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=b4a396491372ba6281405e0330120a54aa518_baa64ff43c2b5732c8d0e4b78a80ac56/node_modules/@maplibre/maplibre-react-native`)"
   - "RCTDeprecation (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)"
   - "RCTRequired (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/Libraries/Required`)"
   - "RCTSwiftUI (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactApple/RCTSwiftUI`)"
@@ -2830,7 +2830,7 @@ EXTERNAL SOURCES:
     :podspec: "../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-v250829098.0.14
   maplibre-react-native:
-    :path: "../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=e2a1f3f3602d234cbc26180d4f51da753d0ef_c916f9ac9172406b597bf7fb8dccea98/node_modules/@maplibre/maplibre-react-native"
+    :path: "../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=b4a396491372ba6281405e0330120a54aa518_baa64ff43c2b5732c8d0e4b78a80ac56/node_modules/@maplibre/maplibre-react-native"
   RCTDeprecation:
     :path: "../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
