@@ -185,7 +185,7 @@ platform :ios do
     )
 
     UI.success("✅ Build uploaded to TestFlight!")
-    UI.message("Open TestFlight to distribute: https://appstoreconnect.apple.com/apps/#{lane_context[SharedValues::APP_STORE_CONNECT_APP_ID]}/testflight")
+    UI.message("Open TestFlight to distribute: https://appstoreconnect.apple.com/apps/6760763483/testflight")
   end
 
   # ── Release lane: Build & upload for App Store submission ──────
