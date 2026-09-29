@@ -2,9 +2,9 @@
 
 # Polaris Maps
 
-**A maps app where every phone is a node, not just a client.**
+**The people's map — turn-by-turn navigation and live traffic owned by users, not a corporate cloud. Every device is a node.**
 
-Turn-by-turn navigation, live traffic, POI search, transit, offline maps — built on a peer-to-peer network instead of a corporate cloud.
+POI search, transit, offline maps, street imagery — all served over a peer-to-peer network instead of a corporate cloud.
 
 [Features](#features) · [How It Works](#how-the-p2p-layer-works) · [Architecture](#architecture) · [Getting Started](#getting-started)
 
