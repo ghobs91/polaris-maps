@@ -8,6 +8,7 @@
 
 import { DARK_MAP_STYLE_JSON } from '../../src/constants/darkMapStyle';
 import { LIGHT_MAP_STYLE_JSON } from '../../src/constants/lightMapStyle';
+import { REGIONAL_ORTHOPHOTO_SOURCES } from '../../src/constants/orthophotoSources';
 import { SATELLITE_STYLE_JSON } from '../../src/constants/satelliteStyle';
 
 /** Parse a hex color (#RRGGBB) to relative luminance (0-1). */
@@ -198,5 +199,73 @@ describe('satelliteStyle', () => {
     expect(cityLabel).toBeDefined();
     expect(cityLabel.paint['text-color']).toBe('#FFFFFF');
     expect(cityLabel.paint['text-halo-width']).toBeGreaterThanOrEqual(2);
+  });
+
+  it('should not over-zoom the global base past its native resolution', () => {
+    expect(style.sources['satellite-global'].maxzoom).toBeLessThan(19);
+    expect(style.sources['satellite-global'].maxzoom).toBeGreaterThan(0);
+  });
+
+  const envReady = (provider: (typeof REGIONAL_ORTHOPHOTO_SOURCES)[number]): boolean =>
+    !provider.auth || provider.auth.every((a) => Boolean(process.env[a.envVar]));
+
+  it('should register a bounded raster source and layer for every regionally-enabled provider', () => {
+    expect(REGIONAL_ORTHOPHOTO_SOURCES.length).toBeGreaterThan(1);
+    for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
+      const source = style.sources[provider.id];
+      if (!envReady(provider)) {
+        // Free-key providers are omitted entirely when their env vars are unset.
+        expect(source).toBeUndefined();
+        expect(style.layers.find((l: any) => l.id === `${provider.id}-tiles`)).toBeUndefined();
+        continue;
+      }
+      expect(source).toBeDefined();
+      expect(source.type).toBe('raster');
+      expect(source.bounds).toEqual(provider.bounds);
+      expect(source.maxzoom).toBe(provider.maxzoom);
+      expect(source.tileSize).toBe(provider.tileSize);
+      expect(source.attribution).toBe(provider.attribution);
+
+      const layer = style.layers.find((l: any) => l.id === `${provider.id}-tiles`);
+      expect(layer).toBeDefined();
+      expect(layer.type).toBe('raster');
+      expect(layer.source).toBe(provider.id);
+    }
+  });
+
+  it('should give every regional provider template valid MapLibre placeholders', () => {
+    for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
+      for (const template of provider.tiles) {
+        const tiled =
+          template.includes('{z}') && template.includes('{x}') && template.includes('{y}');
+        const wms = template.includes('{bbox-epsg-3857}');
+        expect(tiled || wms).toBe(true);
+      }
+    }
+  });
+
+  it('should keep provider templates free of committed credentials', () => {
+    for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
+      for (const template of provider.tiles) {
+        expect(template).not.toMatch(/username=|password=|token=|api[-_]?key=/i);
+      }
+    }
+  });
+
+  it('should render every enabled regional raster layer above the global base and below all labels', () => {
+    const globalIndex = style.layers.findIndex((l: any) => l.id === 'satellite-global-tiles');
+    const labelIndexes = style.layers
+      .map((l: any, i: number) => ({ l, i }))
+      .filter(({ l }) => l.type === 'symbol')
+      .map(({ i }) => i);
+    expect(labelIndexes.length).toBeGreaterThan(0);
+    const firstLabel = Math.min(...labelIndexes);
+
+    for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
+      if (!envReady(provider)) continue;
+      const idx = style.layers.findIndex((l: any) => l.id === `${provider.id}-tiles`);
+      expect(idx).toBeGreaterThan(globalIndex);
+      expect(idx).toBeLessThan(firstLabel);
+    }
   });
 });
