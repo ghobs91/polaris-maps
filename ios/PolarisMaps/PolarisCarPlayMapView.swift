@@ -97,6 +97,31 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// metre offset can't do this: the same offset lands lower on tall aspects.
   private static let followScreenFraction: CGFloat = 0.62
 
+  // MARK: Follow glide tuning
+
+  /// Floor for the glide duration: even at foreground push rates (~30 Hz) the
+  /// glide spans a few frames instead of restarting every push, which keeps
+  /// the motion continuous without perceptible lag behind the fix.
+  private static let minGlideSeconds: CFTimeInterval = 0.25
+  /// Cap for the glide duration (matches the old elapsed cap).
+  private static let maxGlideSeconds: CFTimeInterval = 3.0
+  /// A gap longer than this means the push stream resumed after suspension —
+  /// snap to the fix instead of gliding across the suspension, and relearn
+  /// the cadence. Also the max stale window during coasting.
+  private static let snapGapSeconds: CFTimeInterval = 3.0
+  /// Exponential-moving-average weight for the inter-push cadence estimate.
+  /// A single burst or a single long gap must not skew the next glide.
+  private static let pushIntervalEmaAlpha: CFTimeInterval = 0.35
+  /// Below this speed the vehicle is considered stationary: no glide needed
+  /// and no coasting past the fix.
+  private static let coastMinSpeedMps: Double = 0.5
+  /// Max time the ticker keeps projecting past the last fix at its speed
+  /// (dead-reckoning hold). Bounded so a missed fix can't run the puck down
+  /// the road indefinitely; the next fix re-anchors regardless.
+  private static let coastMaxSeconds: CFTimeInterval = 2.5
+  /// Earth radius for the coast projection (spherical, WGS84 mean).
+  private static let earthRadiusMeters: Double = 6_378_137
+
   private var mapView: MLNMapView?
   private var routeCoordinates: [CLLocationCoordinate2D] = []
   private var alternateCoordinates: [[CLLocationCoordinate2D]] = []
@@ -119,21 +144,44 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   // Follow smoothing: JS pushes route-snapped fixes at display rate while the
   // phone screen is awake, but only at the raw GPS rate (≈1 Hz) once the
   // display sleeps, even though CarPlay keeps rendering. A run-loop ticker
-  // interpolates camera + puck toward each new fix so locked-phone navigation
-  // glides instead of jumping once per second.
+  // interpolates camera + puck toward each new fix and then keeps projecting
+  // past it at the fix's speed, so locked-phone navigation glides instead of
+  // jumping once per second.
   //
   // The ticker is a `Timer` on the main run loop, NOT a `CADisplayLink`: a
   // display link follows a display's vsync, and the phone's stops when it
   // locks — precisely when the glide is needed. A run-loop timer has no such
   // dependency, so it keeps driving while the screen is off.
+  //
+  // Glide durations are FORWARD-looking: an exponential moving average of the
+  // inter-push interval (the expected gap to the next fix), floored and
+  // capped. Using the last observed gap instead made every jittery fix
+  // cadence produce glide–stall–glide stop-motion, and a burst-delivered fix
+  // (elapsed ≈ 0) snapped outright. Once the glide reaches the fix the ticker
+  // coasts at the fix's speed (bounded) until the next push re-anchors it, so
+  // the puck never sits still between fixes while the car is moving.
   private var targetCoordinate: CLLocationCoordinate2D?
   private var targetHeading: Double = 0
+  /// Clamped speed (m/s) that the pushed fix was traveling at. Drives the
+  /// coast hold: after the glide reaches the fix the ticker keeps projecting
+  /// at this speed so the puck doesn't stop dead between ~1 Hz locked-phone
+  /// fixes. 0 (unknown/stationary) disables coasting.
+  private var targetSpeedMps: Double = 0
+  /// Exponential moving average of the inter-push interval — the expected
+  /// time until the NEXT push. Glide durations are forward-looking off this
+  /// (the last observed gap says nothing about the next one; using it made
+  /// every jittery fix cadence read as a per-fix jolt).
+  private var pushIntervalEstimate: CFTimeInterval = 0
   private var followTimer: Timer?
   private var animationStart: CFTimeInterval = 0
   private var animationDuration: TimeInterval = 0
   private var animationFromCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
   private var animationFromHeading: Double = 0
   private var lastCameraPushTime: CFTimeInterval = 0
+  /// True after a glide completes while the ticker keeps projecting past the
+  /// fix at `targetSpeedMps` (see `followAnimationTick`).
+  private var coasting = false
+  private var coastStart: CFTimeInterval = 0
   // Presentation watchdog: re-asserts the CPWindow content and retries a style
   // that never finished loading (the system can clear the window's root view
   // across template transitions, and a cold-launch style fetch can abort).
@@ -423,6 +471,11 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
       self?.followAnimationTick()
     }
+    // Zero tolerance: the coast hold derives the projected position from the
+    // tick's own timestamp, so coalesced/deferred fires would show the puck
+    // slightly behind where the projection says it is. `.common` keeps the
+    // timer firing across template-driven run-loop mode churn.
+    timer.tolerance = 0
     RunLoop.main.add(timer, forMode: .common)
     followTimer = timer
   }
@@ -951,31 +1004,49 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Zoom used when not actively navigating (locate, dashboard tile).
   private static let idleZoom: Double = 15
 
-  func updateCenter(lat: Double, lng: Double, heading: Double) {
+  func updateCenter(lat: Double, lng: Double, heading: Double, speedMps: Double) {
     // (0, 0) is the Atlantic off West Africa — never a real fix. Ignoring it
     // keeps the pre-fix default from parking the map in "blank ocean".
     if lat == 0 && lng == 0 { return }
     let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
     let now = CACurrentMediaTime()
     let hadTarget = targetCoordinate != nil
-    let elapsed = now - lastCameraPushTime
+    let elapsed = lastCameraPushTime > 0 ? now - lastCameraPushTime : 0
     lastCameraPushTime = now
     targetCoordinate = coordinate
     targetHeading = heading
+    targetSpeedMps = max(speedMps, 0)
     hasCenter = true
 
-    // Interpolate over the interval the next fix is likely to need. While JS
-    // pushes at display rate (phone awake) this is a frame or two — effectively
-    // a passthrough. Once the phone display sleeps and only sparse GPS fixes
-    // arrive, the same duration turns each fix into a glide; the cap is wide
-    // enough that a 2–3 s background fix gap still glides (a snap there would
-    // read as a per-fix jump) but a resumed-from-suspension gap still snaps.
+    if hadTarget, elapsed > 0 {
+      // Track the push cadence with an EMA so a single burst or a single long
+      // gap doesn't skew the next glide's duration.
+      pushIntervalEstimate =
+        pushIntervalEstimate <= 0
+        ? elapsed
+        : pushIntervalEstimate + Self.pushIntervalEmaAlpha * (elapsed - pushIntervalEstimate)
+    }
+
+    // Snap when there is no continuity to preserve: first fix, follow turned
+    // off, not navigating, or the push stream resumed after a long suspension
+    // (a resumed-from-suspension gap must not glide across minutes of motion).
     let shouldSnap =
-      !hadTarget || !followVehicle || !isNavigating || elapsed > 3.0 || mapView == nil
+      !hadTarget || !followVehicle || !isNavigating || elapsed > Self.snapGapSeconds || mapView == nil
+    if elapsed > Self.snapGapSeconds {
+      // Cadence knowledge is invalid after a suspension; relearn it.
+      pushIntervalEstimate = 0
+    }
+
     animationFromCoordinate = currentCoordinate
     animationFromHeading = lastHeading
-    animationDuration = shouldSnap ? 0 : min(max(elapsed, 0), 3.0)
+    // Forward-looking duration: glide over the expected gap to the next fix
+    // (the EMA cadence), not the gap just observed. This keeps the glide
+    // running until the re-anchor arrives instead of stalling, and matches
+    // the glide speed to the actual inter-fix displacement.
+    animationDuration =
+      shouldSnap ? 0 : min(max(pushIntervalEstimate, Self.minGlideSeconds), Self.maxGlideSeconds)
     animationStart = now
+    coasting = false
     if animationDuration <= 0.001 {
       stopFollowAnimation()
       applyFollowFrame(coordinate: coordinate, heading: heading)
@@ -1006,6 +1077,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   private func stopFollowAnimation() {
     followTimer?.invalidate()
     followTimer = nil
+    coasting = false
   }
 
   @objc private func followAnimationTick() {
@@ -1018,17 +1090,60 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       animationDuration > 0
       ? min(max((now - animationStart) / animationDuration, 0), 1)
       : 1
-    let coordinate = CLLocationCoordinate2D(
-      latitude: animationFromCoordinate.latitude
-        + (target.latitude - animationFromCoordinate.latitude) * progress,
-      longitude: animationFromCoordinate.longitude
-        + (target.longitude - animationFromCoordinate.longitude) * progress)
-    let heading = interpolateHeading(
-      from: animationFromHeading, to: targetHeading, progress: progress)
-    applyFollowFrame(coordinate: coordinate, heading: heading)
-    if progress >= 1 {
+    let coordinate: CLLocationCoordinate2D
+    let heading: Double
+    if progress < 1 {
+      coordinate = CLLocationCoordinate2D(
+        latitude: animationFromCoordinate.latitude
+          + (target.latitude - animationFromCoordinate.latitude) * progress,
+        longitude: animationFromCoordinate.longitude
+          + (target.longitude - animationFromCoordinate.longitude) * progress)
+      heading = interpolateHeading(
+        from: animationFromHeading, to: targetHeading, progress: progress)
+    } else if coasting {
+      // Dead-reckoning hold: keep projecting past the last fix at its speed
+      // until the next push re-anchors. Without this the puck stops dead at
+      // each ~1 Hz locked-phone fix — a per-second stutter around the glide.
+      // Bounded so a missed fix can't run the puck down the road forever.
+      let coastElapsed = now - coastStart
+      if coastElapsed > Self.coastMaxSeconds {
+        stopFollowAnimation()
+        return
+      }
+      coordinate = Self.project(
+        target, bearing: targetHeading,
+        distanceMeters: targetSpeedMps * coastElapsed)
+      heading = targetHeading
+    } else if isNavigating, followVehicle, targetSpeedMps > Self.coastMinSpeedMps {
+      // Glide finished and the vehicle is moving — begin the coast hold.
+      coasting = true
+      coastStart = now
+      coordinate = target
+      heading = targetHeading
+    } else {
+      // Stationary (or follow/navigation off): hold at the fix.
       stopFollowAnimation()
+      return
     }
+    applyFollowFrame(coordinate: coordinate, heading: heading)
+  }
+
+  /// Projects `coordinate` `distanceMeters` along `bearing` (spherical).
+  private static func project(
+    _ coordinate: CLLocationCoordinate2D, bearing: Double, distanceMeters: Double
+  ) -> CLLocationCoordinate2D {
+    guard distanceMeters > 0 else { return coordinate }
+    let angular = distanceMeters / earthRadiusMeters
+    let bearingRad = bearing * .pi / 180
+    let lat1 = coordinate.latitude * .pi / 180
+    let lng1 = coordinate.longitude * .pi / 180
+    let lat2 = asin(sin(lat1) * cos(angular) + cos(lat1) * sin(angular) * cos(bearingRad))
+    let lng2 =
+      lng1
+      + atan2(
+        sin(bearingRad) * sin(angular) * cos(lat1),
+        cos(angular) - sin(lat1) * sin(lat2))
+    return CLLocationCoordinate2D(latitude: lat2 * 180 / .pi, longitude: lng2 * 180 / .pi)
   }
 
   /// Shortest-arc heading interpolation so crossing north doesn't spin the map.

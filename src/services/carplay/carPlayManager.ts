@@ -32,6 +32,7 @@ import {
 } from '../traffic/routeTrafficService';
 import { decodePolyline } from '../../utils/polyline';
 import { getFavorites, subscribeFavorites } from '../favorites/favoritesService';
+import type { FavoriteKind, FavoriteLocation } from '../favorites/favoritesService';
 import { getSearchHistory } from '../search/searchHistoryService';
 import { useCarPlayStore } from '../../stores/carPlayStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
@@ -39,7 +40,11 @@ import { findIncidentsAhead } from '../traffic/incidentAhead';
 import { INCIDENT_TYPE_LABELS } from '../traffic/incidentWire';
 import { haversineMeters } from '../../utils/routeSnap';
 import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
-import type { CarPlaySearchResult, CarPlayIncidentMarker } from '../../native/carplay';
+import type {
+  CarPlayDashboardShortcut,
+  CarPlaySearchResult,
+  CarPlayIncidentMarker,
+} from '../../native/carplay';
 import type { UnifiedSearchResult } from '../search/unifiedSearch';
 import type { EmitterSubscription } from 'react-native';
 
@@ -62,7 +67,16 @@ let lastDistanceBucket: number | null = null;
 let lastTrafficSignature = '';
 let searchSession: SearchSession | null = null;
 let mapCenterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingMapCenter: { lat: number; lng: number; heading: number } | null = null;
+let pendingMapCenter: {
+  lat: number;
+  lng: number;
+  heading: number;
+  speedMps: number;
+} | null = null;
+/** Fix id + position of the last pushed map center, for duplicate-fix skips. */
+let lastMapCenterFixTime = -1;
+let lastMapCenterLat = Number.NaN;
+let lastMapCenterLng = Number.NaN;
 let arrivalShown = false;
 let lastIncidentCheckAt = 0;
 let warnedIncidentIds = new Set<string>();
@@ -178,7 +192,7 @@ function onConnected() {
   mapStyleUnsubscribe?.();
   mapStyleUnsubscribe = useMapStore.subscribe(syncMapStyle);
   favoritesUnsubscribe?.();
-  favoritesUnsubscribe = subscribeFavorites(pushHomeSuggestions);
+  favoritesUnsubscribe = subscribeFavorites(syncSavedPlaces);
 
   // Push the phone's current map style (dark/light, satellite) so the
   // CarPlay map matches the phone map.
@@ -188,8 +202,10 @@ function onConnected() {
   // If navigation is already active, push initial state
   syncNavigationState(useNavigationStore.getState());
 
-  // Pre-search suggestions for the floating map panel.
+  // Pre-search suggestions for the floating map panel, plus the Dashboard
+  // shortcut card (both mirror the same favorites).
   pushHomeSuggestions();
+  pushDashboardShortcuts();
 
   // Center the idle map on the driver instead of leaving it at the native
   // host's (0, 0) default ("blank ocean"). No-op while navigating, where the
@@ -271,6 +287,9 @@ function onDisconnected() {
   // Drop the cached fix so a reconnect re-reads the driver's live position
   // instead of reusing a stale one for search ranking / route origin.
   carPlayUserLocation = null;
+  lastMapCenterFixTime = -1;
+  lastMapCenterLat = Number.NaN;
+  lastMapCenterLng = Number.NaN;
   stopIdleLocationUpdates();
 }
 
@@ -506,18 +525,22 @@ function onNavigationCancelled(): void {
 }
 
 /**
- * CarPlay dashboard shortcut (Home/Work): start navigation to that favorite
- * directly, like Apple Maps. A route preview is useless here — it renders on
- * the full-screen template, which the driver isn't looking at while the
- * Dashboard split view is up.
+ * CarPlay dashboard shortcut (Home / Work / first custom place): start
+ * navigation to that favorite directly, like Apple Maps. A route preview is
+ * useless here — it renders on the full-screen template, which the driver isn't
+ * looking at while the Dashboard split view is up.
  *
  * No `connected` guard: the native event itself proves the Dashboard scene is
  * attached, and the JS mirror can lag behind a scene connect that happened
  * while the phone was locked.
  */
-async function onDashboardFavorite({ kind }: { kind?: string }): Promise<void> {
-  if (!kind) return;
-  const favorite = getFavorites().find((entry) => entry.kind === kind);
+async function onDashboardFavorite({ id, kind }: { id?: string; kind?: string }): Promise<void> {
+  if (!id && !kind) return;
+  const favorites = getFavorites();
+  // New native builds send the favorite id; older ones send only the kind.
+  const favorite = id
+    ? favorites.find((entry) => entry.id === id)
+    : favorites.find((entry) => entry.kind === kind);
   if (!favorite) return;
   const origin = await resolveRouteOrigin();
   const prefs = useSettingsStore.getState().routePreferences;
@@ -738,10 +761,29 @@ function distanceBucket(meters: number): number {
 function syncMapCenter(state: ReturnType<typeof useNavigationTrackingStore.getState>) {
   if (!connected || !useNavigationStore.getState().isNavigating || !state.navPosition) return;
 
+  // Duplicate fix on the locked path: processFix publishes every fix it
+  // receives to the tracking store, and the tracking subscriber fires for
+  // every published update that changes position/bearing/countdown — which
+  // includes re-pushes where only `distanceToTurn` ticked for the SAME fix.
+  // Passing the unchanged position to the native follow glide would restart
+  // its animation from the current interpolated point: visible 1 Hz hiccup.
+  // Skip those; the countdown pushes don't need a camera change every time.
+  if (
+    lastMapCenterFixTime === state.navFixTime &&
+    state.navPosition[0] === lastMapCenterLng &&
+    state.navPosition[1] === lastMapCenterLat
+  ) {
+    return;
+  }
+  lastMapCenterFixTime = state.navFixTime;
+  lastMapCenterLat = state.navPosition[1];
+  lastMapCenterLng = state.navPosition[0];
+
   pendingMapCenter = {
     lat: state.navPosition[1],
     lng: state.navPosition[0],
     heading: state.navBearing,
+    speedMps: state.navSpeedMps,
   };
   // While the phone screen is awake its display-driven interpolation loop is
   // ticking and publishes ~60fps; throttle to ~30Hz so the native follow glide
@@ -767,7 +809,7 @@ function flushMapCenter() {
   const center = pendingMapCenter;
   pendingMapCenter = null;
   if (!center || !connected || !useNavigationStore.getState().isNavigating) return;
-  CarPlay.updateMapCenter(center.lat, center.lng, center.heading);
+  CarPlay.updateMapCenter(center.lat, center.lng, center.heading, center.speedMps);
 }
 
 function clearMapCenterUpdate() {
@@ -776,6 +818,11 @@ function clearMapCenterUpdate() {
     mapCenterUpdateTimer = null;
   }
   pendingMapCenter = null;
+  // A stale coast velocity from an ended trip must not leak into the next
+  // navigation session's glide re-anchoring on CarPlay.
+  lastMapCenterFixTime = -1;
+  lastMapCenterLat = Number.NaN;
+  lastMapCenterLng = Number.NaN;
 }
 
 /** CarPlay's Locate/Recenter button: refresh the map from the phone's GPS. */
@@ -946,6 +993,38 @@ function ensureSearchUserLocation(): void {
 function pushHomeSuggestions(): void {
   if (!connected) return;
   CarPlay.updateHomeSuggestions(emptyQueryResults());
+}
+
+/** Favorites changed (add/remove/iCloud restore): refresh both CarPlay surfaces. */
+function syncSavedPlaces(): void {
+  pushHomeSuggestions();
+  pushDashboardShortcuts();
+}
+
+/**
+ * The CarPlay Dashboard shortcut buttons, in priority order Home → Work → first
+ * custom pinned place, skipping favorites that aren't set. CarPlay shows at
+ * most two buttons, so only the first two are sent.
+ */
+function dashboardShortcutItems(): CarPlayDashboardShortcut[] {
+  const favorites = getFavorites();
+  const firstOfKind = (kind: FavoriteKind): FavoriteLocation | undefined =>
+    favorites.find((favorite) => favorite.kind === kind);
+  const ordered = [firstOfKind('home'), firstOfKind('work'), firstOfKind('pin')].filter(
+    (favorite): favorite is FavoriteLocation => favorite != null,
+  );
+  return ordered.slice(0, 2).map((favorite) => ({
+    id: favorite.id,
+    kind: favorite.kind,
+    title: favorite.label,
+    subtitle: favorite.entry.text,
+  }));
+}
+
+/** Pushes the Dashboard shortcut card (Home / Work / first custom place). */
+function pushDashboardShortcuts(): void {
+  if (!connected) return;
+  CarPlay.updateDashboardShortcuts(dashboardShortcutItems());
 }
 
 /**

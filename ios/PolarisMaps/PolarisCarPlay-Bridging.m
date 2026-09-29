@@ -34,9 +34,12 @@ RCT_EXTERN_METHOD(pushSearchResults:(NSArray *)results
 
 RCT_EXTERN_METHOD(updateHomeSuggestions:(NSArray *)items)
 
+RCT_EXTERN_METHOD(updateDashboardShortcuts:(NSArray *)items)
+
 RCT_EXTERN_METHOD(updateMapCenter:(double)lat
                   lng : (double)lng
-                  heading : (double)heading)
+                  heading : (double)heading
+                  speedMps : (double)speedMps)
 
 RCT_EXTERN_METHOD(isConnected:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

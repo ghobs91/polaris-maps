@@ -123,11 +123,14 @@ class PolarisCarPlay: RCTEventEmitter {
   /// the split view shows the Polaris map (Apple/Google Maps parity). Counts
   /// as a CarPlay connection on its own: the Dashboard can be the only scene
   /// attached, and its Home/Work shortcut buttons are JS-driven.
-  static func dashboardSceneDidConnect(window: UIWindow) {
+  static func dashboardSceneDidConnect(
+    window: UIWindow, dashboardController: CPDashboardController
+  ) {
     NSLog("[PolarisCarPlay] dashboard scene connected")
     isDashboardSceneConnected = true
     pendingDashboardWindow = window
     DispatchQueue.main.async {
+      Self.mapTemplateManager.dashboardControllerDidConnect(dashboardController)
       Self.attachPendingDashboardIfNeeded()
       Self.publishSceneConnectionIfNeeded()
     }
@@ -137,6 +140,7 @@ class PolarisCarPlay: RCTEventEmitter {
     NSLog("[PolarisCarPlay] dashboard scene disconnected")
     DispatchQueue.main.async {
       Self.isDashboardSceneConnected = false
+      Self.mapTemplateManager.dashboardControllerDidDisconnect()
       Self.mapTemplateManager.detachDashboard()
       Self.pendingDashboardWindow = nil
       Self.publishSceneDisconnectionIfNeeded()
@@ -292,8 +296,33 @@ class PolarisCarPlay: RCTEventEmitter {
     DispatchQueue.main.async { Self.mapTemplateManager.updateHomeSuggestions(items) }
   }
 
-  @objc func updateMapCenter(_ lat: Double, lng: Double, heading: Double) {
-    DispatchQueue.main.async { Self.mapTemplateManager.updateCamera(lat: lat, lng: lng, heading: heading) }
+  /// Dashboard shortcut buttons (Home / Work / first custom place) pushed from
+  /// JS so the split-view card mirrors the app's favorites instead of a fixed
+  /// pair. CarPlay shows at most two, so JS sends at most two.
+  @objc func updateDashboardShortcuts(_ results: NSArray) {
+    let items = Self.parseDashboardShortcuts(results)
+    DispatchQueue.main.async { Self.mapTemplateManager.updateDashboardShortcuts(items) }
+  }
+
+  private static func parseDashboardShortcuts(_ results: NSArray) -> [CarPlayDashboardShortcut] {
+    results.compactMap { element -> CarPlayDashboardShortcut? in
+      guard let dict = element as? NSDictionary,
+        let id = dict["id"] as? String,
+        let title = dict["title"] as? String
+      else { return nil }
+      return CarPlayDashboardShortcut(
+        id: id,
+        kind: dict["kind"] as? String ?? "",
+        title: title,
+        subtitle: dict["subtitle"] as? String ?? ""
+      )
+    }
+  }
+
+  @objc func updateMapCenter(_ lat: Double, lng: Double, heading: Double, speedMps: Double) {
+    DispatchQueue.main.async {
+      Self.mapTemplateManager.updateCamera(lat: lat, lng: lng, heading: heading, speedMps: speedMps)
+    }
   }
 
   @objc func updateMapStyle(_ json: String) {
@@ -341,6 +370,17 @@ struct CarPlaySearchItem {
   let kind: String
   /// Section the row belongs to ("pinned" / "recent"); "" for typed results.
   let section: String
+}
+
+/// One CarPlay Dashboard shortcut button, mirroring a phone favorite. The `id`
+/// is the favorite's storage id (`home` / `work` / `pin-…`), so a tap routes to
+/// exactly the place the button shows.
+struct CarPlayDashboardShortcut {
+  let id: String
+  /// Favorite kind ("home" / "work" / "pin"); drives the button icon.
+  let kind: String
+  let title: String
+  let subtitle: String
 }
 
 struct CarPlayLaneInfo {
@@ -616,6 +656,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private weak var templateWindow: UIWindow?
   private var dashboardWindow: UIWindow?
   private var dashboardHost: CarPlayMapViewHost?
+  /// The Dashboard scene's controller (managed by the connected scene). Held so
+  /// favorite changes pushed from JS can refresh the shortcut card live.
+  private var dashboardController: CPDashboardController?
+  /// Latest shortcut config pushed from JS; replayed to each dashboard scene
+  /// (it can connect before or after JS attaches and pushes favorites).
+  private var dashboardShortcuts: [CarPlayDashboardShortcut] = []
   /// Last values pushed to the map hosts, replayed to a dashboard tile that
   /// attaches after the template scene (CarPlay connects the two scenes
   /// independently).
@@ -623,7 +669,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var routeState: (encoded: String, destination: CLLocationCoordinate2D?, alternates: [String])?
   private var trafficState: [RouteTrafficRange] = []
   private var incidentState: [CarPlayIncidentMarker] = []
-  private var cameraState: (lat: Double, lng: Double, heading: Double)?
+  private var cameraState: (lat: Double, lng: Double, heading: Double, speedMps: Double)?
   private var navigationActive = false
   /// Phone unit preference, mirrored so travel-estimate distances match the
   /// phone (miles vs km) instead of CarPlay's raw meters.
@@ -784,6 +830,51 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     dashboardWindow = nil
   }
 
+  // MARK: Dashboard shortcut buttons (Home / Work / first custom place)
+
+  /// Records the connected Dashboard controller and applies the latest shortcut
+  /// config. JS may push favorites before or after the scene connects.
+  func dashboardControllerDidConnect(_ controller: CPDashboardController) {
+    dashboardController = controller
+    applyDashboardShortcuts()
+  }
+
+  /// The Dashboard scene went away; drop the controller but keep the last
+  /// shortcut config so a reconnect repaints immediately.
+  func dashboardControllerDidDisconnect() {
+    dashboardController = nil
+  }
+
+  /// Rebuilds the Dashboard card from the favorite shortcuts JS pushed.
+  func updateDashboardShortcuts(_ shortcuts: [CarPlayDashboardShortcut]) {
+    dashboardShortcuts = shortcuts
+    applyDashboardShortcuts()
+  }
+
+  private func applyDashboardShortcuts() {
+    guard let controller = dashboardController else { return }
+    // CarPlay displays at most two buttons; JS already caps the list at two.
+    controller.shortcutButtons = dashboardShortcuts.map { shortcut in
+      CPDashboardButton(
+        titleVariants: [shortcut.title],
+        subtitleVariants: [shortcut.subtitle],
+        image: Self.dashboardIcon(for: shortcut.kind)
+      ) { _ in
+        PolarisCarPlay.emitDashboardFavorite(id: shortcut.id, kind: shortcut.kind)
+      }
+    }
+  }
+
+  private static func dashboardIcon(for kind: String) -> UIImage {
+    let symbol: String
+    switch kind {
+    case "home": symbol = "house.fill"
+    case "work": symbol = "briefcase.fill"
+    default: symbol = "mappin.and.ellipse"
+    }
+    return UIImage(systemName: symbol) ?? UIImage()
+  }
+
   private func attachDashboardHostIfNeeded() {
     guard navigationActive, dashboardHost == nil, let window = dashboardWindow else { return }
     // Defensive: never render a second map over the main template window.
@@ -814,7 +905,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     host.showTraffic(trafficState)
     host.showIncidents(incidentState)
     if let camera = cameraState {
-      host.updateCenter(lat: camera.lat, lng: camera.lng, heading: camera.heading)
+      host.updateCenter(
+        lat: camera.lat, lng: camera.lng, heading: camera.heading, speedMps: camera.speedMps)
     }
   }
 
@@ -1554,9 +1646,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   // MARK: Camera
 
-  func updateCamera(lat: Double, lng: Double, heading: Double) {
-    cameraState = (lat, lng, heading)
-    forEachHost { $0.updateCenter(lat: lat, lng: lng, heading: heading) }
+  func updateCamera(lat: Double, lng: Double, heading: Double, speedMps: Double) {
+    cameraState = (lat, lng, heading, speedMps)
+    forEachHost { $0.updateCenter(lat: lat, lng: lng, heading: heading, speedMps: speedMps) }
   }
 
   // MARK: Map style (phone parity: dark/light + satellite preference)
@@ -2221,10 +2313,11 @@ extension PolarisCarPlay {
   }
 
   /// Called from the dashboard scene delegate (separate file), so it must be
-  /// internal rather than fileprivate.
-  static func emitDashboardFavorite(_ kind: String) {
-    NSLog("[PolarisCarPlay] dashboard shortcut tapped: %@", kind)
-    emit("carPlayDashboardFavorite", ["kind": kind])
+  /// internal rather than fileprivate. `id` identifies the exact favorite; JS
+  /// falls back to `kind` for older native builds.
+  static func emitDashboardFavorite(id: String, kind: String) {
+    NSLog("[PolarisCarPlay] dashboard shortcut tapped: %@ (%@)", id, kind)
+    emit("carPlayDashboardFavorite", ["id": id, "kind": kind])
   }
 
   fileprivate static func emitNavigationCancelled() {

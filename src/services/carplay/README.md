@@ -47,11 +47,21 @@ locked or the screen is off, so any CarPlay-facing JS must avoid relying on
   position.
 - **Map follow** — `syncMapCenter` flushes every fix immediately whenever the
   interpolation loop is not ticking, instead of using the foreground ~33 ms
-  throttle. The native map host also glides camera + puck toward each new fix
-  (duration matched to the fix interval) so the locked phone's ≈1 Hz stream
-  still looks continuous. A 60 Hz run-loop `Timer` drives that glide; it does
-  not depend on any display's vsync, so it keeps firing while the screen is off
-  (see `PolarisCarPlayMapView` `startFollowTimer`).
+  throttle. The native map host then glides camera + puck toward each new fix
+  and **coasts past it at the fix's speed** (bounded dead-reckoning hold), so
+  the locked phone's ≈1 Hz stream never stalls between fixes. The glide
+  duration is forward-looking: an EMA of the inter-push interval (the expected
+  gap to the next fix), floored/capped — the last observed gap says nothing
+  about the next one, and using it made every jittery fix cadence read as a
+  per-second jolt (burst-delivered fixes with `elapsed ≈ 0` snapped outright).
+  Long gaps (> 3 s, i.e. a resumed-from-suspension push stream) still snap and
+  relearn the cadence. JS publishes the clamped speed and a monotonic fix id
+  with each atomic `setLiveState`; duplicate re-pushes of one fix are skipped
+  before they reach the native glide. The ticker itself is a 60 Hz run-loop
+  `Timer` with zero tolerance rather than a `CADisplayLink`, because a display
+  link follows a display's vsync and the phone's stops when it locks — exactly
+  when the glide is needed (see `PolarisCarPlayMapView` `startFollowTimer`,
+  `followAnimationTick`).
 - **Search** — `onSearchQuery` calls `session.submit()` instead of `search()`
   whenever the display-driven interpolation loop is not ticking (the same
   `foregroundActivity` signal `syncMapCenter` uses), running the full network

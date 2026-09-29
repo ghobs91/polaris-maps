@@ -355,6 +355,8 @@ export default function NavigationScreen() {
   // Low-pass filtered bearing so turns animate smoothly rather than snapping.
   const smoothBearingRef = useRef(0);
   const interpolationRafRef = useRef<number | null>(null);
+  /** Monotonic id for each published live state (CarPlay duplicate-push skip). */
+  const publishIdRef = useRef(0);
 
   // Live GPS tracking: the shared trackingService pipeline (trackingService)
   // processes every fix — foreground watcher or headless background task —
@@ -499,11 +501,16 @@ export default function NavigationScreen() {
           coords.length - 1,
         );
         // Publish atomically so CarPlay never sees a new position paired with
-        // the previous bearing (which makes the puck jitter).
+        // the previous bearing (which makes the puck jitter). Speed + publish
+        // id travel along so CarPlay's native coast-glide and duplicate-push
+        // skip work identically for both writers (this loop and processFix).
+        publishIdRef.current += 1;
         trackingStore.setLiveState(
           curPos,
           smoothBearingRef.current,
           distToIndex(curPos, curSegIdx, stepEndIdx),
+          anchor.speedMps,
+          publishIdRef.current,
         );
       }
       interpolationRafRef.current = requestAnimationFrame(interpolate);

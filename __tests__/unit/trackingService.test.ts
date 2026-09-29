@@ -289,6 +289,28 @@ describe('trackingService — happy path fix processing', () => {
     // Distance to the end of the current step, so the banner counts down too.
     expect(tracking.distanceToTurn).toBeGreaterThan(0);
     expect(tracking.distanceToTurn!).toBeLessThan(route.summary.distanceMeters);
+    // Clamped speed + monotonic publish id travel with the fix so CarPlay's
+    // native glide can coast between sparse locked-phone pushes and skip
+    // duplicate re-pushes of one fix.
+    expect(tracking.navSpeedMps).toBeCloseTo(12, 5);
+    const firstFixTime = tracking.navFixTime;
+    expect(firstFixTime).toBeGreaterThan(0);
+  });
+
+  it('publishes a strictly increasing fix id for duplicate-push detection', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+
+    processFix(makeFix({ lat: (A[1] + B[1]) / 2, lng: A[0], speed: 12 }), { background: true });
+    const first = useNavigationTrackingStore.getState().navFixTime;
+    nowMs += 1000;
+    processFix(makeFix({ lat: (A[1] + B[1]) / 2 + 0.0001, lng: A[0], speed: 12 }), {
+      background: true,
+    });
+    const second = useNavigationTrackingStore.getState().navFixTime;
+
+    expect(second).toBeGreaterThan(first);
   });
 });
 

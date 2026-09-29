@@ -98,10 +98,20 @@ export interface CarPlaySearchResult {
   lat: number;
   lng: number;
   /** Row icon kind: pre-search `home`/`work`/`pin`/`recent`, or a POI
-   *  category key (`osmSubtype`/`osmType`/result type) for typed results. */
+   *  category key (`osmSubtype`/`osmType`/`result type`) for typed results. */
   kind?: string;
   /** Section the row belongs to; absent for typed-query results (flat list). */
   section?: 'pinned' | 'recent';
+}
+
+/** One CarPlay Dashboard shortcut card button, mirroring a phone favorite. */
+export interface CarPlayDashboardShortcut {
+  /** Favorite storage id (`home` / `work` / `pin-…`); returned on tap. */
+  id: string;
+  /** Favorite kind (`home` / `work` / `pin`); drives the button icon. */
+  kind: string;
+  title: string;
+  subtitle: string;
 }
 
 export interface CarPlayTrafficRange {
@@ -124,7 +134,8 @@ export interface Spec extends TurboModule {
   hideNavigationAlert(): void;
   pushSearchResults(results: Array<object>, query: string, final: boolean): void;
   updateHomeSuggestions(items: Array<object>): void;
-  updateMapCenter(lat: number, lng: number, heading: number): void;
+  updateDashboardShortcuts(items: Array<CarPlayDashboardShortcut>): void;
+  updateMapCenter(lat: number, lng: number, heading: number, speedMps: number): void;
   updateMapStyle(styleJson: string): void;
   isConnected(): Promise<boolean>;
 

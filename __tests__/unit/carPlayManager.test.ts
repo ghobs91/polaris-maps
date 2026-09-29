@@ -28,6 +28,7 @@ jest.mock('react-native', () => {
         hideNavigationAlert: jest.fn(),
         pushSearchResults: jest.fn(),
         updateHomeSuggestions: jest.fn(),
+        updateDashboardShortcuts: jest.fn(),
         updateMapCenter: jest.fn(),
         updateMapStyle: jest.fn(),
         isConnected: jest.fn().mockResolvedValue(false),
@@ -295,13 +296,24 @@ describe('CarPlayManager', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Connect pushes the phone's position so the map isn't stuck at (0, 0).
-    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7128, -74.006, 0);
+    // (4th arg: speed m/s — 0 for the idle locate, unknown/stationary.)
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(
+      40.7128,
+      -74.006,
+      0,
+      0,
+    );
 
     (NativeModules.PolarisCarPlay.updateMapCenter as jest.Mock).mockClear();
     fireEvent('carPlayLocateRequest');
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7128, -74.006, 0);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(
+      40.7128,
+      -74.006,
+      0,
+      0,
+    );
   });
 
   it('follows the car on the idle CarPlay map', async () => {
@@ -316,7 +328,7 @@ describe('CarPlayManager', () => {
     onUpdate({ coords: { latitude: 40.7, longitude: -74.0, heading: 90, speed: 10 } });
 
     // Idle map is north-up, so the pushed heading is 0.
-    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 0);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 0, 0);
   });
 
   it('pushes each fix to the CarPlay map immediately while the phone is locked', () => {
@@ -331,13 +343,44 @@ describe('CarPlayManager', () => {
     // Locked/backgrounded: a throttled setTimeout would never fire before iOS
     // re-suspends the process, leaving CarPlay frozen until unlock.
     mockAppState = 'background';
-    useNavigationTrackingStore.getState().setNavPosition([-73.98, 40.75]);
-    useNavigationTrackingStore.getState().setNavBearing(42);
+    useNavigationTrackingStore.getState().setLiveState([-73.98, 40.75], 42, 500, 12.5, 1);
 
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenLastCalledWith(
       40.75,
       -73.98,
       42,
+      12.5,
+    );
+  });
+
+  it('skips re-pushes of the same fix so the native glide is not restarted', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    const route = makeRoute();
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    jest.clearAllMocks();
+
+    mockAppState = 'background';
+    // First publish of fix #1 → pushed.
+    useNavigationTrackingStore.getState().setLiveState([-73.98, 40.75], 42, 500, 12.5, 7);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledTimes(1);
+
+    // Re-publish of the SAME fix (only the countdown bucket ticked) → the
+    // unchanged position/id must not reach the native glide: restarting it
+    // from the current interpolated point read as a 1 Hz hiccup.
+    useNavigationTrackingStore.getState().setLiveState([-73.98, 40.75], 42, 495, 12.5, 7);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledTimes(1);
+
+    // Next fix (new id/position) → pushed again, with its speed.
+    useNavigationTrackingStore.getState().setLiveState([-73.9795, 40.7505], 42, 480, 13, 8);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledTimes(2);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenLastCalledWith(
+      40.7505,
+      -73.9795,
+      42,
+      13,
     );
   });
 
@@ -971,6 +1014,59 @@ describe('CarPlayManager', () => {
     expect(nav.isNavigating).toBe(true);
     expect(nav.destination).toEqual({ lat: 40.7, lng: -73.9, name: 'Work' });
     expect(nav.routePreview).toBeNull();
+  });
+
+  it('pushes up to two dashboard shortcuts in Home → Work → custom order', () => {
+    (getFavorites as jest.Mock).mockReturnValue([
+      { id: 'home', kind: 'home', label: 'Home', entry: { lat: 1, lng: 1, text: '1 Home St' } },
+      { id: 'work', kind: 'work', label: 'Work', entry: { lat: 2, lng: 2, text: '2 Work Ave' } },
+      { id: 'pin-1', kind: 'pin', label: 'Gym', entry: { lat: 3, lng: 3, text: '3 Gym Rd' } },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    expect(NativeModules.PolarisCarPlay.updateDashboardShortcuts).toHaveBeenCalledWith([
+      { id: 'home', kind: 'home', title: 'Home', subtitle: '1 Home St' },
+      { id: 'work', kind: 'work', title: 'Work', subtitle: '2 Work Ave' },
+    ]);
+  });
+
+  it('fills dashboard slots with the first custom place when a primary is unset', () => {
+    (getFavorites as jest.Mock).mockReturnValue([
+      { id: 'work', kind: 'work', label: 'Work', entry: { lat: 2, lng: 2, text: '2 Work Ave' } },
+      { id: 'pin-1', kind: 'pin', label: 'Gym', entry: { lat: 3, lng: 3, text: '3 Gym Rd' } },
+      { id: 'pin-2', kind: 'pin', label: 'Cafe', entry: { lat: 4, lng: 4, text: '4 Cafe Ln' } },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    expect(NativeModules.PolarisCarPlay.updateDashboardShortcuts).toHaveBeenCalledWith([
+      { id: 'work', kind: 'work', title: 'Work', subtitle: '2 Work Ave' },
+      { id: 'pin-1', kind: 'pin', title: 'Gym', subtitle: '3 Gym Rd' },
+    ]);
+  });
+
+  it('starts navigation to a custom dashboard favorite by id', async () => {
+    const route = makeRoute();
+    (computeRoute as jest.Mock).mockResolvedValue([route]);
+    (getFavorites as jest.Mock).mockReturnValue([
+      {
+        id: 'pin-123',
+        kind: 'pin',
+        label: 'Gym',
+        entry: { lat: 41.1, lng: -73.2, text: 'Gym' },
+      },
+    ]);
+
+    initCarPlay();
+    fireEvent('carPlayDashboardFavorite', { id: 'pin-123', kind: 'pin' });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const nav = useNavigationStore.getState();
+    expect(nav.isNavigating).toBe(true);
+    expect(nav.destination).toEqual({ lat: 41.1, lng: -73.2, name: 'Gym' });
   });
 
   it('pushes saved places as home suggestions on connect', async () => {

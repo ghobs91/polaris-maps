@@ -45,8 +45,9 @@ class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
   }
 }
 
-/// CarPlay Dashboard widget (iOS 13.4+). Provides the two shortcut buttons the
-/// widget shows; tapping one asks JS to preview navigation to that favorite.
+/// CarPlay Dashboard widget (iOS 13.4+). Renders the live Polaris map and lets
+/// JS supply the shortcut buttons (Home / Work / first custom place) from the
+/// app's favorites; tapping one starts navigation to that place.
 class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboardSceneDelegate {
 
   func templateApplicationDashboardScene(
@@ -55,23 +56,10 @@ class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboard
     to window: UIWindow
   ) {
     // Render the live Polaris map into the Dashboard window so the split view
-    // (map + upcoming maneuver + Now Playing) mirrors Apple/Google Maps.
-    PolarisCarPlay.dashboardSceneDidConnect(window: window)
-    let home = CPDashboardButton(
-      titleVariants: ["Home"],
-      subtitleVariants: ["Navigate home"],
-      image: UIImage(systemName: "house.fill") ?? UIImage()
-    ) { _ in
-      PolarisCarPlay.emitDashboardFavorite("home")
-    }
-    let work = CPDashboardButton(
-      titleVariants: ["Work"],
-      subtitleVariants: ["Navigate to work"],
-      image: UIImage(systemName: "briefcase.fill") ?? UIImage()
-    ) { _ in
-      PolarisCarPlay.emitDashboardFavorite("work")
-    }
-    dashboardController.shortcutButtons = [home, work]
+    // (map + upcoming maneuver + Now Playing) mirrors Apple/Google Maps. The
+    // controller receives the favorite shortcut buttons from JS.
+    PolarisCarPlay.dashboardSceneDidConnect(
+      window: window, dashboardController: dashboardController)
   }
 
   func templateApplicationDashboardScene(

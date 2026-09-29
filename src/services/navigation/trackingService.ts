@@ -88,6 +88,9 @@ export const WRONG_WAY_MIN_SPEED_MPS = 3;
 export const WRONG_WAY_HEADING_THRESHOLD_DEG = 120;
 /** Consecutive opposite-direction fixes required before rerouting. */
 export const WRONG_WAY_CONSECUTIVE_COUNT = 3;
+
+/** Monotonic id for each locked/background publish (duplicate-push detection). */
+let publishCounter = 0;
 /** Remaining-distance growth (m) that counts as driving backwards when no heading. */
 const WRONG_WAY_BACKWARD_GROWTH_METERS = 10;
 
@@ -523,11 +526,8 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   // publisher (smooth, 60fps) and we must not interleave. Once it stops — the
   // phone display sleeps (even though CarPlay keeps the app active and fixes
   // flowing), the screen unmounts, or the app is suspended — this path
-  // publishes instead so CarPlay keeps moving while the phone is locked. The
-  // three values go out in a single store update so consumers never see a new
-  // position paired with the previous bearing (which jitters the puck).
+  // publishes instead so CarPlay keeps moving while the phone is locked.
   if (isForegroundInterpolationActive()) return;
-  const trackingStore = useNavigationTrackingStore.getState();
   const anchor = drAnchor;
   if (!anchor) return;
   const routeBearingAtAnchor = computeBearing(
@@ -545,9 +545,19 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
     allManeuvers[liveStepIndex]?.endShapeIndex ?? coords.length - 1,
     coords.length - 1,
   );
-  trackingStore.setLiveState(
-    anchor.pos,
-    bearing,
-    distToIndex(anchor.pos, anchor.segIdx, stepEndIdx),
-  );
+  // Publish everything (position, bearing, countdown, speed, fix id) in a
+  // single store update so consumers never see a new position paired with the
+  // previous bearing — the exact mechanism behind the locked-path puck jitter.
+  // Speed feeds the native coast-glide so CarPlay keeps moving between sparse
+  // background fixes; the monotonic fix id lets CarPlay skip duplicates.
+  // The foreground interpolation loop publishes its own speed/fixTime values.
+  useNavigationTrackingStore
+    .getState()
+    .setLiveState(
+      anchor.pos,
+      bearing,
+      distToIndex(anchor.pos, anchor.segIdx, stepEndIdx),
+      speedMps,
+      ++publishCounter,
+    );
 }

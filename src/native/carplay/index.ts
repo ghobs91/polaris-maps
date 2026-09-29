@@ -4,6 +4,7 @@ import type {
   CarPlayNavigationData,
   CarPlayStartNavigationData,
   CarPlaySearchResult,
+  CarPlayDashboardShortcut,
   CarPlayTrafficRange,
   CarPlayTripPreviewData,
   CarPlayArrivalData,
@@ -16,6 +17,7 @@ export type {
   CarPlayNavigationData,
   CarPlayStartNavigationData,
   CarPlaySearchResult,
+  CarPlayDashboardShortcut,
   CarPlayTrafficRange,
   CarPlayTripPreviewData,
   CarPlayArrivalData,
@@ -88,8 +90,18 @@ export function updateHomeSuggestions(items: CarPlaySearchResult[]): void {
   (NativeModule as any)?.updateHomeSuggestions?.(items);
 }
 
-export function updateMapCenter(lat: number, lng: number, heading: number): void {
-  NativeModule?.updateMapCenter(lat, lng, heading);
+/** Favorite shortcut buttons (Home / Work / first custom) for the Dashboard card. */
+export function updateDashboardShortcuts(items: CarPlayDashboardShortcut[]): void {
+  (NativeModule as any)?.updateDashboardShortcuts?.(items);
+}
+
+export function updateMapCenter(
+  lat: number,
+  lng: number,
+  heading: number,
+  speedMps: number = 0,
+): void {
+  NativeModule?.updateMapCenter(lat, lng, heading, speedMps);
 }
 
 export function updateMapStyle(styleJson: string): void {
