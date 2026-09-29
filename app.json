@@ -16,7 +16,8 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Polaris Maps uses your location in the background to keep turn-by-turn guidance running while the app is closed or your screen is locked, and to contribute anonymous traffic data to the P2P network.",
         "NSCameraUsageDescription": "Polaris Maps uses the camera to capture street-level imagery for the community.",
         "NSPhotoLibraryUsageDescription": "Polaris Maps needs access to your photo library to save and share maps, routes, and locations.",
-        "NSSpeechRecognitionUsageDescription": "Polaris Maps uses speech recognition to enable voice commands for hands-free navigation."
+        "NSSpeechRecognitionUsageDescription": "Polaris Maps uses speech recognition to enable voice commands for hands-free navigation.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
