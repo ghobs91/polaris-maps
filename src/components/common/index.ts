@@ -3,6 +3,7 @@ export { Modal } from './Modal';
 export { LoadingSpinner } from './LoadingSpinner';
 export { ErrorBoundary } from './ErrorBoundary';
 export { ConnectivityBanner } from './ConnectivityBanner';
+export { ColdOpenSplash } from './ColdOpenSplash';
 export { GlassView } from './GlassView';
 export { SFSymbol } from './SFSymbol';
 export { SettingsGroup } from './SettingsGroup';

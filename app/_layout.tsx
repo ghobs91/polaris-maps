@@ -1,9 +1,10 @@
 import { Stack } from 'expo-router';
+import { hideAsync, preventAutoHideAsync } from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ConnectivityBanner } from '@/components/common';
+import { ColdOpenSplash, ConnectivityBanner } from '@/components/common';
 import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { ToastProvider } from '@/contexts/ToastContext';
@@ -36,6 +37,10 @@ import { startMonitoring as startConnectivityMonitoring } from '@/services/regio
 import { scheduleGeonamesDownload } from '@/services/geocoding/geonamesDownloadScheduler';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 import { useICloudSync } from '@/hooks/useICloudSync';
+
+// Keep the native launch screen up until the branded cold-open overlay is on
+// screen, then hand off to it (see RootLayout) without a flash.
+preventAutoHideAsync().catch(() => {});
 
 function RootLayoutInner() {
   const { isDark, colors } = useTheme();
@@ -160,6 +165,12 @@ function RootLayoutInner() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    // The cold-open overlay is painted in this first commit, so the native
+    // launch screen can be removed now without a flash.
+    hideAsync().catch(() => {});
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
@@ -167,6 +178,7 @@ export default function RootLayout() {
           <ConsentGate />
         </ToastProvider>
       </ThemeProvider>
+      <ColdOpenSplash />
     </GestureHandlerRootView>
   );
 }
