@@ -203,9 +203,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     view.delegate = self
     view.showsUserLocation = false
-    // Full-bleed map. The CarPlay surfaces apply safe areas (the Dashboard tile
-    // insets its content), and MapLibre folds those into `contentInset`, which
-    // shifts the camera viewport. We place the camera explicitly, so opt out.
+    // Full-bleed: the CarPlay surfaces apply safe-area insets (the Dashboard
+    // tile is a rounded widget), and MapLibre folds those into `contentInset`
+    // and its render surface. We place the camera explicitly, so opt out.
     view.automaticallyAdjustsContentInset = false
     view.contentInset = .zero
     view.insetsLayoutMarginsFromSafeArea = false
@@ -215,9 +215,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
     self.view = view
     window.rootViewController = self
-    // The Dashboard window can attach before its final bounds are applied;
-    // pin the map to the window instead of trusting the initial frame.
-    view.frame = CGRect(origin: .zero, size: window.bounds.size)
+    fillMapRenderSurface()
 
     // Paint immediately with the self-contained style; JS swaps in the phone
     // style when the bridge attaches.
@@ -270,12 +268,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    // Re-assert a full-bleed frame: the Dashboard window can be resized after
-    // the host attaches, and any stale/inset frame shows as a uniform bezel
-    // around the map tile.
-    if let mapView = mapView, let window = carPlayWindow {
-      mapView.frame = CGRect(origin: .zero, size: window.bounds.size)
-    }
+    fillMapRenderSurface()
     layoutOverlays()
   }
 
@@ -393,6 +386,31 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       width: 52,
       height: 68
     )
+  }
+
+  /// Forces the map (and MapLibre's internal render surface) flush with the
+  /// CarPlay window.
+  ///
+  /// The Dashboard window can be resized after the host attaches, and MapLibre
+  /// creates its Metal render view with `contentMode = .center` and a
+  /// `contentScaleFactor` taken from the *phone's* main screen. On a car
+  /// display whose scale differs, that centered, non-stretching content shows
+  /// as a uniform bezel inside the map tile: the map view fills the window, but
+  /// the rendered map sits inset from its edges. Re-pinning the render surface
+  /// and switching it to `.scaleToFill` makes the map reach the tile edges on
+  /// both the full-screen map and the Dashboard tile.
+  private func fillMapRenderSurface() {
+    guard let mapView = mapView else { return }
+    if let superview = mapView.superview, mapView.frame != superview.bounds {
+      mapView.frame = superview.bounds
+    }
+    for subview in mapView.subviews
+    where NSStringFromClass(type(of: subview)).contains("MTKView") {
+      subview.contentMode = .scaleToFill
+      if subview.frame != mapView.bounds {
+        subview.frame = mapView.bounds
+      }
+    }
   }
 
   // MARK: Follow ticker (run-loop timer)
