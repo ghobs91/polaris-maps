@@ -32,9 +32,10 @@ import { onViewportChange } from '../../services/traffic/topicManager';
 import { TransitLayer } from './TransitLayer';
 import { POILayer } from './POILayer';
 import { IncidentLayer } from './IncidentLayer';
+import { StreetViewCoverageLayer } from './StreetViewCoverageLayer';
 import { MapChrome } from './MapChrome';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
-import { consumeMapLongPress, consumeMapPress } from './mapPressHandlers';
+import { consumeMapLongPress, consumeMapPress, extractScreenPoint } from './mapPressHandlers';
 import { resolveMapStyle } from './mapStyleResolver';
 import { applyNavigationFocus } from '../../services/map/navFocusStyle';
 import {
@@ -162,6 +163,8 @@ interface MapViewProps {
   alternateRouteGeometries?: string[];
   onMapPress?: (lat: number, lng: number) => void;
   onMapLongPress?: (lat: number, lng: number) => void;
+  /** Called when a tap lands on a basemap address-number (housenumber) label. */
+  onAddressPress?: (lat: number, lng: number) => void;
   /** When true, tilts the camera, hides user dot, shows chevron at navPosition */
   navigationMode?: boolean;
   /** Current position of the navigation chevron [lng, lat] */
@@ -182,6 +185,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     alternateRouteGeometries,
     onMapPress,
     onMapLongPress,
+    onAddressPress,
     navigationMode,
     navPosition,
     navBearing = 0,
@@ -741,14 +745,38 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   );
 
   const handlePress = useCallback(
-    (event: any) => {
+    async (event: any) => {
       const coordinates = consumeMapPress(event, suppressNextPressRef);
       if (!coordinates) {
         return;
       }
+
+      // Address-number taps: a tap that lands on a basemap `housenumber` label
+      // opens the place at that address instead of the generic pin behaviour.
+      if (onAddressPress) {
+        const screenPoint = extractScreenPoint(event);
+        if (screenPoint && mapRef.current) {
+          try {
+            const hits = await mapRef.current.queryRenderedFeaturesAtPoint(screenPoint, undefined, [
+              'housenumber',
+            ]);
+            const hitHousenumber = hits?.features?.some(
+              (feature: any) => feature?.properties?.housenumber != null,
+            );
+            if (hitHousenumber) {
+              onAddressPress(coordinates.lat, coordinates.lng);
+              return;
+            }
+          } catch {
+            // Styles without a `housenumber` layer (satellite/terrain/raster)
+            // throw here — fall through to the normal map press.
+          }
+        }
+      }
+
       onMapPress?.(coordinates.lat, coordinates.lng);
     },
-    [onMapPress],
+    [onMapPress, onAddressPress],
   );
 
   const handleLongPress = useCallback(
@@ -1187,6 +1215,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             undo that. Transit stays mounted (toggled by style visibility) to
             avoid a GPU re-upload. */}
         {!navigationMode && <POILayer />}
+
+        {/* Street-view coverage overlay — tapping a covered area opens the 3D
+            viewer. Hidden while navigating, like the POI pills. */}
+        {!navigationMode && <StreetViewCoverageLayer />}
 
         <IncidentLayer />
       </MapLibreGL.MapView>

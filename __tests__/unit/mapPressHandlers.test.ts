@@ -2,6 +2,7 @@ import {
   consumeMapLongPress,
   consumeMapPress,
   extractMapCoordinates,
+  extractScreenPoint,
 } from '../../src/components/map/mapPressHandlers';
 
 describe('mapPressHandlers', () => {
@@ -11,6 +12,29 @@ describe('mapPressHandlers', () => {
         geometry: { coordinates: [-122.406417, 37.785834] },
       }),
     ).toEqual({ lat: 37.785834, lng: -122.406417 });
+  });
+
+  it('extracts the screen point used to hit-test basemap layers', () => {
+    expect(
+      extractScreenPoint({
+        geometry: { coordinates: [-122.406417, 37.785834] },
+        properties: { screenPointX: 120, screenPointY: 240 },
+      }),
+    ).toEqual([120, 240]);
+  });
+
+  it('returns null for the screen point when the platform omits it', () => {
+    expect(
+      extractScreenPoint({
+        geometry: { coordinates: [-122.406417, 37.785834] },
+      }),
+    ).toBeNull();
+    expect(
+      extractScreenPoint({
+        geometry: { coordinates: [-122.406417, 37.785834] },
+        properties: { screenPointX: 120 },
+      }),
+    ).toBeNull();
   });
 
   it('suppresses the first plain press after a long press', () => {

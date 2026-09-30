@@ -21,6 +21,7 @@ import { useTransitStore } from '@/stores/transitStore';
 import { prewarmTransitCache, prewarmOtpLines } from '@/services/transit/transitLineFetcher';
 import { preloadOtpStops } from '@/services/transit/otpEndpointRegistry';
 import { resolveMapSelectionPoi } from '@/services/poi/mapSelectionPoi';
+import { resolvePlaceAtAddress } from '@/services/poi/addressPlaceResolver';
 import { ErrorBoundary } from '@/components/common';
 import { useIsLargeDisplay } from '@/hooks/useIsLargeDisplay';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -81,6 +82,7 @@ export default function MapScreen() {
   const locateTo = useMapStore((s) => s.locateTo);
   const mapViewRef = useRef<MapViewHandle>(null);
   const longPressRequestRef = useRef(0);
+  const addressPressRequestRef = useRef(0);
 
   const handleLocate = useCallback(async () => {
     hapticImpact();
@@ -123,6 +125,21 @@ export default function MapScreen() {
     useOsmPoiStore.getState().setSelectedPoi(selectedPoi);
   }, []);
 
+  // Tapping a basemap address number opens the place at that address (a known
+  // local place, or a reverse-geocoded address card when none is known).
+  const handleAddressPress = useCallback(async (lat: number, lng: number) => {
+    const requestId = addressPressRequestRef.current + 1;
+    addressPressRequestRef.current = requestId;
+
+    useMapStore.getState().setSelectedLocation(null);
+    useTransitStore.getState().setSelectedStop(null);
+
+    const poi = await resolvePlaceAtAddress(lat, lng);
+    if (addressPressRequestRef.current !== requestId) return;
+
+    useOsmPoiStore.getState().setSelectedPoi(poi);
+  }, []);
+
   // ── Large display: map with floating overlays ──
   if (isLarge) {
     return (
@@ -135,6 +152,7 @@ export default function MapScreen() {
             destination={destination}
             onMapPress={handleMapPress}
             onMapLongPress={handleMapLongPress}
+            onAddressPress={handleAddressPress}
           />
 
           <View

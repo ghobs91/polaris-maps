@@ -1047,28 +1047,10 @@ export function POIInfoCard() {
       testID="poi-info-sheet"
     >
       <View style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
-        {poi && streetViewThumb && (
-          <Pressable
-            style={styles.streetViewThumb}
-            onPress={handleStreetView}
-            accessibilityRole="button"
-            accessibilityLabel="Open street view"
-          >
-            <Image
-              source={{ uri: streetViewThumb }}
-              style={styles.streetViewThumbImage}
-              resizeMode="cover"
-            />
-            <View style={styles.streetViewThumbBadge}>
-              <Ionicons name="binoculars-outline" size={12} color="#fff" />
-            </View>
-          </Pressable>
-        )}
-
         {/* Share/close with the name centered between them (Apple Maps-style).
             The sheet's own handle sits above this row. */}
         {poi && (
-          <View style={[styles.actionRow, streetViewThumb && styles.actionRowWithThumb]}>
+          <View style={styles.actionRow}>
             <TouchableOpacity
               onPress={handleShare}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1109,6 +1091,25 @@ export function POIInfoCard() {
               </GlassView>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* Street-level preview sits below the share/close row, top-left. */}
+        {poi && streetViewThumb && (
+          <Pressable
+            style={styles.streetViewThumb}
+            onPress={handleStreetView}
+            accessibilityRole="button"
+            accessibilityLabel="Open street view"
+          >
+            <Image
+              source={{ uri: streetViewThumb }}
+              style={styles.streetViewThumbImage}
+              resizeMode="cover"
+            />
+            <View style={styles.streetViewThumbBadge}>
+              <Ionicons name="binoculars-outline" size={12} color="#fff" />
+            </View>
+          </Pressable>
         )}
 
         {poi && parsed && category && (
@@ -1388,14 +1389,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
   },
-  // Leaves room for the floating street-view thumbnail above the top-left.
-  actionRowWithThumb: {
-    paddingTop: STREETVIEW_THUMB_SIZE + spacing.sm,
-  },
   streetViewThumb: {
-    position: 'absolute',
-    top: spacing.sm,
-    left: spacing.md,
+    marginLeft: spacing.md,
+    marginBottom: spacing.md,
     width: STREETVIEW_THUMB_SIZE,
     height: STREETVIEW_THUMB_SIZE,
     borderRadius: 12,
@@ -1404,7 +1400,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.85)',
     backgroundColor: 'rgba(0,0,0,0.3)',
-    zIndex: 2,
     shadowColor: '#000',
     shadowOpacity: 0.25,
     shadowRadius: 8,

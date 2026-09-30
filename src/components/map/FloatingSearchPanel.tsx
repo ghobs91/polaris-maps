@@ -57,6 +57,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useParkingStore } from '../../stores/parkingStore';
 import { useTransitStore } from '../../stores/transitStore';
+import { useStreetViewStore } from '../../stores/streetViewStore';
 import { computeRoute, initRouting } from '../../services/routing/routingService';
 import { buildRouteAlternatives } from '../../services/routing/routeAlternatives';
 import type { ValhallaRoute } from '../../models/route';
@@ -340,12 +341,16 @@ function LayersCardContent({
   onTrafficToggle,
   transitVisible,
   onTransitToggle,
+  streetViewVisible,
+  onStreetViewToggle,
   isDark,
 }: {
   trafficVisible: boolean;
   onTrafficToggle: (v: boolean) => void;
   transitVisible: boolean;
   onTransitToggle: (v: boolean) => void;
+  streetViewVisible: boolean;
+  onStreetViewToggle: (v: boolean) => void;
   isDark: boolean;
 }) {
   const { colors } = useTheme();
@@ -445,6 +450,23 @@ function LayersCardContent({
           trackColor={{ false: '#555', true: '#007AFF' }}
         />
       </View>
+
+      {/* Street View coverage toggle */}
+      <View style={ctrlStyles.cardDivider} />
+      <View style={ctrlStyles.cardRow}>
+        <Ionicons
+          name="binoculars-outline"
+          size={18}
+          color="#FF6F00"
+          style={ctrlStyles.cardRowIcon}
+        />
+        <Text style={[ctrlStyles.cardRowLabel, { color: textColor }]}>Street View</Text>
+        <Switch
+          value={streetViewVisible}
+          onValueChange={onStreetViewToggle}
+          trackColor={{ false: '#555', true: '#007AFF' }}
+        />
+      </View>
     </>
   );
 }
@@ -492,6 +514,8 @@ export function MapControlsColumn({
   const setTrafficLayerVisible = useMapStore((s) => s.setTrafficLayerVisible);
   const transitLayerVisible = useTransitStore((s) => s.transitLayerVisible);
   const setTransitLayerVisible = useTransitStore((s) => s.setTransitLayerVisible);
+  const streetViewLayerVisible = useStreetViewStore((s) => s.streetViewLayerVisible);
+  const setStreetViewLayerVisible = useStreetViewStore((s) => s.setStreetViewLayerVisible);
   const parkingSpot = useParkingStore((s) => s.spot);
   const saveParking = useParkingStore((s) => s.saveCurrentLocation);
   const clearParking = useParkingStore((s) => s.clearSpot);
@@ -517,6 +541,8 @@ export function MapControlsColumn({
             onTrafficToggle={setTrafficLayerVisible}
             transitVisible={transitLayerVisible}
             onTransitToggle={setTransitLayerVisible}
+            streetViewVisible={streetViewLayerVisible}
+            onStreetViewToggle={setStreetViewLayerVisible}
             isDark={isDark}
           />
         </GlassView>

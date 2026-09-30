@@ -83,6 +83,25 @@ export const MAPILLARY_TOKEN: string = process.env.EXPO_PUBLIC_MAPILLARY_TOKEN ?
 /** Panoramax STAC search endpoint (open street-level imagery, CC-BY-SA). */
 export const PANORAMAX_SEARCH_URL = 'https://api.panoramax.xyz/api/search';
 
+/**
+ * Panoramax coverage vector tiles (STAC "geovisio" source). Layers:
+ * `sequences` (LineString) and `pictures` (Point). No token required.
+ */
+export const PANORAMAX_TILES_URL = 'https://api.panoramax.xyz/api/map/{z}/{x}/{y}.mvt';
+
+/**
+ * Mapillary coverage vector tiles — only fetched when a token is configured.
+ * `mly1_public` layers: `overview` (Point, z0–5), `sequence` (LineString, z6–14)
+ * and `image` (Point, z14). Token is appended as `access_token`.
+ */
+export const MAPILLARY_TILES_URL_TEMPLATE =
+  'https://tiles.mapillary.com/maps/vtp/mly1_public/2/{z}/{x}/{y}';
+
+/** Build the Mapillary coverage tile URL with the configured token. */
+export function mapillaryCoverageTileUrl(token: string): string {
+  return `${MAPILLARY_TILES_URL_TEMPLATE}?access_token=${encodeURIComponent(token)}`;
+}
+
 /** OTP GraphQL endpoint path. */
 export const OTP_GRAPHQL_PATH = '/otp/gtfs/v1';
 
