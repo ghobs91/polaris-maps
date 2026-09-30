@@ -181,6 +181,25 @@ describe('satelliteStyle', () => {
     expect(style.layers[1].source).toBe('satellite-naip');
   });
 
+  it('caps the cached NAIP overlay at its real max zoom and layers a deeper hires overlay above it', () => {
+    // The USGS cached basemap stops at z16; declaring a higher maxzoom makes
+    // MapLibre request z17+ tiles that 404, blanking the overlay and exposing
+    // the blurry global base at ordinary city zoom levels.
+    expect(style.sources['satellite-naip'].maxzoom).toBe(16);
+
+    const hires = style.sources['satellite-naip-hires'];
+    expect(hires).toBeDefined();
+    expect(hires.type).toBe('raster');
+    expect(hires.tiles[0]).toContain('{bbox-epsg-3857}');
+    expect(hires.minzoom).toBeGreaterThanOrEqual(17);
+    expect(hires.bounds).toBeDefined();
+
+    const cacheIdx = style.layers.findIndex((l: any) => l.id === 'satellite-naip-tiles');
+    const hiresIdx = style.layers.findIndex((l: any) => l.id === 'satellite-naip-hires-tiles');
+    expect(cacheIdx).toBeGreaterThanOrEqual(0);
+    expect(hiresIdx).toBeGreaterThan(cacheIdx);
+  });
+
   it('should overlay road and place labels on top of satellite', () => {
     const labelLayers = style.layers.filter(
       (l: any) => l.type === 'symbol' && l.source === 'openmaptiles',
@@ -230,6 +249,22 @@ describe('satelliteStyle', () => {
       expect(layer).toBeDefined();
       expect(layer.type).toBe('raster');
       expect(layer.source).toBe(provider.id);
+    }
+  });
+
+  it('should request transparent PNG for providers that paint blank no-data tiles', () => {
+    for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
+      if (!provider.transparentBlank || !envReady(provider)) continue;
+      const tiles: string[] = style.sources[provider.id].tiles;
+      expect(tiles[0]).toMatch(/format=image\/png|format=png32/i);
+      expect(tiles[0]).toMatch(/transparent=true/i);
+    }
+  });
+
+  it('should carry the registry minzoom onto each regional source', () => {
+    for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
+      if (provider.minzoom === undefined || !envReady(provider)) continue;
+      expect(style.sources[provider.id].minzoom).toBe(provider.minzoom);
     }
   });
 

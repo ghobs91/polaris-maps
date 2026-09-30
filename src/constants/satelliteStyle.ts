@@ -3,7 +3,9 @@
  *
  * Uses free/open imagery only, layered from coarse to fine:
  *   - EOx Sentinel-2 cloudless for global coverage (~10 m), always present.
- *   - USGS The National Map orthoimagery (NAIP, ~1 m) over the US (public domain).
+ *   - USGS The National Map orthoimagery over the US (public domain): the
+ *     cached basemap (~2.4 m at its ~z16 limit) plus a 0.6 m on-demand
+ *     ImageServer overlay for z17+.
  *   - Regional European orthophotos (5–60 cm) from `orthophotoSources.ts`,
  *     each bounded to its coverage so tiles are only requested where the
  *     provider has imagery. Tiled (XYZ/WMTS) and WMS/Map sources are both
@@ -19,6 +21,7 @@
 
 import { withGlobalFallback } from '../services/map/tileFallback';
 import { REGIONAL_ORTHOPHOTO_SOURCES, type RegionalOrthophotoSource } from './orthophotoSources';
+import { LABEL_LAYERS, MAP_GLYPHS_URL, OPENMAPTILES_SOURCE } from './mapLabels';
 
 // Global base templates, best first. MapLibre only requests the next URL when
 // one errors, so Landsat is a free outage fallback behind the EOx mosaic.
@@ -44,15 +47,38 @@ function applyAuth(tiles: string[], auth: RegionalOrthophotoSource['auth']): str
   return tiles.map((tile) => `${tile}${tile.includes('?') ? '&' : '?'}${suffix}`);
 }
 
+// Some WMS/Map/ArcGIS providers render a blank (white or black) 200 image for
+// no-data / out-of-scale requests instead of a 404. Because the tile is opaque,
+// it masks everything beneath it — the white and black rectangles seen over
+// Europe at continent zoom. Ask those providers for a transparent PNG instead,
+// so blank areas fall through to the global base. Templates without a known
+// image-format parameter are left untouched.
+function requestTransparent(tile: string): string {
+  if (tile.includes('format=image/jpeg')) {
+    return `${tile.replace('format=image/jpeg', 'format=image/png')}&TRANSPARENT=TRUE`;
+  }
+  if (tile.includes('FORMAT=image/jpeg')) {
+    return `${tile.replace('FORMAT=image/jpeg', 'FORMAT=image/png')}&TRANSPARENT=TRUE`;
+  }
+  if (tile.includes('format=jpg')) {
+    return `${tile.replace('format=jpg', 'format=png32')}&transparent=true`;
+  }
+  return tile;
+}
+
 // One bounded raster source and layer per registered provider. Bounds keep
 // out-of-country tiles from ever being requested; `maxzoom` is each
-// provider's native pyramid maximum. Each provider falls back to the global
+// provider's native pyramid maximum and `minzoom` the level below which it
+// paints blank rather than imagery. Each provider falls back to the global
 // base so a missing/failed provider tile degrades to global imagery rather
 // than a gap (MapLibre only tries the fallback when the first URL errors).
 const REGIONAL_SOURCES: Record<string, Record<string, unknown>> = {};
 const REGIONAL_LAYERS: Record<string, unknown>[] = [];
 for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
-  const authed = applyAuth(provider.tiles, provider.auth);
+  const shaped = provider.transparentBlank
+    ? provider.tiles.map(requestTransparent)
+    : provider.tiles;
+  const authed = applyAuth(shaped, provider.auth);
   if (!authed) continue;
   const tiles = withGlobalFallback(authed, [GLOBAL_BASE_TILES[0]]);
   REGIONAL_SOURCES[provider.id] = {
@@ -60,6 +86,7 @@ for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
     tiles,
     tileSize: provider.tileSize,
     scheme: provider.scheme ?? 'xyz',
+    ...(provider.minzoom !== undefined ? { minzoom: provider.minzoom } : {}),
     maxzoom: provider.maxzoom,
     attribution: provider.attribution,
     bounds: provider.bounds,
@@ -90,10 +117,14 @@ const style = {
       attribution: 'Sentinel-2 cloudless by EOX / NASA GIBS Landsat',
       maxzoom: 14,
     },
-    // High-resolution US orthoimagery (1 m NAIP) drawn on top of the global
-    // base. Tiles outside NAIP coverage 404 and fall through to the base.
-    // Keeping these in separate sources (rather than one multi-URL source)
-    // prevents MapLibre from serving the blurry global tiles in the US.
+    // US orthoimagery drawn on top of the global base. `maxzoom` is the USGS
+    // cache's real deepest level (~2.4 m/px): declaring a higher value made
+    // MapLibre request z17+ tiles that 404, blanking the overlay above z16 and
+    // exposing the blurry 10 m global base. Capping at 16 lets MapLibre
+    // over-zoom the deepest real tile instead. Bounded to CONUS: the service
+    // returns a coarse global backdrop outside the US, and — because MapLibre
+    // renders a whole tile for any tile that intersects a source's bounds —
+    // requesting it worldwide painted that backdrop over the global base.
     'satellite-naip': {
       type: 'raster' as const,
       tiles: [
@@ -101,15 +132,31 @@ const style = {
       ],
       tileSize: 256,
       attribution: 'Imagery: USGS The National Map (NAIP)',
+      maxzoom: 16,
+      bounds: [-125.0, 24.39, -66.94, 49.38] as [number, number, number, number],
+    },
+    // 0.6 m US imagery from the USGS NAIP ImageServer, which renders any bbox
+    // on demand rather than serving a fixed pyramid — so it stays sharp where
+    // the cached service stops at z16. It takes over from z17 (at z16 the tile
+    // covers the same ground as the cache, so there is no extra detail to
+    // gain). Bounded to CONUS: outside its coverage the service returns an
+    // opaque black image, which would mask the base rather than fall through.
+    'satellite-naip-hires': {
+      type: 'raster' as const,
+      tiles: [
+        'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage' +
+          '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&f=image',
+      ],
+      tileSize: 256,
+      attribution: 'Imagery: USGS The National Map (NAIP)',
+      minzoom: 17,
       maxzoom: 19,
+      bounds: [-125.0, 24.39, -66.94, 49.38] as [number, number, number, number],
     },
-    openmaptiles: {
-      type: 'vector' as const,
-      url: 'https://tiles.openfreemap.org/planet',
-    },
+    openmaptiles: OPENMAPTILES_SOURCE,
     ...REGIONAL_SOURCES,
   },
-  glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+  glyphs: MAP_GLYPHS_URL,
   layers: [
     // ───────────────────── Satellite Imagery ─────────────────────
     {
@@ -130,219 +177,21 @@ const style = {
         'raster-brightness-min': 0.05,
       },
     },
+    {
+      id: 'satellite-naip-hires-tiles',
+      type: 'raster',
+      source: 'satellite-naip-hires',
+      paint: {
+        'raster-opacity': 1,
+        'raster-brightness-min': 0.05,
+      },
+    },
 
     // Regional European orthophotos, finest available per country, above the
     // global base and NAIP but below the labels.
     ...REGIONAL_LAYERS,
 
-    // ───────────────────── Road Labels ─────────────────────
-    {
-      id: 'road-label-primary',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'transportation_name',
-      filter: ['in', 'class', 'primary', 'trunk', 'motorway'],
-      minzoom: 10,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Bold'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 13, 18, 16],
-        'symbol-placement': 'line',
-        'text-rotation-alignment': 'map',
-        'text-max-angle': 30,
-      },
-      paint: {
-        'text-color': '#FFFFFF',
-        'text-halo-color': 'rgba(0,0,0,0.75)',
-        'text-halo-width': 2,
-      },
-    },
-    {
-      id: 'road-label-secondary',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'transportation_name',
-      filter: ['==', 'class', 'secondary'],
-      minzoom: 12,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Bold'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 12, 9, 16, 12, 18, 14],
-        'symbol-placement': 'line',
-        'text-rotation-alignment': 'map',
-        'text-max-angle': 30,
-      },
-      paint: {
-        'text-color': '#FFFFFF',
-        'text-halo-color': 'rgba(0,0,0,0.7)',
-        'text-halo-width': 1.8,
-      },
-    },
-    {
-      id: 'road-label-minor',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'transportation_name',
-      filter: ['in', 'class', 'minor', 'tertiary', 'service'],
-      minzoom: 14,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Regular'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 14, 9, 18, 12],
-        'symbol-placement': 'line',
-        'text-rotation-alignment': 'map',
-        'text-max-angle': 30,
-      },
-      paint: {
-        'text-color': '#EEEEEE',
-        'text-halo-color': 'rgba(0,0,0,0.65)',
-        'text-halo-width': 1.5,
-      },
-    },
-
-    // ───────────────────── Place Labels ─────────────────────
-    {
-      id: 'place-country',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'place',
-      filter: ['==', 'class', 'country'],
-      minzoom: 2,
-      maxzoom: 8,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Bold'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 2, 10, 6, 14],
-        'text-transform': 'uppercase',
-        'text-letter-spacing': 0.1,
-        'text-max-width': 8,
-      },
-      paint: {
-        'text-color': '#FFFFFF',
-        'text-halo-color': 'rgba(0,0,0,0.8)',
-        'text-halo-width': 2.5,
-      },
-    },
-    {
-      id: 'place-state',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'place',
-      filter: ['==', 'class', 'state'],
-      minzoom: 4,
-      maxzoom: 10,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Bold'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 4, 9, 8, 12],
-        'text-transform': 'uppercase',
-        'text-letter-spacing': 0.1,
-        'text-max-width': 8,
-      },
-      paint: {
-        'text-color': '#EEEEEE',
-        'text-halo-color': 'rgba(0,0,0,0.75)',
-        'text-halo-width': 2,
-      },
-    },
-    {
-      id: 'place-city',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'place',
-      filter: ['==', 'class', 'city'],
-      minzoom: 4,
-      maxzoom: 14,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Bold'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 8, 14, 12, 18],
-        'text-max-width': 8,
-      },
-      paint: {
-        'text-color': '#FFFFFF',
-        'text-halo-color': 'rgba(0,0,0,0.8)',
-        'text-halo-width': 2.5,
-      },
-    },
-    {
-      id: 'place-town',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'place',
-      filter: ['==', 'class', 'town'],
-      minzoom: 8,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Bold'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 12, 14, 16, 17],
-        'text-max-width': 8,
-      },
-      paint: {
-        'text-color': '#FFFFFF',
-        'text-halo-color': 'rgba(0,0,0,0.75)',
-        'text-halo-width': 2,
-      },
-    },
-    {
-      id: 'place-village',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'place',
-      filter: ['in', 'class', 'village', 'hamlet'],
-      minzoom: 10,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Regular'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 12, 18, 15],
-        'text-max-width': 7,
-      },
-      paint: {
-        'text-color': '#EEEEEE',
-        'text-halo-color': 'rgba(0,0,0,0.7)',
-        'text-halo-width': 1.5,
-      },
-    },
-
-    // ───────────────────── Water Labels ─────────────────────
-    {
-      id: 'water-name-ocean',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'water_name',
-      filter: ['==', 'class', 'ocean'],
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Italic'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 2, 12, 8, 16],
-        'text-letter-spacing': 0.15,
-        'text-max-width': 8,
-      },
-      paint: {
-        'text-color': '#8EBFFF',
-        'text-halo-color': 'rgba(0,0,0,0.6)',
-        'text-halo-width': 1.5,
-      },
-    },
-    {
-      id: 'water-name-other',
-      type: 'symbol',
-      source: 'openmaptiles',
-      'source-layer': 'water_name',
-      filter: ['!in', 'class', 'ocean'],
-      minzoom: 8,
-      layout: {
-        'text-field': '{name}',
-        'text-font': ['Noto Sans Italic'],
-        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
-        'text-max-width': 6,
-      },
-      paint: {
-        'text-color': '#8EBFFF',
-        'text-halo-color': 'rgba(0,0,0,0.55)',
-        'text-halo-width': 1.2,
-      },
-    },
+    ...LABEL_LAYERS,
   ],
 };
 

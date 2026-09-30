@@ -18,6 +18,13 @@
  * Providers that need a free account credential declare `auth`; their query
  * params are read from EXPO_PUBLIC_* env vars and the provider is omitted
  * entirely when those vars are unset, so no secret is committed.
+ *
+ * Providers that answer no-data / out-of-scale requests with a blank (white or
+ * black) 200 image instead of a 404 declare `transparentBlank`, so the
+ * satellite style asks them for a transparent PNG — an opaque blank tile would
+ * otherwise mask the imagery beneath it. `minzoom` is set where a provider's
+ * pyramid is blank below a given level, so those overview tiles are never
+ * requested at all.
  */
 
 /** A query parameter whose value is read from an environment variable. */
@@ -38,7 +45,11 @@ export interface RegionalOrthophotoSource {
   tileSize: number;
   /** Tile Y axis direction; defaults to `xyz`. */
   scheme?: 'xyz' | 'tms';
-  /** Minimum zoom at which the source is useful; defaults to 0. */
+  /**
+   * Minimum zoom at which the source is useful; defaults to 0. Set above 0 for
+   * providers whose pyramid only has data from a certain level, so the blank
+   * overview tiles never mask the global base.
+   */
   minzoom?: number;
   /** Native maximum zoom (or practical detail limit for WMS sources). */
   maxzoom: number;
@@ -50,6 +61,14 @@ export interface RegionalOrthophotoSource {
   attribution: string;
   /** Coverage extent as `[west, south, east, north]`. */
   bounds: [number, number, number, number];
+  /**
+   * Request a transparent PNG instead of an opaque JPEG. Set for WMS/Map/ArcGIS
+   * providers that paint blank (white or black) no-data tiles rather than
+   * 404ing: an opaque blank tile masks the imagery beneath, while a transparent
+   * one lets the global base show through. Ignored when the URL has no known
+   * image-format parameter, or when the server ignores the request.
+   */
+  transparentBlank?: boolean;
   /** Free-key query params; provider is skipped when any env var is unset. */
   auth?: RegionalOrthophotoAuthParam[];
 }
@@ -67,6 +86,11 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2023-06-01',
     attribution: '© swisstopo',
     bounds: [5.95, 45.82, 10.49, 47.81],
+    // swisstopo's tiles are opaque white outside Switzerland, and MapLibre
+    // renders a whole tile for any tile that merely intersects a source's
+    // bounds — so at low zoom this painted a large white block across the
+    // neighbours. Only request it once tiles are dominated by its coverage.
+    minzoom: 10,
   },
   {
     id: 'ortho-nl',
@@ -80,6 +104,9 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2026-04-01',
     attribution: '© Beeldmateriaal.nl / PDOK',
     bounds: [3.36, 50.75, 7.23, 53.55],
+    // PDOK returns opaque white outside NL; see ortho-ch for why this is a
+    // minzoom rather than a transparency fix.
+    minzoom: 10,
   },
   {
     id: 'ortho-fr',
@@ -106,6 +133,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: 'Datenquelle: basemap.at',
     bounds: [9.53, 46.37, 17.16, 49.02],
+    // basemap.at returns flat white outside Austria; see ortho-ch.
+    minzoom: 10,
   },
   {
     id: 'ortho-es',
@@ -149,6 +178,7 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© NGI/IGN',
     bounds: [2.51, 49.5, 6.41, 51.51],
+    minzoom: 7,
   },
   {
     id: 'ortho-lu',
@@ -164,6 +194,9 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2025-06-01',
     attribution: '© ACT Luxembourg (CC0)',
     bounds: [5.73, 49.45, 6.53, 50.18],
+    // Luxembourg's tile pyramid only has imagery from z9.
+    minzoom: 9,
+    transparentBlank: true,
   },
   {
     id: 'ortho-pl',
@@ -180,6 +213,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© GUGiK (geoportal.gov.pl)',
     bounds: [14.12, 49.0, 24.15, 54.84],
+    // The Polish WMTS returns HTTP 500s and non-image bodies at low/mid zoom.
+    minzoom: 10,
   },
   {
     id: 'ortho-cz',
@@ -194,6 +229,7 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© ČÚZK',
     bounds: [12.09, 48.55, 18.86, 51.06],
+    minzoom: 6,
   },
   {
     id: 'ortho-si',
@@ -209,6 +245,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© GURS',
     bounds: [13.38, 45.42, 16.61, 46.88],
+    minzoom: 7,
+    transparentBlank: true,
   },
   {
     id: 'ortho-hu',
@@ -224,6 +262,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2023-06-01',
     attribution: '© Lechner Tudásközpont',
     bounds: [16.11, 45.74, 22.9, 48.58],
+    minzoom: 6,
+    transparentBlank: true,
   },
   {
     id: 'ortho-ee',
@@ -239,6 +279,7 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2023-06-01',
     attribution: '© Maa- ja Ruumiamet',
     bounds: [21.76, 57.51, 28.21, 59.68],
+    minzoom: 6,
   },
   {
     id: 'ortho-dk',
@@ -272,6 +313,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© Geobasis NRW',
     bounds: [5.86, 50.32, 9.47, 53.68],
+    minzoom: 6,
+    transparentBlank: true,
   },
   {
     id: 'ortho-de-by',
@@ -287,6 +330,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© Bayerische Vermessungsverwaltung',
     bounds: [8.98, 47.27, 13.84, 50.57],
+    minzoom: 7,
+    transparentBlank: true,
   },
   {
     id: 'ortho-de-sn',
@@ -302,6 +347,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2023-06-01',
     attribution: '© GeoSN',
     bounds: [11.87, 50.17, 15.04, 51.69],
+    minzoom: 7,
+    transparentBlank: true,
   },
   {
     id: 'ortho-fi',
@@ -332,6 +379,9 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2023-06-01',
     attribution: '© Landmælingar Íslands / Náttúrufræðistofnun',
     bounds: [-23.28, 63.9, -13.18, 66.53],
+    minzoom: 5,
+    // The single-resolution mosaic has no data above ~z8; the rest is white.
+    transparentBlank: true,
   },
   {
     id: 'ortho-lt',
@@ -361,22 +411,9 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2025-06-01',
     attribution: '© Amt für Tiefbau und Geoinformation (LLV), Liechtenstein',
     bounds: [9.47, 47.05, 9.64, 47.27],
-  },
-  {
-    id: 'ortho-it',
-    label: 'Italy — PCN ortofoto 2012 (HTTP; iOS ATS blocks)',
-    tiles: [
-      'http://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12.map' +
-        '&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
-        '&LAYERS=OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33&STYLES=&CRS=EPSG:3857' +
-        '&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg',
-    ],
-    tileSize: 256,
-    maxzoom: 19,
-    resolutionM: 0.5,
-    acquiredAt: '2012-06-01',
-    attribution: '© Geoportale Nazionale (MASE)',
-    bounds: [6.6, 35.5, 18.6, 47.1],
+    // Liechtenstein is tiny; below z9 the request bbox spans far too much.
+    minzoom: 9,
+    transparentBlank: true,
   },
   {
     id: 'ortho-it-lazio',
@@ -392,21 +429,10 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2023-06-01',
     attribution: '© Regione Lazio (CC BY 4.0)',
     bounds: [11.42, 40.74, 14.04, 42.8],
-  },
-  {
-    id: 'ortho-gr',
-    label: 'Greece — Ktimatologio orthophoto (HTTP; iOS ATS blocks)',
-    tiles: [
-      'http://geoportal.ypen.gr/tiles/service?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
-        '&LAYERS=ktimatologio&STYLES=&CRS=EPSG:3857&BBOX={bbox-epsg-3857}' +
-        '&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg',
-    ],
-    tileSize: 256,
-    maxzoom: 19,
-    resolutionM: 0.35,
-    acquiredAt: '2023-06-01',
-    attribution: '© Κτηματολόγιο Α.Ε. (Hellenic Cadastre)',
-    bounds: [19.0, 34.8, 29.7, 41.8],
+    // The AGEA layer renders near-black at low zoom and a noisy/pixelated
+    // mosaic between roughly z11–14 (its PNG output is also opaque black), so
+    // keep the JPEG and only request it from z15, where the imagery is clean.
+    minzoom: 15,
   },
   {
     id: 'ortho-mt',
@@ -422,6 +448,9 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2012-06-01',
     attribution: '© Environment & Resources Authority, Malta',
     bounds: [14.18, 35.78, 14.58, 36.09],
+    // Malta is tiny; only the deeper tiles carry real imagery.
+    minzoom: 10,
+    transparentBlank: true,
   },
   {
     id: 'ortho-cy',
@@ -437,6 +466,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2014-06-01',
     attribution: '© Department of Lands and Surveys, Cyprus',
     bounds: [32.26, 34.55, 34.6, 35.7],
+    minzoom: 8,
+    transparentBlank: true,
   },
   {
     id: 'ortho-sk-ba',
@@ -466,6 +497,8 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2011-06-01',
     attribution: '© Državna geodetska uprava (DGU)',
     bounds: [13.0, 42.3, 19.5, 46.6],
+    minzoom: 7,
+    transparentBlank: true,
   },
   {
     id: 'ortho-nz',
@@ -480,5 +513,57 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     // Standard access works keyless but is rate-limited; a free Developer key
     // (or the 90-day dynamic key) can be supplied to raise limits.
     auth: [{ name: 'api', envVar: 'EXPO_PUBLIC_LINZ_API_KEY' }],
+  },
+  // ── Middle East ──────────────────────────────────────────────────────
+  // Open high-resolution coverage here is sparse: most national geoportals are
+  // token-gated (UAE) or publish cleartext-only services (Turkey, ATS-blocked
+  // on iOS). These two were live-verified over HTTPS.
+  {
+    id: 'ortho-qa',
+    label: 'Qatar — CGIS national satellite mosaic 2025',
+    tiles: [
+      'https://services.gisqatar.org.qa/server/rest/services/Imagery/QatarSatelitte_WGS84/MapServer/export' +
+        '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256' +
+        '&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    maxzoom: 18,
+    resolutionM: 0.5,
+    acquiredAt: '2025-04-01',
+    attribution: '© Qatar Centre for GIS (CGIS)',
+    bounds: [50.55, 24.4, 51.95, 26.25],
+    // Returns transparent no-data, but skip continent-scale requests anyway.
+    minzoom: 9,
+  },
+  {
+    id: 'ortho-il-telaviv',
+    label: 'Israel — Tel Aviv-Yafo municipal orthophoto 2025',
+    tiles: [
+      'https://gisn.tel-aviv.gov.il/arcgis/rest/services/WM/IView2Ortho2025WM/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    maxzoom: 18,
+    resolutionM: 0.1,
+    acquiredAt: '2025-06-01',
+    attribution: '© Tel Aviv-Yafo Municipality',
+    bounds: [34.72, 32.02, 34.87, 32.16],
+    minzoom: 12,
+  },
+  {
+    id: 'ortho-om',
+    label: 'Oman — National Survey satellite mosaic 2018',
+    tiles: [
+      'https://geoportal.mm.gov.om/server/rest/services/SatelliteImages2018_pro_MIL1/MapServer/export' +
+        '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256' +
+        '&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    maxzoom: 18,
+    resolutionM: 0.5,
+    acquiredAt: '2018-06-01',
+    attribution: '© Ministry of Housing and Urban Planning (Oman)',
+    bounds: [52.0, 16.6, 60.0, 26.5],
+    // Transparent no-data, but skip continent-scale dynamic requests.
+    minzoom: 9,
   },
 ];
