@@ -25,6 +25,7 @@ import { isForegroundInterpolationActive } from '../navigation/foregroundActivit
 import { formatDistance } from '../../utils/units';
 import { resolveMapStyle } from '../../components/map/mapStyleResolver';
 import { applyNavigationFocus } from '../map/navFocusStyle';
+import { getDeviceLanguage } from '../map/labelLanguage';
 import {
   averageRouteTrafficColor,
   ETA_COLOR_ORANGE,
@@ -673,11 +674,12 @@ export function syncMapStyle(): void {
   const isDark = carPlayDark ?? (themeMode === 'dark' || (themeMode === 'system' && systemDark));
   const mapStylePref = useMapStore.getState().mapStyle;
   const isNavigating = useNavigationStore.getState().isNavigating;
-  const key = `${isDark ? 'dark' : 'light'}:${mapStylePref}:${isNavigating ? 'nav' : 'browse'}`;
+  const language = getDeviceLanguage();
+  const key = `${isDark ? 'dark' : 'light'}:${mapStylePref}:${isNavigating ? 'nav' : 'browse'}:${language}`;
   if (key === lastMapStyleKey) return;
   lastMapStyleKey = key;
   try {
-    let style = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false });
+    let style = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false, language });
     if (isNavigating) {
       style = applyNavigationFocus(style, isDark);
     }
