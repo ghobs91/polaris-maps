@@ -1,16 +1,33 @@
 jest.mock('react-native', () => ({
-  NativeModules: {},
+  NativeModules: {
+    PolarisCloudStore: {
+      isAvailable: jest.fn().mockResolvedValue(true),
+      write: jest.fn().mockResolvedValue(true),
+      read: jest.fn().mockResolvedValue(null),
+      remove: jest.fn().mockResolvedValue(true),
+    },
+  },
   NativeEventEmitter: jest.fn(),
   Platform: { OS: 'ios' },
 }));
 
+import { NativeModules } from 'react-native';
 import {
+  LISTS_KEY,
   mergeFavorites,
   mergeLists,
+  slimListsForSync,
   utf8ByteLength,
+  writeListsToICloud,
 } from '../../src/services/icloud/iCloudSyncService';
-import type { PlaceList } from '../../src/models/placeList';
+import type { PlaceList, SavedPlace } from '../../src/models/placeList';
 import type { FavoriteLocation } from '../../src/services/favorites/favoritesService';
+
+const cloudStore = (
+  NativeModules as unknown as {
+    PolarisCloudStore: { write: jest.Mock };
+  }
+).PolarisCloudStore;
 
 describe('iCloudSyncService - mergeLists', () => {
   const now = Date.now();
@@ -151,6 +168,134 @@ describe('iCloudSyncService - mergeFavorites', () => {
     const cloud = [makeFavorite({ id: 'home', kind: 'home', label: 'Home' })];
     const result = mergeFavorites(local, cloud);
     expect(result.map((f) => f.id)).toEqual(['home', 'work', 'pin-1']);
+  });
+});
+
+describe('iCloudSyncService - slimListsForSync', () => {
+  const now = Date.now();
+
+  function makePlace(overrides: Partial<SavedPlace>): SavedPlace {
+    return {
+      id: 'place-1',
+      name: 'Place',
+      lat: 42.36,
+      lng: -71.06,
+      addedAt: now,
+      ...overrides,
+    };
+  }
+
+  function makeList(places: SavedPlace[]): PlaceList {
+    return {
+      id: 'list-1',
+      name: 'Test',
+      isPrivate: true,
+      places,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  it('drops tombstoned places', () => {
+    const lists = [makeList([makePlace({ id: 'live' }), makePlace({ id: 'gone', deleted: true })])];
+    const result = slimListsForSync(lists);
+    expect(result[0].places.map((p) => p.id)).toEqual(['live']);
+  });
+
+  it('omits blank optional fields and the tombstone flag', () => {
+    const lists = [
+      makeList([
+        makePlace({
+          note: '',
+          address: '',
+          phone: undefined,
+          deleted: false,
+        }),
+      ]),
+    ];
+    const place = slimListsForSync(lists)[0].places[0];
+    expect(place).not.toHaveProperty('note');
+    expect(place).not.toHaveProperty('address');
+    expect(place).not.toHaveProperty('phone');
+    expect(place).not.toHaveProperty('deleted');
+  });
+
+  it('keeps required fields and populated optional fields', () => {
+    const lists = [
+      makeList([
+        makePlace({
+          id: 'p1',
+          name: 'Coffee',
+          lat: 1.5,
+          lng: -2.5,
+          addedAt: 123,
+          category: 'cafe',
+          poiUuid: 'node/1',
+          updatedAt: 456,
+        }),
+      ]),
+    ];
+    const place = slimListsForSync(lists)[0].places[0];
+    expect(place).toEqual({
+      id: 'p1',
+      name: 'Coffee',
+      lat: 1.5,
+      lng: -2.5,
+      addedAt: 123,
+      category: 'cafe',
+      poiUuid: 'node/1',
+      updatedAt: 456,
+    });
+  });
+
+  it('preserves list metadata', () => {
+    const lists = [makeList([])];
+    const result = slimListsForSync(lists);
+    expect(result[0]).toMatchObject({
+      id: 'list-1',
+      name: 'Test',
+      isPrivate: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+});
+
+describe('iCloudSyncService - writeListsToICloud', () => {
+  const now = Date.now();
+
+  beforeEach(() => {
+    cloudStore.write.mockClear().mockResolvedValue(true);
+  });
+
+  it('writes payloads well beyond the legacy 60KB key-value cap', async () => {
+    const lists: PlaceList[] = [
+      {
+        id: 'big',
+        name: 'Big',
+        isPrivate: true,
+        createdAt: now,
+        updatedAt: now,
+        places: Array.from({ length: 800 }, (_, i) => ({
+          id: `place-${i}`,
+          name: `A reasonably long saved place name number ${i}`,
+          note: 'Some note text to pad the payload out further.',
+          address: `${i} Example Street, Somewhere, MA 01234`,
+          lat: 42.36 + i / 10000,
+          lng: -71.06 - i / 10000,
+          addedAt: now,
+        })),
+      },
+    ];
+
+    expect(utf8ByteLength(JSON.stringify(lists))).toBeGreaterThan(60 * 1024);
+
+    await expect(writeListsToICloud(lists)).resolves.toBe(true);
+    expect(cloudStore.write).toHaveBeenCalledTimes(1);
+
+    const [key, payload] = cloudStore.write.mock.calls[0];
+    expect(key).toBe(LISTS_KEY);
+    expect(utf8ByteLength(payload)).toBeGreaterThan(60 * 1024);
   });
 });
 

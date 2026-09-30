@@ -1,4 +1,21 @@
-const { withDangerousMod, withXcodeProject, withEntitlementsPlist } = require('expo/config-plugins');
+/**
+ * Expo config plugin: iCloud sync bridge (PolarisCloudStore).
+ *
+ * Adds the iCloud entitlements and copies the native module into the iOS
+ * project. Place lists / favorites are stored as JSON in the app's iCloud
+ * Drive ubiquity container.
+ *
+ * OUT-OF-REPO REQUIREMENT: iCloud Documents must be enabled for the App ID in
+ * the Apple Developer portal, with a container matching
+ * `iCloud.<bundleIdentifier>`. Xcode automatic signing usually provisions it,
+ * but the capability must exist on the App ID first or the build will fail to
+ * sign. See docs/ios-release.md.
+ */
+const {
+  withDangerousMod,
+  withXcodeProject,
+  withEntitlementsPlist,
+} = require('expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -73,9 +90,19 @@ function patchBridgingHeader() {
 }
 
 function withCloudStore(config) {
+  const bundleId = config.ios?.bundleIdentifier ?? 'com.polarismaps.app';
+  const containerId = `iCloud.${bundleId}`;
+
   config = withEntitlementsPlist(config, (cfg) => {
+    // Kept so the native module can migrate data written by older builds.
     cfg.modResults['com.apple.developer.ubiquity-kvstore-identifier'] =
       '$(TeamIdentifierPrefix)$(CFBundleIdentifier)';
+
+    const existingContainers =
+      cfg.modResults['com.apple.developer.ubiquity-container-identifiers'] ?? [];
+    cfg.modResults['com.apple.developer.ubiquity-container-identifiers'] = [
+      ...new Set([...existingContainers, containerId]),
+    ];
     return cfg;
   });
 

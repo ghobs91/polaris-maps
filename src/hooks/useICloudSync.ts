@@ -27,7 +27,7 @@ import {
  *
  * Reinstall safety: pushes are held until the initial pull completes, and
  * an empty local state is never pushed over an unconfirmed cloud state.
- * A `null` cloud read means "no confirmed data" (KVS may still be
+ * A `null` cloud read means "no confirmed data" (iCloud may still be
  * downloading after reinstall) — not "cloud is empty". Empty pushes are
  * only allowed once the cloud was confirmed empty or this session has
  * seen non-empty data (so an explicit "erase all" still propagates).
@@ -79,7 +79,7 @@ export function useICloudSync(): void {
         readFavoritesFromICloud(),
       ]);
       const state = pullState.current;
-      // `null` means "not confirmed" (KVS may still be syncing after reinstall).
+      // `null` means "not confirmed" (iCloud may still be syncing after reinstall).
       unconfirmed = cloudLists === null || cloudFavorites === null;
       state.cloudListsEmpty = !cloudLists || cloudLists.length === 0;
       state.cloudFavoritesEmpty = !cloudFavorites || cloudFavorites.length === 0;
@@ -119,7 +119,7 @@ export function useICloudSync(): void {
 
   // Initial pull. Subscriptions are registered first so no local edit made
   // during the pull window is lost: pushes are held until done === true.
-  // After a reinstall, KVS often syncs a moment after launch, so an
+  // After a reinstall, iCloud often syncs a moment after launch, so an
   // unconfirmed read is retried a few times before giving up.
   useEffect(() => {
     const unsubscribeLists = usePlaceListStore.subscribe((s) => {
@@ -145,7 +145,7 @@ export function useICloudSync(): void {
     })();
 
     // Best-effort flush when leaving the foreground so pending debounced
-    // writes reach KVS before the process may be suspended.
+    // writes reach iCloud before the process may be suspended.
     const appStateSub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') flush();
     });

@@ -1,17 +1,59 @@
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
-import type { PlaceList } from '../../models/placeList';
+import type { PlaceList, SavedPlace } from '../../models/placeList';
 import type { FavoriteLocation } from '../favorites/favoritesService';
 
 export const LISTS_KEY = 'place_lists.json';
 export const FAVORITES_KEY = 'favorites.json';
 
 /**
- * NSUbiquitousKeyValueStore caps out around 1MB total with small per-key
- * limits (~64KB). Refuse oversized writes instead of silently losing data —
- * callers get `false` and can surface a warning. Large libraries need a
- * CloudKit / iCloud Drive backend, which this bridge does not provide.
+ * Data is stored as JSON files in the app's iCloud Drive ubiquity container, so
+ * there is no small per-value limit (unlike the old key-value store's shared
+ * 1MB budget). This is only a sanity ceiling to avoid serializing pathologically
+ * large state in memory; real libraries sit far below it.
  */
-export const MAX_KVS_VALUE_BYTES = 60 * 1024;
+export const MAX_SYNC_VALUE_BYTES = 64 * 1024 * 1024;
+
+/** Optional SavedPlace fields pruned when empty to shrink the synced payload. */
+const OPTIONAL_PLACE_FIELDS = [
+  'note',
+  'address',
+  'category',
+  'phone',
+  'website',
+  'googleMapsUrl',
+  'poiUuid',
+  'updatedAt',
+] as const;
+
+/**
+ * Prepare lists for iCloud sync: drop tombstoned places and omit blank
+ * optional fields. iCloud sync replaces whole lists by `updatedAt`, so
+ * deletions don't depend on tombstones (those exist for the Gun peer merge).
+ * Required place fields are always preserved.
+ */
+export function slimListsForSync(lists: PlaceList[]): PlaceList[] {
+  return lists.map((list) => ({
+    ...list,
+    places: list.places
+      .filter((place) => !place.deleted)
+      .map((place) => {
+        const slim: SavedPlace = {
+          id: place.id,
+          name: place.name,
+          lat: place.lat,
+          lng: place.lng,
+          addedAt: place.addedAt,
+        };
+        for (const field of OPTIONAL_PLACE_FIELDS) {
+          const value = place[field];
+          if (value !== undefined && value !== null && value !== '') {
+            (slim as unknown as Record<string, unknown>)[field] = value;
+          }
+        }
+        return slim;
+      }),
+  }));
+}
 
 interface CloudStoreModule {
   isAvailable(): Promise<boolean>;
@@ -74,14 +116,14 @@ export function utf8ByteLength(value: string): number {
 async function writeKey(key: string, value: unknown): Promise<boolean> {
   if (!CloudStore) return false;
   try {
-    // Attempt the write even when `isAvailable()` is false: `ubiquityIdentityToken`
-    // can transiently be nil while KVS still holds/will-sync data, and gating on
-    // it silently disabled sync for otherwise-valid iCloud accounts.
+    // Attempt the write regardless of `isAvailable()`: the iCloud container can
+    // be transiently unresolvable at launch, and gating on availability
+    // silently disabled sync for otherwise-valid accounts. The native bridge
+    // resolves `false` without touching disk if the container is unavailable.
     const json = JSON.stringify(value);
-    if (utf8ByteLength(json) > MAX_KVS_VALUE_BYTES) {
+    if (utf8ByteLength(json) > MAX_SYNC_VALUE_BYTES) {
       console.warn(
-        `[iCloudSync] Payload for "${key}" exceeds the key-value size limit ` +
-          'and was not written. Large libraries need CloudKit / iCloud Drive.',
+        `[iCloudSync] Payload for "${key}" exceeds the sync sanity limit ` + 'and was not written.',
       );
       return false;
     }
@@ -111,7 +153,7 @@ async function readKey<T>(key: string): Promise<T | null> {
 }
 
 export async function writeListsToICloud(lists: PlaceList[]): Promise<boolean> {
-  return writeKey(LISTS_KEY, lists);
+  return writeKey(LISTS_KEY, slimListsForSync(lists));
 }
 
 export async function readListsFromICloud(): Promise<PlaceList[] | null> {

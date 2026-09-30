@@ -135,6 +135,22 @@ The app uses these entitlements (configured in `ios/PolarisMaps/PolarisMaps.enti
 - Camera access
 - Speech recognition
 - Photo library access
+- iCloud Documents (place lists / favorites sync via the app's ubiquity container)
+
+### iCloud capability (one-time portal setup)
+
+The `withCloudStore` plugin adds `com.apple.developer.ubiquity-container-identifiers`
+(`iCloud.com.polarismaps.app`) to the entitlements. This requires, in the Apple
+Developer portal:
+
+1. **iCloud** enabled for the App ID (`com.polarismaps.app`), with **iCloud
+   Documents** checked.
+2. A container named **`iCloud.com.polarismaps.app`** assigned to that App ID.
+3. Regenerate/download the provisioning profile so it carries the new
+   entitlement (Xcode automatic signing usually does this on the next build).
+
+Without this, the app builds but signing fails, and `isAvailable()` returns
+`false` at runtime (sync is skipped; local MMKV data is unaffected).
 
 ## TestFlight Builds
 

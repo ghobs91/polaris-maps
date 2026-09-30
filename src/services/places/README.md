@@ -8,7 +8,7 @@ The places system enables users to organize saved locations into lists:
 
 1. **Place lists** — full CRUD with cross-list move, MMKV persistence, sort by recent/name/distance
 2. **Multi-format import** — CSV, JSON, GeoJSON, KML/KMZ, and GPX files from Google Maps Takeout and third-party tools. Extracts coordinates from Google Maps URLs.
-3. **iCloud sync** — iOS-only Key-Value storage via native `PolarisCloudStore` module. Pull on mount, debounce-push on local changes, merge on iCloud update events.
+3. **iCloud sync** — iOS-only iCloud Drive (ubiquity container) via native `PolarisCloudStore` module. Pull on mount, debounce-push on local changes, merge on iCloud update events.
 4. **Favorites** — Home, Work, and pinned locations with ordering logic (Home/Work always at top)
 
 ## Files
@@ -32,9 +32,9 @@ The places system enables users to organize saved locations into lists:
 
 ### iCloud (`src/services/icloud/`)
 
-| File                   | Description                                                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `iCloudSyncService.ts` | iOS-only iCloud Key-Value storage bridge via native `PolarisCloudStore` module. Availability checks, JSON serialization, pull/push operations. |
+| File                   | Description                                                                                                                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `iCloudSyncService.ts` | iOS-only iCloud Drive bridge via native `PolarisCloudStore` module. Files live in the ubiquity container; handles availability checks, JSON serialization, pull/push operations. |
 
 ## Import Formats
 
