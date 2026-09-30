@@ -38,6 +38,7 @@ import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { consumeMapLongPress, consumeMapPress, extractScreenPoint } from './mapPressHandlers';
 import { resolveMapStyle } from './mapStyleResolver';
 import { applyNavigationFocus } from '../../services/map/navFocusStyle';
+import { getDeviceLanguage } from '../../services/map/labelLanguage';
 import {
   getConnectivity,
   type ConnectionQuality,
@@ -852,13 +853,22 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // underneath for previously visited areas).
   const useOfflineFallback = styleLoadFailed || connectionQuality !== 'good';
 
+  // Place labels follow the user's device language (OpenMapTiles `name:<lang>`),
+  // not the language of the country being viewed. Resolved once per session.
+  const labelLanguage = useMemo(() => getDeviceLanguage(), []);
+
   // Downloaded packs win over the raster fallback: full vector detail from
   // localhost with zero network. Null when the link is good (online vector
   // wins), no pack covers the viewport, or the server is unavailable.
   const offlineMapStyle = useMemo(() => {
     if (!offlinePack) return null;
     try {
-      let base = resolveMapStyle({ mapStylePref, isDark, styleLoadFailed: false });
+      let base = resolveMapStyle({
+        mapStylePref,
+        isDark,
+        styleLoadFailed: false,
+        language: labelLanguage,
+      });
       if (navigationMode) {
         base = applyNavigationFocus(base, isDark);
       }
@@ -870,7 +880,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     } catch {
       return null;
     }
-  }, [offlinePack, mapStylePref, isDark, navigationMode]);
+  }, [offlinePack, mapStylePref, isDark, navigationMode, labelLanguage]);
 
   // Resolve the map style based on user preference and dark mode.
   // Navigation derives a focus variant that hides context labels and fades
@@ -880,12 +890,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       mapStylePref,
       isDark,
       styleLoadFailed: useOfflineFallback,
+      language: labelLanguage,
     });
     if (navigationMode) {
       style = applyNavigationFocus(style, isDark);
     }
     return style;
-  }, [mapStylePref, isDark, useOfflineFallback, navigationMode]);
+  }, [mapStylePref, isDark, useOfflineFallback, navigationMode, labelLanguage]);
 
   const resolvedMapStyle = offlineMapStyle ?? vectorOrRasterStyle;
 

@@ -100,4 +100,22 @@ describe('resolveMapStyle', () => {
     });
     expect(JSON.parse(resolvedStyle).name).toBe('Polaris iOS26 Compat Light');
   });
+
+  it('localises vector place labels when a language is supplied', () => {
+    const localized = resolveMapStyle({
+      mapStylePref: 'satellite',
+      isDark: false,
+      styleLoadFailed: false,
+      language: 'en-US',
+    });
+    expect(localized).not.toBe(SATELLITE_STYLE_JSON);
+
+    const parsed = JSON.parse(localized);
+    const city = parsed.layers.find((l: { id: string }) => l.id === 'place-city');
+    expect(city.layout['text-field'][0]).toBe('coalesce');
+    expect(JSON.stringify(city.layout['text-field'])).toContain('name:en');
+
+    // The unlocalised constant keeps the local-name placeholder.
+    expect(SATELLITE_STYLE_JSON).toContain('"text-field":"{name}"');
+  });
 });
