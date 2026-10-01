@@ -149,7 +149,9 @@ export function buildPanoramaHtml(
   function onDown(x, y) { dragging = true; lastX = x; lastY = y; }
   function onMove(x, y) {
     if (!dragging) return;
-    yaw -= (x - lastX) * 0.005;
+    // Grab-and-drag: the scene follows the finger, so dragging right increases
+    // yaw (the camera turns left) rather than reversing the pan.
+    yaw += (x - lastX) * 0.005;
     pitch = Math.max(-1.2, Math.min(1.2, pitch + (y - lastY) * 0.005));
     lastX = x; lastY = y;
     render();

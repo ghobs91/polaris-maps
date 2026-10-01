@@ -21,4 +21,10 @@ describe('buildPanoramaHtml', () => {
     expect(html).toContain('id="fb"');
     expect(html).toContain('experimental-webgl');
   });
+
+  it('pans the scene in the drag direction (grab-and-drag)', () => {
+    const html = buildPanoramaHtml('https://img.test/a.jpg', 0, 0, DEFAULT_FOV_DEG);
+    expect(html).toContain('yaw += (x - lastX) * 0.005;');
+    expect(html).not.toContain('yaw -= (x - lastX) * 0.005;');
+  });
 });
