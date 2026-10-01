@@ -9,7 +9,11 @@
  *
  * Usage:
  *   node scripts/bench-search.mjs [--rows=100000] [--places-fts=v2|baseline]
- *     [--trigram=on|off] [--iterations=20] [--seed=42]
+ *     [--trigram=on|off] [--places-bounds-index=on|off] [--iterations=20] [--seed=42]
+ *
+ * `--places-bounds-index` mirrors the `idx_places_bounds (status, lat, lng)`
+ * index used by `getPlacesInBounds`; run with `off` to measure the pre-index
+ * viewport query.
  *
  * Output: JSON with p50/p95 per measurement on stdout. Progress/log lines
  * are written to stderr so the JSON can be piped.
@@ -33,6 +37,7 @@ function parseArgs(argv) {
     geocodingRows: 30_000,
     placesFts: 'v2',
     trigram: true,
+    placesBoundsIndex: true,
     iterations: 20,
     seed: 42,
   };
@@ -50,6 +55,9 @@ function parseArgs(argv) {
         break;
       case 'trigram':
         args.trigram = value !== 'off';
+        break;
+      case 'places-bounds-index':
+        args.placesBoundsIndex = value !== 'off';
         break;
       case 'iterations':
         args.iterations = Number(value);
@@ -303,7 +311,7 @@ function seedGeocoding(db, rows, rng) {
 // Schema (mirrors src/services/database/init.ts)
 // ---------------------------------------------------------------------------
 
-function createSchema(db, { placesFts, trigram }) {
+function createSchema(db, { placesFts, trigram, placesBoundsIndex }) {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;
@@ -337,6 +345,7 @@ function createSchema(db, { placesFts, trigram }) {
     );
     CREATE INDEX idx_places_geohash ON places (geohash8);
     CREATE INDEX idx_places_category ON places (category, geohash8);
+    ${placesBoundsIndex ? 'CREATE INDEX idx_places_bounds ON places (status, lat, lng);' : ''}
 
     CREATE VIRTUAL TABLE places_fts USING fts5(
       name,
@@ -441,6 +450,9 @@ function measure(name, fn, iterations) {
 }
 
 const BBOX = { south: 40.4, north: 41.0, west: -74.3, east: -73.7 };
+// Fixture centre for the viewport POI measurements (matches the NYC cluster).
+const VP_LAT = 40.7;
+const VP_LNG = -74.0;
 
 function run(db, args) {
   const measurementIterations = Math.max(1, args.iterations);
@@ -470,7 +482,43 @@ function run(db, args) {
      LIMIT 20`,
   );
 
+  // Exact `getPlacesInBounds` query (src/services/poi/poiService.ts).
+  const viewportPlacesQuery = db.prepare(
+    `SELECT * FROM places
+     WHERE status = 'open'
+       AND lat BETWEEN ? AND ?
+       AND lng BETWEEN ? AND ?
+     ORDER BY avg_rating DESC NULLS LAST
+     LIMIT ?`,
+  );
+
   const measurements = {
+    // Viewport POI lookup at street (~1.1 km) and neighbourhood (~5.5 km)
+    // spans around the fixture centre. Params are south, north, west, east.
+    viewport_places_street: measure(
+      'viewport_places_street',
+      () =>
+        viewportPlacesQuery.all(
+          VP_LAT - 0.005,
+          VP_LAT + 0.005,
+          VP_LNG - 0.005,
+          VP_LNG + 0.005,
+          500,
+        ),
+      measurementIterations,
+    ),
+    viewport_places_neighborhood: measure(
+      'viewport_places_neighborhood',
+      () =>
+        viewportPlacesQuery.all(
+          VP_LAT - 0.025,
+          VP_LAT + 0.025,
+          VP_LNG - 0.025,
+          VP_LNG + 0.025,
+          500,
+        ),
+      measurementIterations,
+    ),
     fts_name_prefix: measure(
       'fts_name_prefix',
       () => ftsQuery.all('"coffee"*', BBOX.south, BBOX.north, BBOX.west, BBOX.east),
@@ -603,7 +651,11 @@ try {
     `seeding ${args.rows} places + ${args.geocodingRows} geocoding rows ` +
       `(places-fts=${args.placesFts}, trigram=${args.trigram ? 'on' : 'off'})...\n`,
   );
-  createSchema(db, { placesFts: args.placesFts, trigram: args.trigram });
+  createSchema(db, {
+    placesFts: args.placesFts,
+    trigram: args.trigram,
+    placesBoundsIndex: args.placesBoundsIndex,
+  });
   seedPlaces(db, args.rows, rng);
   seedGeocoding(db, args.geocodingRows, rng);
 
@@ -617,6 +669,7 @@ try {
       geocodingRows: args.geocodingRows,
       placesFts: args.placesFts,
       trigram: args.trigram,
+      placesBoundsIndex: args.placesBoundsIndex,
       iterations: args.iterations,
       seed: args.seed,
       dbSizeBytes: stats.size,

@@ -166,6 +166,12 @@ export async function getNearbyPlaces(
 /**
  * Retrieve cached places (Overture + community) within a bounding box.
  * Used by the map viewport to display Overture POIs alongside OSM data.
+ *
+ * Backed by `idx_places_bounds (status, lat, lng)`. The `status` equality
+ * leads so SQLite seeks directly into the `lat` range rather than scanning the
+ * table; `lng` is applied as a residual filter. Street-level viewports (the
+ * common case) use the index; a viewport covering most of the table may still
+ * fall back to a scan.
  */
 export async function getPlacesInBounds(
   south: number,
@@ -177,7 +183,9 @@ export async function getPlacesInBounds(
   const db = await getDatabase();
   const rows = await db.getAllAsync<PlaceRow>(
     `SELECT * FROM places
-     WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND status = 'open'
+     WHERE status = 'open'
+       AND lat BETWEEN ? AND ?
+       AND lng BETWEEN ? AND ?
      ORDER BY avg_rating DESC NULLS LAST
      LIMIT ?`,
     [south, north, west, east, limit],

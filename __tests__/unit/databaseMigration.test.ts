@@ -44,4 +44,13 @@ describe('reviews foreign-key migration', () => {
     expect(createReviews).toBeDefined();
     expect(createReviews).not.toContain('REFERENCES places');
   });
+
+  it('creates the viewport bounds index on places', async () => {
+    await getDatabase();
+
+    const joined = execCalls.join('\n');
+    expect(joined).toContain(
+      'CREATE INDEX IF NOT EXISTS idx_places_bounds ON places (status, lat, lng)',
+    );
+  });
 });

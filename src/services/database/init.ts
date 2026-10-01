@@ -173,6 +173,10 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_places_author ON places (author_pubkey);
     CREATE INDEX IF NOT EXISTS idx_places_name ON places (name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_places_brand ON places (brand_name COLLATE NOCASE);
+    -- Viewport place lookup (getPlacesInBounds). The equality on status
+    -- leads so SQLite seeks straight into the lat range instead of scanning
+    -- the whole table; lng is applied as a residual filter.
+    CREATE INDEX IF NOT EXISTS idx_places_bounds ON places (status, lat, lng);
 
     CREATE VIRTUAL TABLE IF NOT EXISTS places_fts USING fts5(
       name,
