@@ -4,7 +4,7 @@
 # Usage: ./scripts/build-region-bundle.sh us/new-york
 #
 # Prerequisites: osmium, duckdb, node (>=18), gzip
-# Output: geocoding-data.sqlite.gz, overture-places.geojson.gz, manifest-entry.json
+# Output: geocoding-data.sqlite.gz, overture-places.sqlite.gz, manifest-entry.json
 
 set -euo pipefail
 
@@ -57,33 +57,52 @@ NORTH=$(echo "$BBOX_JSON" | node -pe "JSON.parse(require('fs').readFileSync('/de
 
 echo "==> Bounding box: W=$WEST S=$SOUTH E=$EAST N=$NORTH"
 
-# ── 5. Extract Overture places via DuckDB ────────────────────────────────────
-echo "==> Extracting Overture places with DuckDB …"
+# ── 5. Build Overture places SQLite via DuckDB ───────────────────────────────
+echo "==> Building overture-places.sqlite with DuckDB …"
 duckdb -c "
   INSTALL spatial; LOAD spatial;
+  INSTALL sqlite; LOAD sqlite;
   SET s3_region='us-west-2';
-  COPY (
-    SELECT id, names.primary AS name, categories.primary AS category,
-           confidence, geometry
+  ATTACH '${WORK_DIR}/overture-places.sqlite' AS places_db (TYPE SQLITE);
+  CREATE TABLE places_db.places AS
+    SELECT
+      id,
+      names.primary AS name,
+      basic_category,
+      categories.primary AS category_primary,
+      taxonomy.primary AS taxonomy_primary,
+      to_json(taxonomy.hierarchy) AS taxonomy_hierarchy,
+      confidence,
+      operating_status,
+      ST_X(geometry) AS lng,
+      ST_Y(geometry) AS lat,
+      addresses[1].freeform AS addr_freeform,
+      addresses[1].locality AS addr_locality,
+      addresses[1].region AS addr_region,
+      addresses[1].postcode AS addr_postcode,
+      addresses[1].country AS addr_country,
+      phones[1] AS phone,
+      websites[1] AS website,
+      brand.wikidata AS brand_wikidata,
+      brand.names.primary AS brand_name
     FROM read_parquet(
       's3://overturemaps-us-west-2/release/2026-03-18.0/theme=places/type=place/*',
       hive_partitioning=1
     )
     WHERE bbox.xmin BETWEEN ${WEST} AND ${EAST}
-      AND bbox.ymin BETWEEN ${SOUTH} AND ${NORTH}
-  ) TO '${WORK_DIR}/overture-places.geojson'
-  WITH (FORMAT GDAL, DRIVER 'GeoJSON');
+      AND bbox.ymin BETWEEN ${SOUTH} AND ${NORTH};
+  DETACH places_db;
 "
 
 # ── 6. Gzip outputs ─────────────────────────────────────────────────────────
 echo "==> Compressing outputs …"
 gzip -9 -k "$WORK_DIR/geocoding-data.sqlite"
-gzip -9 -k "$WORK_DIR/overture-places.geojson"
+gzip -9 -k "$WORK_DIR/overture-places.sqlite"
 
 GEOCODING_SIZE=$(stat -f%z "$WORK_DIR/geocoding-data.sqlite.gz" 2>/dev/null \
   || stat -c%s "$WORK_DIR/geocoding-data.sqlite.gz")
-PLACES_SIZE=$(stat -f%z "$WORK_DIR/overture-places.geojson.gz" 2>/dev/null \
-  || stat -c%s "$WORK_DIR/overture-places.geojson.gz")
+PLACES_SIZE=$(stat -f%z "$WORK_DIR/overture-places.sqlite.gz" 2>/dev/null \
+  || stat -c%s "$WORK_DIR/overture-places.sqlite.gz")
 
 # ── 7. Write manifest entry ─────────────────────────────────────────────────
 cat > "$WORK_DIR/manifest-entry.json" <<EOF
@@ -94,25 +113,25 @@ cat > "$WORK_DIR/manifest-entry.json" <<EOF
   "bounds": { "minLat": ${SOUTH}, "maxLat": ${NORTH}, "minLng": ${WEST}, "maxLng": ${EAST} },
   "geocodingUrl": "https://cdn.example.com/regions/${REGION_ID}/geocoding-data.sqlite.gz",
   "geocodingSizeBytes": ${GEOCODING_SIZE},
-  "placesUrl": "https://cdn.example.com/regions/${REGION_ID}/overture-places.geojson.gz",
+  "placesUrl": "https://cdn.example.com/regions/${REGION_ID}/overture-places.sqlite.gz",
   "placesSizeBytes": ${PLACES_SIZE}
 }
 EOF
 
 # ── 8. Copy outputs to current directory ─────────────────────────────────────
 cp "$WORK_DIR/geocoding-data.sqlite.gz" .
-cp "$WORK_DIR/overture-places.geojson.gz" .
+cp "$WORK_DIR/overture-places.sqlite.gz" .
 cp "$WORK_DIR/manifest-entry.json" .
 
 echo ""
 echo "=== BUILD COMPLETE ==="
 echo "  geocoding-data.sqlite.gz  (${GEOCODING_SIZE} bytes)"
-echo "  overture-places.geojson.gz  (${PLACES_SIZE} bytes)"
+echo "  overture-places.sqlite.gz  (${PLACES_SIZE} bytes)"
 echo "  manifest-entry.json"
 echo ""
 echo "Upload instructions:"
 echo "  1. Upload geocoding-data.sqlite.gz → https://cdn.example.com/regions/${REGION_ID}/geocoding-data.sqlite.gz"
-echo "  2. Upload overture-places.geojson.gz → https://cdn.example.com/regions/${REGION_ID}/overture-places.geojson.gz"
+echo "  2. Upload overture-places.sqlite.gz → https://cdn.example.com/regions/${REGION_ID}/overture-places.sqlite.gz"
 echo "  3. Merge manifest-entry.json into the master regions-catalog.json:"
 echo "     jq '.regions += [input]' regions-catalog.json manifest-entry.json > tmp.json && mv tmp.json regions-catalog.json"
 echo "  4. Upload regions-catalog.json → https://cdn.example.com/regions/catalog.json"

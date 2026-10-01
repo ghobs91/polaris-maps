@@ -17,9 +17,13 @@ jest.mock('../../src/constants/config', () => ({
   OVERTURE_PLACES_PM_TILES_URL: '',
 }));
 
-import { importOverturePlacesFromGeoJSON } from '../../src/services/poi/overtureFetcher';
+import {
+  importOverturePlacesFromGeoJSON,
+  upsertPlacesInBatches,
+} from '../../src/services/poi/overtureFetcher';
 import { getDatabase } from '../../src/services/database/init';
 import type { OverturePlaceCollection } from '../../src/types/overture';
+import type { Place } from '../../src/models/poi';
 
 interface FtsRow {
   rowid: number;
@@ -142,6 +146,73 @@ describe('upsertOverturePlaces FTS maintenance', () => {
     });
 
     await importOverturePlacesFromGeoJSON(makeGeoJSON());
+
+    expect(execAsync).toHaveBeenCalledWith(expect.stringContaining("'rebuild'"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk batch writes (region SQLite import path)
+// ---------------------------------------------------------------------------
+
+function makePlace(uuid: string): Place {
+  return {
+    uuid,
+    name: `Place ${uuid}`,
+    category: 'cafe',
+    lat: 40.7,
+    lng: -74.0,
+    geohash8: 'dr5regyz',
+    reviewCount: 0,
+    status: 'open',
+    source: 'overture',
+    authorPubkey: '',
+    signature: '',
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+async function* oneBatch(places: Place[]): AsyncIterable<Place[]> {
+  yield places;
+}
+
+describe('upsertPlacesInBatches', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+  });
+
+  it('writes each batch with the FTS triggers left on, no redundant rebuild', async () => {
+    const { execAsync, runAsync } = installDb({
+      existing: [],
+      written: [],
+      placesCount: 2,
+      ftsCount: 2,
+    });
+
+    const written = await upsertPlacesInBatches(oneBatch([makePlace('a'), makePlace('b')]));
+
+    expect(written).toBe(2);
+    const upsert = runAsync.mock.calls[0][0] as string;
+    expect(upsert).toContain('ON CONFLICT(uuid) DO UPDATE');
+    expect(upsert).not.toContain('RETURNING');
+    expect(execAsync).not.toHaveBeenCalledWith(expect.stringContaining("'rebuild'"));
+  });
+
+  it('chunks rows to stay under the SQLite variable limit', async () => {
+    const { runAsync } = installDb({ existing: [], written: [], placesCount: 31, ftsCount: 31 });
+
+    const places = Array.from({ length: 31 }, (_, i) => makePlace(`p${i}`));
+    await upsertPlacesInBatches(oneBatch(places));
+
+    // 30 rows per insert → 31 rows is two statements.
+    expect(runAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it('rebuilds FTS when the index row count diverges', async () => {
+    const { execAsync } = installDb({ existing: [], written: [], placesCount: 5, ftsCount: 4 });
+
+    await upsertPlacesInBatches(oneBatch([makePlace('a')]));
 
     expect(execAsync).toHaveBeenCalledWith(expect.stringContaining("'rebuild'"));
   });

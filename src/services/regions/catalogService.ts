@@ -109,6 +109,8 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       lastUpdated: existing?.lastUpdated ?? null,
       driveKey: existing?.driveKey ?? null,
       geocodingUrl: entry.geocodingUrl ?? null,
+      placesUrl: entry.placesUrl ?? null,
+      placesSizeBytes: entry.placesSizeBytes ?? null,
       tileVersion: existing?.tileVersion ?? null,
     };
 

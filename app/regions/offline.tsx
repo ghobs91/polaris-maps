@@ -86,7 +86,11 @@ export default function OfflineRegionsScreen() {
   const totalSizeMb =
     regions.reduce((sum, r) => {
       return (
-        sum + ((r.tilesSizeBytes ?? 0) + (r.routingSizeBytes ?? 0) + (r.geocodingSizeBytes ?? 0))
+        sum +
+        ((r.tilesSizeBytes ?? 0) +
+          (r.routingSizeBytes ?? 0) +
+          (r.geocodingSizeBytes ?? 0) +
+          (r.placesSizeBytes ?? 0))
       );
     }, 0) /
     (1024 * 1024);

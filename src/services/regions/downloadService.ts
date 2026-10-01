@@ -8,7 +8,10 @@ import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
 import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
-import { importRegionOverturePlaces } from './overtureImporter';
+import {
+  importRegionOverturePlaces,
+  importRegionOverturePlacesFromSqlite,
+} from './overtureImporter';
 import { importRegionPlaceDetails } from './placeDetailImporter';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
@@ -162,7 +165,7 @@ export async function downloadRegion(
 
     // Offline Overture places should come from bundled region assets. Live
     // viewport POIs now use Overture-hosted PMTiles directly.
-    await prefetchOverturePlaces(region, onProgress).catch(() => {});
+    await prefetchOverturePlaces(region, onProgress, signal).catch(() => {});
 
     checkAborted(signal);
 
@@ -278,42 +281,82 @@ async function tryPeerDownload(
 }
 
 /**
- * Placeholder progress stage for Overture region data.
+ * Download (when the catalog advertises a `placesUrl`) and import the region's
+ * Overture places extract into the local `places` table, so viewport POI
+ * fetches have local data to serve without a network round-trip.
  *
- * Offline Overture places should come from bundled region extracts such as
- * `overture-places.geojson`, imported separately after download. Live Overture
- * fetching uses Overture-hosted PMTiles rather than a region-wide query
- * backend or Polaris-hosted service.
+ * Region packs published over P2P may instead ship an uncompressed
+ * `overture-places.geojson` in the region directory; that path is imported
+ * directly. Live viewport POIs still use Overture-hosted PMTiles.
  */
 export async function prefetchOverturePlaces(
   region: Region,
   onProgress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<void> {
+  const totalBytes = region.placesSizeBytes ?? 0;
   onProgress?.({
     regionId: region.id,
-    totalBytes: 0,
+    totalBytes,
     downloadedBytes: 0,
     percent: 0,
     stage: 'places',
   });
 
-  // Region packs may bundle an `overture-places.geojson` extract. Import it
-  // into the local `places` table so offline place details, reviews, and edits
-  // resolve for downloaded regions. Packs without the extract are a no-op.
+  const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
   try {
-    const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
-    const imported = await importRegionOverturePlaces(regionDir);
-    if (imported > 0) {
-      console.warn(`[regions] imported ${imported} Overture places for ${region.id}`);
+    let imported = 0;
+
+    if (region.placesUrl) {
+      // The catalog bundle is gzipped; a `.sqlite.gz` URL is the memory-safe
+      // prebuilt bundle, anything else is a GeoJSON extract.
+      const isSqlite = region.placesUrl.endsWith('.sqlite.gz');
+      const gzPath = `${regionDir}overture-places.bundle.gz`;
+      const outPath = `${regionDir}${
+        isSqlite ? 'overture-places.sqlite' : 'overture-places.geojson'
+      }`;
+
+      checkAborted(signal);
+      await FileSystem.downloadAsync(region.placesUrl, gzPath);
+      checkAborted(signal);
+      await gunzipViaNode(gzPath, outPath);
+      checkAborted(signal);
+
+      imported = isSqlite
+        ? await importRegionOverturePlacesFromSqlite(outPath)
+        : await importRegionOverturePlaces(regionDir);
+      if (imported > 0) {
+        console.warn(`[regions] imported ${imported} Overture places for ${region.id}`);
+      }
+
+      // The decompressed bundle is redundant once imported.
+      await FileSystem.deleteAsync(outPath, { idempotent: true }).catch(() => {});
+      await FileSystem.deleteAsync(gzPath, { idempotent: true }).catch(() => {});
+    } else {
+      // P2P-seeded packs may ship an uncompressed extract in the region dir.
+      imported = await importRegionOverturePlaces(regionDir);
+      if (imported > 0) {
+        console.warn(`[regions] imported ${imported} Overture places for ${region.id}`);
+      }
     }
-  } catch {
-    // Missing/invalid extract — offline place details simply stay unavailable.
+
+    if (imported > 0) {
+      invalidateSearchCacheForBbox({
+        south: region.bounds.minLat,
+        north: region.bounds.maxLat,
+        west: region.bounds.minLng,
+        east: region.bounds.maxLng,
+      });
+    }
+  } catch (error) {
+    // Cancellation must propagate; a missing/invalid extract is non-fatal.
+    if ((error as Error).name === 'AbortError') throw error;
   }
 
   onProgress?.({
     regionId: region.id,
-    totalBytes: 0,
-    downloadedBytes: 0,
+    totalBytes,
+    downloadedBytes: totalBytes,
     percent: 100,
     stage: 'places',
   });

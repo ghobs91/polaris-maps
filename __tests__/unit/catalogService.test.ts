@@ -18,6 +18,12 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: () => false,
 }));
 
+// Mock app config (its module uses syntax the Jest transform cannot parse here;
+// the catalog service only needs the URL constant).
+jest.mock('../../src/constants/config', () => ({
+  REGION_CATALOG_URL: 'https://cdn.example.com/regions/catalog.json',
+}));
+
 // Mock region repository
 const upsertedRegions: any[] = [];
 jest.mock('../../src/services/regions/regionRepository', () => ({
@@ -70,6 +76,8 @@ describe('fetchAndSeedCatalog', () => {
           bounds: { minLat: 40.4, maxLat: 41.0, minLng: -74.3, maxLng: -73.6 },
           geocodingUrl: 'https://cdn.example.com/regions/us-new-york/geocoding-data.sqlite.gz',
           geocodingSizeBytes: 5000000,
+          placesUrl: 'https://cdn.example.com/regions/us-new-york/overture-places.geojson.gz',
+          placesSizeBytes: 12000000,
         },
       ],
     };
@@ -82,6 +90,10 @@ describe('fetchAndSeedCatalog', () => {
     expect(upsertedRegions[0].geocodingUrl).toBe(
       'https://cdn.example.com/regions/us-new-york/geocoding-data.sqlite.gz',
     );
+    expect(upsertedRegions[0].placesUrl).toBe(
+      'https://cdn.example.com/regions/us-new-york/overture-places.geojson.gz',
+    );
+    expect(upsertedRegions[0].placesSizeBytes).toBe(12000000);
   });
 
   it('does nothing when offline and no cache', async () => {

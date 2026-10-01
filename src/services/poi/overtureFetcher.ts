@@ -254,6 +254,109 @@ export async function importOverturePlacesFromGeoJSON(
 }
 
 // ---------------------------------------------------------------------------
+// Bulk place writes
+// ---------------------------------------------------------------------------
+
+/** `places` insert columns, shared by the Overture upsert paths. */
+const PLACES_UPSERT_COLUMNS = `uuid, name, category, lat, lng, geohash8,
+  address_street, address_city, address_state, address_postcode, address_country,
+  phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
+  status, source, author_pubkey, signature, created_at, updated_at`;
+
+/** Rows per multi-row INSERT; 25 columns keeps us under SQLite's 999-variable cap. */
+const PLACES_INSERT_ROWS = 30;
+
+/** Map a `Place` to its `PLACES_UPSERT_COLUMNS` bind values (order matters). */
+function placeToInsertParams(p: Place): SQLiteBindValue[] {
+  return [
+    p.uuid,
+    p.name,
+    p.category,
+    p.lat,
+    p.lng,
+    p.geohash8,
+    p.addressStreet ?? null,
+    p.addressCity ?? null,
+    p.addressState ?? null,
+    p.addressPostcode ?? null,
+    p.addressCountry ?? null,
+    p.phone ?? null,
+    p.website ?? null,
+    p.socials?.length ? JSON.stringify(p.socials) : null,
+    p.emails?.length ? JSON.stringify(p.emails) : null,
+    p.brandName ?? null,
+    p.hours ?? null,
+    p.avgRating ?? null,
+    p.reviewCount ?? 0,
+    p.status,
+    p.source,
+    p.authorPubkey,
+    p.signature,
+    p.createdAt,
+    p.updatedAt,
+  ];
+}
+
+/**
+ * Upsert places from an async source (e.g. a region SQLite bundle) in bounded
+ * chunks. Runs one short transaction per yielded batch so other database work
+ * is never blocked for the whole import, and leaves the `places_fts` triggers
+ * enabled so the index is maintained automatically. Returns rows written.
+ */
+export async function upsertPlacesInBatches(
+  batches: AsyncIterable<readonly Place[]>,
+): Promise<number> {
+  const db = await getDatabase();
+  const rowPlaceholders = `(${Array(25).fill('?').join(', ')})`;
+  let written = 0;
+
+  for await (const batch of batches) {
+    if (batch.length === 0) continue;
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      for (let i = 0; i < batch.length; i += PLACES_INSERT_ROWS) {
+        const chunk = batch.slice(i, i + PLACES_INSERT_ROWS);
+        await txn.runAsync(
+          `INSERT INTO places (${PLACES_UPSERT_COLUMNS})
+           VALUES ${chunk.map(() => rowPlaceholders).join(', ')}
+           ON CONFLICT(uuid) DO UPDATE SET
+             name = excluded.name,
+             category = excluded.category,
+             lat = excluded.lat,
+             lng = excluded.lng,
+             geohash8 = excluded.geohash8,
+             address_street = COALESCE(excluded.address_street, places.address_street),
+             address_city = COALESCE(excluded.address_city, places.address_city),
+             address_state = COALESCE(excluded.address_state, places.address_state),
+             address_postcode = COALESCE(excluded.address_postcode, places.address_postcode),
+             address_country = COALESCE(excluded.address_country, places.address_country),
+             phone = COALESCE(excluded.phone, places.phone),
+             website = COALESCE(excluded.website, places.website),
+             social_media = COALESCE(excluded.social_media, places.social_media),
+             emails = COALESCE(excluded.emails, places.emails),
+             brand_name = COALESCE(excluded.brand_name, places.brand_name),
+             status = excluded.status,
+             updated_at = excluded.updated_at`,
+          chunk.flatMap(placeToInsertParams),
+        );
+      }
+    });
+    written += batch.length;
+  }
+
+  // Consistency guard: the triggers keep FTS in sync, but recover if the index
+  // ever diverged (e.g. an interrupted earlier write).
+  const [placesCount, ftsCount] = await Promise.all([
+    db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM places'),
+    db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM places_fts'),
+  ]);
+  if ((placesCount?.n ?? 0) !== (ftsCount?.n ?? 0)) {
+    await db.execAsync(`INSERT INTO places_fts(places_fts) VALUES('rebuild')`);
+  }
+
+  return written;
+}
+
+// ---------------------------------------------------------------------------
 // Overture category → Polaris PlaceCategory mapping
 // ---------------------------------------------------------------------------
 
@@ -1006,12 +1109,8 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
 
   // SQLite variable limit is 999. With 25 columns per row, max ~39 rows per statement.
   // Use chunks of 30 rows to stay safely under the limit.
-  const CHUNK_SIZE = 30;
+  const CHUNK_SIZE = PLACES_INSERT_ROWS;
   const colCount = 25;
-  const colList = `uuid, name, category, lat, lng, geohash8,
-          address_street, address_city, address_state, address_postcode, address_country,
-          phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
-          status, source, author_pubkey, signature, created_at, updated_at`;
 
   interface FtsRow {
     rowid: number;
@@ -1045,39 +1144,10 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
 
       const rowPlaceholders = `(${Array(colCount).fill('?').join(', ')})`;
       const placeholders = chunk.map(() => rowPlaceholders).join(', ');
-      const params: SQLiteBindValue[] = [];
-      for (const p of chunk) {
-        params.push(
-          p.uuid,
-          p.name,
-          p.category,
-          p.lat,
-          p.lng,
-          p.geohash8,
-          p.addressStreet ?? null,
-          p.addressCity ?? null,
-          p.addressState ?? null,
-          p.addressPostcode ?? null,
-          p.addressCountry ?? null,
-          p.phone ?? null,
-          p.website ?? null,
-          p.socials?.length ? JSON.stringify(p.socials) : null,
-          p.emails?.length ? JSON.stringify(p.emails) : null,
-          p.brandName ?? null,
-          p.hours ?? null,
-          p.avgRating ?? null,
-          p.reviewCount ?? 0,
-          p.status,
-          p.source,
-          p.authorPubkey,
-          p.signature,
-          p.createdAt,
-          p.updatedAt,
-        );
-      }
+      const params = chunk.flatMap(placeToInsertParams);
 
       const written = await txn.getAllAsync<FtsRow>(
-        `INSERT INTO places (${colList}) VALUES ${placeholders}
+        `INSERT INTO places (${PLACES_UPSERT_COLUMNS}) VALUES ${placeholders}
         ON CONFLICT(uuid) DO UPDATE SET
           name = excluded.name,
           category = excluded.category,

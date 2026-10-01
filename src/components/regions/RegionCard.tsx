@@ -30,13 +30,15 @@ export const RegionCard = memo(function RegionCard({
     ? Math.round(
         ((region.tilesSizeBytes ?? 0) +
           (region.routingSizeBytes ?? 0) +
-          (region.geocodingSizeBytes ?? 0)) /
+          (region.geocodingSizeBytes ?? 0) +
+          (region.placesSizeBytes ?? 0)) /
           (1024 * 1024),
       )
     : null;
   const contents =
     region.tilesSizeBytes != null
-      ? `Tiles ${toMb(region.tilesSizeBytes)} MB · Routing ${toMb(region.routingSizeBytes)} MB · Geocoding ${toMb(region.geocodingSizeBytes)} MB`
+      ? `Tiles ${toMb(region.tilesSizeBytes)} MB · Routing ${toMb(region.routingSizeBytes)} MB · Geocoding ${toMb(region.geocodingSizeBytes)} MB` +
+        (region.placesSizeBytes != null ? ` · Places ${toMb(region.placesSizeBytes)} MB` : '')
       : null;
 
   return (

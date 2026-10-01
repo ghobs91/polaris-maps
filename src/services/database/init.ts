@@ -302,6 +302,13 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
   // Add tile_version to regions for version-aware P2P downloads
   await database.execAsync(`ALTER TABLE regions ADD COLUMN tile_version TEXT;`).catch(() => {});
 
+  // Add places_url / places_size_bytes to regions for the Overture places
+  // bundle (offline viewport POIs).
+  await database.execAsync(`ALTER TABLE regions ADD COLUMN places_url TEXT;`).catch(() => {});
+  await database
+    .execAsync(`ALTER TABLE regions ADD COLUMN places_size_bytes INTEGER;`)
+    .catch(() => {});
+
   // ATProto review columns
   for (const ddl of [
     `ALTER TABLE reviews ADD COLUMN source TEXT NOT NULL DEFAULT 'anonymous'`,

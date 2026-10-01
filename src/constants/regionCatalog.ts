@@ -16,6 +16,8 @@ export function catalogEntryToRegion(entry: CatalogEntry): Region {
     lastUpdated: null,
     driveKey: null,
     geocodingUrl: null,
+    placesUrl: null,
+    placesSizeBytes: null,
     tileVersion: null,
   };
 }

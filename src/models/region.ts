@@ -16,6 +16,10 @@ export interface Region {
   lastUpdated: number | null;
   driveKey: string | null;
   geocodingUrl: string | null;
+  /** URL of the region's gzipped Overture places extract, when published. */
+  placesUrl: string | null;
+  /** Compressed size of the Overture places extract, for download progress. */
+  placesSizeBytes: number | null;
   /** OpenFreeMap tile build version (date-stamp from tile URL, e.g. "20260422_001001_pt"). */
   tileVersion: string | null;
 }

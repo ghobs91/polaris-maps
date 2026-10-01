@@ -41,8 +41,9 @@ export async function upsertRegion(region: Region): Promise<void> {
     `INSERT OR REPLACE INTO regions (
        id, name, bounds_min_lat, bounds_max_lat, bounds_min_lng, bounds_max_lng,
        version, download_status, tiles_size_bytes, routing_size_bytes, geocoding_size_bytes,
-       downloaded_at, last_updated, drive_key, geocoding_url, tile_version
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       downloaded_at, last_updated, drive_key, geocoding_url, places_url, places_size_bytes,
+       tile_version
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       region.id,
       region.name,
@@ -59,6 +60,8 @@ export async function upsertRegion(region: Region): Promise<void> {
       region.lastUpdated,
       region.driveKey,
       region.geocodingUrl,
+      region.placesUrl,
+      region.placesSizeBytes,
       region.tileVersion,
     ],
   );
@@ -126,6 +129,8 @@ interface RegionRow {
   last_updated: number | null;
   drive_key: string | null;
   geocoding_url: string | null;
+  places_url: string | null;
+  places_size_bytes: number | null;
   tile_version: string | null;
 }
 
@@ -148,6 +153,8 @@ function rowToRegion(row: RegionRow): Region {
     lastUpdated: row.last_updated,
     driveKey: row.drive_key ?? null,
     geocodingUrl: row.geocoding_url ?? null,
+    placesUrl: row.places_url ?? null,
+    placesSizeBytes: row.places_size_bytes ?? null,
     tileVersion: row.tile_version ?? null,
   };
 }
