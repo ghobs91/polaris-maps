@@ -153,22 +153,22 @@ All outbound actions (probes, edits, reviews) are queued in MMKV (capped at 500 
 
 ### Tech Stack
 
-| Layer      | Technology                                                  |
-| ---------- | ----------------------------------------------------------- |
-| Framework  | React Native 0.86.0 + Expo SDK 57 (bare workflow)           |
-| Language   | TypeScript ~6.0.3 (strict)                                  |
-| Navigation | Expo Router (SDK 57) + React Navigation 7                   |
-| Maps       | MapLibre React Native 10 + OpenFreeMap tiles                |
-| Imagery    | USGS NAIP · Sentinel-2 cloudless (EOX)                      |
-| State      | Zustand 5                                                   |
-| Storage    | expo-sqlite (FTS5) · react-native-mmkv · expo-secure-store  |
-| Identity   | @noble/curves secp256k1 · @noble/hashes SHA-256             |
-| P2P        | Hyperswarm · Hyperdrive · Hypercore · Gun.js                |
-| Traffic    | P2P probes · free open feeds · TomTom (optional cold-start) |
-| Routing    | Valhalla (online + offline graph tiles)                     |
-| Geocoding  | FTS5 local · Photon · Nominatim                             |
-| Transit    | OpenTripPlanner · MBTA V3 · Amtrak BTS                      |
-| Testing    | Jest 29 · @testing-library/react-native 13                  |
+| Layer      | Technology                                                    |
+| ---------- | ------------------------------------------------------------- |
+| Framework  | React Native 0.86.0 + Expo SDK 57 (bare workflow)             |
+| Language   | TypeScript ~6.0.3 (strict)                                    |
+| Navigation | Expo Router (SDK 57) + React Navigation 7                     |
+| Maps       | MapLibre React Native 10 + OpenFreeMap tiles                  |
+| Imagery    | USGS NAIP · Sentinel-2 cloudless (EOX) · regional orthophotos |
+| State      | Zustand 5                                                     |
+| Storage    | expo-sqlite (FTS5) · react-native-mmkv · expo-secure-store    |
+| Identity   | @noble/curves secp256k1 · @noble/hashes SHA-256               |
+| P2P        | Hyperswarm · Hyperdrive · Hypercore · Gun.js                  |
+| Traffic    | P2P probes · free open feeds · TomTom (optional cold-start)   |
+| Routing    | Valhalla (online + offline graph tiles)                       |
+| Geocoding  | FTS5 local · Photon · Nominatim                               |
+| Transit    | OpenTripPlanner · MBTA V3 · Amtrak BTS                        |
+| Testing    | Jest 29 · @testing-library/react-native 13                    |
 
 ---
 

@@ -32,6 +32,17 @@ const GLOBAL_BASE_TILES = [
     '/GoogleMapsCompatible_Level12/{z}/{y}/{x}.jpg',
 ];
 
+/**
+ * Attribution strings for the always-on base imagery, exported so the map's
+ * attribution UI can surface them without parsing the style JSON.
+ */
+export const SATELLITE_GLOBAL_ATTRIBUTION = 'Sentinel-2 cloudless by EOX / NASA GIBS Landsat';
+export const SATELLITE_NAIP_ATTRIBUTION = 'Imagery: USGS The National Map (NAIP)';
+/** CONUS extent of the USGS NAIP overlays (`[west, south, east, north]`). */
+export const SATELLITE_NAIP_BOUNDS: [number, number, number, number] = [
+  -125.0, 24.39, -66.94, 49.38,
+];
+
 // Append a provider's free-key query params (read from EXPO_PUBLIC_* env vars)
 // to its tile templates. Returns null when any required env var is unset, so
 // the provider is omitted rather than rendering broken tiles.
@@ -72,128 +83,150 @@ function requestTransparent(tile: string): string {
 // paints blank rather than imagery. Each provider falls back to the global
 // base so a missing/failed provider tile degrades to global imagery rather
 // than a gap (MapLibre only tries the fallback when the first URL errors).
-const REGIONAL_SOURCES: Record<string, Record<string, unknown>> = {};
-const REGIONAL_LAYERS: Record<string, unknown>[] = [];
-for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
-  const shaped = provider.transparentBlank
-    ? provider.tiles.map(requestTransparent)
-    : provider.tiles;
-  const authed = applyAuth(shaped, provider.auth);
-  if (!authed) continue;
-  const tiles = withGlobalFallback(authed, [GLOBAL_BASE_TILES[0]]);
-  REGIONAL_SOURCES[provider.id] = {
-    type: 'raster',
-    tiles,
-    tileSize: provider.tileSize,
-    scheme: provider.scheme ?? 'xyz',
-    ...(provider.minzoom !== undefined ? { minzoom: provider.minzoom } : {}),
-    maxzoom: provider.maxzoom,
-    attribution: provider.attribution,
-    bounds: provider.bounds,
-  };
-  REGIONAL_LAYERS.push({
-    id: `${provider.id}-tiles`,
-    type: 'raster',
-    source: provider.id,
-    paint: {
-      'raster-opacity': 1,
-      'raster-brightness-min': 0.05,
-    },
-  });
+function buildRegionalLayers(providers: RegionalOrthophotoSource[]): {
+  sources: Record<string, Record<string, unknown>>;
+  layers: Record<string, unknown>[];
+} {
+  const sources: Record<string, Record<string, unknown>> = {};
+  const layers: Record<string, unknown>[] = [];
+  for (const provider of providers) {
+    const shaped = provider.transparentBlank
+      ? provider.tiles.map(requestTransparent)
+      : provider.tiles;
+    const authed = applyAuth(shaped, provider.auth);
+    if (!authed) continue;
+    const tiles = withGlobalFallback(authed, [GLOBAL_BASE_TILES[0]]);
+    sources[provider.id] = {
+      type: 'raster',
+      tiles,
+      tileSize: provider.tileSize,
+      scheme: provider.scheme ?? 'xyz',
+      ...(provider.minzoom !== undefined ? { minzoom: provider.minzoom } : {}),
+      maxzoom: provider.maxzoom,
+      attribution: provider.attribution,
+      bounds: provider.bounds,
+    };
+    layers.push({
+      id: `${provider.id}-tiles`,
+      type: 'raster',
+      source: provider.id,
+      paint: {
+        'raster-opacity': 1,
+        'raster-brightness-min': 0.05,
+      },
+    });
+  }
+  return { sources, layers };
 }
 
-const style = {
-  version: 8 as const,
-  name: 'Polaris Satellite',
-  sources: {
-    // Global low-resolution base (10 m Sentinel-2). Always present so non-US
-    // areas still get imagery. `maxzoom` is the data's native resolution
-    // (~9.5 m/px at z14); EOx serves tiles to z18, but requesting beyond the
-    // native zoom only wastes bandwidth, so MapLibre over-zooms from z14.
-    'satellite-global': {
-      type: 'raster' as const,
-      tiles: GLOBAL_BASE_TILES,
-      tileSize: 256,
-      attribution: 'Sentinel-2 cloudless by EOX / NASA GIBS Landsat',
-      maxzoom: 14,
-    },
-    // US orthoimagery drawn on top of the global base. `maxzoom` is the USGS
-    // cache's real deepest level (~2.4 m/px): declaring a higher value made
-    // MapLibre request z17+ tiles that 404, blanking the overlay above z16 and
-    // exposing the blurry 10 m global base. Capping at 16 lets MapLibre
-    // over-zoom the deepest real tile instead. Bounded to CONUS: the service
-    // returns a coarse global backdrop outside the US, and — because MapLibre
-    // renders a whole tile for any tile that intersects a source's bounds —
-    // requesting it worldwide painted that backdrop over the global base.
-    'satellite-naip': {
-      type: 'raster' as const,
-      tiles: [
-        'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
-      attribution: 'Imagery: USGS The National Map (NAIP)',
-      maxzoom: 16,
-      bounds: [-125.0, 24.39, -66.94, 49.38] as [number, number, number, number],
-    },
-    // 0.6 m US imagery from the USGS NAIP ImageServer, which renders any bbox
-    // on demand rather than serving a fixed pyramid — so it stays sharp where
-    // the cached service stops at z16. It takes over from z17 (at z16 the tile
-    // covers the same ground as the cache, so there is no extra detail to
-    // gain). Bounded to CONUS: outside its coverage the service returns an
-    // opaque black image, which would mask the base rather than fall through.
-    'satellite-naip-hires': {
-      type: 'raster' as const,
-      tiles: [
-        'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage' +
-          '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&f=image',
-      ],
-      tileSize: 256,
-      attribution: 'Imagery: USGS The National Map (NAIP)',
-      minzoom: 17,
-      maxzoom: 19,
-      bounds: [-125.0, 24.39, -66.94, 49.38] as [number, number, number, number],
-    },
-    openmaptiles: OPENMAPTILES_SOURCE,
-    ...REGIONAL_SOURCES,
-  },
-  glyphs: MAP_GLYPHS_URL,
-  layers: [
-    // ───────────────────── Satellite Imagery ─────────────────────
-    {
-      id: 'satellite-global-tiles',
-      type: 'raster',
-      source: 'satellite-global',
-      paint: {
-        'raster-opacity': 1,
-        'raster-brightness-min': 0.05,
+/**
+ * Build the serialized satellite style for a set of regional providers.
+ *
+ * Defaults to the whole registry (the static `SATELLITE_STYLE_JSON`). The
+ * runtime layer manager passes the viewport-eligible subset so only relevant
+ * providers are mounted, while the global base, US NAIP overlays, and vector
+ * labels stay identical.
+ */
+export function buildSatelliteStyleJson(
+  regionalProviders: RegionalOrthophotoSource[] = REGIONAL_ORTHOPHOTO_SOURCES,
+): string {
+  const { sources: regionalSources, layers: regionalLayers } =
+    buildRegionalLayers(regionalProviders);
+  const style = {
+    version: 8 as const,
+    name: 'Polaris Satellite',
+    sources: {
+      // Global low-resolution base (10 m Sentinel-2). Always present so non-US
+      // areas still get imagery. `maxzoom` is the data's native resolution
+      // (~9.5 m/px at z14); EOx serves tiles to z18, but requesting beyond the
+      // native zoom only wastes bandwidth, so MapLibre over-zooms from z14.
+      'satellite-global': {
+        type: 'raster' as const,
+        tiles: GLOBAL_BASE_TILES,
+        tileSize: 256,
+        attribution: SATELLITE_GLOBAL_ATTRIBUTION,
+        maxzoom: 14,
       },
-    },
-    {
-      id: 'satellite-naip-tiles',
-      type: 'raster',
-      source: 'satellite-naip',
-      paint: {
-        'raster-opacity': 1,
-        'raster-brightness-min': 0.05,
+      // US orthoimagery drawn on top of the global base. `maxzoom` is the USGS
+      // cache's real deepest level (~2.4 m/px): declaring a higher value made
+      // MapLibre request z17+ tiles that 404, blanking the overlay above z16 and
+      // exposing the blurry 10 m global base. Capping at 16 lets MapLibre
+      // over-zoom the deepest real tile instead. Bounded to CONUS: the service
+      // returns a coarse global backdrop outside the US, and — because MapLibre
+      // renders a whole tile for any tile that intersects a source's bounds —
+      // requesting it worldwide painted that backdrop over the global base.
+      'satellite-naip': {
+        type: 'raster' as const,
+        tiles: [
+          'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+        ],
+        tileSize: 256,
+        attribution: SATELLITE_NAIP_ATTRIBUTION,
+        maxzoom: 16,
+        bounds: SATELLITE_NAIP_BOUNDS,
       },
-    },
-    {
-      id: 'satellite-naip-hires-tiles',
-      type: 'raster',
-      source: 'satellite-naip-hires',
-      paint: {
-        'raster-opacity': 1,
-        'raster-brightness-min': 0.05,
+      // 0.6 m US imagery from the USGS NAIP ImageServer, which renders any bbox
+      // on demand rather than serving a fixed pyramid — so it stays sharp where
+      // the cached service stops at z16. It takes over from z17 (at z16 the tile
+      // covers the same ground as the cache, so there is no extra detail to
+      // gain). Bounded to CONUS: outside its coverage the service returns an
+      // opaque black image, which would mask the base rather than fall through.
+      'satellite-naip-hires': {
+        type: 'raster' as const,
+        tiles: [
+          'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage' +
+            '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&f=image',
+        ],
+        tileSize: 256,
+        attribution: SATELLITE_NAIP_ATTRIBUTION,
+        minzoom: 17,
+        maxzoom: 19,
+        bounds: SATELLITE_NAIP_BOUNDS,
       },
+      openmaptiles: OPENMAPTILES_SOURCE,
+      ...regionalSources,
     },
+    glyphs: MAP_GLYPHS_URL,
+    layers: [
+      // ───────────────────── Satellite Imagery ─────────────────────
+      {
+        id: 'satellite-global-tiles',
+        type: 'raster',
+        source: 'satellite-global',
+        paint: {
+          'raster-opacity': 1,
+          'raster-brightness-min': 0.05,
+        },
+      },
+      {
+        id: 'satellite-naip-tiles',
+        type: 'raster',
+        source: 'satellite-naip',
+        paint: {
+          'raster-opacity': 1,
+          'raster-brightness-min': 0.05,
+        },
+      },
+      {
+        id: 'satellite-naip-hires-tiles',
+        type: 'raster',
+        source: 'satellite-naip-hires',
+        paint: {
+          'raster-opacity': 1,
+          'raster-brightness-min': 0.05,
+        },
+      },
 
-    // Regional European orthophotos, finest available per country, above the
-    // global base and NAIP but below the labels.
-    ...REGIONAL_LAYERS,
+      // Regional European orthophotos, finest available per country, above the
+      // global base and NAIP but below the labels.
+      ...regionalLayers,
 
-    ...LABEL_LAYERS,
-  ],
-};
+      ...LABEL_LAYERS,
+    ],
+  };
 
-/** Serialized MapLibre style JSON for satellite view. */
-export const SATELLITE_STYLE_JSON = JSON.stringify(style);
+  return JSON.stringify(style);
+}
+
+/** Serialized MapLibre style JSON for satellite view (all regional providers). */
+export const SATELLITE_STYLE_JSON = buildSatelliteStyleJson();

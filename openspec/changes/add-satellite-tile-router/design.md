@@ -57,8 +57,16 @@ MapLibre requests the next tile URL in a source's `tiles` array only when the pr
 
 **Alternative considered:** a native local proxy for timeout-based switching. Rejected for now: it adds iOS-only native code that cannot be build-verified in this environment, and the existing `PolarisTileServer` serves only disk files and is not wired through a config plugin. The proxy remains a documented future option if timeout switching is needed.
 
+### Decision 8: Runtime viewport layer manager consumes the engine (no native protocol)
+
+The router is wired into rendering without native code: `satelliteRuntimeStyle.ts` narrows the mounted regional providers to those that pass the router's spatial + zoom eligibility for the current viewport, and `useSatelliteViewportStyle` rebuilds the satellite style on camera settle — only when the serving provider set or OAM coverage changes, so ordinary panning does not churn `MapView`'s `mapStyle`. The global base, US NAIP overlays, labels, per-provider attribution, and the curated overlap order are unchanged; `satelliteStyle.ts` now exposes `buildSatelliteStyleJson(providers)` with the full registry as the default.
+
+OpenAerialMap has no fixed footprint, so `oamCoverage.ts` queries the OAM STAC search for the viewport (cached 5 min) and mounts the OAM mosaic bounded to the union of intersecting footprints — only where imagery actually exists. The mounted set is capped at `DEFAULT_MAX_VIEWPORT_SOURCES` (8) by viewport overlap, so a continental viewport does not mount every provider. `viewportImageryAttributions` supplies the map's attribution panel (MapLibre's own control is disabled app-wide), and `sentinelStac.ts` reports the freshest Sentinel-2 scene over the viewport for that panel.
+
+**Consequence:** the engine is no longer test-only. Per-tile **timeout** switching is still not expressible, so the native-safe multi-URL fallback (Decision 7) remains the failure path.
+
 ## Risks / Trade-offs
 
-- **Unused-by-render-path risk.** Until a runtime layer manager or native protocol exists, the engine is exercised only by tests and by any future caller. Documented rather than hidden.
+- **Runtime-consumer risk.** The engine now runs on camera settle via `useSatelliteViewportStyle`. It rebuilds `mapStyle` only when the serving provider set (or OAM coverage) changes, so panning within one provider does not churn the style; the remaining risk is the extra `mapStyle` swap when crossing provider boundaries, which reloads the raster style.
 - **Metadata is approximate.** `resolutionM`/`acquiredAt` are nominal values; ranking is only as good as the registry metadata.
-- **STAC not wired.** OAM/Sentinel-2 dynamic discovery is provided as primitives (cache + endpoint) but not connected to a fetch loop.
+- **STAC discovery is viewport-driven.** OpenAerialMap coverage and the latest Sentinel-2 scene are fetched per viewport through their STAC searches (cached), best-effort; a lookup failure never affects rendering. Sentinel-2 scene _imagery_ is not rendered — the base stays the static cloudless mosaic, and only freshness is surfaced.

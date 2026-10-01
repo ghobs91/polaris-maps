@@ -14,10 +14,11 @@
  *
  * NOTE ON MAPLIBRE NATIVE: this app uses MapLibre Native via
  * `@maplibre/maplibre-react-native`, which does NOT support a custom URL
- * protocol (no `addProtocol`). Runtime per-tile switching is therefore not
- * driven from here directly; this module is the pure selection engine, and the
- * native integration uses static `bounds`/`maxzoom` raster layers plus
- * multi-URL `tiles` fallback. See `imagerySources.ts` and the module README.
+ * protocol (no `addProtocol`). Per-tile timeout switching therefore stays in
+ * the native-safe multi-URL `tiles` fallback. The engine's runtime consumer is
+ * `satelliteRuntimeStyle.ts` + `useSatelliteViewportStyle`, which narrow the
+ * mounted regional providers to those serving the current viewport and add
+ * OpenAerialMap coverage. See `imagerySources.ts` and the module README.
  */
 
 /** Bounding box `[west, south, east, north]` in degrees. */

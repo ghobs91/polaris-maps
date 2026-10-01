@@ -41,3 +41,6 @@
 - [x] 6.3 Wire regional sources to fall back to the global base, and the global base to fall back to GIBS Landsat
 - [x] 6.4 Tests: `__tests__/unit/tileFallback.test.ts` — chains, dedup, ranking order, style wiring
 - [ ] 6.5 Native timeout-based switching (custom protocol or local proxy) — deferred; MapLibre Native has no `addProtocol` and the existing `PolarisTileServer` is disk-only and not config-plugin-wired. Only needed if timeout (not 404) switching is required.
+- [x] 6.6 Runtime viewport layer manager — `satelliteRuntimeStyle.ts` + `useSatelliteViewportStyle` consume the router on camera settle (viewport-eligible regional providers capped by overlap, curated order, per-provider attribution) and add OpenAerialMap where `oamCoverage.ts` finds STAC footprints. Tests: `__tests__/unit/satelliteRuntimeStyle.test.ts`, `__tests__/unit/oamCoverage.test.ts`
+- [x] 6.7 Attribution panel — `MapAttribution` surfaces the visible imagery attributions (MapLibre's own control is off app-wide); `viewportImageryAttributions` supplies them. Applies the scoped style on entering satellite mode without a pan.
+- [x] 6.8 Sentinel-2 freshness — `sentinelStac.ts` discovers the newest low-cloud L2A scene over the viewport (Earth Search STAC, cached) and the attribution panel shows its date/cloud. Tests: `__tests__/unit/sentinelStac.test.ts`

@@ -11,9 +11,13 @@
  * which is why both styles share this single definition.
  */
 
+/** Attribution for the OpenFreeMap vector label overlay. */
+export const LABEL_ATTRIBUTION = '© OpenStreetMap contributors · OpenFreeMap';
+
 export const OPENMAPTILES_SOURCE = {
   type: 'vector' as const,
   url: 'https://tiles.openfreemap.org/planet',
+  attribution: LABEL_ATTRIBUTION,
 };
 
 export const MAP_GLYPHS_URL = 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf';

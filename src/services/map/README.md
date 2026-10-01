@@ -2,15 +2,18 @@
 
 Map style, offline tile handling, and satellite tile routing.
 
-| File                   | Responsibility                                                                                                                                                                                                         |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tileRouter.ts`        | Pure, platform-agnostic tile selection engine: spatial/zoom filtering, resolution ranking, recency tie-break, fallback queue, and a TTL+LRU metadata cache.                                                            |
-| `tileFallback.ts`      | Native-safe fallback chains: ordered multi-URL `tiles` (MapLibre tries the next URL only on error), plus `rankedFallbackTileUrls`.                                                                                     |
-| `imagerySources.ts`    | Unified imagery registry (`IMAGERY_SOURCES`) combining global satellite/aerial providers with the regional orthophoto registry in `src/constants/orthophotoSources.ts`; exports `selectBestImagerySource(bbox, zoom)`. |
-| `tileService.ts`       | Runtime tile fetching/caching used by the map.                                                                                                                                                                         |
-| `offlineStyle.ts`      | Offline style rewriting (vector tiles to local source, online raster dropped).                                                                                                                                         |
-| `offlineMapService.ts` | Offline pack lifecycle.                                                                                                                                                                                                |
-| `navFocusStyle.ts`     | Navigation-focus style rewriting.                                                                                                                                                                                      |
+| File                       | Responsibility                                                                                                                                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tileRouter.ts`            | Pure, platform-agnostic tile selection engine: spatial/zoom filtering, resolution ranking, recency tie-break, fallback queue, and a TTL+LRU metadata cache.                                                            |
+| `tileFallback.ts`          | Native-safe fallback chains: ordered multi-URL `tiles` (MapLibre tries the next URL only on error), plus `rankedFallbackTileUrls`.                                                                                     |
+| `imagerySources.ts`        | Unified imagery registry (`IMAGERY_SOURCES`) combining global satellite/aerial providers with the regional orthophoto registry in `src/constants/orthophotoSources.ts`; exports `selectBestImagerySource(bbox, zoom)`. |
+| `satelliteRuntimeStyle.ts` | Runtime consumer of the router: narrows the mounted regional providers (and OpenAerialMap) to those serving the current viewport and builds the scoped satellite style.                                                |
+| `oamCoverage.ts`           | OpenAerialMap viewport coverage via the STAC search (cached) and the bounded OAM overlay source.                                                                                                                       |
+| `sentinelStac.ts`          | Freshest Sentinel-2 L2A scene over the viewport (Earth Search STAC, cached) for the attribution panel.                                                                                                                 |
+| `tileService.ts`           | Runtime tile fetching/caching used by the map.                                                                                                                                                                         |
+| `offlineStyle.ts`          | Offline style rewriting (vector tiles to local source, online raster dropped).                                                                                                                                         |
+| `offlineMapService.ts`     | Offline pack lifecycle.                                                                                                                                                                                                |
+| `navFocusStyle.ts`         | Navigation-focus style rewriting.                                                                                                                                                                                      |
 
 ## Tile routing contract
 
@@ -35,4 +38,4 @@ This app renders with **MapLibre Native** (`@maplibre/maplibre-react-native`). N
 
 404/network fallback is therefore fully handled without native code. **Timeout-based** switching is not expressible in a style and would need a custom protocol handler or local proxy (see the deferred task in `add-satellite-tile-router`).
 
-The router remains the single selection/ranking implementation and is the input to a runtime layer manager should a native protocol handler or local proxy be added later.
+The router is the single selection/ranking implementation. Its runtime consumer is `satelliteRuntimeStyle.ts` (via the `useSatelliteViewportStyle` hook): on camera settle it mounts only the regional providers serving the viewport — capped at `DEFAULT_MAX_VIEWPORT_SOURCES` by viewport overlap, plus OpenAerialMap where its STAC search reports coverage — while preserving per-provider attribution and the curated overlap order. `viewportImageryAttributions` feeds the map's attribution panel, and `sentinelStac.ts` reports the freshest Sentinel-2 scene for the viewport. Per-tile **timeout** switching still needs a native protocol handler or local proxy (see the deferred task in `add-satellite-tile-router`).

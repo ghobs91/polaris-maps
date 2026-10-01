@@ -34,11 +34,14 @@ import { POILayer } from './POILayer';
 import { IncidentLayer } from './IncidentLayer';
 import { StreetViewCoverageLayer } from './StreetViewCoverageLayer';
 import { MapChrome } from './MapChrome';
+import { MapAttribution } from './MapAttribution';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { consumeMapLongPress, consumeMapPress, extractScreenPoint } from './mapPressHandlers';
 import { resolveMapStyle } from './mapStyleResolver';
 import { applyNavigationFocus } from '../../services/map/navFocusStyle';
 import { getDeviceLanguage } from '../../services/map/labelLanguage';
+import { useSatelliteViewportStyle } from '../../hooks/useSatelliteViewportStyle';
+import type { BBox } from '../../services/map/tileRouter';
 import {
   getConnectivity,
   type ConnectionQuality,
@@ -277,6 +280,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // True while a search-result override is replacing the viewport POIs.
   const categorySearchActive = useOsmPoiStore((s) => s.categorySearchResults != null);
   const lastZoomRef = useRef(17);
+  // Latest satellite viewport update, assigned once the hook below is created.
+  // Routed through a ref because the region handler is declared before it.
+  const satelliteUpdateRef = useRef<(bbox: BBox, zoom: number) => void>(() => {});
+  // Last settled viewport, so entering satellite mode applies the scoped style
+  // immediately instead of waiting for the next pan.
+  const lastSatelliteViewportRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
 
   // Sync external followCamera prop into ref
   useEffect(() => {
@@ -528,6 +537,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       if (!rawBounds) return;
       const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
+
+      // Narrow the satellite regional layers to this viewport via the tile
+      // router, and refresh OpenAerialMap coverage in the background.
+      const satelliteBBox: BBox = [minLng, minLat, maxLng, maxLat];
+      lastSatelliteViewportRef.current = { bbox: satelliteBBox, zoom };
+      satelliteUpdateRef.current(satelliteBBox, zoom);
 
       const visibleBounds = { minLat, minLng, maxLat, maxLng };
 
@@ -857,6 +872,31 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // not the language of the country being viewed. Resolved once per session.
   const labelLanguage = useMemo(() => getDeviceLanguage(), []);
 
+  // Viewport-scoped satellite style: the tile router narrows the mounted
+  // regional providers to those serving the current viewport (plus any
+  // OpenAerialMap coverage), instead of mounting all of them statically.
+  const {
+    style: satelliteViewportStyle,
+    attributions: satelliteAttributions,
+    latestScene: satelliteLatestScene,
+    update: updateSatelliteViewportStyle,
+  } = useSatelliteViewportStyle({
+    enabled: mapStylePref === 'satellite' && !useOfflineFallback && !navigationMode,
+    language: labelLanguage,
+  });
+
+  useEffect(() => {
+    satelliteUpdateRef.current = updateSatelliteViewportStyle;
+  }, [updateSatelliteViewportStyle]);
+
+  // Apply the scoped style as soon as satellite mode turns on, using the last
+  // settled viewport (the region handler may not fire again until a pan).
+  useEffect(() => {
+    if (mapStylePref !== 'satellite' || useOfflineFallback || navigationMode) return;
+    const last = lastSatelliteViewportRef.current;
+    if (last) satelliteUpdateRef.current(last.bbox, last.zoom);
+  }, [mapStylePref, useOfflineFallback, navigationMode]);
+
   // Downloaded packs win over the raster fallback: full vector detail from
   // localhost with zero network. Null when the link is good (online vector
   // wins), no pack covers the viewport, or the server is unavailable.
@@ -898,7 +938,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     return style;
   }, [mapStylePref, isDark, useOfflineFallback, navigationMode, labelLanguage]);
 
-  const resolvedMapStyle = offlineMapStyle ?? vectorOrRasterStyle;
+  const resolvedMapStyle = offlineMapStyle ?? satelliteViewportStyle ?? vectorOrRasterStyle;
 
   const handleMapLoadFail = useCallback(() => {
     if (styleLoadTimer.current) {
@@ -1248,6 +1288,16 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               animationDuration: reduceMotion ? 0 : 300,
             })
           }
+        />
+      )}
+
+      {/* Imagery attribution for the satellite style (MapLibre's own control is
+          disabled app-wide). Tapping reveals the visible sources. */}
+      {!navigationMode && mapStylePref === 'satellite' && (
+        <MapAttribution
+          attributions={satelliteAttributions}
+          latestScene={satelliteLatestScene}
+          bottomInset={insets.bottom + 12}
         />
       )}
 
