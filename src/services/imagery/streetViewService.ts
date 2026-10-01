@@ -238,3 +238,14 @@ export async function findStreetViewPanoramas(
 
   return [...mapillaryPanes, ...panoramaxPanes].slice(0, limit);
 }
+
+/**
+ * Order panoramas newest-first across every source, independent of how the
+ * lookup ranked them. Undated captures sort last. The stable sort keeps the
+ * lookup's relative order for equal dates, so the leading capture stays
+ * meaningful. Used by the timeline viewer, which opens on the most recent
+ * capture regardless of source.
+ */
+export function sortPanoramasByRecency(panoramas: StreetViewPanorama[]): StreetViewPanorama[] {
+  return [...panoramas].sort((a, b) => (b.capturedAt ?? -Infinity) - (a.capturedAt ?? -Infinity));
+}

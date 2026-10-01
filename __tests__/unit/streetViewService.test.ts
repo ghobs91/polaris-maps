@@ -8,6 +8,8 @@ import {
   isMapillaryConfigured,
   normalizeMapillary,
   normalizePanoramax,
+  sortPanoramasByRecency,
+  type StreetViewPanorama,
 } from '../../src/services/imagery/streetViewService';
 
 const mockFetch = jest.fn();
@@ -171,5 +173,41 @@ describe('findStreetViewPanoramas', () => {
   it('degrades to an empty list when the network fails', async () => {
     mockFetch.mockRejectedValue(new Error('offline'));
     await expect(findStreetViewPanoramas(48.8584, 2.2945)).resolves.toEqual([]);
+  });
+});
+
+describe('sortPanoramasByRecency', () => {
+  const pano = (id: string, capturedAt?: number): StreetViewPanorama => ({
+    id,
+    source: id.startsWith('mapillary') ? 'mapillary' : 'panoramax',
+    lat: 0,
+    lng: 0,
+    capturedAt,
+    isPano: true,
+    imageUrl: `${id}.jpg`,
+    attribution: 'test',
+  });
+
+  it('orders across sources newest-first and keeps undated captures last', () => {
+    const ordered = sortPanoramasByRecency([
+      pano('panoramax:2020', 1577836800),
+      pano('mapillary:2025', 1735689600),
+      pano('panoramax:undated'),
+      pano('mapillary:2023', 1672531200),
+    ]);
+
+    expect(ordered.map((p) => p.id)).toEqual([
+      'mapillary:2025',
+      'mapillary:2023',
+      'panoramax:2020',
+      'panoramax:undated',
+    ]);
+  });
+
+  it('does not mutate the input list', () => {
+    const input = [pano('a', 100), pano('b', 200)];
+    const ordered = sortPanoramasByRecency(input);
+    expect(input.map((p) => p.id)).toEqual(['a', 'b']);
+    expect(ordered).not.toBe(input);
   });
 });

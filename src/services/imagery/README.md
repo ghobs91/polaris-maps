@@ -46,10 +46,18 @@ The P2P `street_imagery` feed stays the primary, offline-capable source. The
   Mapillary and ordered most-recently-captured first.
 - **Mapillary** — explicit opt-in exception to the no-corporate-cloud rule:
   hidden without `EXPO_PUBLIC_MAPILLARY_TOKEN`, online-only, never cached for
-  offline. Leads the carousel (nearest first) wherever it has coverage.
+  offline. Leads the lookup (nearest first) wherever it has coverage.
+- **Viewer** — opens on the most recent capture from either source
+  (`sortPanoramasByRecency`), with a top timeline dropdown to step back through
+  earlier captures at the same spot.
+- **Coverage overlay** (`StreetViewCoverageLayer`) — only advertises viewable
+  360° imagery (Panoramax `type = equirectangular`, Mapillary `is_pano = true`)
+  and draws every source in one unified colour, so a covered street reads as a
+  single green line and a tap always has imagery to open.
 - Rendering: `PanoramaViewer` projects the equirectangular image with a real
-  WebGL perspective shader (drag to look, pinch/wheel to zoom), with a flat
-  fallback if WebGL or the texture upload is unavailable.
+  WebGL perspective shader (drag to look — the scene follows the finger,
+  pinch/wheel to zoom), with a flat fallback if WebGL or the texture upload is
+  unavailable.
 
 ## Related Files
 
