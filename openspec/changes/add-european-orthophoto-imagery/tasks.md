@@ -4,10 +4,10 @@
 - [x] 1.2 W/Central survey: Luxembourg, Belgium, German states NRW/Bavaria/Saxony usable; IE/UK/Andorra/Monaco/Liechtenstein excluded
 - [x] 1.3 Central/East survey: Poland, Czechia, Hungary, Slovenia usable; Croatia/Bosnia/Romania excluded; Slovakia/Serbia unreachable
 - [x] 1.4 South survey: Spain, Portugal usable; Italy/Greece/Malta/Cyprus excluded
-- [x] 1.5 Second pass to add the excluded countries: pin free-key mechanisms and any 3857 option (Finland `api-key`; Iceland, Lithuania, Liechtenstein, Italy + Lazio, Greece, Malta, Cyprus, Bratislava, Croatia usable; Norway/Sweden/Latvia/Ireland/UK/Andorra/Monaco/Serbia/Bosnia/Romania impossible)
+- [x] 1.5 Second pass to add the excluded countries: pin free-key mechanisms and any 3857 option (Finland `api-key`; Iceland, Lithuania, Liechtenstein, Italy national + Lazio, Malta, Cyprus, Bratislava, Croatia usable; Norway/Sweden/Latvia/Ireland/UK/Andorra/Monaco/Serbia/Bosnia/Romania impossible). Greece re-excluded: the YPEN proxy returns a blank tile for every bbox.
 - [x] 1.6 Live-probe every candidate endpoint (200 + image content-type) and record template, auth, licence, resolution, maxzoom, bounds
 
-## 2. Provider registry (28 entries)
+## 2. Provider registry (27 entries)
 
 - [x] 2.1 Add all verified providers to `REGIONAL_ORTHOPHOTO_SOURCES` with bounds, maxzoom, attribution
 - [x] 2.2 Add optional `auth: Array<{ name, envVar }>` and register Denmark (`username`/`password`) and Finland (`api-key`) behind `EXPO_PUBLIC_*`
@@ -41,7 +41,7 @@
 - [ ] 6.2 Set Finland/Denmark env vars → layer appears; unset → disappears
 - [ ] 6.3 Confirm impossible/partial countries fall back to global with no errors
 - [ ] 6.4 Confirm global base less blurry at city zoom than before the `maxzoom` fix
-- [ ] 6.5 Confirm HTTP-only Italy/Greece load on Android and are silently skipped on iOS
+- [x] 6.5 HTTP-only Italy/Greece removed as a concern: Italy national is registered over HTTPS (`map=...` CGI, works on iOS), and Greece is not registered because its endpoint returns blank tiles (verified by live probe, not a device run)
 
 ## 7. Quality gates
 

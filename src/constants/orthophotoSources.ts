@@ -416,6 +416,32 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     transparentBlank: true,
   },
   {
+    id: 'ortho-it',
+    label: 'Italy — PCN national orthophoto 2012 (50 cm)',
+    // The national PCN service is a MapServer CGI: it requires the `map` query
+    // parameter naming the mapfile, and exposes the orthoimage as two
+    // UTM-zone layers (32 = west/central Italy, 33 = east). Both are requested
+    // together so one source covers the whole country. It is served over HTTPS,
+    // so unlike the (now-dead) Greek proxy it is usable on iOS. A blank tile is
+    // painted below the layer group's scale threshold, hence `minzoom`.
+    tiles: [
+      'https://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12.map' +
+        '&SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+        '&LAYERS=OI.ORTOIMMAGINI.2012.32,OI.ORTOIMMAGINI.2012.33&STYLES=' +
+        '&CRS=EPSG:3857&BBOX={bbox-epsg-3857}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg',
+    ],
+    tileSize: 256,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2012-06-01',
+    attribution: '© PCN (Portale Cartografico Nazionale) — Ortofoto a colori 2012',
+    bounds: [6.6, 35.5, 18.6, 47.1],
+    // Imagery only appears from z11; below that the layer group returns a blank
+    // tile, which would mask the global base.
+    minzoom: 11,
+    transparentBlank: true,
+  },
+  {
     id: 'ortho-it-lazio',
     label: 'Italy (Lazio) — AGEA 2023 orthophoto (20 cm)',
     tiles: [

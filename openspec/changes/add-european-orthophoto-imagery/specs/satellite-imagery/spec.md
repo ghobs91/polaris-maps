@@ -7,7 +7,7 @@ The system SHALL define a typed registry, `REGIONAL_ORTHOPHOTO_SOURCES`, in `src
 #### Scenario: Registry contains the European providers
 
 - **WHEN** `REGIONAL_ORTHOPHOTO_SOURCES` is read at runtime
-- **THEN** it contains entries for Switzerland, Netherlands, France, Austria, Spain, Portugal, Belgium, Luxembourg, Poland, Czechia, Slovenia, Hungary, Estonia, Denmark, Germany (NRW/Bavaria/Saxony), Finland, Iceland, Lithuania, Liechtenstein, Italy (national + Lazio), Greece, Malta, Cyprus, Slovakia (Bratislava), and Croatia
+- **THEN** it contains entries for Switzerland, Netherlands, France, Austria, Spain, Portugal, Belgium, Luxembourg, Poland, Czechia, Slovenia, Hungary, Estonia, Denmark, Germany (NRW/Bavaria/Saxony), Finland, Iceland, Lithuania, Liechtenstein, Italy (national + Lazio), Malta, Cyprus, Slovakia (Bratislava), and Croatia
 - **AND** every entry has a non-empty `attribution` and a four-number `bounds` array
 
 #### Scenario: Every tile template is usable by MapLibre

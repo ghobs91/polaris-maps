@@ -4,7 +4,7 @@ Outside the US, the satellite map type falls back to a single global EOx Sentine
 
 ## What Changes
 
-- Add an extensible registry of **European orthophoto sources** — Switzerland, Netherlands, France, Austria, Spain, Portugal, Belgium, Luxembourg, Poland, Czechia, Slovenia, Hungary, Estonia, Denmark, Germany (NRW/Bavaria/Saxony), Finland, Iceland, Lithuania, Liechtenstein, Italy (national + Lazio), Greece, Malta, Cyprus, Slovakia (Bratislava), and Croatia (28 entries). Both tiled services (XYZ/WMTS) and WMS/Map services (via `{bbox-epsg-3857}`) are supported.
+- Add an extensible registry of **European orthophoto sources** — Switzerland, Netherlands, France, Austria, Spain, Portugal, Belgium, Luxembourg, Poland, Czechia, Slovenia, Hungary, Estonia, Denmark, Germany (NRW/Bavaria/Saxony), Finland, Iceland, Lithuania, Liechtenstein, Italy (national + Lazio), Malta, Cyprus, Slovakia (Bratislava), and Croatia (27 entries). Both tiled services (XYZ/WMTS) and WMS/Map services (via `{bbox-epsg-3857}`) are supported. Greece was dropped: its YPEN proxy responds `200 image/jpeg` but returns the same blank tile for every location, so it serves no imagery.
 - Support **free-key providers** (Denmark, Finland) through `EXPO_PUBLIC_*` env vars: the provider is emitted only when the credential is set, so no secret is committed and the layer never renders broken.
 - Emit one MapLibre raster source + raster layer per enabled provider, stacked above the global EOx base and above NAIP, below the vector labels.
 - Give every regional raster source a `bounds` so tiles are only requested inside its coverage (no worldwide 404 storm like the NAIP layer causes today).

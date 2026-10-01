@@ -252,6 +252,28 @@ describe('satelliteStyle', () => {
     }
   });
 
+  it('registers the national Italy PCN orthophoto and draws Lazio above it', () => {
+    // PCN needs the MapServer `map` CGI parameter and exposes the imagery as
+    // two UTM-zone layers; it is served over HTTPS. Greece returns blank tiles
+    // for every bbox and is deliberately not registered.
+    expect(REGIONAL_ORTHOPHOTO_SOURCES.find((p) => p.id === 'ortho-it')).toBeDefined();
+    expect(REGIONAL_ORTHOPHOTO_SOURCES.some((p) => p.id === 'ortho-gr')).toBe(false);
+
+    const source = style.sources['ortho-it'];
+    expect(source).toBeDefined();
+    expect(source.type).toBe('raster');
+    expect(source.tiles[0]).toContain('wms.pcn.minambiente.it');
+    expect(source.tiles[0]).toContain('map=/ms_ogc');
+    expect(source.tiles[0]).toContain('{bbox-epsg-3857}');
+    expect(source.minzoom).toBe(11);
+    expect(source.maxzoom).toBe(19);
+
+    const nationalIdx = style.layers.findIndex((l: any) => l.id === 'ortho-it-tiles');
+    const lazioIdx = style.layers.findIndex((l: any) => l.id === 'ortho-it-lazio-tiles');
+    expect(nationalIdx).toBeGreaterThanOrEqual(0);
+    expect(lazioIdx).toBeGreaterThan(nationalIdx);
+  });
+
   it('should request transparent PNG for providers that paint blank no-data tiles', () => {
     for (const provider of REGIONAL_ORTHOPHOTO_SOURCES) {
       if (!provider.transparentBlank || !envReady(provider)) continue;

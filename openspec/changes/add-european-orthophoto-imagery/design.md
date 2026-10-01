@@ -10,7 +10,7 @@ The current change is structurally analogous to `add-european-transit-data`: a s
 
 **Goals:**
 
-- Add European orthophoto providers across as many countries as are fetchable: Switzerland, Netherlands, France, Austria, Spain, Portugal, Belgium, Luxembourg, Poland, Czechia, Slovenia, Hungary, Estonia, Denmark, Germany (NRW/Bavaria/Saxony), Finland, Iceland, Lithuania, Liechtenstein, Italy (national + Lazio), Greece, Malta, Cyprus, Slovakia (Bratislava), Croatia — 28 entries. Some are partial (coverage), HTTP-only, or licence-unverified; each is labelled in the registry.
+- Add European orthophoto providers across as many countries as are fetchable: Switzerland, Netherlands, France, Austria, Spain, Portugal, Belgium, Luxembourg, Poland, Czechia, Slovenia, Hungary, Estonia, Denmark, Germany (NRW/Bavaria/Saxony), Finland, Iceland, Lithuania, Liechtenstein, Italy (national + Lazio), Malta, Cyprus, Slovakia (Bratislava), Croatia — 27 entries. Some are partial (coverage) or licence-unverified; each is labelled in the registry.
 - Support both tiled (XYZ/WMTS with `{z}/{x}/{y}`) and WMS/Map services (via MapLibre's `{bbox-epsg-3857}`).
 - Emit one raster source + layer per enabled provider from a single typed registry, stacked above the global base and bounded to its coverage.
 - Support free-key providers behind `EXPO_PUBLIC_*` env vars, omitted when unset.
@@ -45,7 +45,7 @@ Providers are registered when their data is licensed for reuse with attribution.
 
 **Rationale:** Keeps the open-data stance and avoids committing secrets or shipping broken layers. The gating is data-driven, so adding another keyed provider is a registry edit.
 
-**Outcome:** Denmark (env-gated creds) and Finland (env-gated free `api-key`) are registered behind auth. Keyless additions: Iceland, Lithuania, Liechtenstein, Italy (national HTTP + Lazio HTTPS), Greece (HTTP), Malta, Cyprus, Slovakia (Bratislava), Croatia. Genuinely impossible (documented, not registered): Norway (token minted from credentials + restricted "Norge digitalt" agreement), Sweden (HTTP Basic/OAuth + Geotorget entitlement, COG-only), Latvia (401 / blank export), Ireland (MapGenie login), UK (commercial key; NI coast only), Andorra (OGC host dead), Monaco (no public service), Serbia (hosts unreachable), Bosnia (Cloudflare 403), Romania (DNS down after ransomware). The registry makes re-adding any of these a one-object change.
+**Outcome:** Denmark (env-gated creds) and Finland (env-gated free `api-key`) are registered behind auth. Keyless additions: Iceland, Lithuania, Liechtenstein, Italy (national HTTPS + Lazio HTTPS), Malta, Cyprus, Slovakia (Bratislava), Croatia. Greece is **not** registered: the YPEN proxy answers `200 image/jpeg` but returns the same blank tile for every location (verified), so it serves no imagery. Genuinely impossible (documented, not registered): Norway (token minted from credentials + restricted "Norge digitalt" agreement), Sweden (HTTP Basic/OAuth + Geotorget entitlement, COG-only), Latvia (401 / blank export), Ireland (MapGenie login), UK (commercial key; NI coast only), Andorra (OGC host dead), Monaco (no public service), Serbia (hosts unreachable), Bosnia (Cloudflare 403), Romania (DNS down after ransomware). The registry makes re-adding any of these a one-object change.
 
 ### Decision 3: Encode XYZ, WMTS, WMS and OGC API Maps as MapLibre URL templates
 
@@ -67,36 +67,36 @@ A registry entry may declare `auth: Array<{ name: string; envVar: string }>`. At
 
 Every registered endpoint was fetched live and returned HTTP 200 image bytes (`image/jpeg` or `image/png`) at the sampled location.
 
-| Country       | Provider / layer                 | Licence                       | Res.       | Maxz | Access       | Verified endpoint                                                                           |
-| ------------- | -------------------------------- | ----------------------------- | ---------- | ---- | ------------ | ------------------------------------------------------------------------------------------- |
-| Switzerland   | swisstopo `swissimage`           | swisstopo OGD                 | 10 cm      | 20   | keyless      | `wmts.geo.admin.ch/.../swissimage/default/current/3857/{z}/{x}/{y}.jpeg`                    |
-| Netherlands   | PDOK `Actueel_orthoHR`           | PDOK open                     | 5–8 cm     | 21   | keyless      | `service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg`     |
-| France        | IGN `ORTHOIMAGERY.ORTHOPHOTOS`   | Licence Ouverte / Etalab      | 20 cm      | 19   | keyless      | KVP WMTS `data.geopf.fr/wmts?...TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`    |
-| Austria       | basemap.at `bmaporthofoto30cm`   | OGD Austria / CC-BY 4.0       | 30 cm      | 20   | keyless      | `maps.wien.gv.at/basemap/bmaporthofoto30cm/normal/google3857/{z}/{y}/{x}.jpeg` (`z/y/x`)    |
-| Spain         | IGN PNOA `OI.OrthoimageCoverage` | CC BY 4.0                     | 25–50 cm   | 19   | keyless      | WMTS `ign.es/wmts/pnoa-ma?...GoogleMapsCompatible&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`   |
-| Portugal      | DGT `ortos-rgb` (OGC API Maps)   | CC-BY 4.0                     | 30 cm      | 19   | keyless      | `ogcapi.dgterritorio.gov.pt/collections/ortos-rgb/map?...bbox={bbox-epsg-3857}`             |
-| Belgium       | NGI/IGN `orthoimage_coverage`    | CC BY 4.0                     | 12.5–25 cm | 19   | keyless      | WMTS `wmts.ngi.be/inspire/ortho/1.0.0/orthoimage_coverage/.../{z}/{y}/{x}.png`              |
-| Luxembourg    | ACT `OI_OrthoimageCoverage_RGB`  | CC0                           | 10 cm      | 20   | keyless      | WMS `wms.inspire.geoportail.lu/geoserver/wms?...bbox={bbox-epsg-3857}`                      |
-| Poland        | GUGiK `ORTOFOTOMAPA`             | OGD (free reuse)              | 25 cm      | 19   | keyless      | WMTS `mapy.geoportal.gov.pl/.../ORTO/WMTS/StandardResolution?...tileRow={y}&tileCol={x}`    |
-| Czechia       | ČÚZK `ORTOFOTO_WM`               | free reuse (ČÚZK)             | 20 cm      | 18   | keyless      | ArcGIS WMTS `ags.cuzk.gov.cz/.../GoogleMapsCompatible/{z}/{y}/{x}`                          |
-| Slovenia      | GURS `DOF025_3857`               | CC BY 4.0                     | 25 cm      | 19   | keyless      | WMS `ipi.eprostor.gov.si/wms-si-gurs-dts/wms?...BBOX={bbox-epsg-3857}`                      |
-| Hungary       | Lechner `OrthoimageCoverage2023` | free gov use                  | ≈40–50 cm  | 18   | keyless      | WMS `inspire.lechnerkozpont.hu/geoserver/OI.2023/wms?...BBOX={bbox-epsg-3857}`              |
-| Estonia       | Maa- ja Ruumiamet `foto`         | open (Maa-amet)               | ≈60 cm     | 18   | keyless      | WMTS `tiles.maaamet.ee/tm/wmts?...tilematrixset=GMC&TileMatrix={z}&TileRow={y}&TileCol={x}` |
-| Denmark       | Datafordeler `orto_foraar_webm`  | open (Dataforsyningen)        | 10–20 cm   | 20   | env-gated    | `services.datafordeler.dk/.../{z}/{y}/{x}.jpg` + `username`/`password`                      |
-| Germany (NRW) | Geobasis NRW `nw_dop_rgb`        | Datenlizenz Zero 2.0          | 20 cm      | 19   | keyless      | WMS `www.wms.nrw.de/geobasis/wms_nw_dop?...bbox={bbox-epsg-3857}`                           |
-| Germany (BY)  | `by_dop20c`                      | CC BY 4.0                     | 20 cm      | 19   | keyless      | WMS `geoservices.bayern.de/od/wms/dop/v1/dop20?...bbox={bbox-epsg-3857}`                    |
-| Germany (SN)  | `sn_dop_020`                     | dl-de/by-2-0                  | 20 cm      | 19   | keyless      | WMS `geodienste.sachsen.de/wms_geosn_dop-rgb/guest?...bbox={bbox-epsg-3857}`                |
-| Finland       | MML `ortokuva` (open WMTS)       | NLS open / CC BY 4.0          | ~50 cm     | 16   | env-key      | `avoin-karttakuva.../ortokuva/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.jpg?api-key=`       |
-| Iceland       | LMÍ `loftmyndir_hnitsettar`      | LMÍ terms                     | varies     | 19   | keyless      | WMS `gis.lmi.is/geoserver/wms?...srs=EPSG:3857&bbox={bbox-epsg-3857}`                       |
-| Lithuania     | RRT `Ortofoto`                   | **licence unverified**        | cached     | 19   | keyless      | ArcGIS `arcgis.rrt.lt/.../Ortofoto/MapServer/export?...imageSR=3857`                        |
-| Liechtenstein | LLV `li.atg.orthophoto2025`      | **non-commercial only**       | 10 cm      | 20   | keyless      | WMS `service.geo.llv.li/service/wms?...bbox={bbox-epsg-3857}`                               |
-| Italy         | PCN `ortofoto_colore_12`         | attribution (no open licence) | 50 cm      | 19   | keyless HTTP | WMS `wms.pcn.minambiente.it/ogc?...CRS=EPSG:3857`                                           |
-| Italy (Lazio) | Lazio AGEA 2023                  | CC BY 4.0                     | 20 cm      | 19   | keyless      | WMS `geoportale.regione.lazio.it/geoserver/ows?...CRS=EPSG:3857`                            |
-| Greece        | YPEN `ktimatologio`              | CC BY-SA 2.0 (use caveat)     | 20–50 cm   | 19   | keyless HTTP | WMS `geoportal.ypen.gr/tiles/service?...CRS=EPSG:3857`                                      |
-| Malta         | ERAPortal ortho 2012             | **licence unverified**        | 2012       | 18   | keyless      | ArcGIS `eraportal.org.mt/.../Orthophoto_External/MapServer/export?...imageSR=3857`          |
-| Cyprus        | DLS ortho 2014                   | CC BY 4.0 (royalties note)    | 10 cm      | 19   | keyless      | WMS `eservices.dls.moi.gov.cy/.../Imagery_Orthophoto_2014_10cm/.../WmsServer`               |
-| Slovakia (BA) | City of Bratislava ortho 2021    | **licence unverified**        | 10–20 cm   | 19   | keyless      | ArcGIS tiles `geoportal.bratislava.sk/.../Ortofoto_2021/MapServer/tile/{z}/{y}/{x}`         |
-| Croatia       | DGU `DOF`                        | DGU terms (attribution)       | 2011       | 19   | keyless      | WMS `geoportal.dgu.hr/ows?...CRS=EPSG:3857`                                                 |
+| Country       | Provider / layer                 | Licence                       | Res.       | Maxz | Access        | Verified endpoint                                                                           |
+| ------------- | -------------------------------- | ----------------------------- | ---------- | ---- | ------------- | ------------------------------------------------------------------------------------------- |
+| Switzerland   | swisstopo `swissimage`           | swisstopo OGD                 | 10 cm      | 20   | keyless       | `wmts.geo.admin.ch/.../swissimage/default/current/3857/{z}/{x}/{y}.jpeg`                    |
+| Netherlands   | PDOK `Actueel_orthoHR`           | PDOK open                     | 5–8 cm     | 21   | keyless       | `service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg`     |
+| France        | IGN `ORTHOIMAGERY.ORTHOPHOTOS`   | Licence Ouverte / Etalab      | 20 cm      | 19   | keyless       | KVP WMTS `data.geopf.fr/wmts?...TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`    |
+| Austria       | basemap.at `bmaporthofoto30cm`   | OGD Austria / CC-BY 4.0       | 30 cm      | 20   | keyless       | `maps.wien.gv.at/basemap/bmaporthofoto30cm/normal/google3857/{z}/{y}/{x}.jpeg` (`z/y/x`)    |
+| Spain         | IGN PNOA `OI.OrthoimageCoverage` | CC BY 4.0                     | 25–50 cm   | 19   | keyless       | WMTS `ign.es/wmts/pnoa-ma?...GoogleMapsCompatible&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`   |
+| Portugal      | DGT `ortos-rgb` (OGC API Maps)   | CC-BY 4.0                     | 30 cm      | 19   | keyless       | `ogcapi.dgterritorio.gov.pt/collections/ortos-rgb/map?...bbox={bbox-epsg-3857}`             |
+| Belgium       | NGI/IGN `orthoimage_coverage`    | CC BY 4.0                     | 12.5–25 cm | 19   | keyless       | WMTS `wmts.ngi.be/inspire/ortho/1.0.0/orthoimage_coverage/.../{z}/{y}/{x}.png`              |
+| Luxembourg    | ACT `OI_OrthoimageCoverage_RGB`  | CC0                           | 10 cm      | 20   | keyless       | WMS `wms.inspire.geoportail.lu/geoserver/wms?...bbox={bbox-epsg-3857}`                      |
+| Poland        | GUGiK `ORTOFOTOMAPA`             | OGD (free reuse)              | 25 cm      | 19   | keyless       | WMTS `mapy.geoportal.gov.pl/.../ORTO/WMTS/StandardResolution?...tileRow={y}&tileCol={x}`    |
+| Czechia       | ČÚZK `ORTOFOTO_WM`               | free reuse (ČÚZK)             | 20 cm      | 18   | keyless       | ArcGIS WMTS `ags.cuzk.gov.cz/.../GoogleMapsCompatible/{z}/{y}/{x}`                          |
+| Slovenia      | GURS `DOF025_3857`               | CC BY 4.0                     | 25 cm      | 19   | keyless       | WMS `ipi.eprostor.gov.si/wms-si-gurs-dts/wms?...BBOX={bbox-epsg-3857}`                      |
+| Hungary       | Lechner `OrthoimageCoverage2023` | free gov use                  | ≈40–50 cm  | 18   | keyless       | WMS `inspire.lechnerkozpont.hu/geoserver/OI.2023/wms?...BBOX={bbox-epsg-3857}`              |
+| Estonia       | Maa- ja Ruumiamet `foto`         | open (Maa-amet)               | ≈60 cm     | 18   | keyless       | WMTS `tiles.maaamet.ee/tm/wmts?...tilematrixset=GMC&TileMatrix={z}&TileRow={y}&TileCol={x}` |
+| Denmark       | Datafordeler `orto_foraar_webm`  | open (Dataforsyningen)        | 10–20 cm   | 20   | env-gated     | `services.datafordeler.dk/.../{z}/{y}/{x}.jpg` + `username`/`password`                      |
+| Germany (NRW) | Geobasis NRW `nw_dop_rgb`        | Datenlizenz Zero 2.0          | 20 cm      | 19   | keyless       | WMS `www.wms.nrw.de/geobasis/wms_nw_dop?...bbox={bbox-epsg-3857}`                           |
+| Germany (BY)  | `by_dop20c`                      | CC BY 4.0                     | 20 cm      | 19   | keyless       | WMS `geoservices.bayern.de/od/wms/dop/v1/dop20?...bbox={bbox-epsg-3857}`                    |
+| Germany (SN)  | `sn_dop_020`                     | dl-de/by-2-0                  | 20 cm      | 19   | keyless       | WMS `geodienste.sachsen.de/wms_geosn_dop-rgb/guest?...bbox={bbox-epsg-3857}`                |
+| Finland       | MML `ortokuva` (open WMTS)       | NLS open / CC BY 4.0          | ~50 cm     | 16   | env-key       | `avoin-karttakuva.../ortokuva/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.jpg?api-key=`       |
+| Iceland       | LMÍ `loftmyndir_hnitsettar`      | LMÍ terms                     | varies     | 19   | keyless       | WMS `gis.lmi.is/geoserver/wms?...srs=EPSG:3857&bbox={bbox-epsg-3857}`                       |
+| Lithuania     | RRT `Ortofoto`                   | **licence unverified**        | cached     | 19   | keyless       | ArcGIS `arcgis.rrt.lt/.../Ortofoto/MapServer/export?...imageSR=3857`                        |
+| Liechtenstein | LLV `li.atg.orthophoto2025`      | **non-commercial only**       | 10 cm      | 20   | keyless       | WMS `service.geo.llv.li/service/wms?...bbox={bbox-epsg-3857}`                               |
+| Italy         | PCN `ortofoto_colore_12`         | attribution (no open licence) | 50 cm      | 19   | keyless HTTPS | WMS `wms.pcn.minambiente.it/ogc?map=...ortofoto_colore_12.map` (layers UTM32+33)            |
+| Italy (Lazio) | Lazio AGEA 2023                  | CC BY 4.0                     | 20 cm      | 19   | keyless       | WMS `geoportale.regione.lazio.it/geoserver/ows?...CRS=EPSG:3857`                            |
+| ~~Greece~~    | ~~YPEN `ktimatologio`~~          | —                             | —          | —    | excluded      | returns a blank tile for every bbox (verified) — not registered                             |
+| Malta         | ERAPortal ortho 2012             | **licence unverified**        | 2012       | 18   | keyless       | ArcGIS `eraportal.org.mt/.../Orthophoto_External/MapServer/export?...imageSR=3857`          |
+| Cyprus        | DLS ortho 2014                   | CC BY 4.0 (royalties note)    | 10 cm      | 19   | keyless       | WMS `eservices.dls.moi.gov.cy/.../Imagery_Orthophoto_2014_10cm/.../WmsServer`               |
+| Slovakia (BA) | City of Bratislava ortho 2021    | **licence unverified**        | 10–20 cm   | 19   | keyless       | ArcGIS tiles `geoportal.bratislava.sk/.../Ortofoto_2021/MapServer/tile/{z}/{y}/{x}`         |
+| Croatia       | DGU `DOF`                        | DGU terms (attribution)       | 2011       | 19   | keyless       | WMS `geoportal.dgu.hr/ows?...CRS=EPSG:3857`                                                 |
 
 Impossible (documented, not registered): Norway (credential-minted token + restricted agreement), Sweden (Basic/OAuth + Geotorget entitlement, COG-only), Latvia (401 / blank export), Ireland (MapGenie login), UK (commercial key; NI coast only), Andorra (OGC host dead), Monaco (no public service), Serbia (hosts unreachable), Bosnia (Cloudflare 403), Romania (DNS down after ransomware).
 
@@ -108,7 +108,7 @@ Registered bounds (MapLibre `[west, south, east, north]`):
 - EE `[21.76, 57.51, 28.21, 59.68]` · DK `[8.07, 54.56, 15.16, 57.75]`
 - DE-NRW `[5.86, 50.32, 9.47, 53.68]` · DE-BY `[8.98, 47.27, 13.84, 50.57]` · DE-SN `[11.87, 50.17, 15.04, 51.69]`
 - FI `[19.51, 59.81, 31.59, 70.09]` · IS `[-23.28, 63.9, -13.18, 66.53]` · LT `[20.0, 53.0, 26.0, 56.0]` · LI `[9.47, 47.05, 9.64, 47.27]`
-- IT `[6.6, 35.5, 18.6, 47.1]` · IT-Lazio `[11.42, 40.74, 14.04, 42.8]` · GR `[19.0, 34.8, 29.7, 41.8]` · MT `[14.18, 35.78, 14.58, 36.09]`
+- IT `[6.6, 35.5, 18.6, 47.1]` · IT-Lazio `[11.42, 40.74, 14.04, 42.8]` · MT `[14.18, 35.78, 14.58, 36.09]`
 - CY `[32.26, 34.55, 34.6, 35.7]` · SK-BA `[16.9, 48.0, 17.3, 48.3]` · HR `[13.0, 42.3, 19.5, 46.6]`
 
 ### Decision 4: Correct native max zoom per source; do not over-zoom
@@ -158,6 +158,6 @@ interface RegionalOrthophotoSource {
 - **Cross-border overdraw.** National bounds are approximate and may include a fringe of neighbouring territory where tiles 404 and fall through to the global base. Acceptable; bounds can be tightened per provider.
 - **Deep-zoom blur remains.** Providers' native max is ~17–19; beyond that MapLibre over-zooms. This is inherent to open data and strictly better than today.
 - **Attribution wording.** Getting it wrong is a licence breach. Mitigation: pin exact wording from each provider's terms as an explicit task and assert it in tests.
-- **Licence confidence varies.** Several registered providers publish free-to-use government data without a formal open licence (Hungary, Czechia, Croatia, Italy, Greece) and three are explicitly unverified or restricted — Lithuania (no stated licence), Malta (unverified), Bratislava (unverified), Liechtenstein (non-commercial only). They are labelled in the registry/table; re-audit before any commercial release.
+- **Licence confidence varies.** Several registered providers publish free-to-use government data without a formal open licence (Hungary, Czechia, Croatia, Italy) and three are explicitly unverified or restricted — Lithuania (no stated licence), Malta (unverified), Bratislava (unverified), Liechtenstein (non-commercial only). They are labelled in the registry/table; re-audit before any commercial release.
 - **WMS performance.** WMS/`{bbox-epsg-3857}` sources are server-rendered per tile and uncached, unlike tiled providers; they are slower and heavier. Acceptable as an overlay at human zoom levels, and bounded so they only load in-country.
-- **HTTP-only endpoints.** Italy (national PCN) and Greece serve plain HTTP, which iOS App Transport Security blocks, so they load on Android but not iOS. They are registered with clear labels; an ATS exception or an HTTPS proxy would be needed to enable them on iOS.
+- **Cleartext endpoints are excluded.** Services that only serve plain HTTP are blocked by iOS App Transport Security, so they are not registered (this is why Turkey was left out, and why Greece was dropped). The national Italy PCN service was initially assumed HTTP-only, but the MapServer CGI is reachable over HTTPS (`https://wms.pcn.minambiente.it/ogc?map=...`), so it is registered and works on both platforms.
