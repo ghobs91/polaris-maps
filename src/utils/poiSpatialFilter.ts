@@ -14,8 +14,9 @@ export const STREET_LEVEL_POI_ZOOM = 17;
 
 /**
  * Zoom-adaptive cap on total displayed POI markers.
- * At street level (zoom ≥ 17) we allow up to 420 markers since the compact
- * icon+label design takes much less space than the previous pill style.
+ * At street level (zoom ≥ 17) we allow up to 420 markers: the icon-only badge
+ * is compact, and the subset that renders a name pill is thinned separately by
+ * {@link filterPoiLabelsForDisplay}.
  */
 function maxTotalForZoom(zoom: number): number {
   if (zoom >= 17) return 420;
@@ -100,14 +101,13 @@ function exclusionGaps(zoom: number): { gapX: number; gapY: number } {
 }
 
 function labelExclusionGaps(zoom: number): { gapX: number; gapY: number } {
-  if (zoom >= 19) {
-    return { gapX: 58, gapY: 18 };
-  }
-  if (zoom >= 18) {
-    return { gapX: 72, gapY: 22 };
-  }
   if (zoom >= STREET_LEVEL_POI_ZOOM) {
-    return { gapX: 86, gapY: 24 };
+    // Labels render as a name pill extending to the right of the icon (see
+    // POILayer's PoiBadge). The pill reaches ~126px past the icon centre, so
+    // two names on the same row must sit at least that far apart or one pill
+    // would run under the other; nearer names are staggered vertically. gapY
+    // clears the pill height so vertically adjacent pills cannot touch.
+    return { gapX: 126, gapY: 24 };
   }
 
   const { gapX, gapY } = exclusionGaps(zoom);

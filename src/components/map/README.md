@@ -8,7 +8,7 @@ The map layer is built on MapLibre React Native with OpenFreeMap vector tiles an
 
 1. **Vector tile rendering** — MapLibre GL with offline tile support via a native tile server module
 2. **Traffic overlay** — color-coded GeoJSON line layers for congestion (green → yellow → orange → red → dark-red)
-3. **POI layer** — `MarkerView`-based pill badges with icon circle + label, category-colored backgrounds, spatial filtering for density control
+3. **POI layer** — `MarkerView`-based badges: a category-colored icon circle with a name pill tucked behind it to the right, spatial filtering for density control
 4. **Transit layer** — always-mounted GeoJSON layers for route lines and stops with visibility toggling (no GPU re-upload on toggle, empty GeoJSON singletons for stable initial state)
 5. **Navigation mode** — heading-up camera, route polyline + destination-flag rendering, position tracking (map-plane 3D nav puck with a soft outer glow, matching CarPlay). The basemap switches to a derived _navigation focus_ style (see `navFocusStyle.ts`) — context labels hidden, drivable roads drawn ~35% heavier and lifted in tone — the route ribbon widens to cover the carriageway (see `routeRibbon.ts`), and POI badges unmount, so the route is the only high-chroma object on screen.
 6. **Layer control** — traffic, satellite, transit, and POI layers toggled via the map store
@@ -23,13 +23,13 @@ Style changes cannot fix this. Showing buildings at navigation zoom the way Goog
 
 ## Key Components
 
-| File                    | Description                                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `MapView.tsx`           | Core map component — viewport management, POI fetching (3-phase strategy), deduplication, zoom tracking, layer composition.         |
-| `TrafficOverlay.tsx`    | GeoJSON congestion visualization with 5-level color coding based on speed/freeflow ratio.                                           |
-| `TrafficRouteLayer.tsx` | Route-specific traffic overlay for the active navigation route.                                                                     |
-| `POILayer.tsx`          | POI pill badge rendering — MarkerView per filtered POI, PoiBadge with icon + label, spatial filtering via `filterPoisForDisplay()`. |
-| `TransitLayer.tsx`      | Transit route lines and stop markers — always-mounted, visibility toggled via style property.                                       |
+| File                    | Description                                                                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MapView.tsx`           | Core map component — viewport management, POI fetching (3-phase strategy), deduplication, zoom tracking, layer composition.                                       |
+| `TrafficOverlay.tsx`    | GeoJSON congestion visualization with 5-level color coding based on speed/freeflow ratio.                                                                         |
+| `TrafficRouteLayer.tsx` | Route-specific traffic overlay for the active navigation route.                                                                                                   |
+| `POILayer.tsx`          | POI badge rendering — MarkerView per filtered POI, PoiBadge with an icon circle anchoring a right-hand name pill, spatial filtering via `filterPoisForDisplay()`. |
+| `TransitLayer.tsx`      | Transit route lines and stop markers — always-mounted, visibility toggled via style property.                                                                     |
 
 ## POI Rendering Pipeline
 
