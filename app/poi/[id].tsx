@@ -455,6 +455,8 @@ export default function POIDetailScreen() {
                 .join(', ') || undefined
             }
             category={selectedPlace.category}
+            website={selectedPlace.website}
+            phone={selectedPlace.phone}
             onDone={() => setShowSaveSheet(false)}
           />
         </Modal>

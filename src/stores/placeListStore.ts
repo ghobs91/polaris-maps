@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { storage } from '../services/storage/mmkv';
 import { mergeList } from '../services/places/placeListMerge';
+import { suggestEmojiForList } from '../utils/placeListEmoji';
 import type { PlaceList, SavedPlace } from '../models/placeList';
 
 interface PlaceListState {
@@ -68,7 +69,7 @@ export const usePlaceListStore = create<PlaceListState>()((set, get) => ({
     const newList: PlaceList = {
       id: generateId(),
       name,
-      emoji,
+      emoji: emoji?.trim() || suggestEmojiForList(name),
       isPrivate: isPrivate ?? true,
       places: [],
       createdAt: now,
@@ -178,7 +179,10 @@ export const usePlaceListStore = create<PlaceListState>()((set, get) => ({
   },
 
   importList: (list) => {
-    const updated = [...get().lists, list];
+    const withEmoji = list.emoji?.trim()
+      ? list
+      : { ...list, emoji: suggestEmojiForList(list.name) };
+    const updated = [...get().lists, withEmoji];
     set({ lists: updated });
     persistLists(updated);
   },

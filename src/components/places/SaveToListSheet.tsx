@@ -13,6 +13,8 @@ interface SaveToListSheetProps {
   lng: number;
   address?: string;
   category?: string;
+  website?: string;
+  phone?: string;
   onDone: () => void;
 }
 
@@ -23,6 +25,8 @@ export function SaveToListSheet({
   lng,
   address,
   category,
+  website,
+  phone,
   onDone,
 }: SaveToListSheetProps) {
   const { colors } = useTheme();
@@ -53,18 +57,39 @@ export function SaveToListSheet({
       if (existing) {
         removePlace(list.id, existing.id);
       } else {
-        addPlace(list.id, { name: placeName, lat, lng, address, category, poiUuid });
+        addPlace(list.id, {
+          name: placeName,
+          lat,
+          lng,
+          address,
+          category,
+          website,
+          phone,
+          poiUuid,
+        });
       }
     },
-    [poiUuid, placeName, lat, lng, address, category, addPlace, removePlace],
+    [poiUuid, placeName, lat, lng, address, category, website, phone, addPlace, removePlace],
   );
 
   const handleCreateAndAdd = useCallback(() => {
     const name = newListName.trim() || 'New List';
     const list = createList(name);
-    addPlace(list.id, { name: placeName, lat, lng, address, category, poiUuid });
+    addPlace(list.id, { name: placeName, lat, lng, address, category, website, phone, poiUuid });
     setNewListName('');
-  }, [newListName, createList, addPlace, poiUuid, placeName, lat, lng, address, category]);
+  }, [
+    newListName,
+    createList,
+    addPlace,
+    poiUuid,
+    placeName,
+    lat,
+    lng,
+    address,
+    category,
+    website,
+    phone,
+  ]);
 
   const renderRow = useCallback(
     ({ item }: { item: PlaceList }) => {

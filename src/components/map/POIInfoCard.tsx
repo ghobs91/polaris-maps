@@ -1220,6 +1220,8 @@ export function POIInfoCard() {
                   lng={poi.lng}
                   address={parsed?.address ?? undefined}
                   category={poi.subtype}
+                  website={parsed?.website ?? undefined}
+                  phone={parsed?.phone ?? undefined}
                   onDone={() => setShowSaveSheet(false)}
                 />
               )}

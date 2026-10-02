@@ -11,20 +11,21 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
 import { isICloudAvailable } from '../../src/services/icloud/iCloudSyncService';
 import { parseImport } from '../../src/services/places/importService';
-import { PlaceListCard } from '../../src/components/places';
+import { PlaceListCard, PlaceActionBar, EmojiPicker } from '../../src/components/places';
+import type { PlaceActionBarAction } from '../../src/components/places';
 import { GoogleReviewsImport } from '../../src/components/reviews';
 import { useReviewImportStore, isTakeoutReminderDue } from '../../src/stores/reviewImportStore';
 import { Button, ErrorBoundary, Modal, GlassView } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
+import { suggestEmojiForList } from '../../src/utils/placeListEmoji';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { PlaceList } from '../../src/models/placeList';
-
-type ListSortMode = 'recent' | 'alpha';
 
 export default function MyPlacesScreen() {
   const router = useRouter();
@@ -35,13 +36,13 @@ export default function MyPlacesScreen() {
   const lists = usePlaceListStore((s) => s.lists);
   const createList = usePlaceListStore((s) => s.createList);
   const deleteList = usePlaceListStore((s) => s.deleteList);
+  const updateList = usePlaceListStore((s) => s.updateList);
   const clearAllLists = usePlaceListStore((s) => s.clearAllLists);
   const [showNewList, setShowNewList] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newEmoji, setNewEmoji] = useState('');
+  const [editMode, setEditMode] = useState(false);
+  const [emojiTarget, setEmojiTarget] = useState<PlaceList | null>(null);
   const [cloudAvailable, setCloudAvailable] = useState<boolean | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortMode, setSortMode] = useState<ListSortMode>('recent');
 
   React.useEffect(() => {
     isICloudAvailable().then(setCloudAvailable);
@@ -49,11 +50,10 @@ export default function MyPlacesScreen() {
 
   const handleCreateList = useCallback(() => {
     if (!newName.trim()) return;
-    createList(newName.trim(), newEmoji.trim() || undefined);
+    createList(newName.trim());
     setNewName('');
-    setNewEmoji('');
     setShowNewList(false);
-  }, [newName, newEmoji, createList]);
+  }, [newName, createList]);
 
   const handleDeleteList = useCallback(
     (list: PlaceList) => {
@@ -83,6 +83,13 @@ export default function MyPlacesScreen() {
       ],
     );
   }, [clearAllLists]);
+
+  const handleSelectEmoji = useCallback(
+    (emoji: string) => {
+      if (emojiTarget) updateList(emojiTarget.id, { emoji });
+    },
+    [emojiTarget, updateList],
+  );
 
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
@@ -180,33 +187,49 @@ export default function MyPlacesScreen() {
     }
   }, [importText]);
 
-  const cycleSortMode = useCallback(() => {
-    setSortMode((prev) => (prev === 'recent' ? 'alpha' : 'recent'));
-  }, []);
-
-  const filteredSortedLists = useMemo(() => {
-    let result = [...lists];
-    const q = searchQuery.trim().toLowerCase();
-    if (q) {
-      result = result.filter((l) => l.name.toLowerCase().includes(q));
-    }
-    if (sortMode === 'alpha') {
-      result.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
-      result.sort((a, b) => b.updatedAt - a.updatedAt);
-    }
-    return result;
-  }, [lists, searchQuery, sortMode]);
+  // Always alphabetical — the sort toggle is gone.
+  const sortedLists = useMemo(
+    () => [...lists].sort((a, b) => a.name.localeCompare(b.name)),
+    [lists],
+  );
 
   const renderItem = useCallback(
     ({ item }: { item: PlaceList }) => (
       <PlaceListCard
         list={item}
-        onPress={() => router.push({ pathname: '/places/list', params: { id: item.id } })}
+        editing={editMode}
+        onPress={() => {
+          if (editMode) {
+            setEmojiTarget(item);
+          } else {
+            router.push({ pathname: '/places/list', params: { id: item.id } });
+          }
+        }}
         onLongPress={() => handleDeleteList(item)}
+        onIconPress={() => setEmojiTarget(item)}
+        onDelete={() => handleDeleteList(item)}
       />
     ),
-    [router, handleDeleteList],
+    [editMode, router, handleDeleteList],
+  );
+
+  const actions: PlaceActionBarAction[] = useMemo(
+    () => [
+      {
+        key: 'new',
+        icon: 'add-circle-outline',
+        label: 'New list',
+        onPress: () => setShowNewList(true),
+      },
+      {
+        key: 'edit',
+        icon: 'pencil',
+        label: editMode ? 'Done editing' : 'Edit lists',
+        onPress: () => setEditMode((prev) => !prev),
+        active: editMode,
+      },
+    ],
+    [editMode],
   );
 
   return (
@@ -214,17 +237,7 @@ export default function MyPlacesScreen() {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity onPress={() => router.navigate('/(tabs)')} style={styles.closeBtn}>
-              <Text style={styles.closeBtnText}>✕</Text>
-            </TouchableOpacity>
             <Text style={styles.heading}>My Places</Text>
-          </View>
-          <View style={styles.headerRight}>
-            {lists.length > 0 && (
-              <TouchableOpacity onPress={handleClearAll} style={styles.clearBtn}>
-                <Text style={styles.clearBtnText}>Erase all</Text>
-              </TouchableOpacity>
-            )}
             {cloudAvailable !== null && (
               <GlassView material="regular" style={styles.syncBadge}>
                 <Text style={styles.syncBadgeText}>
@@ -233,36 +246,41 @@ export default function MyPlacesScreen() {
               </GlassView>
             )}
           </View>
+          <TouchableOpacity
+            onPress={() => router.navigate('/(tabs)')}
+            accessibilityRole="button"
+            accessibilityLabel="Close My Places"
+            hitSlop={8}
+          >
+            <GlassView material="regular" isInteractive style={styles.closeCircle}>
+              <Ionicons name="close" size={22} color={colors.text} />
+            </GlassView>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.filterRow}>
-          <GlassView material="regular" style={styles.searchContainer}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search lists..."
-              placeholderTextColor={colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCorrect={false}
+        {editMode ? (
+          <View style={styles.editActions}>
+            <Button
+              title="Import places"
+              onPress={() => setShowImport(true)}
+              variant="outline"
+              size="sm"
             />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClear}>
-                <Text style={styles.searchClearText}>✕</Text>
-              </TouchableOpacity>
+            <Button
+              title="Import reviews"
+              onPress={() => setShowReviews(true)}
+              variant="outline"
+              size="sm"
+            />
+            {lists.length > 0 && (
+              <Button title="Erase all" onPress={handleClearAll} variant="ghost" size="sm" />
             )}
-          </GlassView>
-          <Button
-            title={sortMode === 'recent' ? '↕ Recent' : '↕ A-Z'}
-            onPress={cycleSortMode}
-            variant="outline"
-            size="sm"
-            style={styles.sortButton}
-          />
-        </View>
-        <Text style={styles.homeWorkHint}>
-          Home/Work favorites are set from the map search bar for quick routing.
-        </Text>
+          </View>
+        ) : (
+          <Text style={styles.homeWorkHint}>
+            Home/Work favorites are set from the map search bar for quick routing.
+          </Text>
+        )}
 
         {reminderDue && (
           <GlassView material="regular" style={styles.reminderCard}>
@@ -284,40 +302,31 @@ export default function MyPlacesScreen() {
           </GlassView>
         )}
 
-        <Button
-          title="+ New list"
-          onPress={() => setShowNewList(true)}
-          style={styles.newListButton}
-        />
-
         <FlashList
-          data={filteredSortedLists}
+          data={sortedLists}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyIcon}>📍</Text>
-              <Text style={styles.emptyTitle}>
-                {searchQuery ? 'No matching lists' : 'No lists yet'}
-              </Text>
+              <Text style={styles.emptyTitle}>No lists yet</Text>
               <Text style={styles.emptyBody}>
-                {searchQuery
-                  ? 'Try a different search term.'
-                  : 'Create a list to save your favorite places, or import from Google Maps.'}
+                Create a list to save your favorite places, or import from Google Maps.
               </Text>
             </View>
           }
         />
 
-        <View style={styles.footer}>
-          <Button title="Import places" onPress={() => setShowImport(true)} variant="outline" />
-          <Button
-            title="Import Google reviews"
-            onPress={() => setShowReviews(true)}
-            variant="outline"
-          />
-        </View>
+        <PlaceActionBar actions={actions} />
+
+        <EmojiPicker
+          visible={emojiTarget !== null}
+          onClose={() => setEmojiTarget(null)}
+          onSelect={handleSelectEmoji}
+          suggestions={emojiTarget ? [suggestEmojiForList(emojiTarget.name), '⭐', '❤️', '📍'] : []}
+          current={emojiTarget?.emoji}
+        />
 
         <Modal
           visible={showImport}
@@ -386,15 +395,9 @@ export default function MyPlacesScreen() {
               onSubmitEditing={handleCreateList}
             />
           </GlassView>
-          <GlassView material="regular" style={styles.inputWrapper}>
-            <TextInput
-              style={styles.input}
-              placeholder="Emoji icon (optional)"
-              placeholderTextColor={colors.textSecondary}
-              value={newEmoji}
-              onChangeText={setNewEmoji}
-            />
-          </GlassView>
+          <Text style={styles.importHint}>
+            An icon is chosen automatically from the name — you can change it later.
+          </Text>
           <View style={styles.modalActions}>
             <Button title="Cancel" onPress={() => setShowNewList(false)} variant="ghost" />
             <Button title="Create" onPress={handleCreateList} disabled={!newName.trim()} />
@@ -420,64 +423,17 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       flexDirection: 'row' as const,
       alignItems: 'center' as const,
       gap: spacing.sm,
-    },
-    filterRow: {
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      paddingHorizontal: spacing.lg,
-      gap: spacing.sm,
-      marginBottom: spacing.xs,
-    },
-    searchContainer: {
       flex: 1,
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      borderRadius: 999,
-      overflow: 'hidden',
-      borderCurve: 'continuous',
-      paddingHorizontal: spacing.sm,
-    },
-    searchIcon: {
-      fontSize: 14,
-      marginRight: spacing.xs,
-    },
-    searchInput: {
-      ...typography.body,
-      color: colors.text,
-      flex: 1,
-      paddingVertical: spacing.sm,
-    },
-    searchClear: {
-      padding: spacing.xs,
-    },
-    searchClearText: {
-      fontSize: 14,
-      color: colors.textSecondary,
-    },
-    sortButton: {
-      borderCurve: 'continuous',
-    },
-    closeBtn: {
-      padding: spacing.xs,
-    },
-    closeBtnText: {
-      fontSize: 20,
-      color: colors.textSecondary,
-      fontWeight: '600' as const,
     },
     heading: { ...typography.h1, color: colors.text },
-    headerRight: {
-      flexDirection: 'row' as const,
-      alignItems: 'center' as const,
-      gap: spacing.sm,
-    },
-    clearBtn: {
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
-    },
-    clearBtnText: {
-      ...typography.caption,
-      color: '#e53935',
+    closeCircle: {
+      width: 44,
+      height: 44,
+      borderRadius: 999,
+      borderCurve: 'continuous',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
     },
     syncBadge: {
       borderRadius: 999,
@@ -490,10 +446,13 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       ...typography.caption,
       color: colors.textSecondary,
     },
-    newListButton: {
-      marginHorizontal: spacing.lg,
-      marginVertical: spacing.sm,
-      borderCurve: 'continuous',
+    editActions: {
+      flexDirection: 'row' as const,
+      flexWrap: 'wrap' as const,
+      alignItems: 'center' as const,
+      gap: spacing.sm,
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.sm,
     },
     homeWorkHint: {
       ...typography.caption,
@@ -501,11 +460,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       marginHorizontal: spacing.lg,
       marginTop: spacing.xs,
     },
-    listContent: { paddingBottom: spacing.xxl },
-    footer: {
-      padding: spacing.lg,
-      gap: spacing.sm,
-    },
+    listContent: { paddingBottom: 120, paddingTop: spacing.xs },
     reminderCard: {
       marginHorizontal: spacing.lg,
       marginTop: spacing.sm,

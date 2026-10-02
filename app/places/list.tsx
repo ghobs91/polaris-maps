@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,22 +13,30 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
 import { useMapStore } from '../../src/stores/mapStore';
 import { useOsmPoiStore } from '../../src/stores/osmPoiStore';
 import { savedPlaceToOsmPoi } from '../../src/utils/placeToOsmPoi';
+import { haversineMeters } from '../../src/utils/routeSnap';
+import { suggestEmojiForList } from '../../src/utils/placeListEmoji';
 import { searchPlaceAll } from '../../src/native/mapkit';
 import type { NativeMapKitPoi } from '../../src/native/mapkit';
 import { SavedPlaceRow } from '../../src/components/places';
+import { PlaceActionBar } from '../../src/components/places';
+import type { PlaceActionBarAction } from '../../src/components/places';
 import { SaveToListSheet } from '../../src/components/places/SaveToListSheet';
 import { exportFilename, toCSV, toGeoJSON } from '../../src/services/places/exportService';
 import { setListShared } from '../../src/services/places/listSyncService';
-import { Button, ErrorBoundary } from '../../src/components/common';
+import { loadPlaceEnrichmentForPlaces } from '../../src/services/places/placeEnrichmentService';
+import type { PlaceEnrichment } from '../../src/services/places/placeEnrichmentService';
+import { Button, ErrorBoundary, GlassView } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import type { SavedPlace } from '../../src/models/placeList';
 
-type SortMode = 'recent' | 'name' | 'distance';
+type SortMode = 'recent' | 'name';
 
 export default function PlaceListDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -40,6 +48,7 @@ export default function PlaceListDetailScreen() {
   const lists = usePlaceListStore((s) => s.lists);
   const updateList = usePlaceListStore((s) => s.updateList);
   const removePlace = usePlaceListStore((s) => s.removePlace);
+  const addPlace = usePlaceListStore((s) => s.addPlace);
   const locateTo = useMapStore((s) => s.locateTo);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
   const setPendingSearchQuery = useMapStore((s) => s.setPendingSearchQuery);
@@ -54,18 +63,64 @@ export default function PlaceListDetailScreen() {
   const [disambigResults, setDisambigResults] = useState<NativeMapKitPoi[]>([]);
   const [disambigPlace, setDisambigPlace] = useState<SavedPlace | null>(null);
   const [isResolving, setIsResolving] = useState(false);
+  const [enrichment, setEnrichment] = useState<Record<string, PlaceEnrichment>>({});
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [showAddPlace, setShowAddPlace] = useState(false);
+  const [addQuery, setAddQuery] = useState('');
+  const [addResults, setAddResults] = useState<NativeMapKitPoi[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const sortedPlaces = useMemo(() => {
     if (!list) return [];
     const places = [...list.places];
-    switch (sortMode) {
-      case 'name':
-        return places.sort((a, b) => a.name.localeCompare(b.name));
-      case 'recent':
-      default:
-        return places.sort((a, b) => b.addedAt - a.addedAt);
-    }
+    if (sortMode === 'name') return places.sort((a, b) => a.name.localeCompare(b.name));
+    return places.sort((a, b) => b.addedAt - a.addedAt);
   }, [list, sortMode]);
+
+  // Resolve OSM enrichment (opening hours + website) for the whole list in one
+  // cached query.
+  const places = list?.places;
+  useEffect(() => {
+    if (!places || places.length === 0) {
+      setEnrichment({});
+      return undefined;
+    }
+    let cancelled = false;
+    loadPlaceEnrichmentForPlaces(places)
+      .then((loaded) => {
+        if (!cancelled) setEnrichment(loaded);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [places]);
+
+  // Best-effort user location for distance labels.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const last = await Location.getLastKnownPositionAsync();
+        if (cancelled) return;
+        if (last) {
+          setUserCoords({ lat: last.coords.latitude, lng: last.coords.longitude });
+          return;
+        }
+        const current = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!cancelled) {
+          setUserCoords({ lat: current.coords.latitude, lng: current.coords.longitude });
+        }
+      } catch {
+        // Location unavailable — rows simply omit distance.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleRemovePlace = useCallback(
     (place: SavedPlace) => {
@@ -212,11 +267,42 @@ export default function PlaceListDetailScreen() {
   }, [list, editName, updateList]);
 
   const cycleSortMode = useCallback(() => {
-    setSortMode((prev) => {
-      if (prev === 'recent') return 'name';
-      return 'recent';
-    });
+    setSortMode((prev) => (prev === 'recent' ? 'name' : 'recent'));
   }, []);
+
+  const handleAddSearch = useCallback(async () => {
+    const query = addQuery.trim();
+    if (!query) return;
+    setIsSearching(true);
+    try {
+      const results = await searchPlaceAll(query, regionHint);
+      setAddResults(results);
+    } catch {
+      setAddResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [addQuery, regionHint]);
+
+  const handleAddResult = useCallback(
+    (result: NativeMapKitPoi) => {
+      if (!list) return;
+      const name = result.name?.trim() || addQuery.trim();
+      addPlace(list.id, {
+        name,
+        lat: result.latitude,
+        lng: result.longitude,
+        address: result.formattedAddress ?? undefined,
+        phone: result.phoneNumber ?? undefined,
+        website: result.url ?? undefined,
+        category: result.pointOfInterestCategory ?? undefined,
+      });
+      setShowAddPlace(false);
+      setAddQuery('');
+      setAddResults([]);
+    },
+    [list, addQuery, addPlace],
+  );
 
   if (!list) {
     return (
@@ -231,12 +317,19 @@ export default function PlaceListDetailScreen() {
     ({ item }: { item: SavedPlace }) => (
       <SavedPlaceRow
         place={item}
+        openingHours={enrichment[item.id]?.openingHours ?? null}
+        websiteUrl={enrichment[item.id]?.website}
+        distanceMeters={
+          userCoords && (item.lat !== 0 || item.lng !== 0)
+            ? haversineMeters([userCoords.lng, userCoords.lat], [item.lng, item.lat])
+            : null
+        }
         onPress={() => handlePlacePress(item)}
         onLongPress={() => handleRemovePlace(item)}
         onSaveToList={() => setPlaceForSheet(item)}
       />
     ),
-    [handlePlacePress, handleRemovePlace],
+    [handlePlacePress, handleRemovePlace, enrichment, userCoords],
   );
 
   const handleExport = useCallback(() => {
@@ -265,6 +358,36 @@ export default function PlaceListDetailScreen() {
     setListShared(list, list.isPrivate);
   }, [list]);
 
+  const actions: PlaceActionBarAction[] = useMemo(
+    () => [
+      {
+        key: 'add',
+        icon: 'add-circle-outline',
+        label: 'Add a place to this list',
+        onPress: () => setShowAddPlace(true),
+      },
+      {
+        key: 'sort',
+        icon: 'swap-vertical',
+        label: sortMode === 'recent' ? 'Sort by name' : 'Sort by recent',
+        onPress: cycleSortMode,
+      },
+      {
+        key: 'share',
+        icon: 'share-outline',
+        label: 'Export and share this list',
+        onPress: handleExport,
+      },
+      {
+        key: 'rename',
+        icon: 'pencil',
+        label: 'Rename this list',
+        onPress: () => setIsEditing(true),
+      },
+    ],
+    [sortMode, cycleSortMode, handleExport],
+  );
+
   return (
     <ErrorBoundary>
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -286,7 +409,7 @@ export default function PlaceListDetailScreen() {
             ) : (
               <TouchableOpacity onPress={() => setIsEditing(true)}>
                 <Text style={styles.heading} numberOfLines={1}>
-                  {list.name}
+                  {list.emoji?.trim() || suggestEmojiForList(list.name)} {list.name}
                 </Text>
               </TouchableOpacity>
             )}
@@ -302,17 +425,6 @@ export default function PlaceListDetailScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={cycleSortMode} style={styles.sortButton}>
-            <Text style={styles.sortText}>{sortMode === 'recent' ? '↕ Recent' : '↕ A-Z'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={handleExport}
-            style={styles.sortButton}
-            accessibilityRole="button"
-            accessibilityLabel="Export and share this list"
-          >
-            <Text style={styles.sortText}>⤴ Share</Text>
-          </TouchableOpacity>
         </View>
 
         <FlashList
@@ -323,11 +435,13 @@ export default function PlaceListDetailScreen() {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>
-                No places saved yet. Save places from the map or search.
+                No places saved yet. Tap + to add a place, or save places from the map.
               </Text>
             </View>
           }
         />
+
+        <PlaceActionBar actions={actions} />
 
         <Modal
           visible={placeForSheet !== null}
@@ -343,9 +457,77 @@ export default function PlaceListDetailScreen() {
               lng={placeForSheet.lng}
               address={placeForSheet.address}
               category={placeForSheet.category}
+              website={placeForSheet.website}
+              phone={placeForSheet.phone}
               onDone={() => setPlaceForSheet(null)}
             />
           )}
+        </Modal>
+
+        {/* Add a place — search via MKLocalSearch and save straight into the list */}
+        <Modal
+          visible={showAddPlace}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowAddPlace(false)}
+        >
+          <View style={[styles.container, { paddingTop: insets.top }]}>
+            <View style={styles.disambigHeader}>
+              <Text style={styles.heading}>Add a place</Text>
+              <Text style={styles.meta}>Search and tap a result to add it to "{list.name}".</Text>
+            </View>
+            <View style={styles.addSearchRow}>
+              <GlassView material="regular" style={styles.addSearchWrap}>
+                <Ionicons name="search" size={16} color={colors.textSecondary} />
+                <TextInput
+                  style={styles.addSearchInput}
+                  placeholder="Search places…"
+                  placeholderTextColor={colors.textSecondary}
+                  value={addQuery}
+                  onChangeText={setAddQuery}
+                  autoFocus
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  onSubmitEditing={handleAddSearch}
+                />
+              </GlassView>
+              <Button title="Search" onPress={handleAddSearch} size="sm" />
+            </View>
+            {isSearching ? (
+              <ActivityIndicator style={styles.addSpinner} color={colors.primary} />
+            ) : (
+              <FlashList
+                data={addResults}
+                keyExtractor={(_, i) => String(i)}
+                contentContainerStyle={styles.listContent}
+                ListEmptyComponent={
+                  <Text style={styles.addEmpty}>
+                    {addQuery.trim() ? 'No matches — try a different search.' : ''}
+                  </Text>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.disambigRow}
+                    onPress={() => handleAddResult(item)}
+                  >
+                    <Text style={styles.disambigName} numberOfLines={1}>
+                      {item.name ?? addQuery.trim()}
+                    </Text>
+                    <Text style={styles.disambigAddress} numberOfLines={2}>
+                      {(item.formattedAddress ??
+                        [item.thoroughfare, item.locality, item.administrativeArea]
+                          .filter(Boolean)
+                          .join(', ')) ||
+                        'Address not available'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+            <TouchableOpacity style={styles.disambigCancel} onPress={() => setShowAddPlace(false)}>
+              <Text style={styles.disambigCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
         </Modal>
 
         {/* Disambiguation modal — pick the correct location */}
@@ -432,14 +614,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       borderBottomColor: colors.primary,
       paddingBottom: 2,
     },
-    sortButton: {
-      paddingVertical: spacing.xs,
-      paddingHorizontal: spacing.sm,
-      backgroundColor: colors.surface,
-      borderRadius: borderRadius.sm,
-    },
-    sortText: { ...typography.caption, color: colors.textSecondary },
-    listContent: { paddingBottom: spacing.xxl },
+    listContent: { paddingBottom: 120 },
     emptyState: { padding: spacing.xl, alignItems: 'center' },
     emptyText: { ...typography.body, color: colors.textSecondary, textAlign: 'center' },
     disambigHeader: {
@@ -463,6 +638,36 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       borderTopColor: colors.border,
     },
     disambigCancelText: { ...typography.body, color: colors.primary, fontWeight: '600' },
+    addSearchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    addSearchWrap: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      borderRadius: borderRadius.round,
+      borderCurve: 'continuous',
+      overflow: 'hidden',
+      paddingHorizontal: spacing.md,
+    },
+    addSearchInput: {
+      ...typography.body,
+      color: colors.text,
+      flex: 1,
+      paddingVertical: spacing.sm,
+    },
+    addSpinner: { marginTop: spacing.xl },
+    addEmpty: {
+      ...typography.bodySmall,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      padding: spacing.lg,
+    },
     loadingOverlay: {
       ...StyleSheet.absoluteFill,
       backgroundColor: 'rgba(0,0,0,0.3)',
