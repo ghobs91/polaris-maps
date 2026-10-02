@@ -97,6 +97,9 @@ fastlane/test_output
 # Build derived data (local builds)
 build_derived_data/
 
+# Local release/archive output (xcodebuild -archivePath/-exportPath, TestFlight)
+/build/
+
 # Test data (large binary files)
 test-data/
 
