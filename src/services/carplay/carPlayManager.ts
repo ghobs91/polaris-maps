@@ -21,6 +21,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { buildCarPlayTrafficRanges, trafficRangesSignature } from './carPlayTrafficRanges';
 import { createSearchSession, type SearchSession } from '../search/searchSession';
 import { computeRoute } from '../routing/routingService';
+import { ensureOfflineRoutingForPoints } from '../routing/offlineRouting';
 import { isForegroundInterpolationActive } from '../navigation/foregroundActivity';
 import { formatDistance } from '../../utils/units';
 import { resolveMapStyle } from '../../components/map/mapStyleResolver';
@@ -546,6 +547,10 @@ async function onDashboardFavorite({ id, kind }: { id?: string; kind?: string })
   const origin = await resolveRouteOrigin();
   const prefs = useSettingsStore.getState().routePreferences;
   try {
+    await ensureOfflineRoutingForPoints([
+      origin,
+      { lat: favorite.entry.lat, lng: favorite.entry.lng },
+    ]).catch(() => false);
     const routes = await computeRoute(
       [origin, { lat: favorite.entry.lat, lng: favorite.entry.lng }],
       'auto',
@@ -1131,6 +1136,7 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
   const prefs = useSettingsStore.getState().routePreferences;
 
   try {
+    await ensureOfflineRoutingForPoints([origin, { lat, lng }]).catch(() => false);
     const routes = await computeRoute([origin, { lat, lng }], 'auto', {
       avoidTolls: prefs.avoidTolls,
       avoidHighways: prefs.avoidHighways,
@@ -1183,6 +1189,11 @@ async function onSearchResultAddStop(result: { name?: string; lat?: number; lng?
     } else {
       pendingWaypoints.push(newWaypoint);
     }
+    await ensureOfflineRoutingForPoints([
+      origin,
+      ...pendingWaypoints,
+      { lat: nav.destination.lat, lng: nav.destination.lng },
+    ]).catch(() => false);
     const routes = await computeRoute(
       [origin, ...pendingWaypoints, { lat: nav.destination.lat, lng: nav.destination.lng }],
       nav.costing,

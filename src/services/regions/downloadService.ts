@@ -13,6 +13,8 @@ import {
   importRegionOverturePlacesFromSqlite,
 } from './overtureImporter';
 import { importRegionPlaceDetails } from './placeDetailImporter';
+import { extractTar } from '../../utils/archiveExtract';
+import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -183,6 +185,14 @@ export async function downloadRegion(
     // DOT GTFS pre-caching — download transit feed data for offline transit lines.
     await cacheDotGtfsForRegion(region.id, region.bounds).catch(() => {});
 
+    checkAborted(signal);
+
+    // Offline routing graphs (Valhalla) for catalog regions intersecting this
+    // pack. Best-effort: a failed routing fetch must not fail the tile download.
+    await downloadRoutingGraphsForRegion(region, onProgress, signal).catch(() => {});
+
+    checkAborted(signal);
+
     // Calculate total size
     const dirInfo = await FileSystem.getInfoAsync(destDir);
     const totalSize = (dirInfo as { size?: number }).size ?? 0;
@@ -272,6 +282,21 @@ async function tryPeerDownload(
         stage: 'tiles',
       });
     });
+
+    // Peer packs may ship an uncompressed routing.tar; extract it in place so
+    // the graph is usable (the routing graph store scans region packs too).
+    const routingTar = `${destDir}routing.tar`;
+    try {
+      if ((await FileSystem.getInfoAsync(routingTar)).exists) {
+        await extractTar(
+          routingTar.replace(/^file:\/\//, ''),
+          `${destDir}routing/`.replace(/^file:\/\//, ''),
+        );
+        await FileSystem.deleteAsync(routingTar, { idempotent: true });
+      }
+    } catch {
+      // Extraction failed — keep the region data and fall back to online routing.
+    }
 
     return true;
   } catch {
@@ -507,6 +532,9 @@ export async function deleteRegionData(regionId: string): Promise<void> {
     'UPDATE regions SET download_status = ?, downloaded_at = NULL, drive_key = NULL, tile_version = NULL, last_updated = ? WHERE id = ?',
     ['none', Math.floor(Date.now() / 1000), regionId],
   );
+
+  // Reclaim routing graphs no remaining downloaded region covers.
+  await pruneUnusedRoutingGraphs().catch(() => {});
 
   // Removing an offline region changes local coverage — drop cached network
   // results for the affected area so the next search sees current data.

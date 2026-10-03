@@ -25,7 +25,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
-import * as FileSystem from 'expo-file-system/legacy';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import { spacing, typography, borderRadius, sheet as sheetTokens } from '../../constants/theme';
@@ -58,16 +57,12 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useParkingStore } from '../../stores/parkingStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { useStreetViewStore } from '../../stores/streetViewStore';
-import { computeRoute, initRouting } from '../../services/routing/routingService';
+import { computeRoute } from '../../services/routing/routingService';
+import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRouting';
 import { buildRouteAlternatives } from '../../services/routing/routeAlternatives';
 import type { ValhallaRoute } from '../../models/route';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
-import {
-  getRegionContainingPoint,
-  getDownloadedRegions,
-} from '../../services/regions/regionRepository';
-import { extractTar } from '../../utils/archiveExtract';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
@@ -1487,85 +1482,21 @@ export function FloatingSearchPanel({
           accuracy: Location.Accuracy.Balanced,
         });
 
-        const destRegion = await getRegionContainingPoint(dest.lat, dest.lng);
-        const originRegion = await getRegionContainingPoint(
-          pos.coords.latitude,
-          pos.coords.longitude,
-        );
-        let region =
-          (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
-          (originRegion?.downloadStatus === 'complete' ? originRegion : null);
-        if (!region) {
-          const downloaded = await getDownloadedRegions();
-          if (downloaded.length > 0) region = downloaded[0];
-        }
-
-        let offlineInitialized = false;
-
-        if (region) {
-          const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
-          const graphTilePath = `${regionDir}routing/`;
-          const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
-          if (!graphDirInfo.exists) {
-            const tarPath = `${regionDir}routing.tar`;
-            const tarInfo = await FileSystem.getInfoAsync(tarPath);
-            if (tarInfo.exists) {
-              try {
-                await extractTar(tarPath, graphTilePath);
-                await FileSystem.deleteAsync(tarPath, { idempotent: true });
-              } catch {
-                // fall through to online routing
-              }
-            }
-            // No routing tiles available for this region — keep region data intact, fall through to online
-          }
-          if (graphDirInfo.exists || (await FileSystem.getInfoAsync(graphTilePath)).exists) {
-            try {
-              await initRouting(graphTilePath);
-              offlineInitialized = true;
-            } catch {
-              // fall through to online routing
-            }
-          }
-        }
-
+        const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         const currentWaypoints = useNavigationStore.getState().routePreviewWaypoints;
-        const allPoints = [
-          { lat: pos.coords.latitude, lng: pos.coords.longitude },
-          ...currentWaypoints,
-          dest,
-        ];
+        const allPoints = [origin, ...currentWaypoints, dest];
+
+        // Load the downloaded routing graph covering this route first, so the
+        // native engine serves it instead of a slow online request.
+        await ensureOfflineRoutingForPoints(allPoints);
 
         const routePrefs = useSettingsStore.getState().routePreferences;
-        let routes: ValhallaRoute[] = [];
-        try {
-          routes = await computeRoute(allPoints, costing, {
-            avoidTolls: routePrefs.avoidTolls,
-            avoidHighways: routePrefs.avoidHighways,
-            avoidFerries: routePrefs.avoidFerries,
-            alternates: 2,
-          });
-        } catch (routeErr: unknown) {
-          // If online routing failed and offline tiles exist but weren't initialized,
-          // try harder to find and init any available offline tiles
-          if (!offlineInitialized) {
-            const downloaded = await getDownloadedRegions();
-            for (const r of downloaded) {
-              const rDir = `${FileSystem.documentDirectory}regions/${r.id}/`;
-              const rGraphPath = `${rDir}routing/`;
-              const rGraphInfo = await FileSystem.getInfoAsync(rGraphPath);
-              if (!rGraphInfo.exists) continue;
-              try {
-                await initRouting(rGraphPath);
-                routes = await computeRoute(allPoints, costing);
-                break;
-              } catch {
-                // keep trying other regions
-              }
-            }
-          }
-          if (!routes.length) throw routeErr;
-        }
+        const routes = await computeRoute(allPoints, costing, {
+          avoidTolls: routePrefs.avoidTolls,
+          avoidHighways: routePrefs.avoidHighways,
+          avoidFerries: routePrefs.avoidFerries,
+          alternates: 2,
+        });
 
         if (!routes.length) {
           setRouteError('No route found between these points');

@@ -17,16 +17,10 @@ import { useMapStore } from '../../stores/mapStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { useTrafficStore } from '../../stores/trafficStore';
-import * as FileSystem from 'expo-file-system/legacy';
-import { computeRoute, initRouting } from '../../services/routing/routingService';
-import type { ValhallaRoute } from '../../models/route';
+import { computeRoute } from '../../services/routing/routingService';
+import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRouting';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
-import {
-  getRegionContainingPoint,
-  getDownloadedRegions,
-} from '../../services/regions/regionRepository';
-import { extractTar } from '../../utils/archiveExtract';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import { decodePolyline } from '../../utils/polyline';
@@ -90,88 +84,14 @@ export function LocationActionPanel() {
           accuracy: Location.Accuracy.Balanced,
         });
 
-        // Try to load local routing tiles if a downloaded region exists
-        const destRegion = await getRegionContainingPoint(
-          selectedLocation.lat,
-          selectedLocation.lng,
-        );
-        const originRegion = await getRegionContainingPoint(
-          pos.coords.latitude,
-          pos.coords.longitude,
-        );
-        let region =
-          (destRegion?.downloadStatus === 'complete' ? destRegion : null) ??
-          (originRegion?.downloadStatus === 'complete' ? originRegion : null);
-        if (!region) {
-          const downloaded = await getDownloadedRegions();
-          if (downloaded.length > 0) region = downloaded[0];
-        }
+        const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const destination = { lat: selectedLocation.lat, lng: selectedLocation.lng };
 
-        let offlineInitialized = false;
+        // Load the downloaded routing graph covering this route first, so the
+        // native engine serves it instead of a slow online request.
+        await ensureOfflineRoutingForPoints([origin, destination]);
 
-        if (region) {
-          const regionDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
-          const graphTilePath = `${regionDir}routing/`;
-          const graphDirInfo = await FileSystem.getInfoAsync(graphTilePath);
-          if (!graphDirInfo.exists) {
-            const tarPath = `${regionDir}routing.tar`;
-            const tarInfo = await FileSystem.getInfoAsync(tarPath);
-            if (tarInfo.exists) {
-              try {
-                await extractTar(tarPath, graphTilePath);
-                await FileSystem.deleteAsync(tarPath, { idempotent: true });
-              } catch {
-                // Extraction failed — fall through to online routing
-              }
-            }
-            // No routing tiles available for this region — keep region data intact, fall through to online
-          }
-          if (graphDirInfo.exists || (await FileSystem.getInfoAsync(graphTilePath)).exists) {
-            try {
-              await initRouting(graphTilePath);
-              offlineInitialized = true;
-            } catch {
-              // initRouting failed — fall through to online routing
-            }
-          }
-        }
-
-        let routes: ValhallaRoute[] = [];
-        try {
-          routes = await computeRoute(
-            [
-              { lat: pos.coords.latitude, lng: pos.coords.longitude },
-              { lat: selectedLocation.lat, lng: selectedLocation.lng },
-            ],
-            costing,
-          );
-        } catch (routeErr: unknown) {
-          // If online routing failed and offline tiles exist but weren't initialized,
-          // try harder to find and init any available offline tiles
-          if (!offlineInitialized) {
-            const downloaded = await getDownloadedRegions();
-            for (const r of downloaded) {
-              const rDir = `${FileSystem.documentDirectory}regions/${r.id}/`;
-              const rGraphPath = `${rDir}routing/`;
-              const rGraphInfo = await FileSystem.getInfoAsync(rGraphPath);
-              if (!rGraphInfo.exists) continue;
-              try {
-                await initRouting(rGraphPath);
-                routes = await computeRoute(
-                  [
-                    { lat: pos.coords.latitude, lng: pos.coords.longitude },
-                    { lat: selectedLocation.lat, lng: selectedLocation.lng },
-                  ],
-                  costing,
-                );
-                break;
-              } catch {
-                // keep trying other regions
-              }
-            }
-          }
-          if (!routes.length) throw routeErr;
-        }
+        const routes = await computeRoute([origin, destination], costing);
 
         if (!routes.length) {
           setRouteError('No route found between these points');

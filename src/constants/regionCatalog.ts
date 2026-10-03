@@ -1,5 +1,13 @@
 import type { Region } from '../models/region';
 
+/** Minimal lat/lng bounding box shared by regions, catalog entries, and graphs. */
+export interface GeoBoundsLike {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
+
 /** A region entry from the bundled catalog (no runtime download-state fields). */
 export type CatalogEntry = Pick<
   Region,
@@ -30,6 +38,18 @@ export function catalogEntryContainsPoint(entry: CatalogEntry, lat: number, lng:
     lng >= entry.bounds.minLng &&
     lng <= entry.bounds.maxLng
   );
+}
+
+/** True when two lat/lng bounding boxes overlap. */
+export function boundsIntersect(a: GeoBoundsLike, b: GeoBoundsLike): boolean {
+  return (
+    a.minLat <= b.maxLat && a.maxLat >= b.minLat && a.minLng <= b.maxLng && a.maxLng >= b.minLng
+  );
+}
+
+/** Catalog entries whose bounds overlap `bounds` (order preserved). */
+export function catalogEntriesIntersectingBounds(bounds: GeoBoundsLike): CatalogEntry[] {
+  return REGION_CATALOG.filter((entry) => boundsIntersect(entry.bounds, bounds));
 }
 
 /** Return catalog sorted nearest-first relative to the given point. */

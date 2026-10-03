@@ -120,3 +120,14 @@ export const REGION_CATALOG_URL =
 /** URL for the global GeoNames SQLite database (gzipped). */
 export const GEONAMES_DB_URL =
   process.env.EXPO_PUBLIC_GEONAMES_DB_URL ?? 'https://cdn.example.com/global/geonames.sqlite.gz';
+
+/**
+ * GitHub repository publishing pre-built offline routing graphs via Releases.
+ *
+ * `build-region-data.yml` uploads `<regionId>-routing.tar` assets to a
+ * `map-data-*` release here; the app downloads and extracts them during region
+ * download so on-device Valhalla works offline. Set to an empty string to
+ * disable GitHub Releases routing downloads (P2P packs still work).
+ */
+export const REGION_DATA_REPO: string =
+  process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-maps';

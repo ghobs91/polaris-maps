@@ -1,6 +1,6 @@
 import * as Valhalla from '../../native/valhalla';
 import * as MapKitRouting from '../../native/mapkit';
-import { isOnline } from '../regions/connectivityService';
+import { isOnline, getConnectionQuality } from '../regions/connectivityService';
 import { Platform } from 'react-native';
 import { decodePolyline, encodePolyline } from '../../utils/polyline';
 import type {
@@ -13,6 +13,9 @@ import type {
 } from '../../models/route';
 
 let initialized = false;
+
+/** Native path of the currently loaded graph, or null when none is loaded. */
+let initializedPath: string | null = null;
 
 /** Public Valhalla API endpoints hosted by FOSSGIS/OpenStreetMap.
  *  valhalla1 and valhalla2 resolve to different IPs for hardware redundancy. */
@@ -540,13 +543,22 @@ async function computeRouteOnline(
 }
 
 export async function initRouting(graphTilePath: string): Promise<void> {
-  await Valhalla.initialize({ graphTilePath });
+  // The native bridge builds the URL with `URL(fileURLWithPath:)`, which needs
+  // a raw path — a `file://` prefix would resolve into a bogus directory.
+  const nativePath = graphTilePath.replace(/^file:\/\//, '');
+  await Valhalla.initialize({ graphTilePath: nativePath });
   initialized = true;
+  initializedPath = nativePath;
 }
 
 /** Returns true if a local routing graph has been successfully loaded. */
 export function isRoutingInitialized(): boolean {
   return initialized;
+}
+
+/** Native path of the loaded graph, or null when none is loaded. */
+export function getInitializedPath(): string | null {
+  return initializedPath;
 }
 
 export async function computeRoute(
@@ -669,10 +681,18 @@ export async function reroute(
     originHeading: options?.heading,
   };
 
-  // When a GPS course is known and we're online, prefer the heading-aware
-  // online engine first: the native fast-path drops `heading`, producing
-  // U-turn-heavy routes that immediately read as off-route again.
-  if (initialized && options?.heading != null && isOnline() && via.length === 0) {
+  // When a GPS course is known and the connection is good, prefer the
+  // heading-aware online engine first: the native fast-path drops `heading`,
+  // producing U-turn-heavy routes that immediately read as off-route again.
+  // On a weak/no link this would stall ~8s before falling back, so local
+  // routing wins whenever quality is not 'good'.
+  if (
+    initialized &&
+    options?.heading != null &&
+    isOnline() &&
+    getConnectionQuality() === 'good' &&
+    via.length === 0
+  ) {
     try {
       const routes = await computeRouteOnline(waypoints, costing, routeOpts);
       if (routes.length) return routes[0];
@@ -781,4 +801,5 @@ export async function disposeRouting(): Promise<void> {
   if (!initialized) return;
   await Valhalla.dispose();
   initialized = false;
+  initializedPath = null;
 }
