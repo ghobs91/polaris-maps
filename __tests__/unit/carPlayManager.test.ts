@@ -88,6 +88,9 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
 }));
 jest.mock('../../src/services/search/unifiedSearch', () => ({ unifiedSearch: jest.fn() }));
 jest.mock('../../src/services/routing/routingService', () => ({ computeRoute: jest.fn() }));
+jest.mock('../../src/services/routing/offlineRouting', () => ({
+  ensureOfflineRoutingForPoints: jest.fn().mockResolvedValue(false),
+}));
 jest.mock('../../src/services/favorites/favoritesService', () => ({
   getFavorites: jest.fn(() => []),
   subscribeFavorites: jest.fn(() => jest.fn()),

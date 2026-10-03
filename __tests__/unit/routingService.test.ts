@@ -15,6 +15,7 @@ const mockNativeReroute = jest.fn();
 const mockInitialize = jest.fn().mockResolvedValue(undefined);
 const mockDispose = jest.fn().mockResolvedValue(undefined);
 const mockIsOnline = jest.fn().mockReturnValue(true);
+const mockGetConnectionQuality = jest.fn().mockReturnValue('good');
 const mockFetchImpl = jest.fn() as jest.MockedFunction<typeof fetch>;
 
 const mockMapKitComputeRoute = jest.fn();
@@ -43,6 +44,7 @@ jest.mock('../../src/native/mapkit', () => ({
 
 jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: (...args: unknown[]) => mockIsOnline(...args),
+  getConnectionQuality: (...args: unknown[]) => mockGetConnectionQuality(...args),
 }));
 
 jest.mock('react-native', () => ({
@@ -149,6 +151,7 @@ describe('routingService fallback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockIsOnline.mockReturnValue(true);
+    mockGetConnectionQuality.mockReturnValue('good');
     mockInitialize.mockResolvedValue(undefined);
     mockMapKitAvailable.mockReturnValue(true);
     global.fetch = mockFetchImpl;
@@ -306,6 +309,43 @@ describe('routingService fallback', () => {
       expect(mockNativeReroute).toHaveBeenCalledTimes(1);
       expect(mockFetchImpl).not.toHaveBeenCalled();
       expect(mockMapKitReroute).not.toHaveBeenCalled();
+      expect(route).toBeDefined();
+    });
+
+    it('prefers the native engine on a weak connection even with a heading', async () => {
+      const svc = loadRoutingService();
+      const nativeRoute = {
+        summary: {
+          distance_meters: 1500,
+          duration_seconds: 120,
+          has_toll: false,
+          has_ferry: false,
+        },
+        legs: [{ distance_meters: 1500, duration_seconds: 120, maneuvers: [] }],
+        geometry: 'abc',
+        bounding_box: [-74, 40.7, -73.9, 40.8],
+      };
+      mockNativeReroute.mockResolvedValue(nativeRoute);
+      mockIsOnline.mockReturnValue(true);
+      mockGetConnectionQuality.mockReturnValue('poor');
+
+      await svc.initRouting('/tiles/');
+      const route = await svc.reroute(reroutePos, destination, 'auto', { heading: 90 });
+
+      expect(mockNativeReroute).toHaveBeenCalledTimes(1);
+      expect(mockFetchImpl).not.toHaveBeenCalled();
+      expect(route).toBeDefined();
+    });
+
+    it('uses the heading-aware online engine first on a good connection', async () => {
+      const svc = loadRoutingService();
+      mockOnlineSuccess();
+      mockGetConnectionQuality.mockReturnValue('good');
+
+      await svc.initRouting('/tiles/');
+      const route = await svc.reroute(reroutePos, destination, 'auto', { heading: 90 });
+
+      expect(mockFetchImpl).toHaveBeenCalled();
       expect(route).toBeDefined();
     });
 
