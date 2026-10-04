@@ -817,9 +817,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     renderHosts.forEach(body)
   }
 
-  /// Records the CarPlay Dashboard window. The map is only rendered into it
-  /// while navigating (like Apple Maps), so an idle dashboard keeps its normal
-  /// system layout instead of a second map stealing the main window.
+  /// Records the CarPlay Dashboard window and renders the live Polaris map into
+  /// it — idle or navigating (Apple Maps shows its map on the Dashboard when no
+  /// trip is active too). The host is kept for the lifetime of the scene, so an
+  /// idle Dashboard shows the map and the moving 3D view instead of a blank tile.
   func attachDashboard(window: UIWindow) {
     dashboardWindow = window
     attachDashboardHostIfNeeded()
@@ -876,12 +877,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   private func attachDashboardHostIfNeeded() {
-    guard navigationActive, dashboardHost == nil, let window = dashboardWindow else { return }
+    guard dashboardHost == nil, let window = dashboardWindow else { return }
     // Defensive: never render a second map over the main template window.
     guard window !== templateWindow else { return }
     let host = CarPlayMapViewHost(mode: .dashboard)
     host.activate(in: window)
-    host.isNavigating = true
+    // Match the current trip state. Idle driving is derived by the host from the
+    // live speed, so an idle Dashboard renders the moving 3D view too.
+    host.isNavigating = navigationActive
     dashboardHost = host
     configureHost(host)
   }
@@ -931,9 +934,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     navigationActive = value
     if value {
       attachDashboardHostIfNeeded()
-    } else {
-      detachDashboardHost()
     }
+    // Keep the Dashboard host alive across trip end: it must render the idle
+    // map (and the moving 3D view) too, instead of going blank.
     forEachHost { $0.isNavigating = value }
     // End control is trip-only; re-assert the full-screen map window and drop
     // the idle-only panel.

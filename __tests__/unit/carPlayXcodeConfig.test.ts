@@ -325,4 +325,22 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).toContain('Self.attachPendingSceneIfNeeded()');
     }
   });
+
+  it('renders the Dashboard map while idle and shows the moving 3D view', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      const mapView = readRepoFile(`${root}/PolarisCarPlayMapView.swift`);
+      // The Dashboard map host attaches on scene connect and survives trip end,
+      // so an idle Dashboard isn't blank (it used to be gated on a live trip).
+      expect(nativeModule).toContain('guard dashboardHost == nil, let window = dashboardWindow');
+      expect(nativeModule).not.toContain(
+        'guard navigationActive, dashboardHost == nil, let window = dashboardWindow',
+      );
+      // Idle driving (moving, no trip) uses the same pitched 3D camera and nav
+      // puck as navigation, derived from the pushed speed.
+      expect(mapView).toContain('isDriving');
+      expect(mapView).toContain('drivingMinSpeedMps');
+      expect(mapView).toContain('isNavigating || isDriving');
+    }
+  });
 });

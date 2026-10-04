@@ -228,6 +228,13 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     }
   }
 
+  /// True while the car is moving without an active trip. Uses the same pitched,
+  /// heading-up 3D camera and nav puck as navigation (Google/Apple Maps show a
+  /// driving map off-route too), falling back to the flat north-up browse view
+  /// with the plain location dot when the car is stationary. Derived from the
+  /// speed on every GPS push in `updateCenter`.
+  private var isDriving = false
+
   var currentCoordinate = CLLocationCoordinate2D(latitude: 0, longitude: 0)
 
   /// Seeds the position without moving the camera (used for the route start
@@ -674,8 +681,8 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     guard puckBuilt, hasCenter, let style = mapView?.style, let view = mapView else { return }
     let coordinate = currentCoordinate
 
-    // Not navigating: hide the puck and show the plain location dot.
-    guard isNavigating else {
+    // Not navigating or driving: hide the puck and show the plain location dot.
+    guard isNavigating || isDriving else {
       for id in [
         Self.puckHaloRim, Self.puckHaloFill, Self.puckShadowOuter, Self.puckShadowInner,
         Self.puckBody, Self.puckTop,
@@ -1004,6 +1011,13 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// Zoom used when not actively navigating (locate, dashboard tile).
   private static let idleZoom: Double = 15
 
+  /// Below this speed (m/s) the idle map stays a flat, north-up browse view with
+  /// the location dot. At or above it — with no active trip — the map switches
+  /// to the same pitched, heading-up 3D view and nav puck used while
+  /// navigating, so simply driving around looks like Google/Apple Maps instead
+  /// of a static north-up dot. ~2 m/s ≈ 7 km/h.
+  private static let drivingMinSpeedMps: Double = 2.0
+
   func updateCenter(lat: Double, lng: Double, heading: Double, speedMps: Double) {
     // (0, 0) is the Atlantic off West Africa — never a real fix. Ignoring it
     // keeps the pre-fix default from parking the map in "blank ocean".
@@ -1017,6 +1031,10 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     targetHeading = heading
     targetSpeedMps = max(speedMps, 0)
     hasCenter = true
+    // Idle driving (moving, no active trip) mirrors the navigation map:
+    // pitched heading-up 3D + nav puck instead of the flat north-up dot.
+    // Stays false during a trip so navigation owns the camera/puck state.
+    isDriving = !isNavigating && targetSpeedMps > Self.drivingMinSpeedMps
 
     if hadTarget, elapsed > 0 {
       // Track the push cadence with an EMA so a single burst or a single long
@@ -1028,10 +1046,12 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     }
 
     // Snap when there is no continuity to preserve: first fix, follow turned
-    // off, not navigating, or the push stream resumed after a long suspension
-    // (a resumed-from-suspension gap must not glide across minutes of motion).
+    // off, neither navigating nor driving, or the push stream resumed after a
+    // long suspension (a resumed-from-suspension gap must not glide across
+    // minutes of motion).
     let shouldSnap =
-      !hadTarget || !followVehicle || !isNavigating || elapsed > Self.snapGapSeconds || mapView == nil
+      !hadTarget || !followVehicle || !(isNavigating || isDriving)
+      || elapsed > Self.snapGapSeconds || mapView == nil
     if elapsed > Self.snapGapSeconds {
       // Cadence knowledge is invalid after a suspension; relearn it.
       pushIntervalEstimate = 0
@@ -1114,7 +1134,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
         target, bearing: targetHeading,
         distanceMeters: targetSpeedMps * coastElapsed)
       heading = targetHeading
-    } else if isNavigating, followVehicle, targetSpeedMps > Self.coastMinSpeedMps {
+    } else if (isNavigating || isDriving), followVehicle, targetSpeedMps > Self.coastMinSpeedMps {
       // Glide finished and the vehicle is moving — begin the coast hold.
       coasting = true
       coastStart = now
@@ -1155,11 +1175,12 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   }
 
   private func applyFollowCamera(_ view: MLNMapView, heading: Double) {
-    if isNavigating {
+    if isNavigating || isDriving {
       // Heading-up pitched follow camera (phone: zoom 17, pitch 55), shared by
       // the full-screen map and the dashboard split tile so both face the
-      // direction of travel like the phone. The vehicle is then placed at a
-      // fixed fraction of the view height: a fixed metre offset ahead of the
+      // direction of travel like the phone — and by the idle driving view, so
+      // simply moving looks the same as guidance. The vehicle is then placed at
+      // a fixed fraction of the view height: a fixed metre offset ahead of the
       // target can't guarantee that across the full map and dashboard aspects,
       // which previously parked the puck under the floating ETA bar.
       view.camera = MLNMapCamera(

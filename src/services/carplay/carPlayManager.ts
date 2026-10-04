@@ -230,15 +230,31 @@ async function ensureIdleLocationUpdates(): Promise<void> {
     const { status } = await Location.getForegroundPermissionsAsync();
     if (!connected || status !== 'granted') return;
     const subscription = await Location.watchPositionAsync(
-      // Idle map: low-frequency, low-accuracy is plenty (and cheap).
-      { accuracy: Location.Accuracy.Balanced, distanceInterval: 25, timeInterval: 5000 },
+      // Idle map: follow closely enough that the moving 3D view stays smooth
+      // (the native follow glide bridges the gaps between fixes). High accuracy
+      // because the puck/heading now drive a nav-style camera, not just a dot.
+      { accuracy: Location.Accuracy.High, distanceInterval: 25, timeInterval: 2000 },
       (location) => {
         if (!connected || !locationPushAllowed()) return;
         carPlayUserLocation = {
           lat: location.coords.latitude,
           lng: location.coords.longitude,
         };
-        CarPlay.updateMapCenter(location.coords.latitude, location.coords.longitude, 0);
+        // Forward heading + speed so the native host can switch to the pitched
+        // heading-up 3D view and nav puck while the car is moving with no
+        // active trip. GPS reports -1 for both when unavailable.
+        const heading =
+          location.coords.heading != null && location.coords.heading >= 0
+            ? location.coords.heading
+            : 0;
+        const speed =
+          location.coords.speed != null && location.coords.speed > 0 ? location.coords.speed : 0;
+        CarPlay.updateMapCenter(
+          location.coords.latitude,
+          location.coords.longitude,
+          heading,
+          speed,
+        );
       },
     );
     if (!connected) {
