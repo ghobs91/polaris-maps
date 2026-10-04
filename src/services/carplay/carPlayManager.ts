@@ -920,18 +920,37 @@ function getSearchSession(): SearchSession {
       getContext: () => {
         const { viewport } = useMapStore.getState();
         const bounds = useOsmPoiStore.getState().viewportBounds;
+        // The phone map may not have reported a viewport yet (a CarPlay-first
+        // session, or the map screen sitting behind the region gate): its
+        // `(0, 0, zoom 2)` default would centre the entire search in the Gulf
+        // of Guinea, so the local FTS / Overture / Overpass boxes return
+        // nothing and only Photon's bias-less fuzzy pass answers. Fall back to
+        // the driver's live GPS fix so every source is anchored on the car.
+        const hasViewport =
+          Number.isFinite(viewport.lat) &&
+          Number.isFinite(viewport.lng) &&
+          viewport.zoom > 0 &&
+          !(viewport.lat === 0 && viewport.lng === 0);
+        const center = hasViewport
+          ? { lat: viewport.lat, lng: viewport.lng, zoom: viewport.zoom }
+          : carPlayUserLocation
+            ? { lat: carPlayUserLocation.lat, lng: carPlayUserLocation.lng, zoom: 15 }
+            : { lat: viewport.lat, lng: viewport.lng, zoom: viewport.zoom };
         return {
-          lat: viewport.lat,
-          lng: viewport.lng,
-          zoom: viewport.zoom,
-          viewportBounds: bounds
-            ? {
-                south: bounds.minLat,
-                north: bounds.maxLat,
-                west: bounds.minLng,
-                east: bounds.maxLng,
-              }
-            : undefined,
+          lat: center.lat,
+          lng: center.lng,
+          zoom: center.zoom,
+          // Bounds tracked by the phone map only make sense alongside its
+          // viewport; drop them when we substitute the car's position.
+          viewportBounds:
+            hasViewport && bounds
+              ? {
+                  south: bounds.minLat,
+                  north: bounds.maxLat,
+                  west: bounds.minLng,
+                  east: bounds.maxLng,
+                }
+              : undefined,
           userLocation: carPlayUserLocation ?? undefined,
         };
       },

@@ -112,6 +112,7 @@ import {
 import * as CarPlay from '../../src/native/carplay';
 import { useNavigationStore } from '../../src/stores/navigationStore';
 import { useNavigationTrackingStore } from '../../src/stores/navigationTrackingStore';
+import { useMapStore } from '../../src/stores/mapStore';
 import { useTrafficStore } from '../../src/stores/trafficStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useCarPlayStore } from '../../src/stores/carPlayStore';
@@ -211,6 +212,7 @@ describe('CarPlayManager', () => {
     useTrafficStore.getState().setNormalizedSegments([]);
     useSettingsStore.getState().setUseMetric(false);
     useSettingsStore.getState().setThemeMode('system');
+    useMapStore.getState().setViewport({ lat: 0, lng: 0, zoom: 2 });
     mockAppState = 'active';
     resetForegroundInterpolationHeartbeat();
     (getFavorites as jest.Mock).mockReturnValue([]);
@@ -890,6 +892,24 @@ describe('CarPlayManager', () => {
     useTrafficStore.getState().setNormalizedSegments([]);
     expect(NativeModules.PolarisCarPlay.updateRouteTraffic).toHaveBeenCalledTimes(2);
     expect(NativeModules.PolarisCarPlay.updateRouteTraffic).toHaveBeenLastCalledWith([]);
+  });
+
+  it('anchors CarPlay search on the GPS fix when the phone viewport is unset', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    (unifiedSearch as jest.Mock).mockResolvedValue([]);
+
+    // The phone map never reported a viewport (still 0,0): the search must fall
+    // back to the driver's live fix instead of searching the Gulf of Guinea,
+    // which left the local/FTS and viewport-bounded network sources empty.
+    fireEvent('searchQuery', { query: 'coffee' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(unifiedSearch).toHaveBeenCalledWith(
+      'coffee',
+      expect.objectContaining({ lat: 40.7128, lng: -74.006, zoom: 15 }),
+    );
   });
 
   it('pushes staged, rich search results to CarPlay', async () => {
