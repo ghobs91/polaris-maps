@@ -8,24 +8,34 @@ import * as SecureStore from 'expo-secure-store';
 
 const DID_KEY = 'atproto_did';
 
+// Passing a PDS host (rather than a user handle) to `signIn` opens Bluesky's
+// own sign-in page, where the user can sign in with an existing account or
+// create a new one. The app never has to collect a handle itself.
+const BLUESKY_PDS = 'https://bsky.social';
+
 // ---------------------------------------------------------------------------
 // Client metadata
 //
 // This metadata MUST also be served at the client_id URL so the PDS can
 // verify the client during the OAuth flow:
-//   https://polaris-maps-bsky-auth.netlify.app/.well-known/oauth-client-metadata.json
+//   https://app.polarismaps.app/.well-known/oauth-client-metadata.json
+//
+// `client_uri` must share the client_id hostname, and the native redirect
+// scheme must be the client_id hostname in reverse order, or the atproto server
+// rejects the metadata (`invalid_client_metadata` / `invalid_redirect_uri`).
+// `app.polarismaps.app` reverses to the scheme `app.polarismaps.app`, which is
+// declared in app.json's `scheme` array (see Info.plist / AndroidManifest).
 //
 // The native redirect URI must use a custom scheme that passes
 // `@atproto/oauth-client-expo`'s CUSTOM_URI_SCHEME_REGEX, which requires the
-// scheme to contain at least one dot. `com.polarismaps.app` is the app's
-// registered URL scheme (see app.json / Info.plist / AndroidManifest.xml).
+// scheme to contain at least one dot.
 // ---------------------------------------------------------------------------
 
 const CLIENT_METADATA = {
-  client_id: 'https://polaris-maps-bsky-auth.netlify.app/.well-known/oauth-client-metadata.json',
+  client_id: 'https://app.polarismaps.app/.well-known/oauth-client-metadata.json',
   client_name: 'Polaris Maps',
-  client_uri: 'https://polarismaps.com',
-  redirect_uris: ['com.polarismaps.app:/oauth/callback'],
+  client_uri: 'https://app.polarismaps.app',
+  redirect_uris: ['app.polarismaps.app:/oauth/callback'],
   scope: 'atproto transition:generic',
   token_endpoint_auth_method: 'none',
   response_types: ['code'],
@@ -98,17 +108,18 @@ async function resolveHandle(oauthAgent: Agent): Promise<string> {
 /**
  * Initiate the Bluesky OAuth login flow.
  *
- * Opens the system browser so the user can authorise the app on their PDS.
- * Returns the resulting session (did + handle) on success.
+ * Opens Bluesky's own sign-in page in the system browser, so the user signs in
+ * (or creates an account) there without the app asking for a handle. Returns
+ * the resulting session (did + handle) on success.
  */
-export async function loginWithBluesky(handle: string): Promise<AtprotoSession> {
+export async function loginWithBluesky(): Promise<AtprotoSession> {
   const client = getClient();
 
   try {
-    console.log('[bsky-oauth] Starting signIn for:', handle);
+    console.log('[bsky-oauth] Starting signIn');
     // On native, `ExpoOAuthClient.signIn` resolves directly to an OAuthSession
     // (it opens the browser and handles the redirect internally).
-    const oauthSession = await client.signIn(handle);
+    const oauthSession = await client.signIn(BLUESKY_PDS);
     const oauthAgent = new Agent(oauthSession);
 
     const did = oauthAgent.did;
@@ -116,7 +127,7 @@ export async function loginWithBluesky(handle: string): Promise<AtprotoSession> 
       throw new AuthError('No DID in session after login');
     }
 
-    const resolvedHandle = (await resolveHandle(oauthAgent)) || handle;
+    const resolvedHandle = await resolveHandle(oauthAgent);
     agent = oauthAgent;
     currentHandle = resolvedHandle;
 

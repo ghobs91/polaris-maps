@@ -1,8 +1,8 @@
 {
-  "client_id": "https://polaris-maps-bsky-auth.netlify.app/.well-known/oauth-client-metadata.json",
+  "client_id": "https://app.polarismaps.app/.well-known/oauth-client-metadata.json",
   "client_name": "Polaris Maps",
-  "client_uri": "https://polarismaps.com",
-  "redirect_uris": ["com.polarismaps.app:/oauth/callback"],
+  "client_uri": "https://app.polarismaps.app",
+  "redirect_uris": ["app.polarismaps.app:/oauth/callback"],
   "scope": "atproto transition:generic",
   "token_endpoint_auth_method": "none",
   "response_types": ["code"],

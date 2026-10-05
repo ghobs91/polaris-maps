@@ -98,22 +98,13 @@ describe('SettingsContent Bluesky sign-in', () => {
     jest.clearAllMocks();
   });
 
-  it('logs in with the handle the user enters, not a hardcoded domain', () => {
+  it('starts the Bluesky OAuth flow without asking for a handle', () => {
     const screen = render(<SettingsContent />);
 
-    fireEvent.changeText(screen.getByLabelText('Bluesky handle'), 'alice.bsky.social');
-    fireEvent.press(screen.getByLabelText('Sign in to leave reviews'));
+    expect(screen.queryByLabelText('Bluesky handle')).toBeNull();
 
-    expect(mockBskyLogin).toHaveBeenCalledWith('alice.bsky.social');
-    expect(mockBskyLogin).not.toHaveBeenCalledWith('bsky.social');
-  });
+    fireEvent.press(screen.getByLabelText('Sign in with Bluesky'));
 
-  it('strips a leading @ from the entered handle', () => {
-    const screen = render(<SettingsContent />);
-
-    fireEvent.changeText(screen.getByLabelText('Bluesky handle'), '@alice.bsky.social');
-    fireEvent.press(screen.getByLabelText('Sign in to leave reviews'));
-
-    expect(mockBskyLogin).toHaveBeenCalledWith('alice.bsky.social');
+    expect(mockBskyLogin).toHaveBeenCalledWith();
   });
 });

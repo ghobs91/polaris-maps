@@ -12,8 +12,8 @@ interface AtprotoAuthState {
   session: AtprotoSession | null;
   isLoading: boolean;
   error: string | null;
-  /** Start the OAuth login flow for the given Bluesky handle. */
-  login: (handle: string) => Promise<void>;
+  /** Start the Bluesky OAuth login flow. */
+  login: () => Promise<void>;
   logout: () => Promise<void>;
   /** Re-establish a previously-saved session on app start. */
   restore: () => Promise<void>;
@@ -24,10 +24,10 @@ export const useAtprotoAuthStore = create<AtprotoAuthState>((set) => ({
   isLoading: false,
   error: null,
 
-  login: async (handle: string) => {
+  login: async () => {
     set({ isLoading: true, error: null });
     try {
-      await loginWithBluesky(handle);
+      await loginWithBluesky();
       const session = await getBlueskySession();
       set({ session, isLoading: false });
     } catch (err) {

@@ -29,6 +29,7 @@
 			<array>
 				<string>polaris-maps</string>
 				<string>com.polarismaps.app</string>
+				<string>app.polarismaps.app</string>
 			</array>
 		</dict>
 	</array>

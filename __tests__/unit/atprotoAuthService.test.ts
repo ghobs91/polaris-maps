@@ -71,9 +71,9 @@ describe('loginWithBluesky', () => {
     mockSignIn.mockResolvedValue({ did: 'did:plc:test123' });
     mockAgentDid = 'did:plc:test123';
 
-    const session = await loginWithBluesky('alice.bsky.social');
+    const session = await loginWithBluesky();
 
-    expect(mockSignIn).toHaveBeenCalledWith('alice.bsky.social');
+    expect(mockSignIn).toHaveBeenCalledWith('https://bsky.social');
 
     const storedDid = mockSecureStore['atproto_did'];
     expect(storedDid).toBe('did:plc:test123');
@@ -81,27 +81,27 @@ describe('loginWithBluesky', () => {
     expect(getAgent()).not.toBeNull();
   });
 
-  it('falls back to the input handle when the PDS cannot resolve one', async () => {
+  it('falls back to an empty handle when the PDS cannot resolve one', async () => {
     mockSignIn.mockResolvedValue({ did: 'did:plc:test123' });
     mockAgentDid = 'did:plc:test123';
     mockGetSession.mockRejectedValueOnce(new Error('offline'));
 
-    const session = await loginWithBluesky('bob.test');
+    const session = await loginWithBluesky();
 
-    expect(session).toEqual({ did: 'did:plc:test123', handle: 'bob.test' });
+    expect(session).toEqual({ did: 'did:plc:test123', handle: '' });
   });
 
   it('throws AuthError when the returned session has no DID', async () => {
     mockSignIn.mockResolvedValue({});
     mockAgentDid = null;
 
-    await expect(loginWithBluesky('alice.bsky.social')).rejects.toThrow(AuthError);
+    await expect(loginWithBluesky()).rejects.toThrow(AuthError);
   });
 
   it('throws AuthError when signIn throws', async () => {
     mockSignIn.mockRejectedValue(new Error('Network error'));
 
-    await expect(loginWithBluesky('alice.bsky.social')).rejects.toThrow(AuthError);
+    await expect(loginWithBluesky()).rejects.toThrow(AuthError);
   });
 });
 
@@ -125,7 +125,7 @@ describe('getBlueskySession', () => {
   it('returns session from in-memory agent after login', async () => {
     mockSignIn.mockResolvedValue({ did: 'did:plc:test123' });
     mockAgentDid = 'did:plc:test123';
-    await loginWithBluesky('alice.bsky.social');
+    await loginWithBluesky();
 
     const result = await getBlueskySession();
     expect(result).toEqual({ did: 'did:plc:test123', handle: 'alice.bsky.social' });

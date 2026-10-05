@@ -1,14 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Switch,
-  Linking,
-  Alert,
-  TextInput,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, Linking, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
@@ -52,7 +43,6 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
   const [cachedPlaceCount, setCachedPlaceCount] = useState<number | null>(null);
-  const [bskyHandle, setBskyHandle] = useState('');
 
   useEffect(() => {
     countPlaceDetailCache()
@@ -69,7 +59,6 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const osmIsLoggingIn = useOsmAuthStore((s) => s.isLoggingIn);
   const osmLogin = useOsmAuthStore((s) => s.login);
   const osmLogout = useOsmAuthStore((s) => s.logout);
-  const normalizedBskyHandle = bskyHandle.trim().replace(/^@/, '');
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {showHeading && <Text style={styles.heading}>Settings</Text>}
@@ -219,27 +208,12 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                   <Text style={styles.accountCaption}>Leave place reviews</Text>
                 </View>
               </View>
-              <TextInput
-                value={bskyHandle}
-                onChangeText={setBskyHandle}
-                placeholder="alice.bsky.social"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                returnKeyType="go"
-                accessibilityLabel="Bluesky handle"
-                style={styles.handleInput}
-                onSubmitEditing={() => {
-                  if (normalizedBskyHandle) bskyLogin(normalizedBskyHandle).catch(() => {});
-                }}
-              />
               {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
               <Button
-                title={bskyIsLoading ? 'Signing in…' : 'Sign in to leave reviews'}
+                title={bskyIsLoading ? 'Signing in…' : 'Sign in with Bluesky'}
                 variant="primary"
-                onPress={() => bskyLogin(normalizedBskyHandle).catch(() => {})}
-                disabled={bskyIsLoading || normalizedBskyHandle.length === 0}
+                onPress={() => bskyLogin().catch(() => {})}
+                disabled={bskyIsLoading}
                 style={styles.signinBtn}
               />
             </View>
@@ -408,17 +382,6 @@ const createStyles = (isDark: boolean) => {
     accountCaption: { ...typography.caption, fontSize: 12, color: captionColor, marginTop: 1 },
     signinBtn: { alignSelf: 'stretch' },
     signinBlock: { paddingVertical: spacing.sm, gap: spacing.sm },
-    handleInput: {
-      ...typography.body,
-      color: primaryTextColor,
-      backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: isDark ? '#3A3A3C' : '#C6C6C8',
-      borderRadius: 8,
-      borderCurve: 'continuous',
-      paddingHorizontal: spacing.md,
-      minHeight: 44,
-    },
     errorText: { ...typography.caption, color: '#FF453A' },
   });
 };
