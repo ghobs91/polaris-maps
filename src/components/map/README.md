@@ -23,13 +23,22 @@ Style changes cannot fix this. Showing buildings at navigation zoom the way Goog
 
 ## Key Components
 
-| File                    | Description                                                                                                                                                       |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MapView.tsx`           | Core map component — viewport management, POI fetching (3-phase strategy), deduplication, zoom tracking, layer composition.                                       |
-| `TrafficOverlay.tsx`    | GeoJSON congestion visualization with 5-level color coding based on speed/freeflow ratio.                                                                         |
-| `TrafficRouteLayer.tsx` | Route-specific traffic overlay for the active navigation route.                                                                                                   |
-| `POILayer.tsx`          | POI badge rendering — MarkerView per filtered POI, PoiBadge with an icon circle anchoring a right-hand name pill, spatial filtering via `filterPoisForDisplay()`. |
-| `TransitLayer.tsx`      | Transit route lines and stop markers — always-mounted, visibility toggled via style property.                                                                     |
+| File                         | Description                                                                                                                                                                                           |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MapView.tsx`                | Core map component — viewport management, POI fetching (3-phase strategy), deduplication, zoom tracking, layer composition.                                                                           |
+| `TrafficOverlay.tsx`         | GeoJSON congestion visualization with 5-level color coding based on speed/freeflow ratio.                                                                                                             |
+| `TrafficRouteLayer.tsx`      | Route-specific traffic overlay for the active navigation route.                                                                                                                                       |
+| `POILayer.tsx`               | POI badge rendering — MarkerView per filtered POI, PoiBadge with an icon circle anchoring a right-hand name pill, spatial filtering via `filterPoisForDisplay()`.                                     |
+| `TransitLayer.tsx`           | Transit route lines and stop markers — always-mounted, visibility toggled via style property.                                                                                                         |
+| `ExternalRatingsSection.tsx` | External aggregate ratings (TripAdvisor + Yelp) via the on-device headless browser. One independent row per provider with attribution and source link; hidden WebViews are serialized and time-boxed. |
+
+### External ratings (TripAdvisor + Yelp)
+
+`ExternalRatingsSection.tsx` renders one independent row per provider from
+`useExternalRatings`. Hidden WebViews are serialized (one at a time), use the
+native user agent with a persistent (non-incognito) cookie store, and are
+time-boxed; a provider that fails or is challenged renders nothing. No review
+text is fetched or displayed, and nothing is persisted.
 
 ## POI Rendering Pipeline
 

@@ -64,6 +64,23 @@ Gun.js sync → other peers
 | `placeMediaProviders.ts`   | Concrete supplements for `placeMediaService`: `createWikidataCommonsProvider` (P18/P154 via `wbgetentities` → Commons URLs) and `createPanoramaxProvider` (STAC bbox search), both best-effort with injectable `fetch`. Rendered by `PlaceMediaCarousel`. Mapillary and Panoramax 360° panoramas are excluded from the place-photo carousel and instead surfaced by the Street View 3D viewer (`src/services/imagery/streetViewService.ts`). |
 | `attestationService.ts`    | Cryptographic proof-of-presence — verifies GPS proximity ≤100m, signs attestation with Schnorr keypair.                                                                                                                                                                                                                                                                                                                                      |
 | `reputationService.ts`     | Reads/writes user reputation scores from Gun.js with signature verification. Composite of POI contributions, confirmations, and traffic probe accuracy.                                                                                                                                                                                                                                                                                      |
+| `externalRatings/`         | On-device aggregate-rating providers (TripAdvisor + Yelp): shared core (JSON-LD parsing, challenge detection, validation, caching), provider adapters (`tripadvisorProvider.ts`, `yelpProvider.ts`), search-candidate matching, and a bounded browse scheduler (`antiBot.ts`). Resolved with no API or key; transient, device-local, aggregate number only.                                                                                  |
+
+### External ratings (TripAdvisor + Yelp)
+
+Aggregate ratings are resolved on-device with a hidden WebView — no API, key, or
+paid service. Resolution order per provider: explicit `polaris:tripadvisor` /
+`polaris:yelp` tag → a listing linked from the POI website → a provider search
+built from the place name + assembled address (`poiAddress.ts`). A search
+candidate is accepted only when its name matches and an address or `geo` (≤50 m)
+confirms it (`identity.ts`), so a chain's sibling branch is never shown.
+
+Bounded browse policy (`externalRatings/antiBot.ts`): one hidden WebView at a
+time, per-host minimum interval + jitter, and a challenge/429 cool-down with
+exponential backoff and silent give-up. Explicitly NOT done: CAPTCHA solving,
+proxy/IP rotation, fingerprint spoofing, auth-wall bypass, or bulk harvesting.
+Ratings are transient and never persisted; only the aggregate number, exact
+count, listing identity, and source URL are read — no review text.
 
 ## Key Constants
 
