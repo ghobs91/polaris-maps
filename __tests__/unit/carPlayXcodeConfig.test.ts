@@ -367,4 +367,27 @@ describe('CarPlay iOS configuration', () => {
     expect(manager).toContain("addListener('carPlayReportIncident', onReportIncident)");
     expect(manager).toContain('reportIncident(position.lat, position.lng, type');
   });
+
+  it('dismisses the CarPlay search keyboard and marks End navigation red', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+
+      // Tapping the keyboard's search button pushes the results as a list,
+      // which leaves the search template and dismisses the keyboard.
+      expect(nativeModule).toContain('func searchTemplateSearchButtonPressed');
+      expect(nativeModule).toContain('showSearchResultsList()');
+      expect(nativeModule).toContain('CPListTemplate(title: "Results"');
+      // Later search batches keep the pushed list current.
+      expect(nativeModule).toContain('updateSections([searchResultsSection()])');
+
+      // The End control is a red disc with a white × (opaque-colored, not the
+      // template-tinted system symbol).
+      expect(nativeModule).toContain('cancelNavigationImage()');
+      expect(nativeModule).toContain(
+        'UIColor(red: 0xFF / 255, green: 0x3B / 255, blue: 0x30 / 255, alpha: 1)',
+      );
+      expect(nativeModule).toContain('withTintColor(.white, renderingMode: .alwaysOriginal)');
+      expect(nativeModule).not.toContain('makeMapButton(systemName: "xmark.circle.fill")');
+    }
+  });
 });

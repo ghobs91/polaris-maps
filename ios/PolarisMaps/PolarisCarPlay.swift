@@ -643,6 +643,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var homeSuggestions: [CarPlaySearchItem] = []
   private var activeSearchText = ""
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
+  /// The results list pushed when the driver taps the keyboard's search button
+  /// (leaves the search template, which dismisses the keyboard). Later search
+  /// batches update it in place.
+  private var searchResultsTemplate: CPListTemplate?
   /// Bounds a JS search round-trip so the list settles instead of spinning
   /// forever when the bridge never answers.
   private var searchDeadlineTimer: Timer?
@@ -760,6 +764,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
+    searchResultsTemplate = nil
     searchDeadlineTimer?.invalidate()
     searchDeadlineTimer = nil
     homePanel = nil
@@ -797,6 +802,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
+    searchResultsTemplate = nil
     searchDeadlineTimer?.invalidate()
     searchDeadlineTimer = nil
   }
@@ -967,7 +973,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       self?.presentReportOptions()
     }
     reportMapButton = report
-    let end = makeMapButton(systemName: "xmark.circle.fill") { [weak self] in
+    let end = makeMapButton(image: Self.cancelNavigationImage()) { [weak self] in
       self?.endNavigationFromCarPlay()
     }
     endMapButton = end
@@ -1023,6 +1029,39 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     return button
   }
 
+  private func makeMapButton(image: UIImage?, handler: @escaping () -> Void) -> CPMapButton {
+    let button = CPMapButton { _ in handler() }
+    button.image = image
+    return button
+  }
+
+  /// A red disc with a white "×" for the End control, so ending the trip reads
+  /// as the destructive action it is (Apple/Google Maps' red End button). Drawn
+  /// with opaque colors so CarPlay shows the red instead of tinting the glyph.
+  private static func cancelNavigationImage() -> UIImage? {
+    let size = CGSize(width: 30, height: 30)
+    let format = UIGraphicsImageRendererFormat()
+    format.opaque = false
+    let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+      // App danger red (matches the phone), not the dynamic system red.
+      UIColor(red: 0xFF / 255, green: 0x3B / 255, blue: 0x30 / 255, alpha: 1).setFill()
+      UIBezierPath(ovalIn: CGRect(origin: .zero, size: size)).fill()
+
+      let config = UIImage.SymbolConfiguration(pointSize: 13, weight: .bold)
+      if let glyph = UIImage(systemName: "xmark", withConfiguration: config)?
+        .withTintColor(.white, renderingMode: .alwaysOriginal)
+      {
+        let rect = CGRect(
+          x: (size.width - glyph.size.width) / 2,
+          y: (size.height - glyph.size.height) / 2,
+          width: glyph.size.width,
+          height: glyph.size.height)
+        glyph.draw(in: rect)
+      }
+    }
+    return image.withRenderingMode(.alwaysOriginal)
+  }
+
   // MARK: Navigation bar buttons (mute + route overview)
 
   /// The vehicle's light/dark preference, so JS can resolve the phone map style
@@ -1076,7 +1115,23 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   private func presentSearch() {
     guard let search = searchTemplate else { return }
+    // A fresh search starts from the search field, not a stale results list.
+    searchResultsTemplate = nil
     interfaceController?.pushTemplate(search, animated: true, completion: nil)
+  }
+
+  /// Rows for the pushed results list, each opening the same Start/Add Stop
+  /// place card as a row in the search template.
+  private func searchResultsSection() -> CPListSection {
+    let rows = searchItems.prefix(12).map { item -> CPListItem in
+      let row = makeListItem(from: item)
+      row.handler = { [weak self] _, done in
+        self?.presentDestinationActions(name: item.name, lat: item.lat, lng: item.lng)
+        done()
+      }
+      return row
+    }
+    return CPListSection(items: rows)
   }
 
   // MARK: Incident reporting
@@ -1764,6 +1819,12 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       return
     }
     searchItems = items
+    // The driver submitted the search (keyboard dismissed, results pushed):
+    // keep the pushed list in step as later batches land. Before the pending
+    // completion below, which may already be nil after the final batch.
+    if let results = searchResultsTemplate, interfaceController?.topTemplate === results {
+      results.updateSections([searchResultsSection()])
+    }
     guard let completion = pendingSearchCompletion else {
       NSLog(
         "[PolarisCarPlay] search batch '\(normalized)' (\(items.count), final=\(isFinal)) has no pending request"
@@ -2070,6 +2131,26 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       let lng = userInfo["lng"] as? Double
     else { return }
     presentDestinationActions(name: userInfo["name"] as? String, lat: lat, lng: lng)
+  }
+
+  /// The driver tapped the keyboard's search button. Apple's guidance is to
+  /// push a list of the current results — which also leaves the search template
+  /// and dismisses the keyboard so it stops covering the results.
+  func searchTemplateSearchButtonPressed(_ searchTemplate: CPSearchTemplate) {
+    searchDeadlineTimer?.invalidate()
+    searchDeadlineTimer = nil
+    pendingSearchCompletion = nil
+    showSearchResultsList()
+  }
+
+  /// Pushes the current results as a full list (keyboard dismissed). Later
+  /// batches update it in place via `replaceSearchResults`.
+  private func showSearchResultsList() {
+    guard let interfaceController else { return }
+    let template = CPListTemplate(title: "Results", sections: [searchResultsSection()])
+    template.emptyViewTitleVariants = ["No Results"]
+    searchResultsTemplate = template
+    interfaceController.pushTemplate(template, animated: true, completion: nil)
   }
 
   // MARK: CPMapTemplateDelegate
