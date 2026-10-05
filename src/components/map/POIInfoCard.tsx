@@ -42,7 +42,7 @@ import {
 } from '../../services/poi/websiteActionsService';
 import { findStreetViewPanoramas } from '../../services/imagery/streetViewService';
 import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
-import { TripadvisorRatingCard } from './TripadvisorRatingCard';
+import { ExternalRatingsSection } from './ExternalRatingsSection';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
@@ -1203,8 +1203,11 @@ export function POIInfoCard() {
               online={isOnline}
             />
 
-            {/* ── External TripAdvisor rating (on-device headless browse) ───── */}
-            <TripadvisorRatingCard poi={poi} resetKey={poi.id} />
+            {/* ── External ratings: TripAdvisor + Yelp (on-device headless browse) ── */}
+            <ExternalRatingsSection
+              poi={poi}
+              enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
+            />
 
             <RNModal
               visible={showSaveSheet}
