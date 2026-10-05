@@ -178,11 +178,6 @@ export function POILayer() {
     return filterPoisForDisplay(activePois, bounds, zoom);
   }, [activePois, bounds, zoom]);
 
-  const labeledPoiIds = useMemo(() => {
-    if (!bounds || visiblePois.length === 0) return new Set<number>();
-    return new Set(filterPoiLabelsForDisplay(visiblePois, bounds, zoom).map((poi) => poi.id));
-  }, [bounds, visiblePois, zoom]);
-
   // Below street level, collapse nearby POIs into count badges instead of
   // dropping them (2.1/2.2). Offline-safe: purely computed from cached POIs.
   const clusters = useMemo(() => {
@@ -190,6 +185,24 @@ export function POILayer() {
     const centerLat = (bounds.minLat + bounds.maxLat) / 2;
     return clusterPoisForDisplay(visiblePois, gridDegreesForPixels(zoom, centerLat));
   }, [visiblePois, zoom, bounds]);
+
+  const labeledPoiIds = useMemo(() => {
+    if (!bounds || visiblePois.length === 0) return new Set<number>();
+    // Labels are thinned across only the POIs rendered as standalone markers:
+    // every visible POI at street level, or the single-POI clusters below it.
+    // POIs folded into a count badge render no name, so they must not consume
+    // a label slot and crowd out a real isolated marker.
+    let individuallyRendered = visiblePois;
+    if (clusters) {
+      const singleIds = new Set(
+        clusters.filter((cluster) => cluster.count === 1).map((cluster) => cluster.poiIds[0]),
+      );
+      individuallyRendered = visiblePois.filter((poi) => singleIds.has(poi.id));
+    }
+    return new Set(
+      filterPoiLabelsForDisplay(individuallyRendered, bounds, zoom).map((poi) => poi.id),
+    );
+  }, [bounds, visiblePois, zoom, clusters]);
 
   if (visiblePois.length === 0) return null;
 
@@ -200,13 +213,17 @@ export function POILayer() {
         {clusters.map((cluster) => {
           const single = cluster.count === 1 ? byId.get(cluster.poiIds[0]) : undefined;
           if (single) {
+            // Isolated POIs keep their name pill at every zoom; only grouped
+            // POIs collapse into count badges. `labeledPoiIds` still thins the
+            // labels so they never collide (see filterPoiLabelsForDisplay).
+            const showLabel = labeledPoiIds.has(single.id);
             return (
               <MapLibreGL.MarkerView
                 key={`poi-${single.id}`}
                 coordinate={[single.lng, single.lat]}
-                anchor={ICON_ANCHOR}
+                anchor={showLabel ? LABELED_ANCHOR : ICON_ANCHOR}
               >
-                <PoiBadge poi={single} showLabel={false} onPress={handlePress} />
+                <PoiBadge poi={single} showLabel={showLabel} onPress={handlePress} />
               </MapLibreGL.MarkerView>
             );
           }
