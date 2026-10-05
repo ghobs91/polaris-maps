@@ -101,6 +101,9 @@ jest.mock('../../src/services/search/searchHistoryService', () => ({
 jest.mock('../../src/services/traffic/incidentAhead', () => ({
   findIncidentsAhead: jest.fn(() => []),
 }));
+jest.mock('../../src/services/traffic/incidentExchangeService', () => ({
+  reportIncident: jest.fn(),
+}));
 
 import { NativeModules } from 'react-native';
 import * as Location from 'expo-location';
@@ -117,6 +120,7 @@ import { useTrafficStore } from '../../src/stores/trafficStore';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useCarPlayStore } from '../../src/stores/carPlayStore';
 import { toCarPlaySpeedLimit } from '../../src/services/carplay/carPlayManager';
+import { resolveReportPosition } from '../../src/services/carplay/carPlayManager';
 import {
   markForegroundInterpolationTick,
   resetForegroundInterpolationHeartbeat,
@@ -129,6 +133,7 @@ import { computeRoute } from '../../src/services/routing/routingService';
 import { getFavorites } from '../../src/services/favorites/favoritesService';
 import { getSearchHistory } from '../../src/services/search/searchHistoryService';
 import { findIncidentsAhead } from '../../src/services/traffic/incidentAhead';
+import { reportIncident } from '../../src/services/traffic/incidentExchangeService';
 import type { ValhallaRoute } from '../../src/models/route';
 
 // Grab a reference to the emitter created at module load time (before clearAllMocks)
@@ -274,13 +279,17 @@ describe('CarPlayManager', () => {
       'carPlayLocateRequest',
       expect.any(Function),
     );
+    expect(carPlayEmitter.addListener).toHaveBeenCalledWith(
+      'carPlayReportIncident',
+      expect.any(Function),
+    );
   });
 
   it('does not initialise twice', () => {
     initCarPlay();
     initCarPlay();
-    // addListener should be called only 12 times (once per event), not 24
-    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(12);
+    // addListener should be called only 13 times (once per event), not 26
+    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(13);
   });
 
   it('tracks connected state', () => {
@@ -1302,5 +1311,56 @@ describe('CarPlayManager', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([], 'pizza', true);
+  });
+
+  it('reports a CarPlay incident from the report grid at the pushed fix', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    fireEvent('carPlayReportIncident', { type: 'hazard', lat: 40.75, lng: -73.98 });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(reportIncident).toHaveBeenCalledWith(40.75, -73.98, 'hazard', '');
+  });
+
+  it('ignores a CarPlay report with an unknown incident type', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    fireEvent('carPlayReportIncident', { type: 'meteor', lat: 40.75, lng: -73.98 });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(reportIncident).not.toHaveBeenCalled();
+  });
+
+  it('reports from the live nav position when native sends no fix', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    useNavigationTrackingStore.getState().setNavPosition([-73.99, 40.71]);
+    fireEvent('carPlayReportIncident', { type: 'police', lat: 0, lng: 0 });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(reportIncident).toHaveBeenCalledWith(40.71, -73.99, 'police', '');
+  });
+
+  describe('resolveReportPosition', () => {
+    it('prefers a valid pushed fix', () => {
+      expect(resolveReportPosition(40.7, -74.0)).toEqual({ lat: 40.7, lng: -74.0 });
+    });
+
+    it('treats (0, 0) as missing and uses the live nav position', () => {
+      useNavigationTrackingStore.getState().setNavPosition([-73.99, 40.71]);
+      expect(resolveReportPosition(0, 0)).toEqual({ lat: 40.71, lng: -73.99 });
+    });
+
+    it('falls back to the phone viewport when there is no fix', () => {
+      useMapStore.getState().setViewport({ lat: 40.5, lng: -73.5, zoom: 12 });
+      expect(resolveReportPosition()).toEqual({ lat: 40.5, lng: -73.5 });
+    });
+
+    it('returns null when no position is available', () => {
+      expect(resolveReportPosition()).toBeNull();
+    });
   });
 });

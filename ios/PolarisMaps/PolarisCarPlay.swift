@@ -200,7 +200,7 @@ class PolarisCarPlay: RCTEventEmitter {
       "carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected",
       "searchResultAddStop", "carPlayRouteStart", "carPlayContentStyleChanged",
       "carPlayToggleMute", "carPlayArrivalDismiss", "carPlayDashboardFavorite",
-      "carPlayNavigationCancelled", "carPlayLocateRequest",
+      "carPlayNavigationCancelled", "carPlayLocateRequest", "carPlayReportIncident",
     ]
   }
 
@@ -756,6 +756,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     recenterBarButton = nil
     searchMapButton = nil
     endMapButton = nil
+    reportMapButton = nil
     searchItems = []
     activeSearchText = ""
     pendingSearchCompletion = nil
@@ -779,6 +780,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     recenterBarButton = nil
     searchMapButton = nil
     endMapButton = nil
+    reportMapButton = nil
     detachDashboard()
     templateWindow = nil
     lastStyleJson = nil
@@ -950,6 +952,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var recenterButton: CPMapButton?
   private var searchMapButton: CPMapButton?
   private var endMapButton: CPMapButton?
+  private var reportMapButton: CPMapButton?
 
   private func makeMapButtons() -> [CPMapButton] {
     let recenter = makeMapButton(systemName: "location.fill") { [weak self] in
@@ -960,6 +963,10 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       self?.presentSearch()
     }
     searchMapButton = search
+    let report = makeMapButton(systemName: "exclamationmark.bubble.fill") { [weak self] in
+      self?.presentReportOptions()
+    }
+    reportMapButton = report
     let end = makeMapButton(systemName: "xmark.circle.fill") { [weak self] in
       self?.endNavigationFromCarPlay()
     }
@@ -974,6 +981,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     guard let template = mapTemplate else { return }
     var buttons: [CPMapButton] = []
     if let search = searchMapButton { buttons.append(search) }
+    // Report is a driving aid: only surface it while a trip is active, next to
+    // the other nav controls (CarPlay caps the stack at four buttons).
+    if navigationActive, let report = reportMapButton { buttons.append(report) }
     if navigationActive, let end = endMapButton { buttons.append(end) }
     // Recenter last so it sits at the bottom of the stack: CarPlay lays map
     // buttons top-to-bottom, and the panning interface's arrows cover the
@@ -1067,6 +1077,53 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private func presentSearch() {
     guard let search = searchTemplate else { return }
     interfaceController?.pushTemplate(search, animated: true, completion: nil)
+  }
+
+  // MARK: Incident reporting
+
+  /// Reportable incident types, mirroring the phone's `IncidentReportPanel`
+  /// (labels from `incidentWire.INCIDENT_TYPE_LABELS`). `type` is the wire value
+  /// JS signs; the symbol matches the phone's `INCIDENT_TYPE_ICONS`.
+  private static let reportIncidentTypes: [(type: String, title: String, symbol: String)] = [
+    ("accident", "Accident", "car.fill"),
+    ("hazard", "Hazard", "exclamationmark.triangle.fill"),
+    ("police", "Police", "shield.fill"),
+    ("road_closure", "Road Closure", "nosign"),
+    ("construction", "Construction", "hammer.fill"),
+    ("other", "Other", "ellipsis.circle.fill"),
+  ]
+
+  /// Presents the CarPlay report grid. Selecting a type reports at the
+  /// vehicle's current position via `carPlayReportIncident` (the same signed
+  /// P2P incident the phone's `IncidentReportPanel` submits).
+  private func presentReportOptions() {
+    guard let interfaceController else { return }
+    let buttons = Self.reportIncidentTypes.map { entry in
+      CPGridButton(
+        titleVariants: [entry.title],
+        image: UIImage(systemName: entry.symbol) ?? UIImage()
+      ) { [weak self] _ in
+        self?.submitIncidentReport(type: entry.type)
+      }
+    }
+    let grid = CPGridTemplate(title: "Report", gridButtons: buttons)
+    interfaceController.pushTemplate(grid, animated: true, completion: nil)
+  }
+
+  /// Reports at the live vehicle position and returns to the map. The native
+  /// coordinate is the map host's current fix; JS falls back to the tracking
+  /// position / GPS when it is missing (cold launch, pre-fix).
+  private func submitIncidentReport(type: String) {
+    let coordinate = mapViewHost.currentCoordinate
+    let hasFix =
+      mapViewHost.hasCenter
+      && !(coordinate.latitude == 0 && coordinate.longitude == 0)
+    PolarisCarPlay.emitReportIncident(
+      type: type,
+      lat: hasFix ? coordinate.latitude : 0,
+      lng: hasFix ? coordinate.longitude : 0
+    )
+    interfaceController?.popToRootTemplate(animated: true, completion: nil)
   }
 
   // MARK: Navigation
@@ -2186,6 +2243,35 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     endNavigationFromCarPlay()
   }
 
+  // MARK: Multi-stop routing (iOS 27 ETA-tray card)
+
+  /// CarPlay asks whether tapping the ETA tray should offer multi-stop routing.
+  /// Enable it only while a trip is active so the map template always starts a
+  /// card (and never shows one over an idle map).
+  @available(iOS 27.0, *)
+  func mapTemplateShouldProvideMultiStopRouting(_ mapTemplate: CPMapTemplate) -> Bool {
+    return navigationSession != nil && mapTemplate === self.mapTemplate
+  }
+
+  /// Supplies the card the driver gets when tapping the trip/ETA tray:
+  /// **Add Stop** opens search (its result sheet already offers "Add Stop"),
+  /// and **Report** opens the incident report grid. Apple caps the card at two
+  /// buttons, which matches exactly the two actions Polaris supports.
+  @available(iOS 27.0, *)
+  func mapTemplate(
+    _ mapTemplate: CPMapTemplate,
+    didRequestMultiStopCardConfigurationWithCompletion completion:
+      @escaping (CPMultiStopCardConfiguration) -> Void
+  ) {
+    let addStop = CPTextButton(title: "Add Stop", textStyle: .normal) { [weak self] _ in
+      self?.presentSearch()
+    }
+    let report = CPTextButton(title: "Report", textStyle: .normal) { [weak self] _ in
+      self?.presentReportOptions()
+    }
+    completion(CPMultiStopCardConfiguration(title: "Add Stop", buttons: [addStop, report]))
+  }
+
   /// The system dismissed a navigation alert — a duration-based incident
   /// warning timed out, or the driver tapped a button. Clear our record so the
   /// next reroute/incident alert is not suppressed for the rest of the trip.
@@ -2297,6 +2383,13 @@ extension PolarisCarPlay {
     var body: [String: Any] = ["lat": lat, "lng": lng]
     body["name"] = name
     emit("searchResultAddStop", body)
+  }
+
+  /// The driver picked an incident type from the CarPlay report grid. `lat`/
+  /// `lng` are the vehicle's live fix (0,0 when unavailable); JS resolves the
+  /// final position and signs/shares the report.
+  fileprivate static func emitReportIncident(type: String, lat: Double, lng: Double) {
+    emit("carPlayReportIncident", ["type": type, "lat": lat, "lng": lng])
   }
 
   fileprivate static func emitRouteStart(_ index: Int) {

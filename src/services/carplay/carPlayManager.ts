@@ -39,7 +39,7 @@ import { getSearchHistory } from '../search/searchHistoryService';
 import { useCarPlayStore } from '../../stores/carPlayStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
-import { INCIDENT_TYPE_LABELS } from '../traffic/incidentWire';
+import { INCIDENT_TYPE_LABELS, isIncidentType } from '../traffic/incidentWire';
 import { haversineMeters } from '../../utils/routeSnap';
 import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
 import type {
@@ -113,6 +113,7 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('carPlayDashboardFavorite', onDashboardFavorite),
     CarPlay.emitter.addListener('carPlayNavigationCancelled', onNavigationCancelled),
     CarPlay.emitter.addListener('carPlayLocateRequest', onLocateRequest),
+    CarPlay.emitter.addListener('carPlayReportIncident', onReportIncident),
   ];
   appearanceSubscription?.remove();
   appearanceSubscription = Appearance.addChangeListener(syncMapStyle);
@@ -540,6 +541,61 @@ function onArrivalDismiss(): void {
 function onNavigationCancelled(): void {
   const nav = useNavigationStore.getState();
   if (nav.isNavigating) nav.stopNavigation();
+}
+
+/**
+ * The driver picked an incident type from the CarPlay report grid (the ETA-tray
+ * card's **Report** action, or the Report map button). Sign and share the same
+ * P2P incident the phone's `IncidentReportPanel` submits, at the best position
+ * we have: the fix native pushed with the event, else the live navigation
+ * position, else the cached idle GPS fix / phone viewport.
+ */
+async function onReportIncident({
+  type,
+  lat,
+  lng,
+}: {
+  type?: string;
+  lat?: number;
+  lng?: number;
+}): Promise<void> {
+  if (!isIncidentType(type)) return;
+  const position = resolveReportPosition(lat, lng);
+  if (!position) return;
+  try {
+    // Lazy require: the P2P transport chain (Hyperswarm → expo-file-system) is
+    // heavy and must not load on the CarPlay import path until a report is
+    // actually submitted. Matches the lazy-`require` pattern in
+    // `trafficCascade`/`mapSelectionPoi`, and keeps the CarPlay unit suite
+    // parseable under Jest's ESM setup.
+    const { reportIncident } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../traffic/incidentExchangeService') as typeof import('../traffic/incidentExchangeService');
+    await reportIncident(position.lat, position.lng, type, '');
+  } catch {
+    // Transport failed; `reportIncident` still queues most cases offline, so
+    // stay silent on CarPlay rather than blocking the map with an error.
+  }
+}
+
+/**
+ * Best available position for a CarPlay incident report. `(0, 0)` is the map
+ * host's pre-fix default (the Gulf of Guinea), not a real location, so it is
+ * treated as missing.
+ */
+export function resolveReportPosition(
+  lat?: number,
+  lng?: number,
+): { lat: number; lng: number } | null {
+  if (lat != null && lng != null && !(lat === 0 && lng === 0)) return { lat, lng };
+  const navPosition = useNavigationTrackingStore.getState().navPosition;
+  if (navPosition != null) return { lat: navPosition[1], lng: navPosition[0] };
+  if (carPlayUserLocation) return carPlayUserLocation;
+  const { viewport } = useMapStore.getState();
+  if (viewport && !(viewport.lat === 0 && viewport.lng === 0)) {
+    return { lat: viewport.lat, lng: viewport.lng };
+  }
+  return null;
 }
 
 /**

@@ -343,4 +343,28 @@ describe('CarPlay iOS configuration', () => {
       expect(mapView).toContain('isNavigating || isDriving');
     }
   });
+
+  it('surfaces the iOS 27 multi-stop ETA card and CarPlay incident reporting', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+
+      // iOS 27 makes the ETA/trip tray tappable; the card offers exactly the
+      // two actions Polaris supports.
+      expect(nativeModule).toContain('mapTemplateShouldProvideMultiStopRouting');
+      expect(nativeModule).toContain('didRequestMultiStopCardConfigurationWithCompletion');
+      expect(nativeModule).toContain('CPMultiStopCardConfiguration(title: "Add Stop"');
+      expect(nativeModule).toContain('CPTextButton(title: "Add Stop"');
+      expect(nativeModule).toContain('CPTextButton(title: "Report"');
+      // Report grid + a Report map button while navigating.
+      expect(nativeModule).toContain('CPGridTemplate(title: "Report"');
+      expect(nativeModule).toContain('exclamationmark.bubble.fill');
+      expect(nativeModule).toContain('carPlayReportIncident');
+    }
+
+    // JS subscribes to the report event and shares the same signed incident as
+    // the phone's report panel.
+    const manager = readRepoFile('src/services/carplay/carPlayManager.ts');
+    expect(manager).toContain("addListener('carPlayReportIncident', onReportIncident)");
+    expect(manager).toContain('reportIncident(position.lat, position.lng, type');
+  });
 });
