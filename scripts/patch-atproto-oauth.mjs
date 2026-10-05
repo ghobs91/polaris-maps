@@ -9,7 +9,12 @@
  * This script patches the installed package after pnpm install:
  * - Rewrites dist/index.js to use explicit .native.js imports.
  * - Replaces dist/ExpoAtprotoOAuthClientModule.js with a pure-JS crypto polyfill
- *   using @noble/curves, @noble/hashes and expo-crypto.
+ *   using @noble/curves, @noble/hashes and expo-crypto (signing with ES256 must
+ *   pre-hash the signing input with SHA-256, which is easy to get wrong).
+ *
+ * It also patches @atproto/oauth-client's DPoP fetch wrapper so the mandatory
+ * "retry with the server-issued DPoP nonce" step is not skipped on React Native
+ * (see the comment at that patch below).
  */
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -114,7 +119,9 @@ class ExpoAtprotoOAuthClientPolyfill {
     const signingInput = \`\${headerB64}.\${payloadB64}\`;
 
     const privBytes = base64urlToBytes(jwk.d);
-    const sig = p256.sign(textEncoder.encode(signingInput), privBytes);
+    // ES256 signs the SHA-256 digest of the signing input; @noble/curves
+    // expects a pre-hashed message (its \`prehash\` option is off by default).
+    const sig = p256.sign(sha256(textEncoder.encode(signingInput)), privBytes);
     const sigCompact = sig.toCompactRawBytes();
     const sigB64 = base64url(sigCompact);
 
@@ -140,7 +147,7 @@ class ExpoAtprotoOAuthClientPolyfill {
 
     let valid = false;
     try {
-      valid = p256.verify(signature, textEncoder.encode(signingInput), pubBytes);
+      valid = p256.verify(signature, sha256(textEncoder.encode(signingInput)), pubBytes);
     } catch {
       valid = false;
     }
@@ -159,5 +166,56 @@ class ExpoAtprotoOAuthClientPolyfill {
 export default new ExpoAtprotoOAuthClientPolyfill();
 `,
 );
+
+// ---------------------------------------------------------------------------
+// Patch @atproto/oauth-client's DPoP fetch wrapper.
+//
+// Servers (including bsky.social) require a DPoP nonce: the first request for
+// an origin is answered with a non-OK "use_dpop_nonce" response plus a fresh
+// `DPoP-Nonce` header, and the client must retry once with that nonce. The
+// stock client decides whether to retry via `isUseDpopNonceError()`, which
+// parses the response body (`peekJson`) and only accepts status 400 for
+// authorization servers. On React Native that detection can fail, so the retry
+// never happens and login dies with `use_dpop_nonce`.
+//
+// The wrapper only reaches this decision after confirming the response carried
+// a `DPoP-Nonce` that differs from the one sent, so any non-OK response there
+// is a nonce challenge. Treat it as retryable regardless of body parsing.
+// ---------------------------------------------------------------------------
+let oauthClientDist = null;
+try {
+  const expoRequire = createRequire(join(distDir, 'index.js'));
+  oauthClientDist = dirname(expoRequire.resolve('@atproto/oauth-client'));
+} catch {
+  oauthClientDist = null;
+}
+
+const DPOP_ORIGINAL =
+  'const shouldRetry = await isUseDpopNonceError(initResponse, isAuthServer);';
+const DPOP_PATCHED =
+  'const shouldRetry = !initResponse.ok || (await isUseDpopNonceError(initResponse, isAuthServer));';
+
+if (oauthClientDist) {
+  const dpopPath = join(oauthClientDist, 'fetch-dpop.js');
+  const dpopContent = readFileSync(dpopPath, 'utf8');
+
+  if (dpopContent.includes(DPOP_ORIGINAL)) {
+    writeFileSync(dpopPath, dpopContent.replace(DPOP_ORIGINAL, DPOP_PATCHED));
+    console.log('[patch-atproto-oauth] Patched @atproto/oauth-client DPoP nonce retry');
+  } else if (dpopContent.includes(DPOP_PATCHED)) {
+    // Already patched; drop diagnostic logs left by an earlier revision.
+    const cleaned = dpopContent
+      .replace(/\n *if \(shouldRetry\) console\.warn\('\[dpop\][^\n]*/, '')
+      .replace(/\n *if \(!initResponse\.ok\) console\.warn\('\[dpop\][^\n]*/, '');
+    if (cleaned !== dpopContent) {
+      writeFileSync(dpopPath, cleaned);
+      console.log('[patch-atproto-oauth] Cleaned diagnostic logs from @atproto/oauth-client');
+    }
+  } else {
+    console.warn(
+      '[patch-atproto-oauth] Could not find the DPoP retry decision — @atproto/oauth-client may have changed',
+    );
+  }
+}
 
 console.log('[patch-atproto-oauth] Patched @atproto/oauth-client-expo for React Native');
