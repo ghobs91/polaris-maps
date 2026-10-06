@@ -1,0 +1,20 @@
+Polaris Maps is a peer-to-peer maps app. Basic navigation, search and offline
+maps work without any account. No login is required to review the app.
+
+Notes for review:
+- Location permission powers on-device navigation. "Traffic Telemetry" is an
+  optional, default-on setting that contributes anonymised speed probes to a
+  peer-to-peer network; it can be turned off in Settings → Privacy. Probes use a
+  random ID that rotates hourly and contain no account or device identifier.
+- The peer-to-peer mesh only connects when other devices are nearby. With a
+  single device, the app falls back to open traffic feeds, saved history, and an
+  optional TomTom seed. Traffic and transit features degrade gracefully offline.
+- Camera/photo access is used only for community street-level imagery and review
+  photos, which are opt-in in Settings → Privacy.
+- Bluesky (AT Protocol) sign-in is only used to post place reviews; OpenStreetMap
+  sign-in is only used to submit map edits. Neither is required for the rest of
+  the app.
+- No advertising or analytics SDKs are included.
+
+Map data is © OpenStreetMap contributors (ODbL). Full details in
+Settings → About and at https://polarismaps.app/privacy.

@@ -1,0 +1,9 @@
+First public release of Polaris Maps.
+
+• Turn-by-turn navigation with automatic rerouting
+• Live traffic fused from peer-contributed speed probes
+• Report and view incidents shared over the peer network
+• Place search, public transit, and offline region packs
+• CarPlay support
+
+Thanks for trying it — feedback is welcome.
