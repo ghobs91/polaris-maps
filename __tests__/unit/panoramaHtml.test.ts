@@ -24,7 +24,22 @@ describe('buildPanoramaHtml', () => {
 
   it('pans the scene in the drag direction (grab-and-drag)', () => {
     const html = buildPanoramaHtml('https://img.test/a.jpg', 0, 0, DEFAULT_FOV_DEG);
-    expect(html).toContain('yaw += (x - lastX) * 0.005;');
-    expect(html).not.toContain('yaw -= (x - lastX) * 0.005;');
+    expect(html).toContain('yaw += dx * YAW_PER_PX;');
+    expect(html).not.toContain('yaw -= dx * YAW_PER_PX;');
+  });
+
+  it('locks the drag to one axis so horizontal panning never tilts the view', () => {
+    const html = buildPanoramaHtml('https://img.test/a.jpg', 0, 0, DEFAULT_FOV_DEG);
+    expect(html).toContain('AXIS_LOCK_PX');
+    expect(html).toContain("axis = Math.abs(tx) > Math.abs(ty) ? 'h' : 'v';");
+    // Pitch only changes on the vertical axis; yaw only on the horizontal axis.
+    expect(html).toContain('pitch = clampPitch(pitch + dy * PITCH_PER_PX);');
+  });
+
+  it('clamps pitch and adds inertial momentum', () => {
+    const html = buildPanoramaHtml('https://img.test/a.jpg', 0, 0, DEFAULT_FOV_DEG);
+    expect(html).toContain('PITCH_LIMIT = 1.05');
+    expect(html).toContain('requestAnimationFrame(step)');
+    expect(html).toContain('yawVel *= 0.93');
   });
 });

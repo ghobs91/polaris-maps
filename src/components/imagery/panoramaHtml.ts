@@ -146,17 +146,62 @@ export function buildPanoramaHtml(
   }
 
   var dragging = false, lastX = 0, lastY = 0, pinch = 0;
-  function onDown(x, y) { dragging = true; lastX = x; lastY = y; }
+  var gestureStartX = 0, gestureStartY = 0, axis = null;
+  var yawVel = 0, pitchVel = 0, momentumId = 0;
+  var PITCH_LIMIT = 1.05;
+  var AXIS_LOCK_PX = 6;
+  var YAW_PER_PX = 0.005, PITCH_PER_PX = 0.005;
+
+  function clampPitch(v) { return Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, v)); }
+  function stopMomentum() { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = 0; } }
+
+  function onDown(x, y) {
+    dragging = true; axis = null;
+    gestureStartX = x; gestureStartY = y; lastX = x; lastY = y;
+    yawVel = 0; pitchVel = 0; stopMomentum();
+  }
   function onMove(x, y) {
     if (!dragging) return;
-    // Grab-and-drag: the scene follows the finger, so dragging right increases
-    // yaw (the camera turns left) rather than reversing the pan.
-    yaw += (x - lastX) * 0.005;
-    pitch = Math.max(-1.2, Math.min(1.2, pitch + (y - lastY) * 0.005));
+    var dx = x - lastX, dy = y - lastY;
+    if (!axis) {
+      // Lock to the dominant axis once the drag is meaningful, so a horizontal
+      // pan never drifts the pitch (and vice-versa) — this keeps the horizon
+      // level and the motion predictable, the way Maps street view behaves.
+      var tx = x - gestureStartX, ty = y - gestureStartY;
+      if (Math.abs(tx) < AXIS_LOCK_PX && Math.abs(ty) < AXIS_LOCK_PX) { lastX = x; lastY = y; return; }
+      axis = Math.abs(tx) > Math.abs(ty) ? 'h' : 'v';
+    }
+    if (axis === 'h') {
+      // Grab-and-drag: the scene follows the finger (dragging right turns left).
+      yaw += dx * YAW_PER_PX;
+      yawVel = dx * YAW_PER_PX; pitchVel = 0;
+    } else {
+      pitch = clampPitch(pitch + dy * PITCH_PER_PX);
+      pitchVel = dy * PITCH_PER_PX; yawVel = 0;
+    }
     lastX = x; lastY = y;
     render();
   }
-  function onUp() { dragging = false; }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    startMomentum();
+  }
+  function startMomentum() {
+    if (Math.abs(yawVel) < 1e-4 && Math.abs(pitchVel) < 1e-4) return;
+    var step = function () {
+      yaw += yawVel;
+      pitch = clampPitch(pitch + pitchVel);
+      yawVel *= 0.93; pitchVel *= 0.93;
+      render();
+      if (Math.abs(yawVel) > 1e-4 || Math.abs(pitchVel) > 1e-4) {
+        momentumId = requestAnimationFrame(step);
+      } else {
+        momentumId = 0;
+      }
+    };
+    momentumId = requestAnimationFrame(step);
+  }
 
   canvas.addEventListener('pointerdown', function (e) { onDown(e.clientX, e.clientY); });
   window.addEventListener('pointermove', function (e) { onMove(e.clientX, e.clientY); });
