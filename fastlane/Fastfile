@@ -39,24 +39,40 @@ platform :ios do
     UI.success("Build number set to #{build_number}")
   end
 
-  # Fail loudly when the MapKit JS embed config is missing from .env.
-  # The POI card's Apple "Photos & Reviews" embed silently disappears when
-  # these EXPO_PUBLIC_* vars are not inlined at bundle time (the Xcode build
-  # phase runs `expo export:embed`, which loads .env from the repo root).
+  # Preflight for the repo-root .env consumed by the Xcode build phase
+  # (`expo export:embed` inlines EXPO_PUBLIC_* vars from it). Every var is
+  # optional — the app degrades gracefully without them — so a missing .env is
+  # only a warning, never a build failure.
   private_lane :ensure_app_env do
     env_file = File.expand_path("../.env", __dir__)
-    unless File.file?(env_file)
-      UI.user_error!(".env not found at #{env_file} — copy .env.example and fill it in before building")
+    if File.file?(env_file)
+      UI.success(".env found — optional EXPO_PUBLIC_* features will be inlined")
+    else
+      UI.important(
+        ".env not found at #{env_file} — building without optional " \
+          "EXPO_PUBLIC_* features (traffic/transit keys, region catalog, …)"
+      )
     end
-    contents = File.read(env_file)
-    %w[
-      EXPO_PUBLIC_APPLE_MAPKITJS_EMBED_TOKEN
-      EXPO_PUBLIC_MAPKIT_PLACE_DETAIL_URL
-    ].each do |var|
-      next if contents =~ /^#{Regexp.escape(var)}=.+$/
-      UI.user_error!("#{var} is missing or empty in .env — the POI card's Photos & Reviews embed will silently disappear in this build")
+  end
+
+  # Warn when the documented marketing version (app.json → expo.version, per
+  # docs/ios-release.md) drifts from the value actually shipped. Info.plist
+  # hard-codes CFBundleShortVersionString, so bumping app.json alone does not
+  # change the binary unless the project is regenerated with `expo prebuild`.
+  private_lane :verify_version_alignment do
+    app_version = JSON.parse(File.read(File.expand_path("../app.json", __dir__)))["expo"]["version"]
+    plist_version = get_info_plist_value(
+      path: File.expand_path("../ios/PolarisMaps/Info.plist", __dir__),
+      key: "CFBundleShortVersionString",
+    )
+    if app_version == plist_version
+      UI.success("Marketing version aligned: #{app_version}")
+    else
+      UI.important(
+        "Marketing version drift: app.json=#{app_version} but Info.plist=#{plist_version}. " \
+          "Run `npx expo prebuild` (or update Info.plist) so the shipped version matches app.json."
+      )
     end
-    UI.success(".env contains the MapKit JS embed configuration")
   end
 
   # ── Beta lane: Build & upload to TestFlight ─────────────────────
@@ -79,6 +95,7 @@ platform :ios do
     )
 
     ensure_app_env
+    verify_version_alignment
 
     # Quick validation before building
     UI.header("Step 1/7: Validating project")
@@ -207,6 +224,7 @@ platform :ios do
     )
 
     ensure_app_env
+    verify_version_alignment
 
     UI.important("⚠️  This lane uploads a release build to App Store Connect.")
     UI.important("    It will NOT submit for App Review automatically.")
