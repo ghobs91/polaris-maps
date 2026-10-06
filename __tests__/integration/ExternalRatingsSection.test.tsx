@@ -259,6 +259,43 @@ describe('ExternalRatingsSection', () => {
     expect(openURLMock).toHaveBeenCalledWith(TA_LISTING_URL);
   });
 
+  it('shows a loading row while ratings resolve', async () => {
+    // Never resolves: the row stays in the loading state.
+    mockResolveKnownListing.mockImplementation(() => new Promise(() => {}));
+
+    const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    await waitFor(() => expect(screen.getByTestId('external-ratings-loading')).toBeTruthy());
+    expect(screen.queryByTestId('external-ratings-combined')).toBeNull();
+    expect(screen.queryByTestId('external-ratings-empty')).toBeNull();
+  });
+
+  it('offers "write the first review" when no rating is found', async () => {
+    mockResolveKnownListing.mockResolvedValue(null);
+    const onWriteReview = jest.fn();
+
+    const screen = render(
+      <ExternalRatingsSection poi={makePoi('Foo Bar')} onWriteReview={onWriteReview} />,
+    );
+
+    // Settle both providers by failing their WebView stages.
+    await waitFor(() => expect(webViewProps()?.source).toBeTruthy());
+    const firstError = webViewProps().onError as () => void;
+    act(() => firstError());
+    await waitFor(() => expect(webViewProps()?.source).toBeTruthy());
+    const secondError = webViewProps().onError as () => void;
+    act(() => secondError());
+
+    await waitFor(() => {
+      expect(screen.getByTestId('external-ratings-empty')).toBeTruthy();
+    });
+    expect(screen.getByText('No ratings yet — write the first review')).toBeTruthy();
+
+    act(() => {
+      fireEvent.press(screen.getByTestId('external-ratings-write-review'));
+    });
+    expect(onWriteReview).toHaveBeenCalledTimes(1);
+  });
+
   it('stays hidden when the extraction is an anti-bot challenge page', async () => {
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),

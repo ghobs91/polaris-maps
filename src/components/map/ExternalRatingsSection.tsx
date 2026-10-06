@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useExternalRatings } from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
@@ -37,9 +38,12 @@ const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
 export function ExternalRatingsSection({
   poi,
   enrichedFormattedAddress,
+  onWriteReview,
 }: {
   poi: OsmPoi;
   enrichedFormattedAddress?: string | null;
+  /** Opens the write-a-review surface when no external rating is found. */
+  onWriteReview?: () => void;
 }) {
   const { colors } = useTheme();
 
@@ -64,6 +68,11 @@ export function ExternalRatingsSection({
     .filter((s) => s.status === 'loaded' && s.summary)
     .map((s) => s.summary as ExternalRatingSummary);
   const combined = combineExternalRatings(loaded);
+  // Idle counts as resolving too, so the empty state never flashes before the
+  // first resolution pass starts.
+  const resolving = states.some(
+    (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
+  );
 
   const handleMessageEvent = useCallback(
     (provider: ExternalRatingProviderId) => (event: { nativeEvent: { data: string } }) => {
@@ -96,7 +105,51 @@ export function ExternalRatingsSection({
 
       {combined ? (
         <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
-      ) : null}
+      ) : resolving ? (
+        <LoadingBlock colors={colors} />
+      ) : (
+        <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
+      )}
+    </View>
+  );
+}
+
+function LoadingBlock({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={styles.section} testID="external-ratings-loading">
+      <View style={[styles.statusRow, { borderBottomColor: colors.border }]}>
+        <ActivityIndicator size="small" color={colors.textSecondary} />
+        <Text style={[styles.statusText, { color: colors.textSecondary }]}>Loading ratings…</Text>
+      </View>
+    </View>
+  );
+}
+
+function EmptyBlock({
+  colors,
+  onWriteReview,
+}: {
+  colors: ReturnType<typeof useTheme>['colors'];
+  onWriteReview?: () => void;
+}) {
+  return (
+    <View style={styles.section} testID="external-ratings-empty">
+      <Pressable
+        onPress={onWriteReview}
+        disabled={!onWriteReview}
+        accessibilityRole="button"
+        accessibilityLabel="No ratings yet. Write the first review"
+        style={({ pressed }) => [
+          styles.writeCta,
+          { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+        ]}
+        testID="external-ratings-write-review"
+      >
+        <MaterialCommunityIcons name="star-outline" size={18} color={colors.primary} />
+        <Text style={[styles.writeCtaText, { color: colors.primary }]}>
+          No ratings yet — write the first review
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -231,5 +284,29 @@ const styles = StyleSheet.create({
   observed: {
     ...typography.caption,
     marginLeft: 'auto',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  statusText: {
+    ...typography.bodySmall,
+  },
+  writeCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  writeCtaText: {
+    ...typography.label,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

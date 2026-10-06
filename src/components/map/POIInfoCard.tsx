@@ -722,6 +722,26 @@ export function POIInfoCard() {
     });
   }, [poi, detailsTarget, router, setSelectedPoi]);
 
+  // Opens the write-a-review surface directly (used when no external rating is
+  // found, so the ratings row invites the first community review instead).
+  const handleWriteReview = useCallback(async () => {
+    if (!poi) return;
+    const placeId =
+      detailsTarget?.placeId ??
+      (await findPlaceIdNear(poi.lat, poi.lng, poi.name).catch(() => null));
+    setSelectedPoi(null);
+    router.push({
+      pathname: '/poi/reviews',
+      params: {
+        id: placeId ?? `osm:${poi.type}/${poi.id}`,
+        osmId: String(poi.id),
+        name: poi.name,
+        lat: String(poi.lat),
+        lng: String(poi.lng),
+      },
+    });
+  }, [poi, detailsTarget, router, setSelectedPoi]);
+
   // Resolve the local place (if any) once per selected POI so the Reviews
   // affordance can show the on-device review count.
   useEffect(() => {
@@ -1191,6 +1211,13 @@ export function POIInfoCard() {
               ))}
             </ScrollView>
 
+            {/* ── Reviews: TripAdvisor + Yelp aggregate (on-device headless browse) ── */}
+            <ExternalRatingsSection
+              poi={poi}
+              enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
+              onWriteReview={handleWriteReview}
+            />
+
             {/* ── Photos: POI website + open-licensed supplements (Wikimedia) ── */}
             <PlaceMediaCarousel
               lat={poi.lat}
@@ -1201,12 +1228,6 @@ export function POIInfoCard() {
               tags={poi.tags}
               resetKey={poi.id}
               online={isOnline}
-            />
-
-            {/* ── External ratings: TripAdvisor + Yelp (on-device headless browse) ── */}
-            <ExternalRatingsSection
-              poi={poi}
-              enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
             />
 
             <RNModal
