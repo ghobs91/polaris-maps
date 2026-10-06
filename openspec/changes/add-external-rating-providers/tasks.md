@@ -49,6 +49,8 @@
 - [x] 11.1 Source pills inline to the right of the combined aggregate; drop the "Observed …" label
 - [x] 11.2 Bordered, labelled "Reviews" and "Photos" sections on the place card
 - [x] 11.3 Float the street-view thumbnail over the map, anchored top-left (`StreetViewThumbOverlay` + extended `streetViewStore`)
+- [x] 11.5 Wrap Reviews and Photos in the same glass section container as the address block (label inside the container)
+- [x] 11.6 Remove the per-photo captions from the carousel strip; keep attribution in the expanded viewer
 - [ ] 11.4 On-device check: section borders/labels, pill alignment, and street-view overlay position on both display layouts
 
 ## 10. Reviews row placement and states
