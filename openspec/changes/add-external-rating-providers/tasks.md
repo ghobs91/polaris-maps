@@ -44,6 +44,14 @@
 - [x] 6.4 Keep the hidden WebView 0×0/`pointerEvents="none"` with a 20s timeout and abort-on-unmount, as today
 - [x] 6.5 Update `__tests__/integration/TripadvisorRatingCard.test.tsx` into a two-provider, two-stage (search → listing) integration test simulating `onMessage`
 
+## 10. Reviews row placement and states
+
+- [x] 10.1 Move `ExternalRatingsSection` above `PlaceMediaCarousel` in `POIInfoCard`
+- [x] 10.2 Loading indicator while ratings resolve
+- [x] 10.3 Empty "write the first review" CTA wired to the reviews compose route
+- [x] 10.4 Integration tests for the loading and empty states
+- [ ] 10.5 On-device check: row sits above photos, shows loading, then either the combined rating or the write CTA
+
 ## 9. Combined aggregate and provider pills
 
 - [x] 9.1 Add `combine.ts` — count-weighted mean rating, summed exact count, source list, most-recent observed time; unweighted fallback when all counts are zero

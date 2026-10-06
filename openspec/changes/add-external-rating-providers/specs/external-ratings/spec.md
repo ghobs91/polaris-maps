@@ -195,6 +195,29 @@ or challenged extraction SHALL be discarded rather than displayed.
 - **WHEN** the review count cannot be parsed as an exact non-negative integer
 - **THEN** the extraction is discarded
 
+### Requirement: Reviews row placement and states
+
+The reviews row SHALL appear above the place-photo carousel on the place card.
+While ratings are being resolved it SHALL show a loading indicator, and when no
+rating is found it SHALL show a write-the-first-review invitation that opens the
+review-compose surface.
+
+#### Scenario: Row above photos
+
+- **WHEN** the place card renders
+- **THEN** the reviews row appears above the photo carousel
+
+#### Scenario: Loading indicator
+
+- **WHEN** ratings are still resolving
+- **THEN** the row shows a loading indicator
+
+#### Scenario: No rating found
+
+- **WHEN** resolution settles with no rating
+- **THEN** the row shows a write-the-first-review invitation
+- **AND** pressing it opens the review-compose surface
+
 ### Requirement: Combined rating attribution
 
 The combined aggregate SHALL show the rating, the total exact review count, and
