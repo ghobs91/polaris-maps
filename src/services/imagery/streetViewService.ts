@@ -81,6 +81,16 @@ async function requestJson(url: string): Promise<unknown | null> {
 
 // ── Panoramax (STAC GeoJSON) ────────────────────────────────────────
 
+/**
+ * Epoch seconds from a timestamp that may be epoch seconds or milliseconds.
+ * Mapillary reports `captured_at` in milliseconds; Panoramax in seconds — this
+ * normalizes both to the `StreetViewPanorama.capturedAt` contract.
+ */
+function toEpochSeconds(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+  return Math.floor(value >= 1e12 ? value / 1000 : value);
+}
+
 /** Normalize a Panoramax STAC feature collection into panoramas. */
 export function normalizePanoramax(payload: unknown): StreetViewPanorama[] {
   const features = (payload as { features?: unknown[] })?.features;
@@ -99,14 +109,15 @@ export function normalizePanoramax(payload: unknown): StreetViewPanorama[] {
     if (!coords || !imageUrl) continue;
 
     const datetime = f.properties?.datetime as string | undefined;
-    const capturedAt = datetime ? Math.floor(Date.parse(datetime) / 1000) : undefined;
+    const parsedMs = datetime ? Date.parse(datetime) : Number.NaN;
+    const capturedAt = Number.isFinite(parsedMs) ? toEpochSeconds(parsedMs) : undefined;
 
     items.push({
       id: `panoramax:${f.id ?? `${coords[0]},${coords[1]}`}`,
       source: 'panoramax',
       lat: coords[1],
       lng: coords[0],
-      capturedAt: Number.isFinite(capturedAt) ? capturedAt : undefined,
+      capturedAt,
       isPano: true,
       imageUrl,
       thumbnailUrl: f.assets?.thumb?.href,
@@ -161,7 +172,7 @@ export function normalizeMapillary(payload: unknown): StreetViewPanorama[] {
       source: 'mapillary',
       lat: coords[1],
       lng: coords[0],
-      capturedAt: typeof image.captured_at === 'number' ? image.captured_at : undefined,
+      capturedAt: toEpochSeconds(image.captured_at),
       bearing: typeof image.compass_angle === 'number' ? image.compass_angle : undefined,
       isPano: image.is_pano === true,
       imageUrl,

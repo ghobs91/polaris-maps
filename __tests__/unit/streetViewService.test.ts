@@ -90,6 +90,19 @@ describe('normalizeMapillary', () => {
     });
     expect(items[1].isPano).toBe(false);
   });
+
+  it('normalizes milliseconds captured_at to epoch seconds', () => {
+    // Mapillary reports captured_at in ms (1700000000000); the contract is seconds.
+    const [pano] = normalizeMapillary(mapillaryPayload);
+    expect(pano.capturedAt).toBe(1_700_000_000);
+  });
+
+  it('leaves an already-seconds captured_at untouched', () => {
+    const [pano] = normalizeMapillary({
+      data: [{ ...mapillaryPayload.data[0], captured_at: 1_700_000_000 }],
+    });
+    expect(pano.capturedAt).toBe(1_700_000_000);
+  });
 });
 
 describe('findStreetViewPanoramas', () => {

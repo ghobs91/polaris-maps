@@ -23,8 +23,11 @@ const SOURCE_LABELS: Record<StreetViewPanorama['source'], string> = {
 /** Human-readable capture date for the timeline (e.g. "Sep 5, 2025"). */
 function formatCaptureDate(capturedAt?: number): string {
   if (!capturedAt) return 'Date unknown';
-  const date = new Date(capturedAt * 1000);
-  if (Number.isNaN(date.getTime())) return 'Date unknown';
+  // Defensive: accept epoch seconds or milliseconds, and reject nonsense years.
+  const ms = capturedAt >= 1e12 ? capturedAt : capturedAt * 1000;
+  const date = new Date(ms);
+  const year = date.getFullYear();
+  if (Number.isNaN(date.getTime()) || year < 1900 || year > 2100) return 'Date unknown';
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
