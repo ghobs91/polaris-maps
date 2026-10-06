@@ -15,6 +15,7 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('../../src/contexts/ThemeContext', () => ({
   useTheme: () => ({
+    isDark: true,
     colors: {
       backgroundDark: '#10101C',
       border: '#444444',
@@ -23,6 +24,7 @@ jest.mock('../../src/contexts/ThemeContext', () => ({
       textSecondary: '#A0A0B8',
       primary: '#0A84FF',
       warning: '#FF9F0A',
+      glass: { background: 'rgba(20,20,24,0.6)' },
     },
   }),
 }));

@@ -3,8 +3,9 @@ import { FlatList, Linking, Modal, Pressable, StyleSheet, Text, View } from 'rea
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { borderRadius, spacing, typography } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
+import { GlassView } from '../common/GlassView';
 import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import { getConnectivity } from '../../services/regions/connectivityService';
 import {
@@ -175,61 +176,64 @@ export function PlaceMediaCarousel({
   if (items.length === 0) {
     if (!offline) return null;
     return (
-      <View style={styles.section} testID="place-media-empty">
+      <GlassView
+        material="regular"
+        style={[styles.section, { borderColor: colors.border }]}
+        testID="place-media-empty"
+      >
         <Text style={styles.title}>Photos</Text>
         <View style={[styles.emptyState, { borderColor: colors.border }]}>
           <Ionicons name="cloud-offline-outline" size={18} color={colors.textSecondary} />
           <Text style={styles.emptyText}>Photos are unavailable offline</Text>
         </View>
-      </View>
+      </GlassView>
     );
   }
 
   return (
-    <View style={styles.section} testID="place-media-section">
+    <GlassView
+      material="regular"
+      style={[styles.section, { borderColor: colors.border }]}
+      testID="place-media-section"
+    >
       <Text style={styles.title}>Photos</Text>
-      <View style={[styles.box, { borderColor: colors.border }]}>
-        <FlatList
-          data={visible}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={(item) => item.url}
-          contentContainerStyle={styles.strip}
-          testID="place-media-strip"
-          renderItem={({ item, index }) => {
-            const caption = item.attribution ?? item.source;
-            return (
-              <Pressable
-                testID={`place-media-thumb-${index}`}
-                accessibilityRole="button"
-                accessibilityLabel={`Open photo ${index + 1}, ${caption}`}
-                onPress={() => setViewerIndex(index)}
-                style={styles.thumbWrap}
-              >
-                {item.thumbnailUrl ? (
-                  <Image
-                    source={{ uri: item.thumbnailUrl }}
-                    style={[styles.thumb, { borderColor: colors.border }]}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    onError={() => handleError(item.url)}
-                    accessibilityIgnoresInvertColors
-                  />
-                ) : (
-                  <View
-                    style={[styles.thumb, styles.thumbPlaceholder, { borderColor: colors.border }]}
-                  >
-                    <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
-                  </View>
-                )}
-                <Text style={styles.caption} numberOfLines={1}>
-                  {caption}
-                </Text>
-              </Pressable>
-            );
-          }}
-        />
-      </View>
+      <FlatList
+        data={visible}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(item) => item.url}
+        contentContainerStyle={styles.strip}
+        testID="place-media-strip"
+        renderItem={({ item, index }) => {
+          const caption = item.attribution ?? item.source;
+          return (
+            <Pressable
+              testID={`place-media-thumb-${index}`}
+              accessibilityRole="button"
+              accessibilityLabel={`Open photo ${index + 1}, ${caption}`}
+              onPress={() => setViewerIndex(index)}
+              style={styles.thumbWrap}
+            >
+              {item.thumbnailUrl ? (
+                <Image
+                  source={{ uri: item.thumbnailUrl }}
+                  style={[styles.thumb, { borderColor: colors.border }]}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  onError={() => handleError(item.url)}
+                  accessibilityIgnoresInvertColors
+                />
+              ) : (
+                <View
+                  style={[styles.thumb, styles.thumbPlaceholder, { borderColor: colors.border }]}
+                >
+                  <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                </View>
+              )}
+            </Pressable>
+          );
+        }}
+      />
 
       <Modal
         visible={current != null}
@@ -289,20 +293,21 @@ export function PlaceMediaCarousel({
           ) : null}
         </View>
       </Modal>
-    </View>
+    </GlassView>
   );
 }
 
 const createStyles = ({ colors }: Theme) =>
   StyleSheet.create({
-    section: { marginHorizontal: spacing.md, marginBottom: spacing.md },
-    title: { ...typography.label, color: colors.text, marginBottom: spacing.sm },
-    box: {
-      borderWidth: StyleSheet.hairlineWidth,
+    section: {
+      marginHorizontal: spacing.md,
+      marginBottom: spacing.md,
       borderRadius: borderRadius.lg,
       borderCurve: 'continuous',
-      padding: spacing.sm,
+      overflow: 'hidden',
+      padding: spacing.md,
     },
+    title: { ...typography.label, color: colors.text, marginBottom: spacing.sm },
     strip: { gap: spacing.sm },
     thumbWrap: { width: 120 },
     thumb: {
@@ -313,7 +318,6 @@ const createStyles = ({ colors }: Theme) =>
       backgroundColor: colors.surface,
     },
     thumbPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-    caption: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
     emptyState: {
       flexDirection: 'row',
       alignItems: 'center',

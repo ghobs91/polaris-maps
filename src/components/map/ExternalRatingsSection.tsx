@@ -3,6 +3,7 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'r
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
+import { GlassView } from '../common/GlassView';
 import { useExternalRatings } from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
 import {
@@ -83,38 +84,41 @@ export function ExternalRatingsSection({
   );
 
   return (
-    <View testID="external-ratings-section" style={styles.section}>
+    <GlassView
+      material="regular"
+      testID="external-ratings-section"
+      style={[styles.section, { borderColor: colors.border }]}
+    >
       <Text style={[styles.title, { color: colors.text }]}>Reviews</Text>
-      <View style={[styles.box, { borderColor: colors.border }]}>
-        {activeWebView ? (
-          <View style={styles.hiddenWebView} pointerEvents="none">
-            <WebView
-              key={activeWebView.provider}
-              source={{ uri: activeWebView.uri }}
-              style={styles.hiddenWebView}
-              injectedJavaScript={activeWebView.injectedJavaScript}
-              javaScriptEnabled
-              domStorageEnabled
-              sharedCookiesEnabled
-              thirdPartyCookiesEnabled
-              mediaPlaybackRequiresUserAction
-              setSupportMultipleWindows={false}
-              onMessage={handleMessageEvent(activeWebView.provider)}
-              onError={() => handleError(activeWebView.provider)}
-              onHttpError={() => handleError(activeWebView.provider)}
-            />
-          </View>
-        ) : null}
 
-        {combined ? (
-          <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
-        ) : resolving ? (
-          <LoadingBlock colors={colors} />
-        ) : (
-          <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
-        )}
-      </View>
-    </View>
+      {activeWebView ? (
+        <View style={styles.hiddenWebView} pointerEvents="none">
+          <WebView
+            key={activeWebView.provider}
+            source={{ uri: activeWebView.uri }}
+            style={styles.hiddenWebView}
+            injectedJavaScript={activeWebView.injectedJavaScript}
+            javaScriptEnabled
+            domStorageEnabled
+            sharedCookiesEnabled
+            thirdPartyCookiesEnabled
+            mediaPlaybackRequiresUserAction
+            setSupportMultipleWindows={false}
+            onMessage={handleMessageEvent(activeWebView.provider)}
+            onError={() => handleError(activeWebView.provider)}
+            onHttpError={() => handleError(activeWebView.provider)}
+          />
+        </View>
+      ) : null}
+
+      {combined ? (
+        <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
+      ) : resolving ? (
+        <LoadingBlock colors={colors} />
+      ) : (
+        <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
+      )}
+    </GlassView>
   );
 }
 
@@ -226,17 +230,14 @@ const styles = StyleSheet.create({
   section: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    padding: spacing.md,
   },
   title: {
     ...typography.label,
     marginBottom: spacing.sm,
-  },
-  box: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: borderRadius.lg,
-    borderCurve: 'continuous',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
   },
   row: {
     flexDirection: 'row',

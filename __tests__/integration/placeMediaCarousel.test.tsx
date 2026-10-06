@@ -23,6 +23,7 @@ jest.mock('../../src/contexts/ThemeContext', () => ({
       text: '#000000',
       textSecondary: '#666666',
       primary: '#0A84FF',
+      glass: { background: 'rgba(250,250,252,0.6)' },
     },
   }),
 }));
@@ -98,7 +99,8 @@ describe('PlaceMediaCarousel', () => {
     const screen = renderCarousel();
 
     await waitFor(() => expect(screen.getByTestId('place-media-thumb-0')).toBeTruthy());
-    expect(screen.getByText('Wikimedia Commons')).toBeTruthy();
+    // Captions are not shown under the strip thumbnails — only in the viewer.
+    expect(screen.queryByText('Wikimedia Commons')).toBeNull();
 
     fireEvent.press(screen.getByTestId('place-media-thumb-0'));
 
@@ -198,7 +200,8 @@ describe('PlaceMediaCarousel', () => {
 
     // 2 website photos + 2 open-licensed items, all in a single strip.
     expect(screen.getAllByTestId(/^place-media-thumb-\d+$/)).toHaveLength(4);
-    expect(screen.getAllByText('From the web · example.com')).toHaveLength(2);
-    expect(screen.getByText('Wikimedia Commons')).toBeTruthy();
+    // No per-photo captions in the strip.
+    expect(screen.queryByText('From the web · example.com')).toBeNull();
+    expect(screen.queryByText('Wikimedia Commons')).toBeNull();
   });
 });
