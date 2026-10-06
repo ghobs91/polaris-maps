@@ -17,4 +17,4 @@ Notes for review:
 - No advertising or analytics SDKs are included.
 
 Map data is © OpenStreetMap contributors (ODbL). Full details in
-Settings → About and at https://polarismaps.app/privacy.
+Settings → About and at https://app.polarismaps.app/privacy.

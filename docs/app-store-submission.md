@@ -22,7 +22,8 @@ of that is tracked here, so the first public release targets iOS.
 | App Privacy questionnaire answers          | ✅     | Drafted in `docs/app-store-privacy-answers.md`                            |
 | Privacy & Terms content                    | ✅     | `docs/privacy-policy.md`; served from `netlify-deploy/`                   |
 | Store listing copy                         | ✅     | `fastlane/metadata/en-US/`                                                |
-| **Host policy at polarismaps.app**         | ⬜     | Must resolve before review; deploy `netlify-deploy/privacy`               |
+| Host policy/terms                          | ✅     | Live at https://app.polarismaps.app/privacy (+ /terms)                    |
+| Support & marketing URLs                   | ⚠️     | Still point at the unhosted apex `polarismaps.app`; repoint or alias DNS  |
 | **Review contact + screenshots**           | ⬜     | Fill `review_information/` and capture shots (see `fastlane/screenshots`) |
 | **Fill `<DATE>` / `<CONTACT EMAIL>`**      | ⬜     | In the policy, terms, and metadata footer                                 |
 | Universal links on `polarismaps.app`       | 🟡     | Source + AASA migrated; AASA deploy + Apple capability/profile pending    |

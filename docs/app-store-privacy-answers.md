@@ -2,7 +2,7 @@
 
 Reference answers for the App Store Connect **App Privacy** questionnaire. These
 must match `ios/PolarisMaps/PrivacyInfo.xcprivacy` and the published policy at
-https://polarismaps.app/privacy.
+https://app.polarismaps.app/privacy.
 
 ## Data collection
 
@@ -58,6 +58,6 @@ History, Usage Data, Diagnostics, Purchases, etc. — are **not collected**.
 - Replace `<DATE>` and `<CONTACT EMAIL>` in
   `docs/privacy-policy.md`, `netlify-deploy/privacy/index.html`, and
   `netlify-deploy/terms/index.html`.
-- Publish the pages so https://polarismaps.app/privacy and
-  https://polarismaps.app/terms resolve, then confirm the App Store Connect
+- Publish the pages so https://app.polarismaps.app/privacy and
+  https://app.polarismaps.app/terms resolve, then confirm the App Store Connect
   **Privacy Policy URL** field points at the former.

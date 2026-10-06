@@ -357,14 +357,14 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           rightAdornment={
             <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
           }
-          onPress={() => Linking.openURL('https://polarismaps.app/privacy')}
+          onPress={() => Linking.openURL('https://app.polarismaps.app/privacy')}
         />
         <SettingsRow
           title="Terms of Service"
           rightAdornment={
             <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
           }
-          onPress={() => Linking.openURL('https://polarismaps.app/terms')}
+          onPress={() => Linking.openURL('https://app.polarismaps.app/terms')}
         />
       </SettingsGroup>
     </ScrollView>
