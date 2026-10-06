@@ -7,7 +7,7 @@ import {
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
-import { colors, spacing, typography } from '../../constants/theme';
+import { spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from './GlassView';
 import { SFSymbol } from './SFSymbol';

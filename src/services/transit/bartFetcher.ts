@@ -45,17 +45,6 @@ interface BartRouteInfoStation {
   gtfs_longitude: string;
 }
 
-interface BartRouteInfo {
-  name: string;
-  abbr: string;
-  number: string;
-  color: string;
-  hexcolor: string;
-  config: {
-    station: BartRouteInfoStation | BartRouteInfoStation[];
-  };
-}
-
 // ── Cache ─────────────────────────────────────────────────────────────
 
 let cachedLines: TransitRouteLine[] | null = null;

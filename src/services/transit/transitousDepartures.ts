@@ -96,7 +96,6 @@ export async function fetchTransitousDepartures(
       const estMs = ev.departure.estimatedTime
         ? new Date(ev.departure.estimatedTime).getTime()
         : schedMs;
-      const delaySeconds = ev.departure.delaySeconds ?? Math.round((estMs - schedMs) / 1000);
       const isRealtime = !!ev.departure.estimatedTime;
       const effectiveMs = isRealtime ? estMs : schedMs;
 

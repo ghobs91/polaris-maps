@@ -62,7 +62,6 @@ export default function OsmEditScreen() {
   // Auth
   const accessToken = useOsmAuthStore((s) => s.accessToken);
   const user = useOsmAuthStore((s) => s.user);
-  const isLoggingIn = useOsmAuthStore((s) => s.isLoggingIn);
   const login = useOsmAuthStore((s) => s.login);
   const hydrate = useOsmAuthStore((s) => s.hydrate);
   const hydrated = useOsmAuthStore((s) => s.hydrated);

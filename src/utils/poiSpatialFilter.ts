@@ -40,12 +40,10 @@ function toPixel(lat: number, lng: number, zoom: number): { x: number; y: number
 }
 
 /**
- * Approximate marker dimensions in screen pixels.
- * `MARKER_*` covers the icon footprint; `LABEL_*` tracks the actual truncated
- * text footprint used in POILayer so label filtering matches what users see.
+ * Approximate label dimensions in screen pixels. `LABEL_*` tracks the actual
+ * truncated text footprint used in POILayer so label filtering matches what
+ * users see.
  */
-const MARKER_W = 24;
-const MARKER_H = 24;
 const LABEL_W = 104;
 const LABEL_H = 30;
 

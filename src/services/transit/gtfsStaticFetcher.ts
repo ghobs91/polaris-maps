@@ -32,17 +32,10 @@ export type {
 import {
   extractZipTexts,
   parseCsv,
-  parseGtfsColor,
-  routeTypeToMode,
   convertFeedToLines,
   parseGtfsFeed,
   type GtfsFetcherConfig,
   type GtfsFeedData,
-  type GtfsRoute,
-  type GtfsStop,
-  type GtfsTrip,
-  type GtfsStopTime,
-  type GtfsShapePoint,
 } from './gtfsParser';
 
 // ── Persistent cache (MMKV) ─────────────────────────────────────────

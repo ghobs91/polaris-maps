@@ -17,7 +17,6 @@ import {
   type GtfsFeedData,
 } from './gtfsParser';
 import type { TransitRouteLine } from '../../models/transit';
-import { TRANSIT_FEED_CACHE_TTL_MS } from '../../constants/config';
 
 export interface BoundingBox {
   minLat: number;

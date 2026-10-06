@@ -66,7 +66,6 @@ import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
-import { searchByCategory } from '../../services/poi/categorySearchService';
 import { fetchOsmPoisByTags, type OsmPoi } from '../../services/poi/osmFetcher';
 import {
   fetchChargingStations,
@@ -199,42 +198,6 @@ function mergeChargingPois(osmPois: OsmPoi[], ocmPois: OsmPoi[]): OsmPoi[] {
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
-
-/** Map Apple MKPointOfInterestCategory raw values to OSM-style subtypes for POI pill icons. */
-function mapAppleCategory(category?: string): string {
-  if (!category) return 'place';
-  const map: Record<string, string> = {
-    MKPOICategoryRestaurant: 'restaurant',
-    MKPOICategoryCafe: 'cafe',
-    MKPOICategoryBakery: 'bakery',
-    MKPOICategoryNightlife: 'bar',
-    MKPOICategoryGasStation: 'fuel',
-    MKPOICategoryParking: 'parking',
-    MKPOICategoryHospital: 'hospital',
-    MKPOICategoryPharmacy: 'pharmacy',
-    MKPOICategorySchool: 'school',
-    MKPOICategoryUniversity: 'university',
-    MKPOICategoryLibrary: 'library',
-    MKPOICategoryMuseum: 'museum',
-    MKPOICategoryTheater: 'theatre',
-    MKPOICategoryPark: 'park',
-    MKPOICategoryBeach: 'beach',
-    MKPOICategoryStore: 'shop',
-    MKPOICategoryGrocery: 'supermarket',
-    MKPOICategoryFitnessCenter: 'fitness_centre',
-    MKPOICategoryHotel: 'hotel',
-    MKPOICategoryBank: 'bank',
-    MKPOICategoryATM: 'atm',
-    MKPOICategoryPostOffice: 'post_office',
-    MKPOICategoryLaundry: 'laundry',
-    MKPOICategoryCarRental: 'car_rental',
-    MKPOICategoryAmusementPark: 'theme_park',
-    MKPOICategoryAquarium: 'aquarium',
-    MKPOICategoryZoo: 'zoo',
-    MKPOICategoryMovieTheater: 'cinema',
-  };
-  return map[category] ?? 'place';
-}
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -1556,7 +1519,6 @@ export function FloatingSearchPanel({
         name: selectedResult.entry.text,
       };
 
-      const enabledModes = useTransitStore.getState().enabledModes;
       const timeState = useTransitStore.getState();
       const itineraries = await planTransitTrip({
         from: origin,

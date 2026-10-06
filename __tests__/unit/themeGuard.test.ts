@@ -15,7 +15,6 @@ const ALLOWLIST = [
   'app/poi/edit.tsx',
   'app/poi/osm-edit.tsx',
   'app/poi/reviews.tsx',
-  'src/components/common/Button.tsx',
   'src/components/imagery/ImageryViewer.tsx',
   'src/components/map/LocationActionPanel.tsx',
   'src/components/map/MapView.tsx',

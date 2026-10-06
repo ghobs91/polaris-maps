@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, Dimensions, Image } from 'react-native';
 import { colors, spacing, typography, borderRadius } from '../../constants/theme';
 import type { StreetImagery } from '../../models/imagery';

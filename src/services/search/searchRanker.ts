@@ -92,8 +92,8 @@ function computeScore(
   parsed: ParsedSearchQuery,
   distanceKm: number,
   context: RankingContext | undefined,
-  refLat: number,
-  refLng: number,
+  _refLat: number,
+  _refLng: number,
 ): number {
   let score = 0;
   const viewport = context?.viewport;

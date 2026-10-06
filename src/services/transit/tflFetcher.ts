@@ -170,7 +170,7 @@ async function doFetchTflLines(): Promise<TransitRouteLine[]> {
 
     cachedLines = result;
     return result;
-  } catch (e) {
+  } catch {
     cachedLines = [];
     return [];
   } finally {
