@@ -7,6 +7,12 @@ interface StreetViewState {
   /** Whether the street-view coverage overlay is drawn on the map. */
   streetViewLayerVisible: boolean;
   setStreetViewLayerVisible: (visible: boolean) => void;
+  /**
+   * Street-level preview thumbnail for the selected place, floated over the map
+   * by the map screen. Null when no panorama exists.
+   */
+  thumbUrl: string | null;
+  setThumbUrl: (thumbUrl: string | null) => void;
 }
 
 export const useStreetViewStore = create<StreetViewState>()((set) => ({
@@ -15,4 +21,6 @@ export const useStreetViewStore = create<StreetViewState>()((set) => ({
     set({ streetViewLayerVisible: visible });
     storage.set(STREET_VIEW_LAYER_KEY, visible);
   },
+  thumbUrl: null,
+  setThumbUrl: (thumbUrl) => set({ thumbUrl }),
 }));

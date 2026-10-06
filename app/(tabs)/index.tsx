@@ -10,6 +10,7 @@ import { ParkingSpotCard } from '@/components/map/ParkingSpotCard';
 import { FloatingMenuPanel } from '@/components/map/FloatingMenuPanel';
 import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
+import { StreetViewThumbOverlay } from '@/components/map/StreetViewThumbOverlay';
 import { TrafficCoverageBadge } from '@/components/map/TrafficCoverageBadge';
 import { TransitStopCard } from '@/components/map/TransitStopCard';
 import { useMapStore } from '@/stores/mapStore';
@@ -201,6 +202,11 @@ export default function MapScreen() {
             <TrafficCoverageBadge />
           </View>
 
+          <StreetViewThumbOverlay
+            top={insets.top + spacing.sm + 52}
+            left={spacing.md + LARGE_FLOATING_PANEL_WIDTH + LARGE_FLOATING_PANEL_GAP}
+          />
+
           <POIInfoCard />
           <TransitStopCard />
           <ParkingSpotCard />
@@ -238,6 +244,7 @@ export default function MapScreen() {
         >
           <TrafficCoverageBadge />
         </View>
+        <StreetViewThumbOverlay top={insets.top + 72} left={spacing.md} />
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <POIInfoCard />
         <TransitStopCard />

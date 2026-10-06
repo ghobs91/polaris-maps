@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Pressable,
   StyleSheet,
   Linking,
   ScrollView,
@@ -21,6 +20,7 @@ import { BottomSheet } from '../common/BottomSheet';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useMapStore } from '../../stores/mapStore';
 import { usePeerStore } from '../../stores/peerStore';
+import { useStreetViewStore } from '../../stores/streetViewStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
@@ -55,7 +55,6 @@ import {
 const POI_SHEET_SNAPS = [0.55, 0.85] as const;
 /** Apples-Maps-style: at most this many action pills visible, rest scroll. */
 const VISIBLE_ACTION_PILLS = 4;
-const STREETVIEW_THUMB_SIZE = 72;
 
 const WEBSITE_ACTION_LABELS: Record<WebsiteActionKind, string> = {
   order: 'Order',
@@ -595,8 +594,11 @@ export function POIInfoCard() {
   const pillSecondaryContent = isDark ? colors.primaryLight : primary;
   const pillSecondaryBorder = isDark ? 'rgba(64,156,255,0.35)' : 'rgba(0,122,255,0.25)';
 
-  // Street-level preview thumbnail (Mapillary first, then open Panoramax).
-  const [streetViewThumb, setStreetViewThumb] = useState<string | null>(null);
+  // Street-level preview thumbnail (Mapillary first, then open Panoramax). The
+  // URL is published to the store so the map screen can float it over the map
+  // (the action pill uses the local `streetViewFound` flag).
+  const streetViewThumb = useStreetViewStore((s) => s.thumbUrl);
+  const setStreetViewThumb = useStreetViewStore((s) => s.setThumbUrl);
   // Whether the street-view lookup completed with at least one panorama.
   const [streetViewFound, setStreetViewFound] = useState(false);
   // Detected order / reserve / menu links on the venue website.
@@ -1113,24 +1115,7 @@ export function POIInfoCard() {
           </View>
         )}
 
-        {/* Street-level preview sits below the share/close row, top-left. */}
-        {poi && streetViewThumb && (
-          <Pressable
-            style={styles.streetViewThumb}
-            onPress={handleStreetView}
-            accessibilityRole="button"
-            accessibilityLabel="Open street view"
-          >
-            <Image
-              source={{ uri: streetViewThumb }}
-              style={styles.streetViewThumbImage}
-              resizeMode="cover"
-            />
-            <View style={styles.streetViewThumbBadge}>
-              <Ionicons name="binoculars-outline" size={12} color="#fff" />
-            </View>
-          </Pressable>
-        )}
+        {/* Street-level preview now floats over the map (StreetViewThumbOverlay). */}
 
         {poi && parsed && category && (
           <ScrollView
@@ -1414,35 +1399,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
-  },
-  streetViewThumb: {
-    marginLeft: spacing.md,
-    marginBottom: spacing.md,
-    width: STREETVIEW_THUMB_SIZE,
-    height: STREETVIEW_THUMB_SIZE,
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.85)',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
-  },
-  streetViewThumbImage: { width: '100%', height: '100%' },
-  streetViewThumbBadge: {
-    position: 'absolute',
-    left: 6,
-    bottom: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   topTitle: {
     flex: 1,
