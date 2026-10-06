@@ -1,3 +1,22 @@
+### Requirement: Search-card inline extraction
+
+When a provider search-result card carries an inline aggregate rating and an
+exact count, the app MAY use them directly without loading the listing page,
+but only when the card's identity is confirmed (name matches AND an address or
+`geo` signal matches). A card without a confirmation signal SHALL still load
+the listing page for confirmation.
+
+#### Scenario: Confirmed card answers directly
+
+- **WHEN** a search card shows a rating and count AND carries matching coordinates or address
+- **THEN** the rating is validated and displayed without a listing navigation
+
+#### Scenario: Unconfirmed card falls through
+
+- **WHEN** a search card shows a rating but exposes neither matching coordinates nor address
+- **THEN** the app loads the listing page for identity confirmation
+- **AND** no rating is displayed until that confirmation succeeds
+
 ## ADDED Requirements
 
 ### Requirement: Two-provider aggregate ratings

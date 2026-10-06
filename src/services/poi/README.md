@@ -77,10 +77,15 @@ confirms it (`identity.ts`), so a chain's sibling branch is never shown.
 
 Bounded browse policy (`externalRatings/antiBot.ts`): one hidden WebView at a
 time, per-host minimum interval + jitter, and a challenge/429 cool-down with
-exponential backoff and silent give-up. Explicitly NOT done: CAPTCHA solving,
-proxy/IP rotation, fingerprint spoofing, auth-wall bypass, or bulk harvesting.
-Ratings are transient and never persisted; only the aggregate number, exact
-count, listing identity, and source URL are read — no review text.
+exponential backoff and silent give-up. Challenge classification is calibrated:
+anti-bot script tags appear inside valid pages too, so markers are fatal only
+when no rating was extracted, and collectors re-read the page on an interval to
+absorb a DataDome interstitial that auto-resolves. A search card carrying an
+inline rating plus a confirmed identity (address/geo) is displayed without
+loading the listing. Explicitly NOT done: CAPTCHA solving, proxy/IP rotation,
+fingerprint spoofing, auth-wall bypass, or bulk harvesting. Ratings are
+transient and never persisted; only the aggregate number, exact count, listing
+identity, and source URL are read — no review text.
 
 ## Key Constants
 

@@ -167,6 +167,23 @@ renders each provider independently with attribution (provider name, rating, exa
 count, observed time, source link); a provider that fails or is absent renders nothing.
 No review text is requested, parsed, or stored.
 
+### Decision 8 (addendum): Warm-session browsing, calibrated challenge classification, inline search-card ratings
+
+Live probing changed the picture:
+
+- **Yelp's DataDome default mode is a JS interstitial that auto-resolves**, not a hard CAPTCHA. A warmed browser session fetched a real business page with complete JSON-LD (`rating 4.2`, `9,206 reviews`, name, address) after the interstitial cleared.
+- **DataDome script tags appear inside valid content pages.** A marker match alone is therefore _not_ a challenge verdict; the old "markers → discard" rule threw away good data.
+- **TripAdvisor `/Search` serves an interactive DataDome CAPTCHA** (`geo.captcha-delivery.com`) and stays out of scope per policy.
+
+Changes that follow:
+
+1. **Retriable collectors (`core.buildCollectorScript`).** Injected scripts no longer latch on the first empty read; they re-collect on an interval (5 attempts, 1–2.5 s apart) until data appears or attempts run out, so an interstitial is absorbed rather than fatal.
+2. **Calibrated challenge classification (`pageIsChallenge`).** Markers are fatal only when nothing was extracted. The generated collectors fold this in-page (`challenge = markers && !hasData`).
+3. **Inline search-card ratings.** A search candidate carrying rating + count _and_ a confirmation signal (address or `geo`) is validated and displayed without navigating to the listing — one request instead of two, avoiding the most-protected endpoint (Yelp biz pages). Name-only candidates still load the listing for identity confirmation, as before.
+4. **Session persistence.** WebViews use `sharedCookiesEnabled` so DataDome clearance cookies survive provider switches within the app run; the single-active-WebView serialization in `ExternalRatingsSection` is unchanged.
+
+**Decision 4 amendment:** the "fresh WebView per stage" model remains for controller simplicity, but stages may short-circuit (inline) and every stage's collector is retriable; cookie persistence across remounts is the session continuity mechanism.
+
 ## Risks / Trade-offs
 
 - **DOM churn breaks search parsing** (Yelp `data-testid`/`__NEXT_DATA__`, TripAdvisor

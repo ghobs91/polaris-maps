@@ -1,3 +1,40 @@
+### Requirement: Calibrated challenge classification
+
+Anti-bot markers (DataDome/Cloudflare/Akamai script tags or frames) SHALL NOT
+alone classify a page as a challenge, because valid content pages carry them. A
+page SHALL be classified as a challenge only when markers are present and no
+usable rating data was extracted from it.
+
+#### Scenario: Markers with valid data are served normally
+
+- **WHEN** a listing page embeds DataDome scripts AND exposes a complete JSON-LD aggregate rating
+- **THEN** the rating is extracted and displayed
+- **AND** the page is not treated as a challenge
+
+#### Scenario: Markers without data are a challenge
+
+- **WHEN** a page carries anti-bot markers and yields no rating data
+- **THEN** it is classified as a challenge and the host enters cool-down
+
+### Requirement: Retriable in-page collection
+
+Injected collectors SHALL re-read the page on an interval until data is
+available or a bounded number of attempts is exhausted, so a page briefly
+presenting an anti-bot interstitial is re-read once it clears. A collector SHALL
+post exactly once per page.
+
+#### Scenario: Interstitial clears during collection
+
+- **WHEN** the first collection pass finds nothing because a DataDome interstitial is presenting
+- **THEN** the collector re-reads on the retry interval
+- **AND** posts the result once data appears, without remounting the WebView
+
+#### Scenario: Attempts exhausted
+
+- **WHEN** no data is found after the bounded attempts
+- **THEN** the collector posts its final (empty/challenge) state once
+- **AND** the provider degrades silently
+
 ## ADDED Requirements
 
 ### Requirement: Allowed provider hosts only

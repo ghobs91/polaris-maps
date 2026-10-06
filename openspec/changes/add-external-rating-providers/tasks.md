@@ -44,6 +44,16 @@
 - [x] 6.4 Keep the hidden WebView 0×0/`pointerEvents="none"` with a 20s timeout and abort-on-unmount, as today
 - [x] 6.5 Update `__tests__/integration/TripadvisorRatingCard.test.tsx` into a two-provider, two-stage (search → listing) integration test simulating `onMessage`
 
+## 8. Warm-session hardening (addendum)
+
+- [x] 8.1 Calibrate challenge classification in `core.ts` — `hasChallengeMarkers` + `pageIsChallenge(html, extractedData)`; markers are fatal only when nothing was extracted (live Yelp pages embed DataDome scripts with valid content)
+- [x] 8.2 Add `core.buildCollectorScript` — retriable ES5 collector factory replacing the one-shot `SENT` latch; re-collects until data or bounded attempts run out
+- [x] 8.3 Rebuild all four injected scripts (TA/Yelp × listing/search) on the factory; challenge folds in-page (`challenge = markers && !hasData`)
+- [x] 8.4 Carry inline `rating`/`reviewCount` on search candidates (types, message parser, Yelp fetch + WebView scans)
+- [x] 8.5 Resolve inline from the controller: confirmed card (name + address/geo) displays without a listing navigation; unconfirmed falls through
+- [x] 8.6 Tests: challenge semantics + collector retry behavior, search-message rating fields, inline-resolution integration scenario
+- [ ] 8.7 On-device verification: confirm a warmed device WebView passes DataDome on Yelp (interstitial absorption) and that TA listings render
+
 ## 7. Docs and verification
 
 - [x] 7.1 Update `src/services/poi/README.md` with the provider registry, resolution order, and the bounded browse policy
