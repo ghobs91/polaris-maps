@@ -6,7 +6,6 @@ import {
   ALL_ROUTE_TYPES,
   parseGtfsFeed,
   convertFeedToLines,
-  DEFAULT_GTFS_MODE_MAP,
   extractZipTexts,
 } from '../../src/services/transit/gtfsParser';
 import type { GtfsFetcherConfig } from '../../src/services/transit/gtfsParser';

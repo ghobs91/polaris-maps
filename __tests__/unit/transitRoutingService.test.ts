@@ -312,11 +312,11 @@ describe('findEndpointForCoords (registry)', () => {
     expect(ep!.apiStyle).toBe('rest-v1');
   });
 
-  it('returns Entur endpoint for Oslo coordinates', () => {
+  it('returns the Norway GTFS endpoint for Oslo coordinates', () => {
     const ep = findEndpointForCoords(59.91, 10.75);
     expect(ep).not.toBeNull();
-    expect(ep!.label).toContain('Entur');
-    expect(ep!.apiStyle).toBe('transmodel-v3');
+    expect(ep!.label).toContain('Norway');
+    expect(ep!.apiStyle).toBe('no-gtfs-v1');
   });
 
   it('returns Transitous as global fallback for uncovered cities', () => {

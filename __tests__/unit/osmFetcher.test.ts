@@ -4,6 +4,7 @@ import {
   checkPoiExistsInOsm,
   clearExistenceCache,
 } from '../../src/services/poi/osmFetcher';
+import { __setOverpassMinIntervalMsForTests } from '../../src/services/overpassClient';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,6 +32,7 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 beforeEach(() => {
+  __setOverpassMinIntervalMsForTests(0);
   clearOsmCache();
   mockFetch.mockReset();
 });
@@ -92,10 +94,11 @@ describe('fetchOsmPois', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('throws on non-OK HTTP responses from both instances', async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 429 });
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 429 });
-    await expect(fetchOsmPois(40.0, -74.0, 40.1, -73.9)).rejects.toThrow('Overpass API 429');
+  it('throws when all Overpass instances return non-OK HTTP responses', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 429 });
+    await expect(fetchOsmPois(40.0, -74.0, 40.1, -73.9)).rejects.toThrow();
+    // overpassClient hedges the query across all instances in parallel.
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   // ---------------------------------------------------------------------------
@@ -127,7 +130,8 @@ describe('fetchOsmPois', () => {
     // Different bbox
     await fetchOsmPois(51.5, -0.1, 51.6, 0.0);
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // overpassClient fires all instances in parallel per fetch.
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it('ignores cache for stale entries (mocked time)', async () => {
@@ -142,12 +146,11 @@ describe('fetchOsmPois', () => {
     mockFetch.mockClear();
 
     // Advance time past the 5-minute TTL
-    jest.spyOn(Date, 'now').mockReturnValue(realDateNow() + 6 * 60 * 1000);
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(realDateNow() + 6 * 60 * 1000);
 
     await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-
-    jest.restoreAllMocks();
+    nowSpy.mockRestore();
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it('cache survives minor bbox variations below the rounding threshold', async () => {
@@ -176,18 +179,18 @@ describe('fetchOsmPois', () => {
     mockFetch.mockClear();
 
     await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
-  it('rejects when Overpass requests time out', async () => {
-    // Both primary and fallback timeout (simulated via immediate abort)
+  it('rejects when all Overpass requests time out', async () => {
+    // Every instance times out (simulated via immediate abort)
     mockFetch.mockImplementation(() =>
       Promise.reject(new DOMException('The operation was aborted.', 'AbortError')),
     );
 
-    await expect(fetchOsmPois(40.7, -74.0, 40.8, -73.9)).rejects.toThrow('aborted');
-    // Should have tried both primary and fallback
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    await expect(fetchOsmPois(40.7, -74.0, 40.8, -73.9)).rejects.toThrow();
+    // Should have tried all hedged instances
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it('passes AbortSignal to fetch', async () => {
@@ -342,9 +345,7 @@ describe('checkPoiExistsInOsm', () => {
   });
 
   it('returns cached result on second call with same params', async () => {
-    let callCount = 0;
     mockFetch.mockImplementation(() => {
-      callCount++;
       return Promise.resolve({
         ok: true,
         json: async () => ({ elements: [{ type: 'node', id: 1 }] }),

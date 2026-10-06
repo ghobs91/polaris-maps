@@ -1,8 +1,4 @@
-import {
-  filterPoisForDisplay,
-  STREET_LEVEL_POI_ZOOM,
-  ViewportBounds,
-} from '../../src/utils/poiSpatialFilter';
+import { filterPoisForDisplay, ViewportBounds } from '../../src/utils/poiSpatialFilter';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
 
 // ---------------------------------------------------------------------------

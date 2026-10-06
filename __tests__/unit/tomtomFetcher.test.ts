@@ -138,8 +138,8 @@ describe('sampleRoutePoints', () => {
       coords.push([-74.0 + i * 0.001, 40.7]);
     }
     const points = sampleRoutePoints(coords);
-    // 0.5° span with 0.008° spacing ≈ 63 samples
+    // 0.5° span with 0.005° spacing (ROUTE_SAMPLE_SPACING_DEG) ≈ 85 samples
     expect(points.length).toBeGreaterThanOrEqual(50);
-    expect(points.length).toBeLessThanOrEqual(80);
+    expect(points.length).toBeLessThanOrEqual(100);
   });
 });

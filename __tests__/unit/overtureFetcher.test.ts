@@ -57,11 +57,16 @@ beforeEach(() => {
   resetOverturePmtilesStateForTests();
   jest.clearAllMocks();
 
-  const txn: { runAsync: jest.Mock } = { runAsync: jest.fn().mockResolvedValue(undefined) };
+  const txn: { runAsync: jest.Mock; getAllAsync: jest.Mock } = {
+    runAsync: jest.fn().mockResolvedValue(undefined),
+    getAllAsync: jest.fn().mockResolvedValue([]),
+  };
   (getDatabase as jest.Mock).mockResolvedValue({
-    withExclusiveTransactionAsync: async (cb: (t: { runAsync: jest.Mock }) => Promise<void>) =>
-      cb(txn),
+    withExclusiveTransactionAsync: async (
+      cb: (t: { runAsync: jest.Mock; getAllAsync: jest.Mock }) => Promise<void>,
+    ) => cb(txn),
     execAsync: jest.fn().mockResolvedValue(undefined),
+    getFirstAsync: jest.fn().mockResolvedValue({ n: 0 }),
   });
 });
 

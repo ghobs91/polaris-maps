@@ -422,7 +422,6 @@ describe('navigation tracking lifecycle (global coordinator)', () => {
 
 describe('background navigation task handler', () => {
   function getHandler(): (body: unknown) => Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (TaskManager as any).__definedTasks[BACKGROUND_LOCATION_TASK];
     expect(handler).toBeDefined();
     return handler;

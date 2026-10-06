@@ -41,11 +41,21 @@ jest.mock('../../src/services/sync/hyperdriveBridge', () => ({
   seedRegion: jest.fn(),
   unseedRegion: jest.fn(),
 }));
+// Cut the native Hypercore chain (which pulls expo-crypto → expo-modules-core)
+// at the module boundary so the download-service import graph stays testable.
+jest.mock('../../src/native/hypercore', () => ({
+  joinFeed: jest.fn(),
+  leaveFeed: jest.fn(),
+  getEntry: jest.fn(),
+  getStatus: jest.fn(),
+  listFeeds: jest.fn(),
+}));
 jest.mock('react-native', () => ({
   NativeEventEmitter: jest.fn().mockImplementation(() => ({
     addListener: jest.fn(() => ({ remove: jest.fn() })),
   })),
   NativeModules: {},
+  TurboModuleRegistry: { get: jest.fn(() => null) },
 }));
 jest.mock('../../src/services/poi/overtureFetcher', () => ({
   fetchOverturePlaces: jest.fn(),

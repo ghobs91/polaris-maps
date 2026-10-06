@@ -328,11 +328,20 @@ describe('fetchTransitLines Amtrak BTS supplement', () => {
     });
     mockOverpass.mockResolvedValue({ elements: [] });
 
-    const result = await fetchTransitLines(38.85, -77.1, 38.95, -76.95);
+    // Collect the streamed results — sources push via onProgress and whichever
+    // finishes first resolves the promise.
+    let latest: Awaited<ReturnType<typeof fetchTransitLines>> = [];
+    const result = await fetchTransitLines(38.85, -77.1, 38.95, -76.95, (lines) => {
+      latest = lines;
+    });
 
-    // Both Amtrak and DC Metro Red Line should be present
-    expect(result.some((l) => l.name === 'Acela')).toBe(true);
+    // Overpass fallback ran and produced the DC Metro Red Line immediately.
     expect(result.some((l) => l.ref === 'Red')).toBe(true);
+
+    // Amtrak is merged in asynchronously; flush the pending microtasks.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(latest.some((l) => l.name === 'Acela')).toBe(true);
+    expect(latest.some((l) => l.ref === 'Red')).toBe(true);
 
     // Overpass WAS called (regression check — before the fix, the
     // findEndpointForCoords skip block blocked Overpass for ANY match)
