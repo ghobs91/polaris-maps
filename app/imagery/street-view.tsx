@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Linking, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -80,6 +80,19 @@ export default function StreetViewScreen() {
 
   const current = captures[index];
 
+  // Dismiss by dragging down only from the top bar, so horizontal panning of the
+  // panorama never triggers the navigation gesture.
+  const dismissResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evt, g) => g.dy > 10 && Math.abs(g.dy) > Math.abs(g.dx),
+        onPanResponderRelease: (_evt, g) => {
+          if (g.dy > 48) router.back();
+        },
+      }),
+    [router],
+  );
+
   const selectCapture = useCallback((next: number) => {
     setFallbackNotice(null);
     setTimelineOpen(false);
@@ -128,7 +141,10 @@ export default function StreetViewScreen() {
               />
             )}
 
-            <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
+            <View
+              {...dismissResponder.panHandlers}
+              style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}
+            >
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Close street view"

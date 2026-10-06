@@ -155,7 +155,10 @@ function RootLayoutInner() {
         <Stack.Screen name="regions/index" options={{ title: 'Download Regions' }} />
         <Stack.Screen name="regions/offline" options={{ title: 'Offline Regions' }} />
         <Stack.Screen name="imagery/viewer" options={{ title: 'Street View' }} />
-        <Stack.Screen name="imagery/street-view" options={{ title: 'Street View 3D' }} />
+        <Stack.Screen
+          name="imagery/street-view"
+          options={{ title: 'Street View 3D', gestureEnabled: false }}
+        />
         <Stack.Screen name="imagery/capture" options={{ title: 'Capture' }} />
         <Stack.Screen name="settings/index" options={{ title: '' }} />
         <Stack.Screen name="places/list" options={{ headerShown: false }} />
