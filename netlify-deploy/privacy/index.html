@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Polaris Maps — Privacy Policy</title>
+    <meta name="description" content="How Polaris Maps handles your data." />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #111;
+        --muted: #555;
+        --bg: #fff;
+        --accent: #0a68ff;
+        --border: #e5e5ea;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f2f2f7;
+          --muted: #a1a1a6;
+          --bg: #0b0b0c;
+          --border: #2c2c2e;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.6 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 40px 20px 80px;
+      }
+      h1 {
+        font-size: 30px;
+        line-height: 1.2;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 20px;
+        margin: 36px 0 8px;
+      }
+      h3 {
+        font-size: 16px;
+        margin: 22px 0 6px;
+      }
+      p,
+      li {
+        color: var(--fg);
+      }
+      .meta,
+      footer {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .callout {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 20px 0;
+        background: color-mix(in srgb, var(--accent) 6%, transparent);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0;
+        font-size: 14px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      a {
+        color: var(--accent);
+      }
+      code {
+        font-size: 0.9em;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Polaris Maps — Privacy Policy</h1>
+      <p class="meta">Last updated: <DATE> · Canonical URL: https://polarismaps.app/privacy</p>
+
+      <p>
+        Polaris Maps is a peer-to-peer mapping app. It is built so that your device can contribute
+        map and traffic data directly to other devices, without a corporate cloud in the middle.
+        This policy explains what leaves your device and why.
+      </p>
+
+      <div class="callout">
+        <strong>Summary.</strong> We run no advertising, analytics, or cross-app tracking. Location
+        is used on-device for navigation. If you turn on <em>Traffic Telemetry</em>, your device
+        also shares anonymised speed probes with nearby peers. Photos and reviews are shared only
+        when you enable the relevant feature. Traffic and geocoding use a few third-party services
+        that receive the coordinates needed to answer a request.
+      </div>
+
+      <h2>Information we process</h2>
+
+      <h3>Location</h3>
+      <ul>
+        <li>
+          <strong>On device:</strong> your location is used to show your position, provide
+          turn-by-turn guidance, and adjust ETAs. This stays on your device unless you enable
+          Traffic Telemetry.
+        </li>
+        <li>
+          <strong>Traffic telemetry (opt-in, default on):</strong> while the app is in the
+          foreground and the permission is enabled, we derive an <strong>anonymised speed
+          probe</strong> (geohash cell, speed, bearing, timestamp) and share it with nearby Polaris
+          peers over a peer-to-peer network. Probes use a <strong>random ID that rotates
+          hourly</strong> and are not linked to your account or device identity. Probes expire within
+          minutes.
+        </li>
+        <li>
+          <strong>Third-party traffic (optional):</strong> when configured, a TomTom traffic feed
+          may be queried to seed traffic data. Requests include the map coordinates being viewed.
+        </li>
+      </ul>
+
+      <h3>Photos and imagery</h3>
+      <ul>
+        <li>
+          <strong>Street-level imagery</strong> is captured and shared only when <em>Imagery
+          Sharing</em> is enabled.
+        </li>
+        <li>
+          <strong>Review photos</strong> are uploaded only when <em>Review Photo Sharing</em> is
+          enabled.
+        </li>
+      </ul>
+
+      <h3>Content you create</h3>
+      <ul>
+        <li>
+          <strong>Place reviews</strong> are published to the AT Protocol (Bluesky) under your
+          Bluesky account when you sign in to leave a review.
+        </li>
+        <li>
+          <strong>Map edits</strong> are submitted to OpenStreetMap under your OpenStreetMap
+          account when you sign in to edit.
+        </li>
+        <li>
+          <strong>Incident reports</strong> (e.g. accidents, hazards) are shared over the peer mesh;
+          they are signed but not tied to your account.
+        </li>
+      </ul>
+
+      <h3>Third-party services</h3>
+      <p>Depending on how you use the app, requests may be sent to:</p>
+      <table>
+        <thead>
+          <tr><th>Service</th><th>Purpose</th><th>Data involved</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>TomTom</td><td>Traffic flow / ETA seed (optional)</td><td>Map coordinates</td></tr>
+          <tr><td>OpenStreetMap / Overpass / Nominatim</td><td>Place + address data</td><td>Bounding box / coordinates</td></tr>
+          <tr><td>Photon / Overture Maps</td><td>Geocoding / place data</td><td>Search query / coordinates</td></tr>
+          <tr><td>AT Protocol relays</td><td>Reviews</td><td>Review content, account handle</td></tr>
+          <tr><td>OpenStreetMap API</td><td>Map edits</td><td>Edit content, account</td></tr>
+          <tr><td>Nostr relays</td><td>Traffic fallback</td><td>Anonymised probes, signed incidents</td></tr>
+          <tr><td>Transit agencies</td><td>Transit schedules / departures</td><td>Stop/route IDs</td></tr>
+        </tbody>
+      </table>
+
+      <h2>What we do not do</h2>
+      <ul>
+        <li>No advertising identifiers, no third-party ad or analytics SDKs.</li>
+        <li>No selling of personal data.</li>
+        <li>No cross-app tracking.</li>
+      </ul>
+
+      <h2>Your controls</h2>
+      <ul>
+        <li>
+          <strong>Settings → Privacy</strong> lets you turn off Location Access, Traffic Telemetry,
+          POI Contributions, Imagery Sharing, and Review Photo Sharing at any time.
+        </li>
+        <li>
+          Turning off Traffic Telemetry stops probe contribution immediately (the app pauses
+          collection when offline or backgrounded).
+        </li>
+      </ul>
+
+      <h2>Data retention</h2>
+      <ul>
+        <li>Traffic probes expire within minutes and are not stored by us.</li>
+        <li>Incidents are wiped from your device after their TTL expires.</li>
+        <li>Reviews and OpenStreetMap edits live on the respective public networks under their terms.</li>
+      </ul>
+
+      <h2>Children</h2>
+      <p>Polaris Maps is not directed at children under 13.</p>
+
+      <h2>Contact</h2>
+      <p>Questions or data requests: <CONTACT EMAIL>.</p>
+
+      <h2>Changes</h2>
+      <p>We may update this policy; material changes will be reflected in the app.</p>
+
+      <footer>
+        <p><a href="https://polarismaps.app/terms">Terms of Service</a></p>
+      </footer>
+    </main>
+  </body>
+</html>

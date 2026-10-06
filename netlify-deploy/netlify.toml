@@ -6,3 +6,13 @@
   from = "/.well-known/oauth-client-metadata.json"
   to = "/.well-known/oauth-client-metadata.json"
   status = 200
+
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms"
+  to = "/terms/index.html"
+  status = 200
