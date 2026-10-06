@@ -8,11 +8,11 @@ import { useStreetViewStore } from '../../stores/streetViewStore';
 const THUMB_SIZE = 72;
 
 /**
- * Floating street-level preview anchored to the map's top-left (Google Maps
- * style). Rendered by the map screen so it floats over the map rather than
- * inside the place sheet. Tapping it opens the street-view viewer.
+ * Floating street-level preview anchored just above the place sheet, on the
+ * left (Google Maps style). Rendered by the map screen so it floats over the map
+ * rather than inside the place sheet. Tapping it opens the street-view viewer.
  */
-export function StreetViewThumbOverlay({ top, left }: { top: number; left: number }) {
+export function StreetViewThumbOverlay({ bottom, left }: { bottom: number; left: number }) {
   const router = useRouter();
   const poi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
@@ -30,7 +30,7 @@ export function StreetViewThumbOverlay({ top, left }: { top: number; left: numbe
   if (!poi || !thumbUrl) return null;
 
   return (
-    <View pointerEvents="box-none" style={[styles.mount, { top, left }]}>
+    <View pointerEvents="box-none" style={[styles.mount, { bottom, left }]}>
       <Pressable
         style={styles.thumb}
         onPress={open}

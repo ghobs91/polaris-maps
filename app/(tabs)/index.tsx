@@ -31,11 +31,16 @@ import { hapticImpact } from '@/utils/haptics';
 
 const LARGE_FLOATING_PANEL_WIDTH = 380;
 const LARGE_FLOATING_PANEL_GAP = spacing.md;
+// Must match the place sheet's first snap point (POIInfoCard POI_SHEET_SNAPS[0])
+// so the floating street-view thumbnail sits just above the collapsed sheet.
+const POI_SHEET_PEEK_FRACTION = 0.55;
 
 export default function MapScreen() {
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const isLarge = useIsLargeDisplay();
+  const screenHeight = Dimensions.get('window').height;
+  const streetViewBottom = Math.round(screenHeight * POI_SHEET_PEEK_FRACTION) + spacing.md;
   const setViewport = useMapStore((s) => s.setViewport);
   const activeRouteGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
   const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
@@ -203,7 +208,7 @@ export default function MapScreen() {
           </View>
 
           <StreetViewThumbOverlay
-            top={insets.top + spacing.sm + 52}
+            bottom={streetViewBottom}
             left={spacing.md + LARGE_FLOATING_PANEL_WIDTH + LARGE_FLOATING_PANEL_GAP}
           />
 
@@ -244,7 +249,7 @@ export default function MapScreen() {
         >
           <TrafficCoverageBadge />
         </View>
-        <StreetViewThumbOverlay top={insets.top + 72} left={spacing.md} />
+        <StreetViewThumbOverlay bottom={streetViewBottom} left={spacing.md} />
         <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <POIInfoCard />
         <TransitStopCard />
