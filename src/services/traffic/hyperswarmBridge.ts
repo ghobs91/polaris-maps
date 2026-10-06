@@ -18,11 +18,19 @@ let WorkletClass:
     })
   | null = null;
 
+/** An outgoing request whose reply is awaited by the caller. */
+interface OutgoingRequest {
+  send(data: Uint8Array): void;
+  reply(): Promise<Uint8Array | string | null>;
+}
+
 let RPCClass:
   | (new (
       ipc: unknown,
       onrequest: (req: RpcRequest) => void,
-    ) => { request(cmd: number): { send(data: Uint8Array): void } })
+    ) => {
+      request(cmd: number): OutgoingRequest;
+    })
   | null = null;
 
 function resolveNativeDeps(): boolean {
@@ -108,7 +116,7 @@ let worklet: {
   terminate(): void;
   IPC: unknown;
 } | null = null;
-let rpc: { request(cmd: number): { send(data: Uint8Array): void } } | null = null;
+let rpc: { request(cmd: number): OutgoingRequest } | null = null;
 let started = false;
 
 let probeHandlers: ProbeHandler[] = [];
@@ -267,6 +275,9 @@ export function publishProbe(probeJson: string): void {
   sendCommand(CMD_PUBLISH_PROBE, probeJson);
 }
 
+/** How long to wait for the worklet's status reply before falling back. */
+const STATUS_TIMEOUT_MS = 3_000;
+
 /** Get current Hyperswarm status (peer count, topics, segment count). */
 export async function getStatus(): Promise<{
   peerCount: number;
@@ -274,18 +285,52 @@ export async function getStatus(): Promise<{
   topics: string[];
   segmentCount: number;
 }> {
-  if (!rpc) return { peerCount: 0, topicCount: 0, topics: [], segmentCount: 0 };
+  const empty = (): {
+    peerCount: number;
+    topicCount: number;
+    topics: string[];
+    segmentCount: number;
+  } => ({ peerCount: 0, topicCount: 0, topics: [], segmentCount: 0 });
+  if (!rpc) return empty();
 
-  return new Promise((resolve) => {
-    const req = rpc!.request(CMD_GET_STATUS);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const req = rpc.request(CMD_GET_STATUS);
     req.send(new TextEncoder().encode(''));
 
-    // The worklet replies via the RPC response —
-    // bare-rpc handles request/reply correlation internally.
-    // For now, use the last-reported state as fallback.
-    // TODO: Implement proper request/reply once bare-rpc two-way is confirmed
-    resolve({ peerCount: 0, topicCount: 0, topics: [], segmentCount: 0 });
-  });
+    // bare-rpc correlates the worklet's `req.reply(...)` back to this request.
+    // Race a timeout so a stalled/unavailable worklet can't leave the request
+    // (and the caller's poll loop) pending forever. The `.catch` also absorbs a
+    // late rejection if the timeout wins first, avoiding an unhandled rejection.
+    const replyPromise = req.reply();
+    const reply = await Promise.race([
+      replyPromise.catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), STATUS_TIMEOUT_MS);
+      }),
+    ]);
+    if (reply == null) return empty();
+
+    const text = typeof reply === 'string' ? reply : new TextDecoder().decode(reply);
+    const parsed = JSON.parse(text) as Partial<{
+      peerCount: number;
+      topicCount: number;
+      topics: string[];
+      segmentCount: number;
+    }>;
+
+    return {
+      peerCount: parsed.peerCount ?? 0,
+      topicCount: parsed.topicCount ?? 0,
+      topics: Array.isArray(parsed.topics) ? parsed.topics : [],
+      segmentCount: parsed.segmentCount ?? 0,
+    };
+  } catch (e) {
+    console.warn('[HyperswarmBridge] getStatus failed', e);
+    return empty();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** Suspend Hyperswarm connections (call on app background). */

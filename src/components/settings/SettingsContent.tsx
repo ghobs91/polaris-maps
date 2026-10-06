@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Switch, Linking, Alert } from 'reac
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
+import { useTrafficStore } from '../../stores/trafficStore';
 import {
   clearPlaceDetailCache,
   countPlaceDetailCache,
@@ -59,6 +60,12 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const osmIsLoggingIn = useOsmAuthStore((s) => s.isLoggingIn);
   const osmLogin = useOsmAuthStore((s) => s.login);
   const osmLogout = useOsmAuthStore((s) => s.logout);
+  const swarmPeerCount = useTrafficStore((s) => s.swarmPeerCount);
+  const swarmTopicCount = useTrafficStore((s) => s.swarmTopicCount);
+  const swarmSegmentCount = useTrafficStore((s) => s.swarmSegmentCount);
+  const nostrRelayCount = useTrafficStore((s) => s.nostrRelayCount);
+  const trafficMode = useTrafficStore((s) => s.trafficMode);
+  const isCollectingProbes = useTrafficStore((s) => s.isCollectingProbes);
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {showHeading && <Text style={styles.heading}>Settings</Text>}
@@ -281,6 +288,26 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
           }
           onPress={() => router.push('/onboarding?step=1')}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        header="P2P Network"
+        footer="Peer-to-peer traffic mesh status. Your device contributes anonymous speed probes when Traffic Telemetry is on and the app is in the foreground."
+      >
+        <SettingsRow
+          title="Transport"
+          value={trafficMode === 'hyperswarm' ? 'Hyperswarm' : 'Nostr fallback'}
+        />
+        <SettingsRow title="Peers" value={String(swarmPeerCount)} />
+        <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
+        <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
+        <SettingsRow title="Nostr Relays" value={String(nostrRelayCount)} />
+        <SettingsRow
+          title="Contributing Probes"
+          value={
+            isCollectingProbes ? 'Yes' : permissions.trafficTelemetryEnabled ? 'Paused' : 'Off'
+          }
         />
       </SettingsGroup>
 

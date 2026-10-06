@@ -10,6 +10,7 @@ import { convertP2PToNormalized, mergeTrafficSources } from './trafficMerger';
 import {
   initHyperswarmBridge,
   disposeHyperswarmBridge,
+  getStatus as getSwarmStatus,
   onPeerCount,
   onAggregatedUpdate,
   suspend as swarmSuspend,
@@ -366,6 +367,10 @@ let aggregatedUnsub: (() => void) | null = null;
 let nostrProbeUnsub: (() => void) | null = null;
 let condRequestUnsub: (() => void) | null = null;
 let modeCheckInterval: ReturnType<typeof setInterval> | null = null;
+let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+
+/** How often to poll the worklet for the full mesh status snapshot. */
+const STATUS_POLL_INTERVAL_MS = 15_000;
 
 /** Throttle for indexing live P2P probe aggregates into history. */
 let lastProbeIndexAt = 0;
@@ -445,6 +450,13 @@ export async function initTrafficP2P(): Promise<void> {
     const relayCount = getConnectedRelayCount();
     useTrafficStore.getState().setNostrRelayCount(relayCount);
   }, 10_000);
+
+  // Poll the worklet for the full mesh status (topic/segment counts) alongside
+  // the event-driven peer count, so the UI can show live P2P health.
+  void refreshSwarmStatus();
+  statusPollInterval = setInterval(() => {
+    void refreshSwarmStatus();
+  }, STATUS_POLL_INTERVAL_MS);
 }
 
 /** Tear down all P2P traffic connections. */
@@ -462,6 +474,10 @@ export function disposeTrafficP2P(): void {
     clearInterval(modeCheckInterval);
     modeCheckInterval = null;
   }
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
 
   disposeHyperswarmBridge();
   disposeNostrFallback();
@@ -475,6 +491,13 @@ export function suspendTrafficP2P(): void {
 /** Resume P2P connections (app foregrounded). */
 export function resumeTrafficP2P(): void {
   swarmResume();
+}
+
+/** Fetch the worklet's full mesh status and mirror it into the store. */
+async function refreshSwarmStatus(): Promise<void> {
+  const status = await getSwarmStatus();
+  useTrafficStore.getState().setSwarmStatus(status);
+  updateTrafficMode(status.peerCount);
 }
 
 function updateTrafficMode(swarmPeerCount: number): void {

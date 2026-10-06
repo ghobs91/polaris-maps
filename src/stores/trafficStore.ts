@@ -13,6 +13,10 @@ interface TrafficState {
 
   /** Number of directly connected Hyperswarm peers for current geohash topics. */
   swarmPeerCount: number;
+  /** Number of Hyperswarm topics (geohash4 cells) currently joined. */
+  swarmTopicCount: number;
+  /** Number of aggregated traffic segments held by the worklet. */
+  swarmSegmentCount: number;
   /** Number of connected Nostr relays (fallback layer). */
   nostrRelayCount: number;
   /** Current traffic exchange mode (auto-selected based on swarm peer density). */
@@ -38,6 +42,8 @@ interface TrafficState {
   setSubscriptionCount: (count: number) => void;
   setCollecting: (collecting: boolean) => void;
   setSwarmPeerCount: (count: number) => void;
+  /** Replace the full mesh status snapshot (peer/topic/segment counts). */
+  setSwarmStatus: (status: { peerCount: number; topicCount: number; segmentCount: number }) => void;
   setNostrRelayCount: (count: number) => void;
   setTrafficMode: (mode: TrafficMode) => void;
   setNormalizedSegments: (segments: NormalizedTrafficSegment[]) => void;
@@ -56,6 +62,8 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   activeSubscriptionCount: 0,
   isCollectingProbes: false,
   swarmPeerCount: 0,
+  swarmTopicCount: 0,
+  swarmSegmentCount: 0,
   nostrRelayCount: 0,
   trafficMode: 'hyperswarm',
 
@@ -89,6 +97,12 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   setSubscriptionCount: (activeSubscriptionCount) => set({ activeSubscriptionCount }),
   setCollecting: (isCollectingProbes) => set({ isCollectingProbes }),
   setSwarmPeerCount: (swarmPeerCount) => set({ swarmPeerCount }),
+  setSwarmStatus: ({ peerCount, topicCount, segmentCount }) =>
+    set({
+      swarmPeerCount: peerCount,
+      swarmTopicCount: topicCount,
+      swarmSegmentCount: segmentCount,
+    }),
   setNostrRelayCount: (nostrRelayCount) => set({ nostrRelayCount }),
   setTrafficMode: (trafficMode) => set({ trafficMode }),
   setNormalizedSegments: (normalizedSegments) =>
@@ -117,6 +131,8 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
       isExternalFetchLoading: false,
       lastExternalFetchAt: null,
       swarmPeerCount: 0,
+      swarmTopicCount: 0,
+      swarmSegmentCount: 0,
       nostrRelayCount: 0,
       incidents: [],
     }),
