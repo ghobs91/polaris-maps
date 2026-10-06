@@ -204,4 +204,15 @@ describe('PlaceMediaCarousel', () => {
     expect(screen.queryByText('From the web · example.com')).toBeNull();
     expect(screen.queryByText('Wikimedia Commons')).toBeNull();
   });
+
+  it('pages horizontally between photos in the expanded viewer', async () => {
+    const screen = renderCarousel();
+    await waitFor(() => expect(screen.getByTestId('place-media-thumb-0')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('place-media-thumb-1'));
+
+    expect(screen.getByTestId('place-media-viewer')).toBeTruthy();
+    expect(screen.getByTestId('place-media-viewer-pager')).toBeTruthy();
+    expect(screen.getByTestId('place-media-viewer-counter')).toHaveTextContent('2 / 2');
+  });
 });

@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  FlatList,
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +63,7 @@ export function PlaceMediaCarousel({
   const styles = useThemedStyles(createStyles);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const [items, setItems] = useState<PlaceMediaItem[]>([]);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [failed, setFailed] = useState<Set<string>>(new Set());
@@ -257,19 +267,36 @@ export function PlaceMediaCarousel({
             </Pressable>
           </View>
 
-          <View style={styles.viewerImageWrap}>
-            {current?.url ? (
-              <Image
-                source={{ uri: current.url }}
-                style={styles.viewerImage}
-                contentFit="contain"
-                onError={() => current && handleError(current.url)}
-                accessibilityIgnoresInvertColors
-              />
-            ) : (
-              <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
+          <FlatList
+            data={visible}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item) => item.url}
+            style={styles.viewerList}
+            testID="place-media-viewer-pager"
+            initialScrollIndex={viewerIndex ?? 0}
+            getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+            onMomentumScrollEnd={(e) => {
+              const next = Math.round(e.nativeEvent.contentOffset.x / width);
+              if (Number.isFinite(next) && next !== viewerIndex) setViewerIndex(next);
+            }}
+            renderItem={({ item }) => (
+              <View style={[styles.viewerPage, { width }]}>
+                {item.url ? (
+                  <Image
+                    source={{ uri: item.url }}
+                    style={styles.viewerImage}
+                    contentFit="contain"
+                    onError={() => handleError(item.url)}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
+                )}
+              </View>
             )}
-          </View>
+          />
 
           {current ? (
             <View style={[styles.viewerFooter, { paddingBottom: insets.bottom + spacing.md }]}>
@@ -337,7 +364,8 @@ const createStyles = ({ colors }: Theme) =>
     },
     viewerCount: { ...typography.body, color: '#FFFFFF' },
     closeButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-    viewerImageWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    viewerList: { flex: 1 },
+    viewerPage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     viewerImage: { width: '100%', height: '100%' },
     viewerFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.xs },
     viewerAttribution: { ...typography.caption, color: '#E0E0E0' },
