@@ -4,6 +4,10 @@ import { WebView } from 'react-native-webview';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useExternalRatings } from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
+import {
+  combineExternalRatings,
+  type CombinedRating,
+} from '../../services/poi/externalRatings/combine';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import type {
   ExternalRatingProviderId,
@@ -14,9 +18,10 @@ import { borderRadius, spacing, typography } from '../../constants/theme';
 
 /**
  * External aggregate ratings from TripAdvisor and Yelp, resolved via the
- * on-device headless browser. Each provider is shown independently, only with
- * attribution (provider, rating, exact count, observed time, source link). No
- * review text is fetched or displayed, and nothing is persisted.
+ * on-device headless browser. When both providers have a rating they are
+ * combined into one count-weighted aggregate; the individual provider listings
+ * are surfaced as clickable pills. No review text is fetched or displayed, and
+ * nothing is persisted.
  *
  * Bounded policy: only one hidden WebView is mounted at a time; the WebView uses
  * the native user agent with a persistent (non-incognito) cookie store. The app
@@ -55,7 +60,10 @@ export function ExternalRatingsSection({
   // Serialize hidden browsing: mount at most one provider WebView at a time, in
   // registry order. A waiting provider's stage is picked up once this one settles.
   const activeWebView = states.find((s) => s.webView)?.webView ?? null;
-  const rows = states.filter((s) => s.status === 'loaded' && s.summary);
+  const loaded = states
+    .filter((s) => s.status === 'loaded' && s.summary)
+    .map((s) => s.summary as ExternalRatingSummary);
+  const combined = combineExternalRatings(loaded);
 
   const handleMessageEvent = useCallback(
     (provider: ExternalRatingProviderId) => (event: { nativeEvent: { data: string } }) => {
@@ -86,62 +94,69 @@ export function ExternalRatingsSection({
         </View>
       ) : null}
 
-      {rows.map((state) => (
-        <RatingRow
-          key={state.provider}
-          summary={state.summary as ExternalRatingSummary}
-          colors={colors}
-        />
-      ))}
+      {combined ? (
+        <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
+      ) : null}
     </View>
   );
 }
 
-function RatingRow({
-  summary,
+function CombinedRatingBlock({
+  combined,
+  sources,
   colors,
 }: {
-  summary: ExternalRatingSummary;
+  combined: CombinedRating;
+  sources: ExternalRatingSummary[];
   colors: ReturnType<typeof useTheme>['colors'];
 }) {
-  const label = PROVIDER_LABEL[summary.provider];
-  const openListing = useCallback(() => {
-    Linking.openURL(summary.listingUrl).catch(() => {});
-  }, [summary.listingUrl]);
-
-  const stars = renderStars(summary.rating);
+  const openListing = useCallback((url: string) => {
+    Linking.openURL(url).catch(() => {});
+  }, []);
 
   return (
-    <View style={styles.section} testID={`external-rating-section-${summary.provider}`}>
+    <View style={styles.section} testID="external-ratings-combined">
       <View style={[styles.row, { borderBottomColor: colors.border }]}>
-        <View style={styles.badge}>
-          <Text style={[styles.badgeText, { color: colors.text }]}>{label}</Text>
-        </View>
-        <View style={styles.metrics}>
-          <Text
-            style={[styles.rating, { color: colors.text }]}
-            testID={`external-rating-${summary.provider}`}
-          >
-            {summary.rating.toFixed(1)}
-          </Text>
-          <Text style={[styles.stars, { color: colors.warning }]}>{stars}</Text>
-          <Text style={[styles.count, { color: colors.textSecondary }]}>
-            {summary.reviewCount.toLocaleString()} reviews
-          </Text>
-        </View>
-      </View>
-      <View style={styles.footer}>
-        <Text style={[styles.observed, { color: colors.textSecondary }]}>
-          Observed {formatObserved(summary.observedAt)}
-        </Text>
-        <Pressable
-          onPress={openListing}
-          accessibilityLabel={`Open listing on ${label}`}
-          accessibilityRole="button"
-          hitSlop={8}
+        <Text
+          style={[styles.rating, { color: colors.text }]}
+          testID="external-ratings-combined-rating"
         >
-          <Text style={[styles.link, { color: colors.primary }]}>{`View on ${label}`}</Text>
-        </Pressable>
+          {combined.rating.toFixed(1)}
+        </Text>
+        <Text style={[styles.stars, { color: colors.warning }]}>
+          {renderStars(combined.rating)}
+        </Text>
+        <Text
+          style={[styles.count, { color: colors.textSecondary }]}
+          testID="external-ratings-combined-count"
+        >
+          {combined.reviewCount.toLocaleString()} reviews
+        </Text>
+      </View>
+
+      <View style={styles.pills}>
+        {sources.map((summary) => {
+          const label = PROVIDER_LABEL[summary.provider];
+          return (
+            <Pressable
+              key={summary.provider}
+              onPress={() => openListing(summary.listingUrl)}
+              accessibilityRole="link"
+              accessibilityLabel={`Open ${label} listing`}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.pill,
+                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+              ]}
+              testID={`external-ratings-pill-${summary.provider}`}
+            >
+              <Text style={[styles.pillText, { color: colors.primary }]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+        <Text style={[styles.observed, { color: colors.textSecondary }]}>
+          Observed {formatObserved(combined.observedAt)}
+        </Text>
       </View>
     </View>
   );
@@ -180,47 +195,41 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  badge: {
-    borderRadius: borderRadius.sm,
-    backgroundColor: 'rgba(28,142,242,0.12)',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-  },
-  badgeText: {
-    ...typography.label,
-    fontWeight: '600',
-  },
-  metrics: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginLeft: spacing.md,
-  },
   rating: {
     ...typography.h3,
-    fontSize: 18,
+    fontSize: 20,
   },
   stars: {
     ...typography.label,
     fontSize: 13,
     letterSpacing: 1,
+    marginLeft: spacing.xs,
   },
   count: {
     ...typography.bodySmall,
-    marginLeft: spacing.xs,
+    marginLeft: spacing.sm,
   },
-  footer: {
+  pills: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: spacing.xs,
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
     paddingHorizontal: spacing.xs,
+  },
+  pill: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: borderRadius.round,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+  },
+  pillText: {
+    ...typography.label,
+    fontSize: 13,
+    fontWeight: '600',
   },
   observed: {
     ...typography.caption,
-  },
-  link: {
-    ...typography.label,
-    fontSize: 13,
+    marginLeft: 'auto',
   },
 });

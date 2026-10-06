@@ -109,6 +109,7 @@ export async function resolveExternalRatings(
 }
 
 export { clearExternalRatingCache } from './core';
+export { combineExternalRatings, type CombinedRating } from './combine';
 export {
   candidatesFromSearchHtml,
   candidatesFromSearchMessage,

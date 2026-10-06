@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
 jest.mock('react-native-webview', () => ({
   WebView: (props: Record<string, unknown>) => {
@@ -104,12 +104,11 @@ describe('ExternalRatingsSection', () => {
       challenge: false,
     });
 
-    await waitFor(() =>
-      expect(screen.getByTestId('external-rating-section-tripadvisor')).toBeTruthy(),
-    );
-    expect(screen.getByTestId('external-rating-tripadvisor').props.children).toBe('4.5');
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
+    expect(screen.getByTestId('external-ratings-combined-rating').props.children).toBe('4.5');
     expect(screen.getByText('2,345 reviews')).toBeTruthy();
-    expect(screen.getByText('View on Tripadvisor')).toBeTruthy();
+    expect(screen.getByTestId('external-ratings-pill-tripadvisor')).toBeTruthy();
+    expect(screen.queryByTestId('external-ratings-pill-yelp')).toBeNull();
   });
 
   it('falls back to search for both providers and matches by identity', async () => {
@@ -152,9 +151,7 @@ describe('ExternalRatingsSection', () => {
       automation: [],
       challenge: false,
     });
-    await waitFor(() =>
-      expect(screen.getByTestId('external-rating-section-tripadvisor')).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
 
     // Yelp search becomes the active WebView next.
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: YELP_SEARCH_URL }));
@@ -186,9 +183,11 @@ describe('ExternalRatingsSection', () => {
       challenge: false,
     });
 
-    await waitFor(() => expect(screen.getByTestId('external-rating-section-yelp')).toBeTruthy());
-    expect(screen.getByTestId('external-rating-yelp').props.children).toBe('4.2');
-    expect(screen.getByText('View on Yelp')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('external-ratings-pill-yelp')).toBeTruthy());
+    // Combined: (4.5*2345 + 4.2*321) / (2345 + 321) = 4.46 -> "4.5"
+    expect(screen.getByTestId('external-ratings-combined-rating').props.children).toBe('4.5');
+    expect(screen.getByText('2,666 reviews')).toBeTruthy();
+    expect(screen.getByTestId('external-ratings-pill-tripadvisor')).toBeTruthy();
   });
 
   it('resolves from the search card itself when it carries rating + identity', async () => {
@@ -221,11 +220,43 @@ describe('ExternalRatingsSection', () => {
     });
 
     // No listing navigation: the card answered.
-    await waitFor(() =>
-      expect(screen.getByTestId('external-rating-section-tripadvisor')).toBeTruthy(),
-    );
-    expect(screen.getByTestId('external-rating-tripadvisor').props.children).toBe('4.5');
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
+    expect(screen.getByTestId('external-ratings-combined-rating').props.children).toBe('4.5');
     expect(screen.getByText('2,345 reviews')).toBeTruthy();
+    expect(screen.getByTestId('external-ratings-pill-tripadvisor')).toBeTruthy();
+  });
+
+  it('opens the provider listing when its pill is pressed', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.5,
+      ldCount: 2345,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('external-ratings-pill-tripadvisor')).toBeTruthy(),
+    );
+
+    const openURLMock = jest.fn().mockResolvedValue(undefined);
+    jest
+      .spyOn(jest.requireActual('react-native').Linking, 'openURL')
+      .mockImplementation(openURLMock as unknown as typeof import('react-native').Linking.openURL);
+
+    act(() => {
+      fireEvent.press(screen.getByTestId('external-ratings-pill-tripadvisor'));
+    });
+    expect(openURLMock).toHaveBeenCalledWith(TA_LISTING_URL);
   });
 
   it('stays hidden when the extraction is an anti-bot challenge page', async () => {
@@ -249,6 +280,6 @@ describe('ExternalRatingsSection', () => {
     });
 
     await new Promise((r) => setTimeout(r, 30));
-    expect(screen.queryByTestId('external-rating-section-tripadvisor')).toBeNull();
+    expect(screen.queryByTestId('external-ratings-combined')).toBeNull();
   });
 });
