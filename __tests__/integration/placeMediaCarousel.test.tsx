@@ -215,4 +215,15 @@ describe('PlaceMediaCarousel', () => {
     expect(screen.getByTestId('place-media-viewer-pager')).toBeTruthy();
     expect(screen.getByTestId('place-media-viewer-counter')).toHaveTextContent('2 / 2');
   });
+
+  it('closes the expanded viewer when the close button is pressed', async () => {
+    const screen = renderCarousel();
+    await waitFor(() => expect(screen.getByTestId('place-media-thumb-0')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('place-media-thumb-0'));
+    expect(screen.getByTestId('place-media-viewer')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('place-media-viewer-close'));
+    expect(screen.queryByTestId('place-media-viewer')).toBeNull();
+  });
 });

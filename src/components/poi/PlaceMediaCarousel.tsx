@@ -183,6 +183,8 @@ export function PlaceMediaCarousel({
     if (url) void Linking.openURL(url).catch(() => undefined);
   }, []);
 
+  const closeViewer = useCallback(() => setViewerIndex(null), []);
+
   if (items.length === 0) {
     if (!offline) return null;
     return (
@@ -249,56 +251,59 @@ export function PlaceMediaCarousel({
         visible={current != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setViewerIndex(null)}
+        onRequestClose={closeViewer}
       >
-        <View style={styles.viewer} testID="place-media-viewer">
-          <View style={[styles.viewerHeader, { paddingTop: insets.top + spacing.sm }]}>
-            <Text style={styles.viewerCount} testID="place-media-viewer-counter">
-              {visible.length > 0 ? (viewerIndex ?? 0) + 1 : 0} / {visible.length}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close photo viewer"
-              onPress={() => setViewerIndex(null)}
-              hitSlop={8}
-              style={styles.closeButton}
-            >
-              <Ionicons name="close" size={26} color="#FFFFFF" />
-            </Pressable>
-          </View>
+        {current ? (
+          <View style={styles.viewer} testID="place-media-viewer">
+            <View style={[styles.viewerHeader, { paddingTop: insets.top + spacing.sm }]}>
+              <Text style={styles.viewerCount} testID="place-media-viewer-counter">
+                {visible.length > 0 ? (viewerIndex ?? 0) + 1 : 0} / {visible.length}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close photo viewer"
+                onPress={closeViewer}
+                hitSlop={8}
+                style={styles.closeButton}
+                testID="place-media-viewer-close"
+              >
+                <Ionicons name="close" size={26} color="#FFFFFF" />
+              </Pressable>
+            </View>
 
-          <FlatList
-            data={visible}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(item) => item.url}
-            style={styles.viewerList}
-            testID="place-media-viewer-pager"
-            initialScrollIndex={viewerIndex ?? 0}
-            getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-            onMomentumScrollEnd={(e) => {
-              const next = Math.round(e.nativeEvent.contentOffset.x / width);
-              if (Number.isFinite(next) && next !== viewerIndex) setViewerIndex(next);
-            }}
-            renderItem={({ item }) => (
-              <View style={[styles.viewerPage, { width }]}>
-                {item.url ? (
-                  <Image
-                    source={{ uri: item.url }}
-                    style={styles.viewerImage}
-                    contentFit="contain"
-                    onError={() => handleError(item.url)}
-                    accessibilityIgnoresInvertColors
-                  />
-                ) : (
-                  <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
-                )}
-              </View>
-            )}
-          />
+            <FlatList
+              data={visible}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => item.url}
+              style={styles.viewerList}
+              testID="place-media-viewer-pager"
+              initialScrollIndex={viewerIndex ?? 0}
+              getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+              onMomentumScrollEnd={(e) => {
+                // Ignore late momentum events once the viewer is closing.
+                if (viewerIndex === null) return;
+                const next = Math.round(e.nativeEvent.contentOffset.x / width);
+                if (Number.isFinite(next) && next !== viewerIndex) setViewerIndex(next);
+              }}
+              renderItem={({ item }) => (
+                <View style={[styles.viewerPage, { width }]}>
+                  {item.url ? (
+                    <Image
+                      source={{ uri: item.url }}
+                      style={styles.viewerImage}
+                      contentFit="contain"
+                      onError={() => handleError(item.url)}
+                      accessibilityIgnoresInvertColors
+                    />
+                  ) : (
+                    <Ionicons name="image-outline" size={48} color={colors.textSecondary} />
+                  )}
+                </View>
+              )}
+            />
 
-          {current ? (
             <View style={[styles.viewerFooter, { paddingBottom: insets.bottom + spacing.md }]}>
               <Text style={styles.viewerAttribution} numberOfLines={2}>
                 {current.attribution ?? current.source}
@@ -317,8 +322,8 @@ export function PlaceMediaCarousel({
                 </Pressable>
               ) : null}
             </View>
-          ) : null}
-        </View>
+          </View>
+        ) : null}
       </Modal>
     </GlassView>
   );
