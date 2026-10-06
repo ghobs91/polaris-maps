@@ -44,6 +44,14 @@
 - [x] 6.4 Keep the hidden WebView 0×0/`pointerEvents="none"` with a 20s timeout and abort-on-unmount, as today
 - [x] 6.5 Update `__tests__/integration/TripadvisorRatingCard.test.tsx` into a two-provider, two-stage (search → listing) integration test simulating `onMessage`
 
+## 9. Combined aggregate and provider pills
+
+- [x] 9.1 Add `combine.ts` — count-weighted mean rating, summed exact count, source list, most-recent observed time; unweighted fallback when all counts are zero
+- [x] 9.2 Unit tests for weighting, single provider, zero counts, invalid entries, observed-time
+- [x] 9.3 Rework `ExternalRatingsSection` into one combined block plus a clickable pill per contributing provider
+- [x] 9.4 Integration tests: combined numbers, both pills, pill opens the listing, no pill/combined when challenged
+- [ ] 9.5 On-device check: combined value and both pills render on a place with ratings from both providers
+
 ## 8. Warm-session hardening (addendum)
 
 - [x] 8.1 Calibrate challenge classification in `core.ts` — `hasChallengeMarkers` + `pageIsChallenge(html, extractedData)`; markers are fatal only when nothing was extracted (live Yelp pages embed DataDome scripts with valid content)

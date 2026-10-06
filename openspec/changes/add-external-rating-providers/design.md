@@ -184,6 +184,18 @@ Changes that follow:
 
 **Decision 4 amendment:** the "fresh WebView per stage" model remains for controller simplicity, but stages may short-circuit (inline) and every stage's collector is retriable; cookie persistence across remounts is the session continuity mechanism.
 
+### Decision 9: Combined aggregate and provider pills
+
+When both providers return a rating, the card shows one combined aggregate rather
+than two rows: the rating is the **review-count-weighted mean** and the count is
+the **sum** of the exact counts (`combineExternalRatings` in `combine.ts`). A
+single provider's combined values equal its own. Each contributing provider is
+surfaced as a clickable pill that opens that provider's listing; a provider
+without a rating shows no pill. This puts the number a user cares about up front
+while keeping per-provider attribution (and the "no review text" boundary)
+intact. Weighted mean is used because summing raw star ratings would let a
+3-review source outweigh a 9,000-review source.
+
 ## Risks / Trade-offs
 
 - **DOM churn breaks search parsing** (Yelp `data-testid`/`__NEXT_DATA__`, TripAdvisor

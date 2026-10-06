@@ -75,6 +75,10 @@ built from the place name + assembled address (`poiAddress.ts`). A search
 candidate is accepted only when its name matches and an address or `geo` (≤50 m)
 confirms it (`identity.ts`), so a chain's sibling branch is never shown.
 
+When both providers return a rating, the card shows one combined aggregate
+(`combine.ts`): the review-count-weighted mean rating and the summed review
+count, with a clickable pill per contributing provider that opens its listing.
+
 Bounded browse policy (`externalRatings/antiBot.ts`): one hidden WebView at a
 time, per-host minimum interval + jitter, and a challenge/429 cool-down with
 exponential backoff and silent give-up. Challenge classification is calibrated:

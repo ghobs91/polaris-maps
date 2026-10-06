@@ -1,10 +1,84 @@
+## ADDED Requirements
+
+### Requirement: Combined aggregate across providers
+
+The app SHALL resolve external aggregate ratings for a place from both
+TripAdvisor and Yelp, independently, using only the on-device headless browser,
+and SHALL display a single combined aggregate. The app SHALL NOT require an API
+key, account, or paid service to obtain these ratings.
+
+#### Scenario: Both providers resolve
+
+- **WHEN** a place has valid, identity-matched ratings from both providers
+- **THEN** the card displays one combined aggregate rating and total review count
+- **AND** a clickable pill for each contributing provider
+
+#### Scenario: One provider resolves
+
+- **WHEN** only one provider yields a valid, identity-matched rating
+- **THEN** the combined aggregate equals that provider's rating and count
+- **AND** only that provider's pill is shown
+- **AND** the unresolved provider contributes nothing
+
+#### Scenario: No provider resolves
+
+- **WHEN** neither provider yields a valid, identity-matched rating
+- **THEN** the card renders without any external-rating content
+- **AND** the rest of the place card remains fully usable
+
+### Requirement: Combined aggregate calculation
+
+When more than one provider contributes a rating, the combined rating SHALL be
+the review-count-weighted mean of the contributing ratings and the combined
+count SHALL be the sum of their exact counts. When only one provider
+contributes, the combined values SHALL equal that provider's. When all
+contributing counts are zero, the app SHALL fall back to an unweighted mean
+rather than dividing by zero.
+
+#### Scenario: Weighted mean and summed count
+
+- **WHEN** TripAdvisor contributes 4.5 over 1000 reviews and Yelp 3.0 over 3000
+- **THEN** the combined rating is 3.4 (weighted) and the combined count is 4,000
+
+#### Scenario: Single provider
+
+- **WHEN** only Yelp contributes 4.2 over 321 reviews
+- **THEN** the combined rating is 4.2 and the combined count is 321
+
+#### Scenario: Zero counts
+
+- **WHEN** every contributing provider reports zero reviews
+- **THEN** the combined rating is the unweighted mean
+- **AND** no divide-by-zero occurs
+
+### Requirement: Provider listing pills
+
+For every provider contributing a rating, the app SHALL display a clickable pill
+labelled with the provider name that opens that provider's listing URL. No pill
+SHALL be shown for a provider that contributed no rating.
+
+#### Scenario: Pill per contributing provider
+
+- **WHEN** ratings from both providers are displayed
+- **THEN** a Tripadvisor pill and a Yelp pill are both shown
+
+#### Scenario: Press opens the listing
+
+- **WHEN** the user presses a provider pill
+- **THEN** the app opens that provider's listing URL
+
+#### Scenario: No pill without a rating
+
+- **WHEN** a provider contributed no rating
+- **THEN** no pill is shown for that provider
+
 ### Requirement: Search-card inline extraction
 
-When a provider search-result card carries an inline aggregate rating and an
-exact count, the app MAY use them directly without loading the listing page,
-but only when the card's identity is confirmed (name matches AND an address or
-`geo` signal matches). A card without a confirmation signal SHALL still load
-the listing page for confirmation.
+The app SHALL use an inline aggregate rating and exact count from a provider
+search-result card directly, without loading the listing page, but only when the
+card's identity is confirmed (name matches AND an address or `geo` signal
+matches). A card without a confirmation signal SHALL load the listing page for
+confirmation before any rating is displayed.
 
 #### Scenario: Confirmed card answers directly
 
@@ -16,31 +90,6 @@ the listing page for confirmation.
 - **WHEN** a search card shows a rating but exposes neither matching coordinates nor address
 - **THEN** the app loads the listing page for identity confirmation
 - **AND** no rating is displayed until that confirmation succeeds
-
-## ADDED Requirements
-
-### Requirement: Two-provider aggregate ratings
-
-The app SHALL resolve and display an external aggregate rating for a place from both
-TripAdvisor and Yelp, independently, using only the on-device headless browser. The app
-SHALL NOT require an API key, account, or paid service to obtain these ratings.
-
-#### Scenario: Both providers resolve
-
-- **WHEN** a place card is opened for a business that can be identified on both providers
-- **THEN** the card displays a TripAdvisor rating row and a Yelp rating row independently
-
-#### Scenario: One provider resolves
-
-- **WHEN** only one provider yields a valid, identity-matched rating
-- **THEN** the card displays the resolved provider's row
-- **AND** the unresolved provider contributes no row and no error
-
-#### Scenario: No provider resolves
-
-- **WHEN** neither provider yields a valid, identity-matched rating
-- **THEN** the card renders without any external-rating row
-- **AND** the rest of the place card remains fully usable
 
 ### Requirement: Listing resolution order
 
@@ -146,21 +195,22 @@ or challenged extraction SHALL be discarded rather than displayed.
 - **WHEN** the review count cannot be parsed as an exact non-negative integer
 - **THEN** the extraction is discarded
 
-### Requirement: Rating attribution and source link
+### Requirement: Combined rating attribution
 
-Every displayed rating SHALL be attributed to its provider and include the provider
-name, the rating value, the exact review count, the time the rating was observed, and a
-link to the source listing.
+The combined aggregate SHALL show the rating, the total exact review count, and
+an observed-time label, and SHALL be attributed to the contributing providers
+through their listing pills.
 
-#### Scenario: Attribution rendered
+#### Scenario: Combined attribution rendered
 
-- **WHEN** a validated rating is displayed
-- **THEN** the row shows the provider name, rating, exact review count, an observed-time label, and a link to the source listing
+- **WHEN** a combined aggregate is displayed
+- **THEN** it shows the rating, the total exact review count, and an observed-time label
+- **AND** the contributing providers are represented by their listing pills
 
 #### Scenario: Source link opens the listing
 
-- **WHEN** the user activates the source link
-- **THEN** the app opens the provider's listing URL
+- **WHEN** the user activates a provider pill
+- **THEN** the app opens that provider's listing URL
 
 ### Requirement: Transient and device-local ratings
 
