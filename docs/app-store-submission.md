@@ -25,7 +25,7 @@ of that is tracked here, so the first public release targets iOS.
 | **Host policy at polarismaps.app**         | ⬜     | Must resolve before review; deploy `netlify-deploy/privacy`               |
 | **Review contact + screenshots**           | ⬜     | Fill `review_information/` and capture shots (see `fastlane/screenshots`) |
 | **Fill `<DATE>` / `<CONTACT EMAIL>`**      | ⬜     | In the policy, terms, and metadata footer                                 |
-| **`.com` → `.app` link decision**          | ⬜     | Place links + associated domains still use `polarismaps.com` (see below)  |
+| Universal links on `polarismaps.app`       | 🟡     | Source + AASA migrated; AASA deploy + Apple capability/profile pending    |
 
 ## Version
 
@@ -36,17 +36,33 @@ alone will not change the binary. Run `npx expo prebuild` or update the plist,
 then confirm with `bundle exec fastlane ios release` (the `verify_version_alignment`
 preflight warns on drift).
 
-## Known risk: `polarismaps.com` vs `polarismaps.app`
+## Universal links (`polarismaps.app`)
 
-The canonical domain is `polarismaps.app`, but these still reference `.com`:
+The canonical domain is `polarismaps.app`. The source has been migrated:
 
-- `src/services/places/shareService.ts` → `PLACE_LINK_HOST = 'polarismaps.com'`
-- `plugins/withUniversalLinks.js` → `applinks:polarismaps.com`
+- `src/services/places/shareService.ts` → `PLACE_LINK_HOST = 'polarismaps.app'`
+- `plugins/withUniversalLinks.js` → `applinks:polarismaps.app`
+- `netlify-deploy/.well-known/apple-app-site-association` declares
+  `XTXZ3CYRPX.com.polarismaps.app` for `/p/*` and `/p`.
 
-Universal links (`https://polarismaps.com/p/<id>`) will not open the app from the
-`.app` domain, and Apple needs `apple-app-site-association` served at whichever
-host is declared. Decide the final host, update both, and publish the AASA file
-before relying on share links.
+Three things remain, all outside the app code, before links open the app:
+
+1. **Deploy** the AASA file so
+   `https://polarismaps.app/.well-known/apple-app-site-association` resolves
+   with `Content-Type: application/json`.
+2. **Enable the Associated Domains capability** for App ID
+   `com.polarismaps.app` in the Apple Developer portal and **regenerate the App
+   Store provisioning profile**. The committed profile
+   (`AppStore_com.polarismaps.app.mobileprovision`) does **not** include
+   `com.apple.developer.associated-domains`, so adding the entitlement now would
+   fail signing.
+3. **Apply the entitlement** (`npx expo prebuild` runs the `withUniversalLinks`
+   plugin, or add
+   `com.apple.developer.associated-domains = ["applinks:polarismaps.app"]` to
+   `ios/PolarisMaps/PolarisMaps.entitlements`) and re-sign.
+
+Until then, shared place links fall back to the `polaris-maps://` scheme and the
+app still resolves them; only the https universal-link entry point is inactive.
 
 ## Submission path (iOS)
 

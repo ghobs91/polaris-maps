@@ -7,13 +7,13 @@ import {
 describe('buildPlaceLink', () => {
   it('uses a canonical path when an id exists', () => {
     expect(buildPlaceLink({ canonicalId: 'abc123', lat: 1, lng: 2 })).toBe(
-      'https://polarismaps.com/p/abc123',
+      'https://polarismaps.app/p/abc123',
     );
   });
 
   it('falls back to coordinates and name', () => {
     const link = buildPlaceLink({ lat: 40.7, lng: -74, name: 'Cafe A' });
-    expect(link.startsWith('https://polarismaps.com/p?')).toBe(true);
+    expect(link.startsWith('https://polarismaps.app/p?')).toBe(true);
     expect(link).toContain('lat=40.7');
     expect(link).toContain('name=Cafe+A');
   });
@@ -53,7 +53,7 @@ describe('parsePlaceLink', () => {
 
   it('rejects unrelated URLs and malformed input', () => {
     expect(parsePlaceLink('https://example.com/p/abc')).toBeNull();
-    expect(parsePlaceLink('https://polarismaps.com/about')).toBeNull();
+    expect(parsePlaceLink('https://polarismaps.app/about')).toBeNull();
     expect(parsePlaceLink('not a url')).toBeNull();
   });
 });

@@ -16,3 +16,8 @@
   from = "/terms"
   to = "/terms/index.html"
   status = 200
+
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"

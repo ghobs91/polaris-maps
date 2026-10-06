@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocalSearchParams, Redirect } from 'expo-router';
 
 /**
- * Inbound canonical place link (`https://polarismaps.com/p/<id>`) — resolve to
+ * Inbound canonical place link (`https://polarismaps.app/p/<id>`) — resolve to
  * the place detail screen.
  */
 export default function PlaceLinkScreen() {

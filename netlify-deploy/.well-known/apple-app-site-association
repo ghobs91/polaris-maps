@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["XTXZ3CYRPX.com.polarismaps.app"],
+        "components": [
+          { "/": "/p/*", "comment": "Canonical place links" },
+          { "/": "/p", "comment": "Coordinate place links" }
+        ]
+      }
+    ]
+  }
+}
