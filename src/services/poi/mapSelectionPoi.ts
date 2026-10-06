@@ -1,5 +1,6 @@
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { OsmPoi } from './osmFetcher';
+import { reverseGeocode } from '../geocoding/geocodingService';
 
 export const MAP_SELECTION_KIND_TAG = 'polaris:selection_kind';
 const MAP_SELECTION_KIND = 'map_long_press';
@@ -58,7 +59,6 @@ export function createMapSelectionPoi(
 }
 
 export async function resolveMapSelectionPoi(lat: number, lng: number): Promise<OsmPoi> {
-  const { reverseGeocode } = await import('../geocoding/geocodingService');
   const entry = await reverseGeocode(lat, lng).catch(() => null);
   return createMapSelectionPoi(lat, lng, entry);
 }

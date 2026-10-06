@@ -13,7 +13,13 @@ const OVERPASS_INSTANCES = [
 
 /** Minimum gap between successive Overpass requests (ms). */
 const OVERPASS_MIN_INTERVAL_MS = 1_000;
+let _minIntervalMs = OVERPASS_MIN_INTERVAL_MS;
 let _lastOverpassRequestAt = 0;
+
+/** Exposed for testing only: override the inter-request throttle (0 disables). */
+export function __setOverpassMinIntervalMsForTests(ms: number): void {
+  _minIntervalMs = ms;
+}
 
 export interface OverpassRequestOptions {
   /** Overpass QL query string (without the `data=` prefix). */
@@ -32,11 +38,13 @@ export interface OverpassRequestOptions {
  * instances fail.
  */
 export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
-  // Enforce minimum inter-request gap to respect public API usage policies
+  // Enforce minimum inter-request gap to respect public API usage policies.
+  // Clamp to 0 so a backward clock change can't produce a huge negative
+  // elapsed and, in turn, an enormous wait.
   const now = Date.now();
-  const elapsed = now - _lastOverpassRequestAt;
-  if (elapsed < OVERPASS_MIN_INTERVAL_MS) {
-    await new Promise((r) => setTimeout(r, OVERPASS_MIN_INTERVAL_MS - elapsed));
+  const elapsed = Math.max(0, now - _lastOverpassRequestAt);
+  if (elapsed < _minIntervalMs) {
+    await new Promise((r) => setTimeout(r, _minIntervalMs - elapsed));
   }
   _lastOverpassRequestAt = Date.now();
 
