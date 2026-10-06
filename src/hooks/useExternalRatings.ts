@@ -90,7 +90,10 @@ function paceFetch<T>(url: string, task: () => Promise<T>): Promise<T> {
   return browseScheduler.schedule(host, task);
 }
 
-export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatingsResult {
+export function useExternalRatings(
+  query: ExternalRatingQuery,
+  resetKey: string | number,
+): UseExternalRatingsResult {
   const [states, setStates] = useState<InternalState[]>(() =>
     EXTERNAL_RATING_PROVIDERS.map((p) => blankState(p.id)),
   );
@@ -119,6 +122,10 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
     (id: ExternalRatingProviderId) => {
       clearTimer(id);
       timerRef.current[id] = setTimeout(() => {
+        // A provider that already produced a summary is settled: never let a
+        // stale stage timeout wipe a loaded row.
+        const current = statesRef.current.find((s) => s.provider === id);
+        if (current?.status === 'loaded') return;
         update(id, { status: 'failed', webView: null });
       }, STAGE_TIMEOUT_MS);
     },
@@ -127,17 +134,20 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
 
   useEffect(() => {
     let cancelled = false;
-    const providerTimers: Array<ReturnType<typeof setTimeout>> = [];
+    const q = queryRef.current;
 
     EXTERNAL_RATING_PROVIDERS.forEach((provider) => {
       const id = provider.id;
-      const explicitTag = query.tags?.[`polaris:${id}`];
+      const explicitTag = q.tags?.[`polaris:${id}`];
+
+      // A new place: reset this provider before re-resolving.
+      update(id, blankState(id));
 
       void (async () => {
         let listingUrl: string | null = null;
         let origin: Origin = explicitTag ? 'tag' : 'website';
         try {
-          listingUrl = await resolveKnownListing(provider, query);
+          listingUrl = await resolveKnownListing(provider, q);
         } catch {
           listingUrl = null;
         }
@@ -147,7 +157,7 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
           let summary: ExternalRatingSummary | null = null;
           try {
             summary = await paceFetch(listingUrl, () =>
-              fetchAndParseRating(provider, listingUrl as string, query),
+              fetchAndParseRating(provider, listingUrl as string, q),
             );
           } catch {
             summary = null;
@@ -157,10 +167,7 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
             update(id, { status: 'loaded', summary, listingUrl, webView: null, origin });
             return;
           }
-          const t = setTimeout(() => {
-            if (!cancelled) update(id, { status: 'failed', webView: null });
-          }, STAGE_TIMEOUT_MS);
-          providerTimers.push(t);
+          armTimeout(id);
           update(id, {
             status: 'loading',
             listingUrl,
@@ -175,11 +182,8 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
           return;
         }
 
-        const searchUrl = provider.buildSearchUrl(query.name, query.address ?? null);
-        const t = setTimeout(() => {
-          if (!cancelled) update(id, { status: 'failed', webView: null });
-        }, STAGE_TIMEOUT_MS);
-        providerTimers.push(t);
+        const searchUrl = provider.buildSearchUrl(q.name, q.address ?? null);
+        armTimeout(id);
         update(id, {
           status: 'searching',
           origin: 'search',
@@ -196,11 +200,11 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
 
     return () => {
       cancelled = true;
-      providerTimers.forEach(clearTimeout);
       Object.values(timerRef.current).forEach((t) => t && clearTimeout(t));
     };
-    // `query` is memoised by the caller (one per place).
-  }, [query, update]);
+    // Resolution is keyed to the place (`resetKey`), not to every query field,
+    // so late enrichment can't reset an already-loaded rating.
+  }, [resetKey, update, armTimeout]);
 
   const handleMessage = useCallback(
     (id: ExternalRatingProviderId, data: string) => {

@@ -50,7 +50,7 @@ export function ExternalRatingsSection({
     [poi, enrichedFormattedAddress],
   );
 
-  const { states, handleMessage, handleError } = useExternalRatings(query);
+  const { states, handleMessage, handleError } = useExternalRatings(query, poi.id);
 
   // Serialize hidden browsing: mount at most one provider WebView at a time, in
   // registry order. A waiting provider's stage is picked up once this one settles.
