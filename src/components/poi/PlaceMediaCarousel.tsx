@@ -3,7 +3,7 @@ import { FlatList, Linking, Modal, Pressable, StyleSheet, Text, View } from 'rea
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { spacing, typography } from '../../constants/theme';
+import { borderRadius, spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import { getConnectivity } from '../../services/regions/connectivityService';
@@ -188,46 +188,48 @@ export function PlaceMediaCarousel({
   return (
     <View style={styles.section} testID="place-media-section">
       <Text style={styles.title}>Photos</Text>
-      <FlatList
-        data={visible}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(item) => item.url}
-        contentContainerStyle={styles.strip}
-        testID="place-media-strip"
-        renderItem={({ item, index }) => {
-          const caption = item.attribution ?? item.source;
-          return (
-            <Pressable
-              testID={`place-media-thumb-${index}`}
-              accessibilityRole="button"
-              accessibilityLabel={`Open photo ${index + 1}, ${caption}`}
-              onPress={() => setViewerIndex(index)}
-              style={styles.thumbWrap}
-            >
-              {item.thumbnailUrl ? (
-                <Image
-                  source={{ uri: item.thumbnailUrl }}
-                  style={[styles.thumb, { borderColor: colors.border }]}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  onError={() => handleError(item.url)}
-                  accessibilityIgnoresInvertColors
-                />
-              ) : (
-                <View
-                  style={[styles.thumb, styles.thumbPlaceholder, { borderColor: colors.border }]}
-                >
-                  <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
-                </View>
-              )}
-              <Text style={styles.caption} numberOfLines={1}>
-                {caption}
-              </Text>
-            </Pressable>
-          );
-        }}
-      />
+      <View style={[styles.box, { borderColor: colors.border }]}>
+        <FlatList
+          data={visible}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(item) => item.url}
+          contentContainerStyle={styles.strip}
+          testID="place-media-strip"
+          renderItem={({ item, index }) => {
+            const caption = item.attribution ?? item.source;
+            return (
+              <Pressable
+                testID={`place-media-thumb-${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Open photo ${index + 1}, ${caption}`}
+                onPress={() => setViewerIndex(index)}
+                style={styles.thumbWrap}
+              >
+                {item.thumbnailUrl ? (
+                  <Image
+                    source={{ uri: item.thumbnailUrl }}
+                    style={[styles.thumb, { borderColor: colors.border }]}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    onError={() => handleError(item.url)}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <View
+                    style={[styles.thumb, styles.thumbPlaceholder, { borderColor: colors.border }]}
+                  >
+                    <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+                  </View>
+                )}
+                <Text style={styles.caption} numberOfLines={1}>
+                  {caption}
+                </Text>
+              </Pressable>
+            );
+          }}
+        />
+      </View>
 
       <Modal
         visible={current != null}
@@ -295,6 +297,12 @@ const createStyles = ({ colors }: Theme) =>
   StyleSheet.create({
     section: { marginHorizontal: spacing.md, marginBottom: spacing.md },
     title: { ...typography.label, color: colors.text, marginBottom: spacing.sm },
+    box: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: borderRadius.lg,
+      borderCurve: 'continuous',
+      padding: spacing.sm,
+    },
     strip: { gap: spacing.sm },
     thumbWrap: { width: 120 },
     thumb: {

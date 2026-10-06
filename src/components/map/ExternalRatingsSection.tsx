@@ -19,10 +19,11 @@ import { borderRadius, spacing, typography } from '../../constants/theme';
 
 /**
  * External aggregate ratings from TripAdvisor and Yelp, resolved via the
- * on-device headless browser. When both providers have a rating they are
- * combined into one count-weighted aggregate; the individual provider listings
- * are surfaced as clickable pills. No review text is fetched or displayed, and
- * nothing is persisted.
+ * on-device headless browser, wrapped in a bordered "Reviews" section. When both
+ * providers have a rating they are combined into one count-weighted aggregate
+ * with the source pills to its right; otherwise the row shows a loading
+ * indicator or a write-the-first-review invitation. No review text is fetched or
+ * displayed, and nothing is persisted.
  *
  * Bounded policy: only one hidden WebView is mounted at a time; the WebView uses
  * the native user agent with a persistent (non-incognito) cookie store. The app
@@ -82,45 +83,101 @@ export function ExternalRatingsSection({
   );
 
   return (
-    <View testID="external-ratings-section">
-      {activeWebView ? (
-        <View style={styles.hiddenWebView} pointerEvents="none">
-          <WebView
-            key={activeWebView.provider}
-            source={{ uri: activeWebView.uri }}
-            style={styles.hiddenWebView}
-            injectedJavaScript={activeWebView.injectedJavaScript}
-            javaScriptEnabled
-            domStorageEnabled
-            sharedCookiesEnabled
-            thirdPartyCookiesEnabled
-            mediaPlaybackRequiresUserAction
-            setSupportMultipleWindows={false}
-            onMessage={handleMessageEvent(activeWebView.provider)}
-            onError={() => handleError(activeWebView.provider)}
-            onHttpError={() => handleError(activeWebView.provider)}
-          />
-        </View>
-      ) : null}
+    <View testID="external-ratings-section" style={styles.section}>
+      <Text style={[styles.title, { color: colors.text }]}>Reviews</Text>
+      <View style={[styles.box, { borderColor: colors.border }]}>
+        {activeWebView ? (
+          <View style={styles.hiddenWebView} pointerEvents="none">
+            <WebView
+              key={activeWebView.provider}
+              source={{ uri: activeWebView.uri }}
+              style={styles.hiddenWebView}
+              injectedJavaScript={activeWebView.injectedJavaScript}
+              javaScriptEnabled
+              domStorageEnabled
+              sharedCookiesEnabled
+              thirdPartyCookiesEnabled
+              mediaPlaybackRequiresUserAction
+              setSupportMultipleWindows={false}
+              onMessage={handleMessageEvent(activeWebView.provider)}
+              onError={() => handleError(activeWebView.provider)}
+              onHttpError={() => handleError(activeWebView.provider)}
+            />
+          </View>
+        ) : null}
 
-      {combined ? (
-        <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
-      ) : resolving ? (
-        <LoadingBlock colors={colors} />
-      ) : (
-        <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
-      )}
+        {combined ? (
+          <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
+        ) : resolving ? (
+          <LoadingBlock colors={colors} />
+        ) : (
+          <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function CombinedRatingBlock({
+  combined,
+  sources,
+  colors,
+}: {
+  combined: CombinedRating;
+  sources: ExternalRatingSummary[];
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  const openListing = useCallback((url: string) => {
+    Linking.openURL(url).catch(() => {});
+  }, []);
+
+  return (
+    <View style={styles.row} testID="external-ratings-combined">
+      <Text
+        style={[styles.rating, { color: colors.text }]}
+        testID="external-ratings-combined-rating"
+      >
+        {combined.rating.toFixed(1)}
+      </Text>
+      <Text style={[styles.stars, { color: colors.warning }]}>{renderStars(combined.rating)}</Text>
+      <Text
+        style={[styles.count, { color: colors.textSecondary }]}
+        testID="external-ratings-combined-count"
+      >
+        {combined.reviewCount.toLocaleString()} reviews
+      </Text>
+
+      {/* Source pills sit to the right of the aggregate. */}
+      <View style={styles.pillsInline}>
+        {sources.map((summary) => {
+          const label = PROVIDER_LABEL[summary.provider];
+          return (
+            <Pressable
+              key={summary.provider}
+              onPress={() => openListing(summary.listingUrl)}
+              accessibilityRole="link"
+              accessibilityLabel={`Open ${label} listing`}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.pill,
+                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+              ]}
+              testID={`external-ratings-pill-${summary.provider}`}
+            >
+              <Text style={[styles.pillText, { color: colors.primary }]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
 function LoadingBlock({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
   return (
-    <View style={styles.section} testID="external-ratings-loading">
-      <View style={[styles.statusRow, { borderBottomColor: colors.border }]}>
-        <ActivityIndicator size="small" color={colors.textSecondary} />
-        <Text style={[styles.statusText, { color: colors.textSecondary }]}>Loading ratings…</Text>
-      </View>
+    <View style={styles.statusRow} testID="external-ratings-loading">
+      <ActivityIndicator size="small" color={colors.textSecondary} />
+      <Text style={[styles.statusText, { color: colors.textSecondary }]}>Loading ratings…</Text>
     </View>
   );
 }
@@ -133,7 +190,7 @@ function EmptyBlock({
   onWriteReview?: () => void;
 }) {
   return (
-    <View style={styles.section} testID="external-ratings-empty">
+    <View testID="external-ratings-empty">
       <Pressable
         onPress={onWriteReview}
         disabled={!onWriteReview}
@@ -154,82 +211,10 @@ function EmptyBlock({
   );
 }
 
-function CombinedRatingBlock({
-  combined,
-  sources,
-  colors,
-}: {
-  combined: CombinedRating;
-  sources: ExternalRatingSummary[];
-  colors: ReturnType<typeof useTheme>['colors'];
-}) {
-  const openListing = useCallback((url: string) => {
-    Linking.openURL(url).catch(() => {});
-  }, []);
-
-  return (
-    <View style={styles.section} testID="external-ratings-combined">
-      <View style={[styles.row, { borderBottomColor: colors.border }]}>
-        <Text
-          style={[styles.rating, { color: colors.text }]}
-          testID="external-ratings-combined-rating"
-        >
-          {combined.rating.toFixed(1)}
-        </Text>
-        <Text style={[styles.stars, { color: colors.warning }]}>
-          {renderStars(combined.rating)}
-        </Text>
-        <Text
-          style={[styles.count, { color: colors.textSecondary }]}
-          testID="external-ratings-combined-count"
-        >
-          {combined.reviewCount.toLocaleString()} reviews
-        </Text>
-      </View>
-
-      <View style={styles.pills}>
-        {sources.map((summary) => {
-          const label = PROVIDER_LABEL[summary.provider];
-          return (
-            <Pressable
-              key={summary.provider}
-              onPress={() => openListing(summary.listingUrl)}
-              accessibilityRole="link"
-              accessibilityLabel={`Open ${label} listing`}
-              hitSlop={6}
-              style={({ pressed }) => [
-                styles.pill,
-                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
-              ]}
-              testID={`external-ratings-pill-${summary.provider}`}
-            >
-              <Text style={[styles.pillText, { color: colors.primary }]}>{label}</Text>
-            </Pressable>
-          );
-        })}
-        <Text style={[styles.observed, { color: colors.textSecondary }]}>
-          Observed {formatObserved(combined.observedAt)}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 function renderStars(rating: number): string {
   const full = Math.round(rating);
   const clamped = Math.max(0, Math.min(5, full));
   return '★'.repeat(clamped) + '☆'.repeat(5 - clamped);
-}
-
-function formatObserved(observedAt: number): string {
-  const diffMs = Date.now() - observedAt;
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 const styles = StyleSheet.create({
@@ -242,11 +227,22 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
   },
+  title: {
+    ...typography.label,
+    marginBottom: spacing.sm,
+  },
+  box: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: borderRadius.lg,
+    borderCurve: 'continuous',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
   row: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: spacing.xs,
   },
   rating: {
     ...typography.h3,
@@ -262,13 +258,12 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     marginLeft: spacing.sm,
   },
-  pills: {
+  pillsInline: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingTop: spacing.sm,
-    paddingHorizontal: spacing.xs,
+    marginLeft: 'auto',
+    paddingLeft: spacing.sm,
   },
   pill: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -281,16 +276,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  observed: {
-    ...typography.caption,
-    marginLeft: 'auto',
-  },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   statusText: {
     ...typography.bodySmall,
@@ -303,6 +293,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    marginVertical: spacing.xs,
   },
   writeCtaText: {
     ...typography.label,
