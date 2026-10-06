@@ -54,13 +54,15 @@ rather than dividing by zero.
 ### Requirement: Provider listing pills
 
 For every provider contributing a rating, the app SHALL display a clickable pill
-labelled with the provider name that opens that provider's listing URL. No pill
-SHALL be shown for a provider that contributed no rating.
+labelled with the provider name, positioned to the right of the combined
+aggregate on the same row, that opens that provider's listing URL. No pill SHALL
+be shown for a provider that contributed no rating.
 
 #### Scenario: Pill per contributing provider
 
 - **WHEN** ratings from both providers are displayed
 - **THEN** a Tripadvisor pill and a Yelp pill are both shown
+- **AND** both pills sit to the right of the combined rating and count
 
 #### Scenario: Press opens the listing
 
@@ -220,14 +222,13 @@ review-compose surface.
 
 ### Requirement: Combined rating attribution
 
-The combined aggregate SHALL show the rating, the total exact review count, and
-an observed-time label, and SHALL be attributed to the contributing providers
-through their listing pills.
+The combined aggregate SHALL show the rating and the total exact review count,
+attributed to the contributing providers through their listing pills.
 
 #### Scenario: Combined attribution rendered
 
 - **WHEN** a combined aggregate is displayed
-- **THEN** it shows the rating, the total exact review count, and an observed-time label
+- **THEN** it shows the rating and the total exact review count
 - **AND** the contributing providers are represented by their listing pills
 
 #### Scenario: Source link opens the listing

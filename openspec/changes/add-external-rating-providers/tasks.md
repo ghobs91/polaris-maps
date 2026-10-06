@@ -44,6 +44,13 @@
 - [x] 6.4 Keep the hidden WebView 0×0/`pointerEvents="none"` with a 20s timeout and abort-on-unmount, as today
 - [x] 6.5 Update `__tests__/integration/TripadvisorRatingCard.test.tsx` into a two-provider, two-stage (search → listing) integration test simulating `onMessage`
 
+## 11. Card layout polish
+
+- [x] 11.1 Source pills inline to the right of the combined aggregate; drop the "Observed …" label
+- [x] 11.2 Bordered, labelled "Reviews" and "Photos" sections on the place card
+- [x] 11.3 Float the street-view thumbnail over the map, anchored top-left (`StreetViewThumbOverlay` + extended `streetViewStore`)
+- [ ] 11.4 On-device check: section borders/labels, pill alignment, and street-view overlay position on both display layouts
+
 ## 10. Reviews row placement and states
 
 - [x] 10.1 Move `ExternalRatingsSection` above `PlaceMediaCarousel` in `POIInfoCard`
