@@ -21,8 +21,13 @@ import type {
 // ---------------------------------------------------------------------------
 // Anti-bot challenge detection
 // ---------------------------------------------------------------------------
+//
+// DataDome and friends inject script tags/frames into perfectly valid content
+// pages too (verified against live Yelp pages: markers present AND a complete
+// JSON-LD rating served). So a marker match alone is NOT a challenge verdict —
+// it is only fatal when nothing extractable was found alongside it.
 
-/** Challenge/anti-bot markers that indicate the page is not a real listing. */
+/** Challenge/anti-bot markers that indicate the page may not be a real listing. */
 const CHALLENGE_MARKERS = [
   'datadome',
   'akamai',
@@ -35,9 +40,19 @@ const CHALLENGE_MARKERS = [
   'are you a robot',
 ];
 
-export function detectChallenge(html: string): boolean {
+/** True when the raw HTML carries anti-bot markers at all. */
+export function hasChallengeMarkers(html: string): boolean {
   const lower = html.toLowerCase();
   return CHALLENGE_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/**
+ * A page counts as a challenge only when anti-bot markers are present and no
+ * usable rating data was extracted from it. Markers without data (a real
+ * protection script embedded in a valid page) are not a verdict.
+ */
+export function pageIsChallenge(html: string, extractedData: boolean): boolean {
+  return hasChallengeMarkers(html) && !extractedData;
 }
 
 /** The same markers, as a JSON array literal, for injection into ES5 page JS. */
@@ -398,19 +413,85 @@ export function parseSearchMessageFromWebView(
     if (!raw || typeof raw !== 'object') continue;
     const c = raw as Record<string, unknown>;
     if (typeof c.url !== 'string' || !c.url) continue;
-    out.push({
+    const candidate: RatingSearchCandidate = {
       url: c.url,
       name: typeof c.name === 'string' ? c.name : null,
       address: typeof c.address === 'string' ? c.address : null,
       geo: parseWebViewGeo(c.geo),
-    });
+    };
+    if (typeof c.rating === 'number' && Number.isFinite(c.rating)) candidate.rating = c.rating;
+    if (typeof c.reviewCount === 'number' && Number.isInteger(c.reviewCount)) {
+      candidate.reviewCount = c.reviewCount;
+    }
+    out.push(candidate);
   }
   return out;
 }
 
 // ---------------------------------------------------------------------------
-// In-memory cache
+// Retriable injected collector
 // ---------------------------------------------------------------------------
+
+/**
+ * Build the standard injected-collector wrapper around a provider's `collect()`
+ * body. Replaces the old one-shot `SENT` latch: the collector re-runs on an
+ * interval until it has data or time runs out, so a page that is briefly
+ * presenting a DataDome interstitial gets re-read once it clears (verified:
+ * Yelp's interstitial auto-resolves within seconds in a warmed WebView).
+ *
+ * The generated script is ES5-compatible — it runs inside third-party pages.
+ *
+ * @param providerId    Value posted as `provider` on every message.
+ * @param payloadType   `'external-rating'` or `'rating-search'`.
+ * @param hasDataJs     ES5 expression, evaluated in page context; true when
+ *                      `out` carries the data worth posting.
+ * @param collectBodyJs ES5 statements that populate `out` from the DOM.
+ * @param initialDelayMs / retryIntervalMs / maxAttempts — pacing.
+ */
+export function buildCollectorScript(opts: {
+  providerId: string;
+  payloadType: 'external-rating' | 'rating-search';
+  hasDataJs: string;
+  collectBodyJs: string;
+  initialDelayMs?: number;
+  retryIntervalMs?: number;
+  maxAttempts?: number;
+}): string {
+  const initialDelayMs = opts.initialDelayMs ?? 0;
+  const retryIntervalMs = opts.retryIntervalMs ?? 2000;
+  const maxAttempts = opts.maxAttempts ?? 4;
+  return `(function () {
+  var ATTEMPTS = ${JSON.stringify(maxAttempts)};
+  var INTERVAL = ${JSON.stringify(retryIntervalMs)};
+  var FIRST_DELAY = ${JSON.stringify(initialDelayMs)};
+  var TYPE = ${JSON.stringify(opts.payloadType)};
+  var PROVIDER = ${JSON.stringify(opts.providerId)};
+  var SENT = false;
+  function post(obj) {
+    if (SENT) return;
+    SENT = true;
+    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch (e) {}
+  }
+  function collect() {
+    var out = { type: TYPE, provider: PROVIDER };
+${opts.collectBodyJs}
+    var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot'];
+    var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
+    var markerHit = false;
+    for (var mi = 0; mi < MARKERS.length; mi++) {
+      if (low.indexOf(MARKERS[mi]) !== -1) { markerHit = true; break; }
+    }
+    var hasData = ${opts.hasDataJs};
+    out.challenge = markerHit && !hasData;
+    if (hasData) { post(out); return; }
+    if (SENT) return;
+    ATTEMPTS -= 1;
+    if (ATTEMPTS > 0) { setTimeout(collect, INTERVAL); }
+  }
+  if (FIRST_DELAY > 0) { setTimeout(collect, FIRST_DELAY); } else { collect(); }
+  return true;
+})();`;
+}
 
 interface CacheEntry {
   summary: ExternalRatingSummary;

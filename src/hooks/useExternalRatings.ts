@@ -217,6 +217,37 @@ export function useExternalRatings(query: ExternalRatingQuery): UseExternalRatin
           update(id, { status: 'failed', webView: null });
           return;
         }
+
+        // Inline answer: the search card itself carried rating + count and a
+        // confirmation signal, so no listing navigation is needed.
+        if (chosen.rating != null && chosen.reviewCount != null && (chosen.geo || chosen.address)) {
+          if (!matchIdentity(chosen, q)) {
+            clearTimer(id);
+            update(id, { status: 'failed', webView: null });
+            return;
+          }
+          const inlineListingUrl = provider.parseListingUrl(chosen.url) ?? chosen.url;
+          const summary = validateExternalRating(
+            {
+              rating: chosen.rating,
+              reviewCount: chosen.reviewCount,
+              listingName: chosen.name,
+              listingAddress: chosen.address,
+              geo: chosen.geo ?? null,
+              challenge: false,
+            },
+            inlineListingUrl,
+            id,
+            { expectedName: q.name },
+          );
+          if (summary) {
+            setCachedExternalRating(id, inlineListingUrl, summary);
+            clearTimer(id);
+            update(id, { status: 'loaded', summary, listingUrl: inlineListingUrl, webView: null });
+            return;
+          }
+        }
+
         armTimeout(id);
         update(id, {
           status: 'loading',

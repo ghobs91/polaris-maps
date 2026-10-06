@@ -172,9 +172,22 @@ describe('parseExternalRatingFromHtml', () => {
     expect(rating?.reviewCount).toBe(1234);
   });
 
-  it('returns null on anti-bot challenge pages', () => {
+  it('returns null when a challenge page carries no extractable data', () => {
     const html = '<html><body><div id="datadome">Please verify you are human</div></body></html>';
     expect(parseExternalRatingFromHtml(html)).toBeNull();
+  });
+
+  it('extracts a rating even when anti-bot markers are present (real DataDome pages embed them)', () => {
+    const html = [
+      '<script src="https://geo.captcha-delivery.com/interstitial.js"></script>',
+      '<script type="application/ld+json">',
+      '  {"@type":"Restaurant","name":"The Prime Meathouse",',
+      '   "aggregateRating":{"ratingValue":"4.5","reviewCount":"2345"}}',
+      '</script>',
+    ].join('\n');
+    const rating = parseExternalRatingFromHtml(html);
+    expect(rating?.rating).toBe(4.5);
+    expect(rating?.reviewCount).toBe(2345);
   });
 
   it('returns null when rating or count is missing', () => {

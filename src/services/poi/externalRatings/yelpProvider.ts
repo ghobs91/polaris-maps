@@ -9,12 +9,13 @@
  */
 
 import {
-  detectChallenge,
+  buildCollectorScript,
   discoverListingFromAnchors,
   extractLdBlocks,
   findAggregateRating,
   parseRatingMessageFromWebView,
   parseSearchMessageFromWebView,
+  pageIsChallenge,
 } from './core';
 import type { ExternalRatingProvider } from './provider';
 import type { GeoPoint, RawExternalRating, RatingSearchCandidate } from './types';
@@ -199,8 +200,6 @@ function parseYelpDomFallback(html: string): { rating: number | null; count: num
  * Order: JSON-LD → `__NEXT_DATA__` → DOM fallback.
  */
 export function parseYelpRatingFromHtml(html: string): RawExternalRating | null {
-  if (detectChallenge(html)) return null;
-
   const ld = findAggregateRating(extractLdBlocks(html));
   const next = parseYelpNextDataRating(html);
   const dom = parseYelpDomFallback(html);
@@ -208,6 +207,10 @@ export function parseYelpRatingFromHtml(html: string): RawExternalRating | null 
   const rating = ld.rating ?? next?.rating ?? dom.rating;
   const count = ld.count ?? next?.reviewCount ?? dom.count;
   if (rating == null || count == null) return null;
+
+  // Markers alone are not a verdict: live Yelp pages carry DataDome scripts
+  // while serving complete JSON-LD (verified against a real listing page).
+  if (pageIsChallenge(html, true)) return null;
 
   return {
     rating,
@@ -242,12 +245,21 @@ function scanSearchBusinesses(
   if (name && (alias || webUrl)) {
     const canonical = canonicalYelpListingUrl(webUrl ?? `https://www.yelp.com/biz/${alias}`);
     if (canonical) {
-      out.push({
+      const candidate: RatingSearchCandidate = {
         url: canonical,
         name,
         address: yelpAddress(o.location),
         geo: yelpGeo(o.coordinates),
-      });
+      };
+      const agg =
+        o.aggregateRating && typeof o.aggregateRating === 'object'
+          ? (o.aggregateRating as Record<string, unknown>)
+          : null;
+      const rating = asNumber(o.rating) ?? (agg ? asNumber(agg.ratingValue) : null);
+      const count = asInt(o.reviewCount) ?? (agg ? asInt(agg.reviewCount) : null);
+      if (rating != null) candidate.rating = rating;
+      if (count != null) candidate.reviewCount = count;
+      out.push(candidate);
     }
   }
   for (const v of Object.values(o)) scanSearchBusinesses(v, out, name);
@@ -296,26 +308,20 @@ export function buildYelpSearchUrl(name: string, address: string | null): string
 // Injected JS for the hidden-WebView stages
 // ---------------------------------------------------------------------------
 
-/** Listing-stage injected JS. ES5-compatible — runs inside a third-party page. */
-export const YELP_RATING_JS = `(function () {
-  var SENT = false;
-  function post(obj) {
-    if (SENT) return;
-    SENT = true;
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch (e) {}
-  }
-  function collect() {
-    var out = {
-      type: 'external-rating',
-      provider: 'yelp',
-      ldRating: null,
-      ldCount: null,
-      ldName: null,
-      ldAddress: null,
-      geo: null,
-      automation: [],
-      challenge: false
-    };
+/** Listing-stage injected JS. Re-collects until data or attempts run out. */
+export const YELP_RATING_JS = buildCollectorScript({
+  providerId: 'yelp',
+  payloadType: 'external-rating',
+  hasDataJs: 'out.ldRating != null && out.ldCount != null',
+  initialDelayMs: 1000,
+  retryIntervalMs: 2000,
+  maxAttempts: 5,
+  collectBodyJs: `    out.ldRating = null;
+    out.ldCount = null;
+    out.ldName = null;
+    out.ldAddress = null;
+    out.geo = null;
+    out.automation = [];
     var scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (var i = 0; i < scripts.length; i++) {
       try {
@@ -380,47 +386,77 @@ export const YELP_RATING_JS = `(function () {
       var bodyTxt = (document.body.innerText || '').replace(/\\s+/g, ' ');
       var cm = /([0-9][0-9,]*)\\s*reviews?\\b/i.exec(bodyTxt);
       if (cm) out.ldCount = parseInt(cm[1].replace(/,/g, ''), 10);
-    }
-    var src = document.body ? (document.body.innerHTML || '') : '';
-    var low = src.toLowerCase();
-    var markers = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot'];
-    for (var mi = 0; mi < markers.length; mi++) {
-      if (low.indexOf(markers[mi]) !== -1) { out.challenge = true; break; }
-    }
-    post(out);
-  }
-  collect();
-  setTimeout(collect, 3000);
-  return true;
-})();`;
+    }`,
+});
 
-/** Search-stage injected JS. ES5-compatible — runs inside a third-party page. */
-export const YELP_SEARCH_JS = `(function () {
-  var SENT = false;
-  function post(obj) {
-    if (SENT) return;
-    SENT = true;
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch (e) {}
-  }
-  function collect() {
-    var out = { type: 'rating-search', provider: 'yelp', candidates: [] };
+/**
+ * Search-stage injected JS. Re-collects until `/biz/` anchors appear (or
+ * attempts run out). A DataDome interstitial auto-resolving in a warmed WebView
+ * is re-read automatically instead of posting an empty list once.
+ */
+export const YELP_SEARCH_JS = buildCollectorScript({
+  providerId: 'yelp',
+  payloadType: 'rating-search',
+  hasDataJs: 'out.candidates.length > 0',
+  initialDelayMs: 1500,
+  retryIntervalMs: 2500,
+  maxAttempts: 5,
+  collectBodyJs: `    out.candidates = [];
     var seen = {};
-    var anchors = document.querySelectorAll('a[href*="/biz/"]');
-    for (var i = 0; i < anchors.length && out.candidates.length < 20; i++) {
-      var href = anchors[i].getAttribute('href') || '';
-      var abs;
-      try { abs = new URL(href, location.href).toString(); } catch (e) { continue; }
-      if (seen[abs]) continue;
-      seen[abs] = true;
-      var name = (anchors[i].textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
-      out.candidates.push({ url: abs, name: name || null, address: null, geo: null });
+    var next = document.getElementById('__NEXT_DATA__');
+    if (next) {
+      try {
+        var scanCards = function (v, name) {
+          if (!v || out.candidates.length >= 20) return;
+          if (Array.isArray(v)) {
+            for (var ai = 0; ai < v.length; ai++) scanCards(v[ai], name);
+            return;
+          }
+          if (typeof v !== 'object') return;
+          var o = v;
+          var nm = typeof o.name === 'string' ? o.name : name;
+          var alias = typeof o.alias === 'string' ? o.alias : null;
+          var webUrl = typeof o.webUrl === 'string' ? o.webUrl : null;
+          var agg = (o.aggregateRating && typeof o.aggregateRating === 'object') ? o.aggregateRating : null;
+          var rt = o.rating != null ? Number(o.rating) : (agg && agg.ratingValue != null ? Number(agg.ratingValue) : null);
+          var ct = o.reviewCount != null ? Number(o.reviewCount) : (agg && agg.reviewCount != null ? Number(agg.reviewCount) : null);
+          if (nm && (alias || webUrl)) {
+            var base = webUrl || ('https://www.yelp.com/biz/' + alias);
+            var u;
+            try { u = new URL(base, location.href).toString(); } catch (e2) { u = null; }
+            if (u && u.indexOf('/biz/') !== -1 && !seen[u]) {
+              seen[u] = true;
+              var cand = { url: u, name: nm, address: null, geo: null };
+              if (o.location && typeof o.location === 'object') {
+                cand.address = o.location.formattedAddress || [o.location.address1, o.location.city, o.location.state].filter(function (x) { return !!x; }).join(', ') || null;
+              }
+              if (o.coordinates && o.coordinates.latitude != null) {
+                cand.geo = { lat: Number(o.coordinates.latitude), lng: Number(o.coordinates.longitude) };
+              }
+              if (rt != null) cand.rating = rt;
+              if (ct != null) cand.reviewCount = ct;
+              out.candidates.push(cand);
+            }
+          }
+          var keys = Object.keys(o);
+          for (var j = 0; j < keys.length; j++) scanCards(o[keys[j]], nm);
+        };
+        scanCards(JSON.parse(next.textContent || 'null'), null);
+      } catch (e) { /* malformed next data — ignore */ }
     }
-    post(out);
-  }
-  collect();
-  setTimeout(collect, 2500);
-  return true;
-})();`;
+    if (out.candidates.length === 0) {
+      var anchors = document.querySelectorAll('a[href*="/biz/"]');
+      for (var i = 0; i < anchors.length && out.candidates.length < 20; i++) {
+        var href = anchors[i].getAttribute('href') || '';
+        var abs;
+        try { abs = new URL(href, location.href).toString(); } catch (e) { continue; }
+        if (seen[abs]) continue;
+        seen[abs] = true;
+        var text = (anchors[i].textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
+        out.candidates.push({ url: abs, name: text || null, address: null, geo: null });
+      }
+    }`,
+});
 
 export function extractYelpRatingFromWebViewMessage(data: string): RawExternalRating | null {
   return parseRatingMessageFromWebView(data, 'yelp');

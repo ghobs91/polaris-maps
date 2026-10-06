@@ -25,7 +25,8 @@ import type {
 
 // Re-export provider-agnostic helpers and TripAdvisor specifics unchanged.
 export {
-  detectChallenge,
+  hasChallengeMarkers,
+  pageIsChallenge,
   namesMatch,
   parseExactCount,
   parseRatingFromStarText,

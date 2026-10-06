@@ -191,6 +191,43 @@ describe('ExternalRatingsSection', () => {
     expect(screen.getByText('View on Yelp')).toBeTruthy();
   });
 
+  it('resolves from the search card itself when it carries rating + identity', async () => {
+    mockResolveKnownListing.mockResolvedValue(null);
+
+    const screen = render(
+      <ExternalRatingsSection
+        poi={makePoi('Foo Bar', {
+          'addr:housenumber': '123',
+          'addr:street': 'Main St',
+          'addr:city': 'New York',
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_SEARCH_URL }));
+    onMessage({
+      type: 'rating-search',
+      provider: 'tripadvisor',
+      candidates: [
+        {
+          url: TA_LISTING_URL,
+          name: 'Foo Bar',
+          address: '123 Main St, New York',
+          geo: { lat: 40.75, lng: -73.99 },
+          rating: 4.5,
+          reviewCount: 2345,
+        },
+      ],
+    });
+
+    // No listing navigation: the card answered.
+    await waitFor(() =>
+      expect(screen.getByTestId('external-rating-section-tripadvisor')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('external-rating-tripadvisor').props.children).toBe('4.5');
+    expect(screen.getByText('2,345 reviews')).toBeTruthy();
+  });
+
   it('stays hidden when the extraction is an anti-bot challenge page', async () => {
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
@@ -202,9 +239,9 @@ describe('ExternalRatingsSection', () => {
     onMessage({
       type: 'external-rating',
       provider: 'tripadvisor',
-      ldRating: 4.5,
-      ldCount: 2345,
-      ldName: 'Foo Bar',
+      ldRating: null,
+      ldCount: null,
+      ldName: null,
       ldAddress: null,
       geo: null,
       automation: [],

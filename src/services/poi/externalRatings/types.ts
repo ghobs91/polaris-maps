@@ -61,4 +61,8 @@ export interface RatingSearchCandidate {
   name: string | null;
   address: string | null;
   geo?: GeoPoint | null;
+  /** Aggregate rating shown inline on a search-result card, when available. */
+  rating?: number;
+  /** Exact review count shown inline on a search-result card. */
+  reviewCount?: number;
 }

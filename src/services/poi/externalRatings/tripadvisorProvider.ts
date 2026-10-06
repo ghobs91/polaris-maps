@@ -8,7 +8,7 @@
  */
 
 import {
-  detectChallenge,
+  buildCollectorScript,
   discoverListingFromAnchors,
   extractLdBlocks,
   findAggregateRating,
@@ -16,6 +16,7 @@ import {
   parseRatingFromStarText,
   parseRatingMessageFromWebView,
   parseSearchMessageFromWebView,
+  pageIsChallenge,
 } from './core';
 import type { ExternalRatingProvider } from './provider';
 import type { RawExternalRating, RatingSearchCandidate } from './types';
@@ -166,8 +167,6 @@ export function collectAutomationText(html: string): string[] {
  * Prefers JSON-LD `aggregateRating`; falls back to `data-automation` text.
  */
 export function parseExternalRatingFromHtml(html: string): RawExternalRating | null {
-  if (detectChallenge(html)) return null;
-
   const ld = findAggregateRating(extractLdBlocks(html));
 
   const automation = collectAutomationText(html);
@@ -181,6 +180,10 @@ export function parseExternalRatingFromHtml(html: string): RawExternalRating | n
   const rating = ld.rating ?? automationRating;
   const count = ld.count ?? automationCount;
   const listingName = ld.name ?? null;
+
+  const extracted = rating != null && count != null;
+  // Markers alone are not a verdict: valid pages can carry DataDome scripts.
+  if (pageIsChallenge(html, extracted)) return null;
 
   if (rating == null || count == null) return null;
 
@@ -199,31 +202,25 @@ export function parseExternalRatingFromHtml(html: string): RawExternalRating | n
 // ---------------------------------------------------------------------------
 
 /**
- * Listing-stage injected JS. Runs on-device after page load, reads JSON-LD
- * `aggregateRating` + `data-automation` elements, detects anti-bot challenges,
- * then postMessages a structured rating object back.
- *
- * ES5-compatible (no optional chaining) — runs inside a third-party page.
+ * Listing-stage injected JS. Re-collects until JSON-LD `aggregateRating` or
+ * `data-automation` text is available (or attempts run out), so a page briefly
+ * presenting an anti-bot interstitial is re-read once it clears. No separate
+ * challenge latch in-page: markers without data are not a verdict (verified
+ * against live pages that embed DataDome scripts with full content).
  */
-export const TRIPADVISOR_RATING_JS = `(function () {
-  var SENT = false;
-  function post(obj) {
-    if (SENT) return;
-    SENT = true;
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch (e) {}
-  }
-  function collect() {
-    var out = {
-      type: 'external-rating',
-      provider: 'tripadvisor',
-      ldRating: null,
-      ldCount: null,
-      ldName: null,
-      ldAddress: null,
-      geo: null,
-      automation: [],
-      challenge: false
-    };
+export const TRIPADVISOR_RATING_JS = buildCollectorScript({
+  providerId: 'tripadvisor',
+  payloadType: 'external-rating',
+  hasDataJs: 'out.ldRating != null && out.ldCount != null',
+  initialDelayMs: 1000,
+  retryIntervalMs: 2000,
+  maxAttempts: 5,
+  collectBodyJs: `    out.ldRating = null;
+    out.ldCount = null;
+    out.ldName = null;
+    out.ldAddress = null;
+    out.geo = null;
+    out.automation = [];
     var scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (var i = 0; i < scripts.length; i++) {
       try {
@@ -239,7 +236,9 @@ export const TRIPADVISOR_RATING_JS = `(function () {
             if (out.ldCount == null && arr[a].reviewCount != null) out.ldCount = Number(arr[a].reviewCount);
           }
           if (out.ldName == null && it.name) out.ldName = String(it.name);
-          if (!out.ldAddress && it.address) out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+          if (!out.ldAddress && it.address) {
+            out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+          }
           if (!out.geo && it.geo && it.geo.latitude != null && it.geo.longitude != null) {
             out.geo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
           }
@@ -247,45 +246,32 @@ export const TRIPADVISOR_RATING_JS = `(function () {
         }
       } catch (e) { /* malformed JSON-LD — ignore */ }
     }
-    var autos = document.querySelectorAll('[data-automation]');
-    for (var j = 0; j < autos.length; j++) {
-      var dv = autos[j].getAttribute('data-automation') || '';
-      var lower = dv.toLowerCase();
-      if (lower.indexOf('review') !== -1 || lower.indexOf('rating') !== -1 || lower.indexOf('count') !== -1) {
-        var txt = (autos[j].textContent || '').replace(/\\s+/g, ' ').trim();
-        if (txt) out.automation.push(txt);
+    if (out.ldRating == null || out.ldCount == null) {
+      var autos = document.querySelectorAll('[data-automation]');
+      for (var j = 0; j < autos.length; j++) {
+        var dv = autos[j].getAttribute('data-automation') || '';
+        var lower = dv.toLowerCase();
+        if (lower.indexOf('review') !== -1 || lower.indexOf('rating') !== -1 || lower.indexOf('count') !== -1) {
+          var txt = (autos[j].textContent || '').replace(/\\s+/g, ' ').trim();
+          if (txt) out.automation.push(txt);
+        }
       }
-    }
-    var src = document.body ? (document.body.innerHTML || '') : '';
-    var low = src.toLowerCase();
-    if (low.indexOf('datadome') !== -1 || low.indexOf('akamai') !== -1 || low.indexOf('perimeterx') !== -1 ||
-        low.indexOf('just a moment') !== -1 || low.indexOf('cf-challenge') !== -1 ||
-        low.indexOf('challenge-platform') !== -1 || low.indexOf('attention required') !== -1 ||
-        low.indexOf('verify you are human') !== -1 || low.indexOf('are you a robot') !== -1) {
-      out.challenge = true;
-    }
-    post(out);
-  }
-  collect();
-  setTimeout(collect, 3000);
-  return true;
-})();`;
+    }`,
+});
 
 /**
- * Search-stage injected JS. Collects listing-like anchors (rating links) and
- * their visible text, then postMessages the candidates back.
- *
- * ES5-compatible — runs inside a third-party page.
+ * Search-stage injected JS. Re-collects until `_Review-` listing anchors appear
+ * (or attempts run out). No separate challenge latch: markers without data are
+ * not a verdict.
  */
-export const TRIPADVISOR_SEARCH_JS = `(function () {
-  var SENT = false;
-  function post(obj) {
-    if (SENT) return;
-    SENT = true;
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch (e) {}
-  }
-  function collect() {
-    var out = { type: 'rating-search', provider: 'tripadvisor', candidates: [] };
+export const TRIPADVISOR_SEARCH_JS = buildCollectorScript({
+  providerId: 'tripadvisor',
+  payloadType: 'rating-search',
+  hasDataJs: 'out.candidates.length > 0',
+  initialDelayMs: 1500,
+  retryIntervalMs: 2500,
+  maxAttempts: 5,
+  collectBodyJs: `    out.candidates = [];
     var seen = {};
     var anchors = document.querySelectorAll('a[href]');
     for (var i = 0; i < anchors.length && out.candidates.length < 20; i++) {
@@ -297,13 +283,8 @@ export const TRIPADVISOR_SEARCH_JS = `(function () {
       seen[abs] = true;
       var name = (anchors[i].textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
       out.candidates.push({ url: abs, name: name || null, address: null, geo: null });
-    }
-    post(out);
-  }
-  collect();
-  setTimeout(collect, 2500);
-  return true;
-})();`;
+    }`,
+});
 
 /** Parse a listing-stage WebView payload for TripAdvisor. */
 export function extractRatingFromWebViewMessage(data: string): RawExternalRating | null {
