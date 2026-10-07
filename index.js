@@ -9,6 +9,11 @@ import 'react-native-gesture-handler';
 // URL polyfill — required by @atproto/oauth-client-expo on React Native.
 import 'react-native-url-polyfill/auto';
 
+// AbortSignal.throwIfAborted polyfill — RN ships abort-controller@3, which
+// lacks it; @atproto's OAuth client calls it while resolving the identity after
+// the browser authorization step. Must load before the app's @atproto code.
+import './src/polyfills/abortSignal';
+
 // Register the iOS background-location task in the global scope. expo-task-manager
 // requires tasks to be defined when the JS bundle loads — on a headless launch
 // (iOS relaunching the app to deliver a location fix) the Expo Router root is not
