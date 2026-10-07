@@ -18,6 +18,7 @@ import * as Location from 'expo-location';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
 import { useMapStore } from '../../src/stores/mapStore';
 import { useOsmPoiStore } from '../../src/stores/osmPoiStore';
+import { useSettingsStore, type PlaceSortMode } from '../../src/stores/settingsStore';
 import { savedPlaceToOsmPoi } from '../../src/utils/placeToOsmPoi';
 import { haversineMeters } from '../../src/utils/routeSnap';
 import { suggestEmojiForList } from '../../src/utils/placeListEmoji';
@@ -27,16 +28,28 @@ import { SavedPlaceRow } from '../../src/components/places';
 import { PlaceActionBar } from '../../src/components/places';
 import type { PlaceActionBarAction } from '../../src/components/places';
 import { SaveToListSheet } from '../../src/components/places/SaveToListSheet';
+import { SortSheet } from '../../src/components/places/SortSheet';
+import type { SortOption } from '../../src/components/places/SortSheet';
 import { exportFilename, toCSV, toGeoJSON } from '../../src/services/places/exportService';
 import { setListShared } from '../../src/services/places/listSyncService';
 import { loadPlaceEnrichmentForPlaces } from '../../src/services/places/placeEnrichmentService';
 import type { PlaceEnrichment } from '../../src/services/places/placeEnrichmentService';
+import {
+  loadPlaceReviewSummaries,
+  type PlaceReviewSummary,
+} from '../../src/services/places/placeReviewSummaryService';
 import { Button, ErrorBoundary, GlassView } from '../../src/components/common';
 import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import type { SavedPlace } from '../../src/models/placeList';
 
-type SortMode = 'recent' | 'name';
+type SortMode = PlaceSortMode;
+
+const SORT_OPTIONS: SortOption<SortMode>[] = [
+  { key: 'recent', label: 'Most recently added' },
+  { key: 'name', label: 'Name (A–Z)' },
+  { key: 'distance', label: 'Distance from you' },
+];
 
 export default function PlaceListDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,7 +69,9 @@ export default function PlaceListDetailScreen() {
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
 
   const list = lists.find((l) => l.id === id);
-  const [sortMode, setSortMode] = useState<SortMode>('recent');
+  const sortMode = useSettingsStore((s) => s.placeSort);
+  const setSortMode = useSettingsStore((s) => s.setPlaceSort);
+  const [showSort, setShowSort] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(list?.name ?? '');
   const [placeForSheet, setPlaceForSheet] = useState<SavedPlace | null>(null);
@@ -64,6 +79,7 @@ export default function PlaceListDetailScreen() {
   const [disambigPlace, setDisambigPlace] = useState<SavedPlace | null>(null);
   const [isResolving, setIsResolving] = useState(false);
   const [enrichment, setEnrichment] = useState<Record<string, PlaceEnrichment>>({});
+  const [reviewSummaries, setReviewSummaries] = useState<Record<string, PlaceReviewSummary>>({});
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [showAddPlace, setShowAddPlace] = useState(false);
   const [addQuery, setAddQuery] = useState('');
@@ -74,8 +90,16 @@ export default function PlaceListDetailScreen() {
     if (!list) return [];
     const places = [...list.places];
     if (sortMode === 'name') return places.sort((a, b) => a.name.localeCompare(b.name));
+    if (sortMode === 'distance') {
+      if (!userCoords) return places.sort((a, b) => b.addedAt - a.addedAt);
+      const distanceOf = (place: SavedPlace) =>
+        place.lat !== 0 || place.lng !== 0
+          ? haversineMeters([userCoords.lng, userCoords.lat], [place.lng, place.lat])
+          : Number.POSITIVE_INFINITY;
+      return places.sort((a, b) => distanceOf(a) - distanceOf(b) || a.name.localeCompare(b.name));
+    }
     return places.sort((a, b) => b.addedAt - a.addedAt);
-  }, [list, sortMode]);
+  }, [list, sortMode, userCoords]);
 
   // Resolve OSM enrichment (opening hours + website) for the whole list in one
   // cached query.
@@ -83,12 +107,20 @@ export default function PlaceListDetailScreen() {
   useEffect(() => {
     if (!places || places.length === 0) {
       setEnrichment({});
+      setReviewSummaries({});
       return undefined;
     }
     let cancelled = false;
     loadPlaceEnrichmentForPlaces(places)
       .then((loaded) => {
         if (!cancelled) setEnrichment(loaded);
+      })
+      .catch(() => undefined);
+    // Review summaries are local-only (session-cached external + community) and
+    // never trigger a provider load — see placeReviewSummaryService.
+    loadPlaceReviewSummaries(places)
+      .then((loaded) => {
+        if (!cancelled) setReviewSummaries(loaded);
       })
       .catch(() => undefined);
     return () => {
@@ -266,10 +298,6 @@ export default function PlaceListDetailScreen() {
     setIsEditing(false);
   }, [list, editName, updateList]);
 
-  const cycleSortMode = useCallback(() => {
-    setSortMode((prev) => (prev === 'recent' ? 'name' : 'recent'));
-  }, []);
-
   const handleAddSearch = useCallback(async () => {
     const query = addQuery.trim();
     if (!query) return;
@@ -327,9 +355,10 @@ export default function PlaceListDetailScreen() {
         onPress={() => handlePlacePress(item)}
         onLongPress={() => handleRemovePlace(item)}
         onSaveToList={() => setPlaceForSheet(item)}
+        reviewSummary={reviewSummaries[item.id] ?? null}
       />
     ),
-    [handlePlacePress, handleRemovePlace, enrichment, userCoords],
+    [handlePlacePress, handleRemovePlace, enrichment, reviewSummaries, userCoords],
   );
 
   const handleExport = useCallback(() => {
@@ -369,8 +398,9 @@ export default function PlaceListDetailScreen() {
       {
         key: 'sort',
         icon: 'swap-vertical',
-        label: sortMode === 'recent' ? 'Sort by name' : 'Sort by recent',
-        onPress: cycleSortMode,
+        label: 'Sort places',
+        onPress: () => setShowSort(true),
+        active: sortMode !== 'recent',
       },
       {
         key: 'share',
@@ -385,7 +415,7 @@ export default function PlaceListDetailScreen() {
         onPress: () => setIsEditing(true),
       },
     ],
-    [sortMode, cycleSortMode, handleExport],
+    [sortMode, handleExport],
   );
 
   return (
@@ -442,6 +472,14 @@ export default function PlaceListDetailScreen() {
         />
 
         <PlaceActionBar actions={actions} />
+
+        <SortSheet
+          visible={showSort}
+          options={SORT_OPTIONS}
+          value={sortMode}
+          onSelect={setSortMode}
+          onClose={() => setShowSort(false)}
+        />
 
         <Modal
           visible={placeForSheet !== null}

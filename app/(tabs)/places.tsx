@@ -13,10 +13,11 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { usePlaceListStore } from '../../src/stores/placeListStore';
+import { useSettingsStore, type SavedListsSortMode } from '../../src/stores/settingsStore';
 import { isICloudAvailable } from '../../src/services/icloud/iCloudSyncService';
 import { parseImport } from '../../src/services/places/importService';
-import { PlaceListCard, PlaceActionBar, EmojiPicker } from '../../src/components/places';
-import type { PlaceActionBarAction } from '../../src/components/places';
+import { PlaceListCard, PlaceActionBar, EmojiPicker, SortSheet } from '../../src/components/places';
+import type { PlaceActionBarAction, SortOption } from '../../src/components/places';
 import { GoogleReviewsImport } from '../../src/components/reviews';
 import { useReviewImportStore, isTakeoutReminderDue } from '../../src/stores/reviewImportStore';
 import { Button, ErrorBoundary, Modal, GlassView } from '../../src/components/common';
@@ -26,6 +27,13 @@ import { suggestEmojiForList } from '../../src/utils/placeListEmoji';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import type { PlaceList } from '../../src/models/placeList';
+
+type ListSortMode = SavedListsSortMode;
+
+const LIST_SORT_OPTIONS: SortOption<ListSortMode>[] = [
+  { key: 'recent', label: 'Most recently updated' },
+  { key: 'name', label: 'Name (A–Z)' },
+];
 
 export default function MyPlacesScreen() {
   const router = useRouter();
@@ -41,6 +49,9 @@ export default function MyPlacesScreen() {
   const [showNewList, setShowNewList] = useState(false);
   const [newName, setNewName] = useState('');
   const [editMode, setEditMode] = useState(false);
+  const sortMode = useSettingsStore((s) => s.savedListsSort);
+  const setSortMode = useSettingsStore((s) => s.setSavedListsSort);
+  const [showSort, setShowSort] = useState(false);
   const [emojiTarget, setEmojiTarget] = useState<PlaceList | null>(null);
   const [cloudAvailable, setCloudAvailable] = useState<boolean | null>(null);
 
@@ -187,11 +198,12 @@ export default function MyPlacesScreen() {
     }
   }, [importText]);
 
-  // Always alphabetical — the sort toggle is gone.
-  const sortedLists = useMemo(
-    () => [...lists].sort((a, b) => a.name.localeCompare(b.name)),
-    [lists],
-  );
+  // Default is "most recently updated"; the user can switch to name.
+  const sortedLists = useMemo(() => {
+    const copy = [...lists];
+    if (sortMode === 'name') return copy.sort((a, b) => a.name.localeCompare(b.name));
+    return copy.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  }, [lists, sortMode]);
 
   const renderItem = useCallback(
     ({ item }: { item: PlaceList }) => (
@@ -222,6 +234,13 @@ export default function MyPlacesScreen() {
         onPress: () => setShowNewList(true),
       },
       {
+        key: 'sort',
+        icon: 'swap-vertical',
+        label: 'Sort lists',
+        onPress: () => setShowSort(true),
+        active: sortMode !== 'recent',
+      },
+      {
         key: 'edit',
         icon: 'pencil',
         label: editMode ? 'Done editing' : 'Edit lists',
@@ -229,7 +248,7 @@ export default function MyPlacesScreen() {
         active: editMode,
       },
     ],
-    [editMode],
+    [editMode, sortMode],
   );
 
   return (
@@ -319,6 +338,14 @@ export default function MyPlacesScreen() {
         />
 
         <PlaceActionBar actions={actions} />
+
+        <SortSheet
+          visible={showSort}
+          options={LIST_SORT_OPTIONS}
+          value={sortMode}
+          onSelect={setSortMode}
+          onClose={() => setShowSort(false)}
+        />
 
         <EmojiPicker
           visible={emojiTarget !== null}

@@ -18,6 +18,11 @@ export interface RoutePreferences {
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
+/** Sort order for the places inside a saved list. */
+export type PlaceSortMode = 'recent' | 'name' | 'distance';
+/** Sort order for the saved-lists screen. */
+export type SavedListsSortMode = 'recent' | 'name';
+
 interface PersistedSettings {
   permissions: PermissionPreferences;
   routePreferences: RoutePreferences;
@@ -28,6 +33,10 @@ interface PersistedSettings {
   navigationAutoAdvanceLegs: boolean;
   /** Automatically end navigation shortly after reaching the destination. */
   navigationAutoEnd: boolean;
+  /** Default "most recently added" sort for places within a list. */
+  placeSort: PlaceSortMode;
+  /** Default "most recently updated" sort for the saved-lists screen. */
+  savedListsSort: SavedListsSortMode;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -38,6 +47,8 @@ interface SettingsState extends PersistedSettings {
   setVoiceGuidanceEnabled: (enabled: boolean) => void;
   setNavigationAutoAdvanceLegs: (enabled: boolean) => void;
   setNavigationAutoEnd: (enabled: boolean) => void;
+  setPlaceSort: (mode: PlaceSortMode) => void;
+  setSavedListsSort: (mode: SavedListsSortMode) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -60,6 +71,8 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   voiceGuidanceEnabled: true,
   navigationAutoAdvanceLegs: true,
   navigationAutoEnd: true,
+  placeSort: 'recent',
+  savedListsSort: 'recent',
 };
 
 function loadSettings(): PersistedSettings {
@@ -94,6 +107,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       voiceGuidanceEnabled: state.voiceGuidanceEnabled,
       navigationAutoAdvanceLegs: state.navigationAutoAdvanceLegs,
       navigationAutoEnd: state.navigationAutoEnd,
+      placeSort: state.placeSort,
+      savedListsSort: state.savedListsSort,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -126,6 +141,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setNavigationAutoEnd: (navigationAutoEnd) => {
       set({ navigationAutoEnd });
+      persist();
+    },
+    setPlaceSort: (placeSort) => {
+      set({ placeSort });
+      persist();
+    },
+    setSavedListsSort: (savedListsSort) => {
+      set({ savedListsSort });
       persist();
     },
   };
