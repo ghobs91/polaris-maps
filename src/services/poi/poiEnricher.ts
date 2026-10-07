@@ -32,6 +32,31 @@ export interface EnrichedPoiData {
 const enrichmentCache = new Map<number, EnrichedPoiData | null>();
 const MAX_CACHE_SIZE = 500;
 
+/** Normalize a place name for loose compatibility checks. */
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Whether a MapKit match plausibly refers to the same place. The native
+ * `searchPOI` returns the *closest* item within 200m of the requested
+ * coordinates (it cannot always find the query name), so a nearby, differently
+ * named venue can come back for a POI the local index doesn't know. Accept
+ * exact matches and containment (min 4 chars); reject everything else so
+ * another venue's phone/website/hours never leak onto this place.
+ */
+function namesLookCompatible(poiName: string, matchName: string | null | undefined): boolean {
+  if (!matchName) return false;
+  const a = normalizeName(poiName);
+  const b = normalizeName(matchName);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a));
+}
+
 function cacheSet(key: number, value: EnrichedPoiData | null) {
   // Evict oldest when full
   if (enrichmentCache.size >= MAX_CACHE_SIZE) {
@@ -56,7 +81,10 @@ export async function enrichPoi(poi: OsmPoi): Promise<EnrichedPoiData> {
     return enrichmentCache.get(poi.id) ?? {};
   }
 
-  const match = await searchPOI(poi.name, poi.lat, poi.lng);
+  const rawMatch = await searchPOI(poi.name, poi.lat, poi.lng);
+  // Discard a match whose name clearly isn't this place (see
+  // `namesLookCompatible`) so a nearby venue's data can't be shown here.
+  const match = namesLookCompatible(poi.name, rawMatch?.name) ? rawMatch : null;
 
   // Start logo fetch in parallel with the rest of the enrichment
   const logoPromise = fetchWikidataLogo(poi.tags).catch(() => undefined);

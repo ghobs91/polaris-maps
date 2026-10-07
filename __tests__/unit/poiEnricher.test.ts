@@ -96,6 +96,47 @@ describe('enrichPoi', () => {
     expect(result).toEqual({});
   });
 
+  it('ignores a MapKit match whose name is a different place', async () => {
+    // The native search returns the closest item within 200m even when its name
+    // does not match the query — e.g. a neighbouring venue. None of its fields
+    // may be attributed to this POI.
+    mockSearchPOI.mockResolvedValueOnce({
+      name: "Mongo's Coffee",
+      phoneNumber: '+1 (516) 584-6464',
+      url: 'https://mongoscoffee.com',
+      latitude: 40.7128,
+      longitude: -74.006,
+      pointOfInterestCategory: 'MKPOICategoryCafe',
+      formattedAddress: '83 Woodbury Rd, Hicksville NY 11801',
+    });
+
+    const result = await enrichPoi({ ...basePoi, name: 'Cross Street Cafe' });
+    expect(result).toEqual({});
+  });
+
+  it('still resolves the Wikidata logo when the MapKit match name mismatches', async () => {
+    mockSearchPOI.mockResolvedValueOnce({
+      name: "Mongo's Coffee",
+      url: 'https://mongoscoffee.com',
+      latitude: 40.7128,
+      longitude: -74.006,
+    });
+    mockFetch.mockResolvedValueOnce(
+      wbgetentities('Q37158', {
+        P154: [{ mainsnak: { datavalue: { value: 'Starbucks Logo.svg', type: 'string' } } }],
+      }),
+    );
+
+    const result = await enrichPoi({
+      ...basePoi,
+      name: 'Cross Street Cafe',
+      tags: { ...basePoi.tags, 'brand:wikidata': 'Q37158' },
+    });
+    expect(result.website).toBeUndefined();
+    expect(result.phone).toBeUndefined();
+    expect(result.logoUrl).toContain('Starbucks_Logo.svg');
+  });
+
   it('fetches logo from Wikidata when brand:wikidata tag present', async () => {
     mockSearchPOI.mockResolvedValueOnce(null);
     mockFetch.mockResolvedValueOnce(
