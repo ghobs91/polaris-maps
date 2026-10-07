@@ -4,6 +4,7 @@ import { FlashList } from '@shopify/flash-list';
 import { spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePlaceListStore } from '../../stores/placeListStore';
+import { suggestEmojiForList } from '../../utils/placeListEmoji';
 import type { PlaceList } from '../../models/placeList';
 
 interface SaveToListSheetProps {
@@ -100,6 +101,9 @@ export function SaveToListSheet({
           onPress={() => handleToggle(item)}
         >
           <Text style={styles.checkmark}>{saved ? '✓' : ''}</Text>
+          <Text style={styles.listEmoji}>
+            {item.emoji?.trim() || suggestEmojiForList(item.name)}
+          </Text>
           <Text style={styles.listName}>{item.name}</Text>
           <Text style={styles.count}>{item.places.length}</Text>
         </Pressable>
@@ -163,6 +167,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       color: colors.primary,
       fontWeight: '700',
     },
+    listEmoji: { fontSize: 18, marginRight: spacing.sm },
     listName: { ...typography.body, color: colors.text, flex: 1 },
     count: { ...typography.caption, color: colors.textSecondary },
     newListRow: {
