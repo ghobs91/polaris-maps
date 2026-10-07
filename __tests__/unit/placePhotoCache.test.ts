@@ -46,8 +46,16 @@ describe('placePhotoCache', () => {
     const now = Date.now();
     const spy = jest.spyOn(Date, 'now').mockReturnValue(now);
     setCachedPlacePhotos(URL, ['https://cafe.example/a.jpg']);
-    spy.mockReturnValue(now + 8 * 24 * 60 * 60 * 1000);
+    spy.mockReturnValue(now + 61 * 24 * 60 * 60 * 1000);
     expect(getCachedPlacePhotos(URL)).toBeNull();
+  });
+
+  it('keeps entries that are within the 2-month TTL', () => {
+    const now = Date.now();
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(now);
+    setCachedPlacePhotos(URL, ['https://cafe.example/a.jpg']);
+    spy.mockReturnValue(now + 59 * 24 * 60 * 60 * 1000);
+    expect(getCachedPlacePhotos(URL)).toEqual(['https://cafe.example/a.jpg']);
   });
 
   it('returns null for unknown pages and clears on demand', () => {

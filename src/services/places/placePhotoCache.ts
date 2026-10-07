@@ -11,10 +11,11 @@ import { storage } from '../storage/mmkv';
  */
 
 const CACHE_KEY = 'place_website_photos_v1';
-const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Re-scrape a site's photos only after this long (2 months). */
+const TTL_MS = 60 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 300;
 
-export const MAX_PLACE_PHOTOS = 8;
+export const MAX_PLACE_PHOTOS = 3;
 
 interface CacheEntry {
   urls: string[];
