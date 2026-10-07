@@ -7,6 +7,8 @@ import { formatPlaceCategory } from '../../utils/placeCategory';
 import { describeOpeningStatus } from '../../utils/openingStatus';
 import { formatDistance } from '../../utils/units';
 import { PlacePhotoStrip } from './PlacePhotoStrip';
+import type { PlaceReviewSummary } from '../../services/places/placeReviewSummaryService';
+import type { ExternalRatingProviderId } from '../../services/poi/externalRatings/types';
 import type { SavedPlace } from '../../models/placeList';
 
 interface SavedPlaceRowProps {
@@ -20,11 +22,18 @@ interface SavedPlaceRowProps {
   websiteUrl?: string | null;
   /** Distance from the user in meters, when known. */
   distanceMeters?: number | null;
+  /** Community or already-resolved external rating, when known. */
+  reviewSummary?: PlaceReviewSummary | null;
 }
 
+const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
+  tripadvisor: 'Tripadvisor',
+  yelp: 'Yelp',
+};
+
 /**
- * Google-Maps-style place card: name, category, open/closed + distance, then a
- * horizontally scrolling strip of the venue's website photos.
+ * Google-Maps-style place card: name, category, rating, open/closed + distance,
+ * then a horizontally scrolling strip of the venue's website photos.
  */
 export const SavedPlaceRow = memo(function SavedPlaceRow({
   place,
@@ -34,6 +43,7 @@ export const SavedPlaceRow = memo(function SavedPlaceRow({
   openingHours,
   websiteUrl,
   distanceMeters,
+  reviewSummary,
 }: SavedPlaceRowProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -61,6 +71,22 @@ export const SavedPlaceRow = memo(function SavedPlaceRow({
             <Text style={styles.category} numberOfLines={1}>
               {category}
             </Text>
+          ) : null}
+          {reviewSummary ? (
+            <View style={styles.reviews}>
+              <Ionicons name="star" size={13} color={colors.warning} />
+              <Text style={[styles.reviewsRating, { color: colors.text }]}>
+                {reviewSummary.rating.toFixed(1)}
+              </Text>
+              <Text style={[styles.reviewsCount, { color: colors.textSecondary }]}>
+                ({reviewSummary.count.toLocaleString()})
+              </Text>
+              <Text style={[styles.reviewsSource, { color: colors.textSecondary }]}>
+                {reviewSummary.source === 'community'
+                  ? 'Community'
+                  : reviewSummary.providers.map((provider) => PROVIDER_LABEL[provider]).join(' · ')}
+              </Text>
+            </View>
           ) : null}
           {hasStatusLine ? (
             <Text style={styles.statusLine} numberOfLines={1}>
@@ -123,6 +149,10 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     info: { flex: 1, gap: 2 },
     name: { ...typography.h3, color: colors.text },
     category: { ...typography.bodySmall, color: colors.textSecondary },
+    reviews: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+    reviewsRating: { ...typography.bodySmall, fontWeight: '600' },
+    reviewsCount: { ...typography.bodySmall },
+    reviewsSource: { ...typography.caption },
     statusLine: { ...typography.bodySmall },
     dot: { color: colors.textSecondary },
     distance: { color: colors.textSecondary },

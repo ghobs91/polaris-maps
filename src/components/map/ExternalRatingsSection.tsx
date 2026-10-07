@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,6 +10,10 @@ import {
   combineExternalRatings,
   type CombinedRating,
 } from '../../services/poi/externalRatings/combine';
+import {
+  placeRatingKey,
+  setSessionPlaceRating,
+} from '../../services/places/placeRatingSessionCache';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import type {
   ExternalRatingProviderId,
@@ -66,10 +70,27 @@ export function ExternalRatingsSection({
   // Serialize hidden browsing: mount at most one provider WebView at a time, in
   // registry order. A waiting provider's stage is picked up once this one settles.
   const activeWebView = states.find((s) => s.webView)?.webView ?? null;
-  const loaded = states
-    .filter((s) => s.status === 'loaded' && s.summary)
-    .map((s) => s.summary as ExternalRatingSummary);
-  const combined = combineExternalRatings(loaded);
+  const loaded = useMemo(
+    () =>
+      states
+        .filter((s) => s.status === 'loaded' && s.summary)
+        .map((s) => s.summary as ExternalRatingSummary),
+    [states],
+  );
+  const combined = useMemo(() => combineExternalRatings(loaded), [loaded]);
+
+  // Publish the resolved aggregate to the session cache so saved-list rows can
+  // show it without ever triggering a provider load themselves.
+  useEffect(() => {
+    if (!combined) return;
+    setSessionPlaceRating(placeRatingKey(poi), {
+      rating: combined.rating,
+      reviewCount: combined.reviewCount,
+      sources: combined.sources,
+      observedAt: combined.observedAt,
+    });
+  }, [combined, poi]);
+
   // Idle counts as resolving too, so the empty state never flashes before the
   // first resolution pass starts.
   const resolving = states.some(
