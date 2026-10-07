@@ -62,6 +62,26 @@ export class AuthError extends Error {
   }
 }
 
+/**
+ * Flatten an error and its `cause` chain into a single log-friendly line.
+ * atproto wraps the actionable failure (the actual fetch/validation error) in
+ * `cause`, which the OAuth error's `message` never surfaces.
+ */
+function describeError(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  for (let i = 0; i < 8 && current != null; i++) {
+    if (current instanceof Error) {
+      parts.push(`${current.name}: ${current.message}`);
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  return parts.join(' → ');
+}
+
 // ---------------------------------------------------------------------------
 // Module-level singletons
 // ---------------------------------------------------------------------------
@@ -141,6 +161,7 @@ export async function loginWithBluesky(): Promise<AtprotoSession> {
         ? err.message
         : `Login failed: ${err instanceof Error ? err.message : String(err)}`;
     console.error('[bsky-oauth]', message);
+    console.error('[bsky-oauth] cause:', describeError(err));
     if (err instanceof AuthError) throw err;
     throw new AuthError(message, err);
   }
@@ -192,6 +213,7 @@ export async function restoreBlueskySession(): Promise<AtprotoSession | null> {
     };
   } catch (err) {
     // Session is invalid or expired — clear everything
+    console.error('[bsky-oauth] restore cause:', describeError(err));
     await logoutBluesky();
     throw new AuthError('Session restore failed', err);
   }
