@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Polaris Maps</title>
+    <meta name="description" content="A peer-to-peer navigation app built on open map data." />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #111;
+        --muted: #555;
+        --bg: #fff;
+        --accent: #0a68ff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f2f2f7;
+          --muted: #a1a1a6;
+          --bg: #0b0b0c;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          16px/1.6 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 64px 20px 80px;
+      }
+      h1 {
+        font-size: 32px;
+        margin: 0 0 8px;
+      }
+      h2 {
+        font-size: 20px;
+        margin: 32px 0 8px;
+      }
+      p,
+      li {
+        color: var(--fg);
+      }
+      ul {
+        padding-left: 20px;
+      }
+      a {
+        color: var(--accent);
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Polaris Maps</h1>
+      <p>
+        A peer-to-peer navigation app built on open map data — turn-by-turn guidance, live
+        traffic, transit, offline maps, and community street-level imagery, without routing your
+        every move through a corporate cloud. Coming to the App Store.
+      </p>
+
+      <h2>Support</h2>
+      <p>
+        Questions, bug reports, or data requests:
+        <a href="mailto:<CONTACT EMAIL>">&lt;CONTACT EMAIL&gt;</a>
+      </p>
+
+      <h2>Legal</h2>
+      <ul>
+        <li><a href="/privacy/">Privacy Policy</a></li>
+        <li><a href="/terms/">Terms of Service</a></li>
+      </ul>
+
+      <p class="muted">Map data © OpenStreetMap contributors (ODbL).</p>
+    </main>
+  </body>
+</html>

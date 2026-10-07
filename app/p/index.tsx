@@ -3,7 +3,7 @@ import { useLocalSearchParams, Redirect } from 'expo-router';
 import { useMapStore } from '../../src/stores/mapStore';
 
 /**
- * Inbound coordinate place link (`https://polarismaps.app/p?lat=..&lng=..`) —
+ * Inbound coordinate place link (`https://app.polarismaps.app/p?lat=..&lng=..`) —
  * center the map on the place and fall through to the map tab.
  */
 export default function PlaceCoordsLinkScreen() {

@@ -1,12 +1,12 @@
 /**
  * Build and parse shareable place links.
  *
- * Canonical places use a universal link (`https://polarismaps.app/p/<id>`);
+ * Canonical places use a universal link (`https://app.polarismaps.app/p/<id>`);
  * places without a canonical id fall back to coordinates (+ optional name)
  * encoded in the link so the app can still resolve them.
  */
 
-export const PLACE_LINK_HOST = 'polarismaps.app';
+export const PLACE_LINK_HOST = 'app.polarismaps.app';
 export const PLACE_LINK_PATH_PREFIX = '/p';
 export const PLACE_SCHEME = 'polaris-maps';
 
@@ -80,7 +80,7 @@ export function parsePlaceLink(raw: string): ParsedPlaceLink | null {
     return { canonicalId, name, ...coords };
   }
 
-  // https://polarismaps.app/p/<id>
+  // https://app.polarismaps.app/p/<id>
   const afterPrefix = url.pathname.slice(PLACE_LINK_PATH_PREFIX.length).replace(/^\/+/, '');
   const canonicalId = afterPrefix ? decodeURIComponent(afterPrefix) : undefined;
   return { canonicalId, name, ...coords };

@@ -1,12 +1,12 @@
 /**
  * Expo config plugin: iOS Universal Links for place sharing.
  *
- * Adds `com.apple.developer.associated-domains` (applinks:polarismaps.app) to
- * the app entitlements so `https://polarismaps.app/p/<id>` links open the app.
+ * Adds `com.apple.developer.associated-domains` (applinks:app.polarismaps.app) to
+ * the app entitlements so `https://app.polarismaps.app/p/<id>` links open the app.
  *
  * OUT-OF-REPO REQUIREMENT: Universal Links also require an
  * `apple-app-site-association` (AASA) file served at
- * `https://polarismaps.app/.well-known/apple-app-site-association` containing
+ * `https://app.polarismaps.app/.well-known/apple-app-site-association` containing
  * the app's `teamID.bundleID`. That file is hosted outside this repository and
  * must be deployed/updated independently; without it iOS will not open the app
  * from a web link (the `polaris-maps://` scheme fallback still works).
@@ -16,7 +16,7 @@
  */
 const { withEntitlementsPlist } = require('expo/config-plugins');
 
-const ASSOCIATED_DOMAINS = ['applinks:polarismaps.app'];
+const ASSOCIATED_DOMAINS = ['applinks:app.polarismaps.app'];
 
 const withUniversalLinks = (config) =>
   withEntitlementsPlist(config, (cfg) => {

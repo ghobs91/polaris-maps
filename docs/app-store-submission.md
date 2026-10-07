@@ -23,10 +23,10 @@ of that is tracked here, so the first public release targets iOS.
 | Privacy & Terms content                    | ✅     | `docs/privacy-policy.md`; served from `netlify-deploy/`                   |
 | Store listing copy                         | ✅     | `fastlane/metadata/en-US/`                                                |
 | Host policy/terms                          | ✅     | Live at https://app.polarismaps.app/privacy (+ /terms)                    |
-| Support & marketing URLs                   | ⚠️     | Still point at the unhosted apex `polarismaps.app`; repoint or alias DNS  |
+| Support & marketing URLs                   | ✅     | Landing + support live at https://app.polarismaps.app                     |
 | **Review contact + screenshots**           | ⬜     | Fill `review_information/` and capture shots (see `fastlane/screenshots`) |
 | **Fill `<DATE>` / `<CONTACT EMAIL>`**      | ⬜     | In the policy, terms, and metadata footer                                 |
-| Universal links on `polarismaps.app`       | 🟡     | Source + AASA migrated; AASA deploy + Apple capability/profile pending    |
+| Universal links on `app.polarismaps.app`   | 🟡     | Source + AASA live; Apple capability + profile + entitlement pending      |
 
 ## Version
 
@@ -37,37 +37,34 @@ alone will not change the binary. Run `npx expo prebuild` or update the plist,
 then confirm with `bundle exec fastlane ios release` (the `verify_version_alignment`
 preflight warns on drift).
 
-## Universal links (`polarismaps.app`)
+## Universal links (`app.polarismaps.app`)
 
-The canonical domain is `polarismaps.app`. The source has been migrated:
+The only hosted domain is `app.polarismaps.app`, so place links and the
+associated domain point there. Source and hosting are done:
 
-- `src/services/places/shareService.ts` → `PLACE_LINK_HOST = 'polarismaps.app'`
-- `plugins/withUniversalLinks.js` → `applinks:polarismaps.app`
-- `netlify-deploy/.well-known/apple-app-site-association` declares
-  `XTXZ3CYRPX.com.polarismaps.app` for `/p/*` and `/p`.
+- `src/services/places/shareService.ts` → `PLACE_LINK_HOST = 'app.polarismaps.app'`
+- `plugins/withUniversalLinks.js` → `applinks:app.polarismaps.app`
+- `netlify-deploy/.well-known/apple-app-site-association` is deployed and serves
+  `XTXZ3CYRPX.com.polarismaps.app` for `/p/*` and `/p` as `application/json`.
 
-Three things remain, all outside the app code, before links open the app:
+Two steps remain, both in the Apple Developer portal:
 
-1. **Deploy** the AASA file so
-   `https://polarismaps.app/.well-known/apple-app-site-association` resolves
-   with `Content-Type: application/json`.
-2. **Enable the Associated Domains capability** for App ID
-   `com.polarismaps.app` in the Apple Developer portal and **regenerate the App
-   Store provisioning profile**. The committed profile
-   (`AppStore_com.polarismaps.app.mobileprovision`) does **not** include
-   `com.apple.developer.associated-domains`, so adding the entitlement now would
-   fail signing.
-3. **Apply the entitlement** (`npx expo prebuild` runs the `withUniversalLinks`
+1. **Enable the Associated Domains capability** for App ID
+   `com.polarismaps.app` and **regenerate the App Store provisioning profile**.
+   The committed profile (`AppStore_com.polarismaps.app.mobileprovision`) does
+   **not** include `com.apple.developer.associated-domains`, so adding the
+   entitlement now would fail signing.
+2. **Apply the entitlement** (`npx expo prebuild` runs the `withUniversalLinks`
    plugin, or add
-   `com.apple.developer.associated-domains = ["applinks:polarismaps.app"]` to
-   `ios/PolarisMaps/PolarisMaps.entitlements`) and re-sign.
+   `com.apple.developer.associated-domains = ["applinks:app.polarismaps.app"]`
+   to `ios/PolarisMaps/PolarisMaps.entitlements`) and re-sign.
 
 Until then, shared place links fall back to the `polaris-maps://` scheme and the
 app still resolves them; only the https universal-link entry point is inactive.
 
 ## Submission path (iOS)
 
-1. Host the privacy policy and terms so both URLs resolve.
+1. (Done) Policy/terms + landing/support are live at `app.polarismaps.app`.
 2. Fill review contact info and capture screenshots.
 3. `bundle exec fastlane ios release` → uploads the build to App Store Connect.
 4. Complete App Privacy + listing metadata in App Store Connect (or run
