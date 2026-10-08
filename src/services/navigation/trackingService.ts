@@ -264,34 +264,50 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   const isBackground = opts?.background === true;
 
   const gpsPos: [number, number] = [location.coords.longitude, location.coords.latitude];
-  // Constrain the snap to the previous segment's neighbourhood so a fix near a
-  // self-approaching section (cloverleaf, parallel carriageway) cannot snap to
-  // a distant part of the route and make the puck "fly" off in another
+
+  // Course/validity are needed before snapping, because the snap is
+  // heading-aware: on a self-approaching junction (cloverleaf on-ramp,
+  // parallel carriageway) it keeps the puck on the lane being driven instead
+  // of whichever loop is a few metres closer. An unknown/slow course is left
+  // out so the snap stays purely geometric.
+  const rawSpeed = location.coords.speed ?? -1;
+  const rawHeading = location.coords.heading;
+  const headingValid =
+    rawHeading != null && Number.isFinite(rawHeading) && rawHeading >= 0 && rawHeading <= 360;
+  const movingFast = rawSpeed >= WRONG_WAY_MIN_SPEED_MPS;
+  const trustedHeading = movingFast && headingValid ? rawHeading! : undefined;
+  lastGpsSpeedMps = rawSpeed >= 0 ? rawSpeed : 0;
+  lastGpsHeading = trustedHeading ?? null;
+
+  // Constrain the snap to the previous segment's neighbourhood (and prefer the
+  // direction of travel) so a fix near a self-approaching section cannot snap
+  // to a distant part of the route and make the puck "fly" off in another
   // direction while the user is still on the same road.
   const {
     snapped,
     segmentIndex,
     distanceMeters: distFromRoute,
     bearing: routeBearing,
-  } = snapToRoute(gpsPos, coords, { hintIndex: gpsSegmentIndex });
+  } = snapToRoute(gpsPos, coords, { hintIndex: gpsSegmentIndex, heading: trustedHeading });
   gpsSegmentIndex = segmentIndex;
   const now = performance.now();
 
   // --- Wrong-way detection (driving opposite the route while still near it) ---
   // Distance-based off-route never fires here: the snapped point stays close
   // to the polyline, so compare travel direction against the route bearing.
-  const rawSpeed = location.coords.speed ?? -1;
-  const rawHeading = location.coords.heading;
-  const headingValid =
-    rawHeading != null && Number.isFinite(rawHeading) && rawHeading >= 0 && rawHeading <= 360;
-  const movingFast = rawSpeed >= WRONG_WAY_MIN_SPEED_MPS;
-  lastGpsSpeedMps = rawSpeed >= 0 ? rawSpeed : 0;
-  lastGpsHeading = movingFast && headingValid ? rawHeading! : null;
   const gpsRemainingNow = computeRemainingMeters(snapped, segmentIndex, coords);
   if (distFromRoute <= OFF_ROUTE_THRESHOLD_METERS && movingFast) {
     if (headingValid) {
       const headingDiff = angleDifferenceDeg(routeBearing, rawHeading!);
-      if (headingDiff > WRONG_WAY_HEADING_THRESHOLD_DEG) {
+      // A large heading/route mismatch only proves wrong-way when the vehicle
+      // is NOT still closing on the destination. On a tight bend the compass
+      // lags the route tangent while the remaining distance keeps shrinking —
+      // counting that as wrong-way rerouted the driver mid-on-ramp. Genuine
+      // wrong-way driving grows the remaining distance, so require that.
+      const progressing =
+        lastGpsRemaining != null &&
+        gpsRemainingNow < lastGpsRemaining - WRONG_WAY_BACKWARD_GROWTH_METERS;
+      if (headingDiff > WRONG_WAY_HEADING_THRESHOLD_DEG && !progressing) {
         wrongWayCount++;
       } else {
         wrongWayCount = 0;

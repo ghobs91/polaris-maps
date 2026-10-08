@@ -137,6 +137,30 @@ describe('routeSnap', () => {
     });
   });
 
+  describe('snapToRoute heading-aware disambiguation', () => {
+    // Two parallel lanes ~11 m apart running opposite directions, like the
+    // crossing carriageways of a cloverleaf on-ramp.
+    const lanes: [number, number][] = [
+      [-74.0, 40.0], // 0
+      [-73.99, 40.0], // 1 — eastbound lane (segment 0, bearing ~90)
+      [-73.99, 40.0002], // 2 — connector (segment 1)
+      [-74.0, 40.0002], // 3 — westbound lane (segment 2, bearing ~270)
+      [-74.0, 40.0], // 4 — connector (segment 3)
+    ];
+    // Slightly closer to the westbound lane, but the vehicle is heading east.
+    const pos: [number, number] = [-73.995, 40.00013];
+
+    it('picks the globally nearest lane when the course is unknown', () => {
+      expect(snapToRoute(pos, lanes).segmentIndex).toBe(2);
+    });
+
+    it('prefers the lane aligned with the travel heading', () => {
+      const result = snapToRoute(pos, lanes, { heading: 90 });
+      expect(result.segmentIndex).toBe(0);
+      expect(result.snapped[1]).toBeCloseTo(40.0, 4);
+    });
+  });
+
   describe('computeRemainingMeters', () => {
     // 3-point straight eastward route: each segment ~1.1 km at 40° lat
     const coords: [number, number][] = [

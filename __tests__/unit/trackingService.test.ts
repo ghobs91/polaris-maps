@@ -34,6 +34,7 @@ import {
   advanceAlongRoute,
   distToIndex,
   isOffRouteActive,
+  isWrongWayDriving,
 } from '../../src/services/navigation/trackingService';
 import { haversineMeters, snapToRoute } from '../../src/utils/routeSnap';
 import { markForegroundInterpolationTick } from '../../src/services/navigation/foregroundActivity';
@@ -409,6 +410,52 @@ describe('trackingService — snap continuity', () => {
     const anchor = getAnchor()!;
     expect(anchor.segIdx).toBe(0);
     expect(anchor.pos[1]).toBeCloseTo(40.0, 4);
+  });
+});
+
+describe('trackingService — tight-turn (cloverleaf) continuity', () => {
+  it('does not flag wrong-way mid-bend while the vehicle is still progressing', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+
+    // Fixes advancing north (remaining distance shrinking) while the compass
+    // reads backwards — as it can on the inside of a tight ramp loop. The old
+    // heading-only check rerouted here; requiring backward progress keeps the
+    // trip on-course.
+    for (let i = 1; i <= 4; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: A[1] + i * 0.0001, lng: A[0], speed: 13, heading: 180 }), {
+        background: true,
+      });
+    }
+
+    expect(isWrongWayDriving()).toBe(false);
+    expect(mockReroute).not.toHaveBeenCalled();
+  });
+
+  it('still flags genuine wrong-way driving (remaining distance growing)', () => {
+    const route = makeRoute();
+    startNav(route);
+    startTracking(route);
+    mockReroute.mockResolvedValue(makeRoute());
+
+    // Get established partway up the route, then reverse: heading south while
+    // the position also moves south, so the remaining distance grows.
+    for (let i = 1; i <= 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: 40.7 + i * 0.002, lng: A[0], speed: 13, heading: 0 }), {
+        background: true,
+      });
+    }
+    for (let i = 0; i < 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: 40.706 - i * 0.002, lng: A[0], speed: 13, heading: 180 }), {
+        background: true,
+      });
+    }
+
+    expect(isWrongWayDriving()).toBe(true);
   });
 });
 

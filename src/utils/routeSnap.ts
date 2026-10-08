@@ -47,6 +47,14 @@ export interface SnapToRouteOptions {
   maxAheadMeters?: number;
   /** Route distance (m) behind the hint still eligible for snapping. */
   maxBehindMeters?: number;
+  /**
+   * Course over ground (degrees, 0 = north). When present, a segment whose
+   * bearing disagrees with the vehicle's travel direction is penalised, so a
+   * fix near a self-approaching junction (cloverleaf, parallel carriageway)
+   * snaps to the carriageway actually being driven instead of whichever loop
+   * is a few metres closer. Omit when the course is unknown/slow.
+   */
+  heading?: number;
 }
 
 /** Continuity window defaults — generous for 1 Hz fixes (≤ ~55 m/fix). */
@@ -59,13 +67,30 @@ interface SnapCandidate {
   idx: number;
 }
 
+/**
+ * Extra cost (m) applied to a segment whose direction opposes the vehicle's
+ * course. Small enough that a genuinely off-route fix still snaps to the
+ * nearest road, large enough to break a near-tie between the two carriageways
+ * of a cloverleaf/parallel crossing (they are usually within ~10–20 m).
+ */
+const HEADING_ALIGN_PENALTY_METERS = 15;
+
+/** Direction-agreement penalty for a segment, 0 when aligned with `heading`. */
+function headingPenalty(heading: number, a: [number, number], b: [number, number]): number {
+  const segBearing = computeBearing(a, b);
+  const align = Math.cos((angleDifferenceDeg(heading, segBearing) * Math.PI) / 180);
+  return (1 - align) * HEADING_ALIGN_PENALTY_METERS;
+}
+
 /** Nearest projection of `pos` onto the given segments (all when `indices` is null). */
 function nearestOnSegments(
   pos: [number, number],
   coords: [number, number][],
   indices: Set<number> | null,
+  heading?: number,
 ): SnapCandidate {
   let best: SnapCandidate = { dist: Infinity, point: pos, idx: 0 };
+  let bestCost = Infinity;
 
   for (let i = 0; i < coords.length - 1; i++) {
     if (indices && !indices.has(i)) continue;
@@ -79,7 +104,11 @@ function nearestOnSegments(
     t = Math.max(0, Math.min(1, t));
     const proj: [number, number] = [a[0] + t * dx, a[1] + t * dy];
     const dist = haversineMeters(pos, proj);
-    if (dist < best.dist) {
+    // `dist` is reported to callers for off-route checks; `cost` only ranks
+    // candidates, folding in the direction of travel when known.
+    const cost = heading == null ? dist : dist + headingPenalty(heading, a, b);
+    if (cost < bestCost) {
+      bestCost = cost;
       best = { dist, point: proj, idx: i };
     }
   }
@@ -112,7 +141,8 @@ export function snapToRoute(
   coords: [number, number][],
   options?: SnapToRouteOptions,
 ): RouteSnapResult {
-  const global = nearestOnSegments(pos, coords, null);
+  const heading = options?.heading;
+  const global = nearestOnSegments(pos, coords, null, heading);
   if (options?.hintIndex == null || coords.length < 2) return toSnapResult(global, coords);
 
   const hint = Math.max(0, Math.min(options.hintIndex, coords.length - 2));
@@ -134,7 +164,7 @@ export function snapToRoute(
     if (acc > maxAhead) break;
   }
 
-  const windowed = nearestOnSegments(pos, coords, window);
+  const windowed = nearestOnSegments(pos, coords, window, heading);
   // A windowed snap within the off-route threshold means the fix is on the
   // route near the hint — prefer it over a globally-nearest far segment.
   if (windowed.dist <= OFF_ROUTE_THRESHOLD_METERS) return toSnapResult(windowed, coords);
