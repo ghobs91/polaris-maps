@@ -10,4 +10,9 @@
 module.exports = {
   preset: 'jest-expo',
   testMatch: ['**/__tests__/integration/**/*.test.[jt]s?(x)'],
+  // Resolve the app's `@/*` -> `src/*` alias (Metro handles this for the app;
+  // Jest needs it to render components that import via `@/`).
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+  },
 };
