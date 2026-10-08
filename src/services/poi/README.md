@@ -84,12 +84,23 @@ time, per-host minimum interval + jitter, and a challenge/429 cool-down with
 exponential backoff and silent give-up. Challenge classification is calibrated:
 anti-bot script tags appear inside valid pages too, so markers are fatal only
 when no rating was extracted, and collectors re-read the page on an interval to
-absorb a DataDome interstitial that auto-resolves. A search card carrying an
-inline rating plus a confirmed identity (address/geo) is displayed without
-loading the listing. Explicitly NOT done: CAPTCHA solving, proxy/IP rotation,
-fingerprint spoofing, auth-wall bypass, or bulk harvesting. Ratings are
-transient and never persisted; only the aggregate number, exact count, listing
-identity, and source URL are read — no review text.
+absorb a DataDome interstitial that auto-resolves; when the bounded attempts run
+out the collector posts its final (empty/challenge) state once so the stage
+settles promptly. A search card carrying an inline rating plus a confirmed
+identity (address/geo) is displayed without loading the listing. Explicitly NOT
+done: CAPTCHA solving, proxy/IP rotation, fingerprint spoofing, auth-wall
+bypass, or bulk harvesting. Ratings are transient and never persisted; only the
+aggregate number, exact count, listing identity, and source URL are read — no
+review text.
+
+Speed without extra requests: the place website is fetched **once** per URL
+(cached + single-flight in `core.fetchDiscoveryHtml`) and shared by both
+providers' listing discovery; collectors start immediately and poll fast
+in-page (no network cost); a resolved-to-nothing provider is remembered for the
+session (`placeRatingSessionCache`) so re-opening a card skips the pipeline; and
+the hidden WebView stays mounted across stages/providers while the card is open,
+keeping the warmed cookie store. The WebView rejects any navigation that leaves
+the provider allowlist or uses a non-web scheme (`isAllowedExternalRatingUrl`).
 
 ## Key Constants
 
