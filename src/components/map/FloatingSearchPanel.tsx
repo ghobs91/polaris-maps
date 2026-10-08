@@ -2209,6 +2209,16 @@ export function FloatingSearchPanel({
         ? (routePreviewTrafficEta ?? routePreview.summary.durationSeconds)
         : routePreview.summary.durationSeconds;
 
+    // Traffic factor implied by the header ETA, applied to the option rows so
+    // the primary row and alternates read the same live time as the header
+    // instead of free-flow values.
+    const routePreviewTrafficScale =
+      routePreviewCosting === 'auto' &&
+      routePreviewTrafficEta != null &&
+      routePreview.summary.durationSeconds > 0
+        ? routePreviewTrafficEta / routePreview.summary.durationSeconds
+        : null;
+
     return (
       <View style={rootStyle} pointerEvents="box-none">
         {!embedded && <MapControlsColumn isDark={isDark} onLocatePress={onLocatePress} />}
@@ -2253,7 +2263,11 @@ export function FloatingSearchPanel({
           {/* Route alternatives — pick a different path before starting */}
           {routePreview && routePreviewAlternates.length > 0 && (
             <View style={{ paddingHorizontal: spacing.md, marginTop: spacing.sm, gap: 6 }}>
-              {buildRouteAlternatives(routePreview, routePreviewAlternates).map((option, idx) => {
+              {buildRouteAlternatives(
+                routePreview,
+                routePreviewAlternates,
+                routePreviewTrafficScale,
+              ).map((option, idx) => {
                 const isPrimary = option.route === routePreview;
                 const accent = isDark ? '#409CFF' : '#007AFF';
                 return (

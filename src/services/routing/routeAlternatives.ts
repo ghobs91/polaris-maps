@@ -13,22 +13,32 @@ export interface RouteAlternative {
  * sorted fastest first with the delay relative to the fastest route. Returns
  * an empty array when there is no route (callers must never render an empty
  * list as if it were a choice).
+ *
+ * `durationScale` (optional) multiplies every option's duration so the rows can
+ * show the same live-traffic-adjusted time as the preview header instead of
+ * free-flow values.
  */
 export function buildRouteAlternatives(
   primary: ValhallaRoute | null | undefined,
   alternates: readonly ValhallaRoute[],
+  durationScale: number | null = null,
 ): RouteAlternative[] {
   const all = primary ? [primary, ...alternates] : [...alternates];
   if (all.length === 0) return [];
 
-  const fastest = Math.min(...all.map((route) => route.summary.durationSeconds));
+  const scale = durationScale != null && durationScale > 0 ? durationScale : 1;
+  const scaled = all.map((route) => ({
+    route,
+    durationSeconds: Math.round(route.summary.durationSeconds * scale),
+    distanceMeters: route.summary.distanceMeters,
+  }));
 
-  return all
-    .map((route) => ({
-      route,
-      durationSeconds: route.summary.durationSeconds,
-      distanceMeters: route.summary.distanceMeters,
-      delaySeconds: Math.max(0, route.summary.durationSeconds - fastest),
+  const fastest = Math.min(...scaled.map((option) => option.durationSeconds));
+
+  return scaled
+    .map((option) => ({
+      ...option,
+      delaySeconds: Math.max(0, option.durationSeconds - fastest),
     }))
     .sort((a, b) => a.durationSeconds - b.durationSeconds);
 }
