@@ -5,9 +5,9 @@
       "id": "us-ny-new-york",
       "name": "New York Metro",
       "geofabrik": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
-      "bbox": "-74.3,40.4,-73.7,41.0",
-      "bounds": { "minLat": 40.4, "maxLat": 41.0, "minLng": -74.3, "maxLng": -73.7 },
-      "tilesSizeBytes": 251658240,
+      "bbox": "-74.3,40.4,-73.2,41.0",
+      "bounds": { "minLat": 40.4, "maxLat": 41.0, "minLng": -74.3, "maxLng": -73.2 },
+      "tilesSizeBytes": 440401920,
       "routingSizeBytes": 125829120,
       "geocodingSizeBytes": 194035200
     },

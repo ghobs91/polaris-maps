@@ -854,7 +854,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     void getOfflinePackForPoint(lat, lng).then((pack) => {
       if (!cancelled) {
-        setOfflinePack((prev) => (prev?.sourceId === pack?.sourceId ? prev : pack));
+        // Re-resolve when font availability changes (labels can appear
+        // without the covered region changing).
+        setOfflinePack((prev) =>
+          prev?.sourceId === pack?.sourceId && prev?.glyphsUrl === pack?.glyphsUrl ? prev : pack,
+        );
       }
     });
     return () => {
@@ -862,11 +866,13 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     };
   }, [lookupCell, connectionQuality]);
 
-  // Slow-link fallback counts as a style failure: the raster compat style has
-  // no font/glyph dependencies and far fewer requests, so it paints on links
-  // where the vector style stalls (and MapLibre keeps its native tile cache
-  // underneath for previously visited areas).
-  const useOfflineFallback = styleLoadFailed || connectionQuality !== 'good';
+  // Fully offline is distinct from a weak link: the raster compat style needs
+  // the network too, so switching to it just overzooms a cached parent tile
+  // into a blur that never re-renders on zoom. Only fall back to raster on an
+  // actual style failure or a poor-but-connected link; offline keeps the
+  // vector style (plus any downloaded pack) so cached tiles stay crisp.
+  const offline = connectionQuality === 'none';
+  const useOfflineFallback = styleLoadFailed || connectionQuality === 'poor';
 
   // Place labels follow the user's device language (OpenMapTiles `name:<lang>`),
   // not the language of the country being viewed. Resolved once per session.
@@ -881,7 +887,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     latestScene: satelliteLatestScene,
     update: updateSatelliteViewportStyle,
   } = useSatelliteViewportStyle({
-    enabled: mapStylePref === 'satellite' && !useOfflineFallback && !navigationMode,
+    // Satellite imagery is a network raster source — pointless offline.
+    enabled: mapStylePref === 'satellite' && !useOfflineFallback && !navigationMode && !offline,
     language: labelLanguage,
   });
 
@@ -916,6 +923,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         sourceId: offlinePack.sourceId,
         tileBaseUrl: offlinePack.tileBaseUrl,
         fallbackBackground: isDark ? '#18262E' : '#F4F1E9',
+        glyphsUrl: offlinePack.glyphsUrl ?? undefined,
       });
     } catch {
       return null;
@@ -967,7 +975,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   useEffect(() => {
     styleLoadedRef.current = false;
     if (styleLoadTimer.current) clearTimeout(styleLoadTimer.current);
-    if (useOfflineFallback) return;
+    if (useOfflineFallback || offline) return;
     const timeoutMs = connectionQuality === 'good' ? 8000 : 4000;
     styleLoadTimer.current = setTimeout(() => {
       if (!styleLoadedRef.current) {
@@ -983,7 +991,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         styleLoadTimer.current = null;
       }
     };
-  }, [resolvedMapStyle, connectionQuality, useOfflineFallback]);
+  }, [resolvedMapStyle, connectionQuality, useOfflineFallback, offline]);
 
   // Build the nav puck shapes in map-plane coordinates.  Memoizing avoids
   // re-computing the GeoJSON on every render while still reacting to zoom,
@@ -1299,6 +1307,18 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           latestScene={satelliteLatestScene}
           bottomInset={insets.bottom + 12}
         />
+      )}
+
+      {!navigationMode && offline && !offlinePack && !styleLoadFailed && (
+        <View
+          style={[styles.limitedCoverage, { top: insets.top + 8 }]}
+          testID="map-offline-coverage"
+          accessibilityRole="text"
+          accessibilityLabel="Offline. No downloaded map covers this area."
+        >
+          <View style={styles.limitedCoverageDot} />
+          <Text style={styles.limitedCoverageText}>No offline map for this area</Text>
+        </View>
       )}
 
       {styleLoadFailed && (

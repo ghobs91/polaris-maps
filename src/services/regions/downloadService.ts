@@ -4,6 +4,7 @@ import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
+import { downloadOfflineFonts } from '../map/offlineFonts';
 import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
 import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
@@ -164,6 +165,10 @@ export async function downloadRegion(
     }
 
     checkAborted(signal);
+
+    // Bundle label fonts (shared across all regions) so the offline vector
+    // style can render place labels with no connection. Best-effort.
+    await downloadOfflineFonts().catch(() => {});
 
     // Offline Overture places should come from bundled region assets. Live
     // viewport POIs now use Overture-hosted PMTiles directly.

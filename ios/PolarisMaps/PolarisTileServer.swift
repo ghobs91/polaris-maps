@@ -161,8 +161,15 @@ class PolarisTileServer: NSObject {
       return
     }
 
-    let path = String(parts[1])
+    // Percent-decode so font paths with spaces (e.g. "Noto%20Sans%20Regular")
+    // resolve to the real on-disk directory names.
+    let path = String(parts[1]).removingPercentEncoding ?? String(parts[1])
     let segments = path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
+    // Loopback-only, but reject traversal so a decoded path can't escape root.
+    guard !segments.contains("..") else {
+      respond(connection, status: "404 Not Found", contentType: "text/plain", body: Data("invalid path".utf8))
+      return
+    }
     guard let sourceId = segments.first else {
       respond(connection, status: "404 Not Found", contentType: "text/plain", body: Data("missing source".utf8))
       return

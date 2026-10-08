@@ -20,6 +20,13 @@ export interface OfflineStyleOptions {
   tileBaseUrl: string;
   /** Background colour when the base style has no background layer. */
   fallbackBackground: string;
+  /**
+   * Loopback glyphs template to point the style at, e.g.
+   * `http://127.0.0.1:51234/offline-fonts/{fontstack}/{range}.pbf`. When
+   * omitted the base style's remote glyphs URL is left in place (labels then
+   * need a connection).
+   */
+  glyphsUrl?: string;
 }
 
 interface StyleSource {
@@ -46,8 +53,9 @@ interface StyleLayer {
  *   maxzoom: 12 }` so high zooms overzoom from z12 instead of 404ing.
  * - Online `raster` sources (e.g. satellite imagery) are dropped with their
  *   layers — they can never load offline and would leave black gaps.
- * - Remote `glyphs` are kept: labels render on poor-but-connected links and
- *   fail silently when fully offline, while geometry still paints.
+ * - `glyphs` are repointed at `options.glyphsUrl` (bundled font ranges served
+ *   over the same loopback server) when provided, so labels render fully
+ *   offline; otherwise the base style's remote glyphs are kept.
  *
  * Returns `null` when the style has no vector source to rewrite (nothing
  * offline-capable) or the JSON is invalid.
@@ -85,6 +93,11 @@ export function buildOfflineStyle(
     }
   }
   if (!rewrote) return null;
+
+  // Point labels at locally-served font ranges when they were bundled.
+  if (options.glyphsUrl) {
+    style.glyphs = options.glyphsUrl;
+  }
 
   // Drop layers whose source was removed (online raster), keep the rest.
   style.layers = (style.layers ?? []).filter((l) => !l.source || style.sources?.[l.source]);

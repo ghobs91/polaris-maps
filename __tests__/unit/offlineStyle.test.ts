@@ -34,6 +34,12 @@ describe('buildOfflineStyle', () => {
     expect(style.glyphs).toContain('tiles.openfreemap.org');
   });
 
+  it('repoints glyphs at the loopback font source when provided', () => {
+    const glyphsUrl = 'http://127.0.0.1:51234/offline-fonts/{fontstack}/{range}.pbf';
+    const style = JSON.parse(buildOfflineStyle(vectorStyle(), { ...OPTS, glyphsUrl })!);
+    expect(style.glyphs).toBe(glyphsUrl);
+  });
+
   it('drops online raster sources and their layers, injecting a background', () => {
     const base = JSON.stringify({
       version: 8,

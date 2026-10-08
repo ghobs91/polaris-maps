@@ -6,6 +6,7 @@ import {
   getTileServerBaseUrl,
 } from '../../native/tileServer';
 import { getDownloadedRegions, getRegionContainingPoint } from '../regions/regionRepository';
+import { offlineFontsDir, offlineGlyphsUrl, OFFLINE_FONTS_SOURCE_ID } from './offlineFonts';
 
 /**
  * Serves downloaded region vector packs to MapLibre over loopback HTTP.
@@ -26,6 +27,7 @@ const SOURCE_PREFIX = 'offline-';
 let serverBaseUrl: string | null = null;
 let startAttempted = false;
 const registeredSources = new Set<string>();
+let fontsSourceRegistered = false;
 
 /** Loopback base URL once the server is up, else `null`. */
 export function getOfflineTileBaseUrl(): string | null {
@@ -84,6 +86,7 @@ export async function syncOfflineSources(): Promise<void> {
   } catch {
     // Fall through with an empty set — addTileSource is idempotent per id.
   }
+  if (existingIds.has(OFFLINE_FONTS_SOURCE_ID)) fontsSourceRegistered = true;
   for (const region of regions) {
     const sourceId = offlineSourceId(region.id);
     if (registeredSources.has(sourceId) || existingIds.has(sourceId)) {
@@ -101,12 +104,37 @@ export async function syncOfflineSources(): Promise<void> {
       // One bad pack must not block the rest.
     }
   }
+
+  await ensureFontsSource();
+}
+
+/**
+ * Register the shared glyph directory with the running server if it has been
+ * populated. Returns whether offline labels are available. Idempotent.
+ */
+async function ensureFontsSource(): Promise<boolean> {
+  if (!serverBaseUrl) return false;
+  if (fontsSourceRegistered) return true;
+  try {
+    const info = await FileSystem.getInfoAsync(offlineFontsDir());
+    if (!info.exists) return false;
+    await addTileSource({
+      id: OFFLINE_FONTS_SOURCE_ID,
+      filePath: toNativePath(offlineFontsDir()),
+    });
+    fontsSourceRegistered = true;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface OfflinePack {
   regionId: string;
   sourceId: string;
   tileBaseUrl: string;
+  /** Loopback glyphs template when bundled fonts are available, else null. */
+  glyphsUrl: string | null;
 }
 
 /**
@@ -140,5 +168,11 @@ export async function getOfflinePackForPoint(
       return null;
     }
   }
-  return { regionId: region.id, sourceId, tileBaseUrl: baseUrl };
+  const fontsAvailable = await ensureFontsSource();
+  return {
+    regionId: region.id,
+    sourceId,
+    tileBaseUrl: baseUrl,
+    glyphsUrl: fontsAvailable ? offlineGlyphsUrl(baseUrl) : null,
+  };
 }
