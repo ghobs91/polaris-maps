@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from '../common/GlassView';
-import { useExternalRatings } from '../../hooks/useExternalRatings';
+import {
+  useExternalRatings,
+  type ExternalRatingWebViewStage,
+} from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
+import { isAllowedExternalRatingUrl } from '../../services/poi/externalRatings';
 import {
   combineExternalRatings,
   type CombinedRating,
@@ -67,9 +71,16 @@ export function ExternalRatingsSection({
 
   const { states, handleMessage, handleError } = useExternalRatings(query, poi.id);
 
-  // Serialize hidden browsing: mount at most one provider WebView at a time, in
-  // registry order. A waiting provider's stage is picked up once this one settles.
+  // Serialize hidden browsing: at most one stage is active at a time, in
+  // registry order. The WebView itself is kept mounted (with its warmed cookie
+  // store) across stages and providers while the card is open, so a cleared
+  // DataDome session is not lost to a cold remount.
   const activeWebView = states.find((s) => s.webView)?.webView ?? null;
+  const lastWebViewRef = useRef<ExternalRatingWebViewStage | null>(null);
+  useEffect(() => {
+    if (activeWebView) lastWebViewRef.current = activeWebView;
+  }, [activeWebView]);
+  const mountedWebView = activeWebView ?? lastWebViewRef.current;
   const loaded = useMemo(
     () =>
       states
@@ -104,6 +115,15 @@ export function ExternalRatingsSection({
     [handleMessage],
   );
 
+  // Reject any navigation that leaves the provider host allowlist or uses a
+  // non-web scheme (`headless-browse-policy`). `about:blank` is the WebView's
+  // own initial document.
+  const handleShouldStartLoad = useCallback(
+    (request: { url: string }) =>
+      request.url === 'about:blank' || isAllowedExternalRatingUrl(request.url),
+    [],
+  );
+
   return (
     <GlassView
       material="regular"
@@ -112,22 +132,22 @@ export function ExternalRatingsSection({
     >
       <Text style={[styles.title, { color: colors.text }]}>Reviews</Text>
 
-      {activeWebView ? (
+      {mountedWebView ? (
         <View style={styles.hiddenWebView} pointerEvents="none">
           <WebView
-            key={activeWebView.provider}
-            source={{ uri: activeWebView.uri }}
+            source={{ uri: mountedWebView.uri }}
             style={styles.hiddenWebView}
-            injectedJavaScript={activeWebView.injectedJavaScript}
+            injectedJavaScript={mountedWebView.injectedJavaScript}
             javaScriptEnabled
             domStorageEnabled
             sharedCookiesEnabled
             thirdPartyCookiesEnabled
             mediaPlaybackRequiresUserAction
             setSupportMultipleWindows={false}
-            onMessage={handleMessageEvent(activeWebView.provider)}
-            onError={() => handleError(activeWebView.provider)}
-            onHttpError={() => handleError(activeWebView.provider)}
+            onShouldStartLoadWithRequest={handleShouldStartLoad}
+            onMessage={activeWebView ? handleMessageEvent(activeWebView.provider) : undefined}
+            onError={activeWebView ? () => handleError(activeWebView.provider) : undefined}
+            onHttpError={activeWebView ? () => handleError(activeWebView.provider) : undefined}
           />
         </View>
       ) : null}

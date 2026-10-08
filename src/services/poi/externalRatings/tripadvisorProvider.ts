@@ -212,9 +212,9 @@ export const TRIPADVISOR_RATING_JS = buildCollectorScript({
   providerId: 'tripadvisor',
   payloadType: 'external-rating',
   hasDataJs: 'out.ldRating != null && out.ldCount != null',
-  initialDelayMs: 1000,
-  retryIntervalMs: 2000,
-  maxAttempts: 5,
+  initialDelayMs: 0,
+  retryIntervalMs: 500,
+  maxAttempts: 20,
   collectBodyJs: `    out.ldRating = null;
     out.ldCount = null;
     out.ldName = null;
@@ -268,9 +268,9 @@ export const TRIPADVISOR_SEARCH_JS = buildCollectorScript({
   providerId: 'tripadvisor',
   payloadType: 'rating-search',
   hasDataJs: 'out.candidates.length > 0',
-  initialDelayMs: 1500,
-  retryIntervalMs: 2500,
-  maxAttempts: 5,
+  initialDelayMs: 0,
+  retryIntervalMs: 500,
+  maxAttempts: 20,
   collectBodyJs: `    out.candidates = [];
     var seen = {};
     var anchors = document.querySelectorAll('a[href]');
@@ -282,7 +282,25 @@ export const TRIPADVISOR_SEARCH_JS = buildCollectorScript({
       if (seen[abs]) continue;
       seen[abs] = true;
       var name = (anchors[i].textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
-      out.candidates.push({ url: abs, name: name || null, address: null, geo: null });
+      var cand = { url: abs, name: name || null, address: null, geo: null };
+      var card = anchors[i];
+      for (var up = 0; up < 4 && card.parentElement; up++) { card = card.parentElement; }
+      var autos = card.querySelectorAll('[data-automation]');
+      for (var a = 0; a < autos.length; a++) {
+        var automation = (autos[a].getAttribute('data-automation') || '').toLowerCase();
+        var text = (autos[a].textContent || '').replace(/\\s+/g, ' ').trim();
+        var aria = autos[a].getAttribute('aria-label') || '';
+        if (cand.rating == null && (automation.indexOf('rating') !== -1 || automation.indexOf('bubble') !== -1 || automation.indexOf('review') !== -1)) {
+          var rm = /([0-9]+(?:\\.[0-9]+)?)\\s*star/i.exec(aria || text);
+          if (rm) cand.rating = Number(rm[1]);
+        }
+        if (cand.reviewCount == null && (automation.indexOf('count') !== -1 || automation.indexOf('review') !== -1)) {
+          var cm = /([0-9][0-9,]*)\\s*reviews?\\b/i.exec(text);
+          if (cm) cand.reviewCount = parseInt(cm[1].replace(/,/g, ''), 10);
+        }
+        if (!cand.address && automation.indexOf('address') !== -1 && text) cand.address = text.slice(0, 200);
+      }
+      out.candidates.push(cand);
     }`,
 });
 

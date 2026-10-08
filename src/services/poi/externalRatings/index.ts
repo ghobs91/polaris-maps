@@ -13,6 +13,7 @@
 
 import {
   getCachedExternalRating,
+  fetchDiscoveryHtml,
   fetchPageHtml,
   setCachedExternalRating,
   validateExternalRating,
@@ -51,7 +52,8 @@ export async function resolveKnownListing(
 
   const website = normalizeWebsiteUrl(query.website ?? null);
   if (website) {
-    const html = await fetchPageHtml(website, options?.timeoutMs ?? 8000);
+    // Cached + single-flight: both providers share one homepage fetch.
+    const html = await fetchDiscoveryHtml(website, options?.timeoutMs);
     if (html) {
       const discovered = provider.discoverFromWebsiteHtml(html, website);
       if (discovered) return discovered;
@@ -59,6 +61,26 @@ export async function resolveKnownListing(
   }
 
   return null;
+}
+
+/**
+ * True for a URL the hidden WebView may load: an http(s) URL on one of the
+ * registered providers' allowed hosts. Off-allowlist hosts and non-web schemes
+ * (`data:`, `blob:`, `file:`, …) are rejected by the WebView navigation gate
+ * (see the `headless-browse-policy` spec).
+ */
+export function isAllowedExternalRatingUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  return EXTERNAL_RATING_PROVIDERS.some((provider) =>
+    (provider.allowedHosts as readonly string[]).includes(host),
+  );
 }
 
 /**

@@ -26,6 +26,11 @@ import {
   validateExternalRating,
 } from '../services/poi/externalRatings/core';
 import { matchIdentity } from '../services/poi/identity';
+import {
+  isExternalRatingMiss,
+  markExternalRatingMiss,
+  placeRatingKey,
+} from '../services/places/placeRatingSessionCache';
 import type {
   ExternalRatingProviderId,
   ExternalRatingQuery,
@@ -82,6 +87,11 @@ function hostOf(url: string): string {
   }
 }
 
+/** Stable session key for a provider's resolved-to-nothing state on a place. */
+function missKeyFor(query: ExternalRatingQuery, provider: ExternalRatingProviderId): string {
+  return `${provider}:${placeRatingKey(query)}`;
+}
+
 function paceFetch<T>(url: string, task: () => Promise<T>): Promise<T> {
   const host = hostOf(url);
   if (browseScheduler.isCoolingDown(host)) {
@@ -118,6 +128,17 @@ export function useExternalRatings(
     }
   }, []);
 
+  const fail = useCallback(
+    (id: ExternalRatingProviderId) => {
+      // Remember the miss for the session so re-opening the card skips the whole
+      // browse pipeline for this provider. TTL-bounded and in-memory only, like
+      // the ratings themselves.
+      markExternalRatingMiss(missKeyFor(queryRef.current, id));
+      update(id, { status: 'failed', webView: null });
+    },
+    [update],
+  );
+
   const armTimeout = useCallback(
     (id: ExternalRatingProviderId) => {
       clearTimer(id);
@@ -126,10 +147,10 @@ export function useExternalRatings(
         // stale stage timeout wipe a loaded row.
         const current = statesRef.current.find((s) => s.provider === id);
         if (current?.status === 'loaded') return;
-        update(id, { status: 'failed', webView: null });
+        fail(id);
       }, STAGE_TIMEOUT_MS);
     },
-    [clearTimer, update],
+    [clearTimer, fail],
   );
 
   useEffect(() => {
@@ -142,6 +163,12 @@ export function useExternalRatings(
 
       // A new place: reset this provider before re-resolving.
       update(id, blankState(id));
+
+      // Already settled with no rating this session: skip the whole pipeline.
+      if (isExternalRatingMiss(missKeyFor(q, id))) {
+        update(id, { status: 'failed' });
+        return;
+      }
 
       void (async () => {
         let listingUrl: string | null = null;
@@ -218,7 +245,7 @@ export function useExternalRatings(
         const chosen = selectSearchCandidate(candidates, q);
         if (!chosen) {
           clearTimer(id);
-          update(id, { status: 'failed', webView: null });
+          fail(id);
           return;
         }
 
@@ -227,7 +254,7 @@ export function useExternalRatings(
         if (chosen.rating != null && chosen.reviewCount != null && (chosen.geo || chosen.address)) {
           if (!matchIdentity(chosen, q)) {
             clearTimer(id);
-            update(id, { status: 'failed', webView: null });
+            fail(id);
             return;
           }
           const inlineListingUrl = provider.parseListingUrl(chosen.url) ?? chosen.url;
@@ -273,7 +300,7 @@ export function useExternalRatings(
       if (raw.challenge) {
         browseScheduler.reportChallenge(hostOf(current.webView.uri));
         clearTimer(id);
-        update(id, { status: 'failed', webView: null });
+        fail(id);
         return;
       }
 
@@ -284,7 +311,7 @@ export function useExternalRatings(
         );
         if (!confirmed) {
           clearTimer(id);
-          update(id, { status: 'failed', webView: null });
+          fail(id);
           return;
         }
       }
@@ -293,14 +320,14 @@ export function useExternalRatings(
       const summary = validateExternalRating(raw, listingUrl, id, { expectedName: q.name });
       if (!summary) {
         clearTimer(id);
-        update(id, { status: 'failed', webView: null });
+        fail(id);
         return;
       }
       setCachedExternalRating(id, listingUrl, summary);
       clearTimer(id);
       update(id, { status: 'loaded', summary, webView: null });
     },
-    [armTimeout, clearTimer, update],
+    [armTimeout, clearTimer, fail],
   );
 
   const handleError = useCallback(
@@ -310,9 +337,9 @@ export function useExternalRatings(
         browseScheduler.reportRateLimited(hostOf(current.webView.uri), 0);
       }
       clearTimer(id);
-      update(id, { status: 'failed', webView: null });
+      fail(id);
     },
-    [clearTimer, update],
+    [clearTimer, fail],
   );
 
   const publicStates = useMemo<ExternalRatingProviderState[]>(

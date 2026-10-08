@@ -43,6 +43,7 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 
 import { ExternalRatingsSection } from '../../src/components/map/ExternalRatingsSection';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
+import { clearSessionPlaceRatings } from '../../src/services/places/placeRatingSessionCache';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
 
 const TA_LISTING_URL =
@@ -82,6 +83,7 @@ describe('ExternalRatingsSection', () => {
     mockFetchAndParseRating.mockReset();
     mockFetchAndParseRating.mockResolvedValue(null);
     browseScheduler.reset();
+    clearSessionPlaceRatings();
   });
 
   it('loads a known TripAdvisor listing in a hidden WebView and surfaces a validated rating', async () => {
@@ -296,6 +298,23 @@ describe('ExternalRatingsSection', () => {
       fireEvent.press(screen.getByTestId('external-ratings-write-review'));
     });
     expect(onWriteReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects navigations that leave the provider host allowlist', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+
+    const shouldStart = webViewProps().onShouldStartLoadWithRequest as (r: {
+      url: string;
+    }) => boolean;
+    expect(shouldStart({ url: TA_LISTING_URL })).toBe(true);
+    expect(shouldStart({ url: 'about:blank' })).toBe(true);
+    expect(shouldStart({ url: 'https://evil.example.com/ad' })).toBe(false);
+    expect(shouldStart({ url: 'data:text/html,hi' })).toBe(false);
   });
 
   it('stays hidden when the extraction is an anti-bot challenge page', async () => {

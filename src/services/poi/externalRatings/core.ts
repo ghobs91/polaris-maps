@@ -291,6 +291,62 @@ export async function fetchPageHtml(url: string, timeoutMs: number): Promise<str
 }
 
 // ---------------------------------------------------------------------------
+// Cached page fetch for listing discovery
+// ---------------------------------------------------------------------------
+//
+// Both providers discover a listing from the same place website. Fetch it once
+// per URL: single-flight de-dupes concurrent callers and a short TTL cache
+// avoids repeat fetches across mounts, so the homepage is never fetched twice
+// for one place. The POI website is not a provider host, so it is not paced by
+// the provider browse scheduler.
+
+const DISCOVERY_TTL_MS = 15 * 60 * 1000;
+const DISCOVERY_MAX_ENTRIES = 100;
+const DISCOVERY_TIMEOUT_MS = 4_000;
+
+interface DiscoveryEntry {
+  html: string | null;
+  expiresAt: number;
+}
+
+const discoveryCache = new Map<string, DiscoveryEntry>();
+const discoveryInflight = new Map<string, Promise<string | null>>();
+
+/** Clear the discovery page cache (tests / teardown). */
+export function clearDiscoveryCache(): void {
+  discoveryCache.clear();
+  discoveryInflight.clear();
+}
+
+/**
+ * Fetch a place website's HTML for listing discovery, deduped and cached.
+ * Concurrent callers for the same URL share a single request. Never rejects; a
+ * failure resolves to null.
+ */
+export function fetchDiscoveryHtml(
+  url: string,
+  timeoutMs: number = DISCOVERY_TIMEOUT_MS,
+): Promise<string | null> {
+  const cached = discoveryCache.get(url);
+  if (cached && Date.now() < cached.expiresAt) return Promise.resolve(cached.html);
+
+  const inflight = discoveryInflight.get(url);
+  if (inflight) return inflight;
+
+  const request = fetchPageHtml(url, timeoutMs).then((html) => {
+    discoveryCache.set(url, { html, expiresAt: Date.now() + DISCOVERY_TTL_MS });
+    if (discoveryCache.size > DISCOVERY_MAX_ENTRIES) {
+      const oldest = discoveryCache.keys().next().value;
+      if (oldest !== undefined) discoveryCache.delete(oldest);
+    }
+    return html;
+  });
+  discoveryInflight.set(url, request);
+  void request.finally(() => discoveryInflight.delete(url));
+  return request;
+}
+
+// ---------------------------------------------------------------------------
 // Shared anchor discovery
 // ---------------------------------------------------------------------------
 
@@ -458,8 +514,8 @@ export function buildCollectorScript(opts: {
   maxAttempts?: number;
 }): string {
   const initialDelayMs = opts.initialDelayMs ?? 0;
-  const retryIntervalMs = opts.retryIntervalMs ?? 2000;
-  const maxAttempts = opts.maxAttempts ?? 4;
+  const retryIntervalMs = opts.retryIntervalMs ?? 500;
+  const maxAttempts = opts.maxAttempts ?? 20;
   return `(function () {
   var ATTEMPTS = ${JSON.stringify(maxAttempts)};
   var INTERVAL = ${JSON.stringify(retryIntervalMs)};
@@ -484,9 +540,12 @@ ${opts.collectBodyJs}
     var hasData = ${opts.hasDataJs};
     out.challenge = markerHit && !hasData;
     if (hasData) { post(out); return; }
-    if (SENT) return;
     ATTEMPTS -= 1;
-    if (ATTEMPTS > 0) { setTimeout(collect, INTERVAL); }
+    if (ATTEMPTS > 0) { setTimeout(collect, INTERVAL); return; }
+    // Attempts exhausted: post the final (possibly challenge/empty) state once
+    // so the stage settles promptly instead of waiting out the controller
+    // timeout — a collector SHALL post exactly once per page.
+    post(out);
   }
   if (FIRST_DELAY > 0) { setTimeout(collect, FIRST_DELAY); } else { collect(); }
   return true;
@@ -504,6 +563,7 @@ const ratingCache = new Map<string, CacheEntry>();
 
 export function clearExternalRatingCache(): void {
   ratingCache.clear();
+  clearDiscoveryCache();
 }
 
 function cacheKey(provider: ExternalRatingProviderId, listingUrl: string): string {

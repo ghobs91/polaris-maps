@@ -313,9 +313,9 @@ export const YELP_RATING_JS = buildCollectorScript({
   providerId: 'yelp',
   payloadType: 'external-rating',
   hasDataJs: 'out.ldRating != null && out.ldCount != null',
-  initialDelayMs: 1000,
-  retryIntervalMs: 2000,
-  maxAttempts: 5,
+  initialDelayMs: 0,
+  retryIntervalMs: 500,
+  maxAttempts: 20,
   collectBodyJs: `    out.ldRating = null;
     out.ldCount = null;
     out.ldName = null;
@@ -398,9 +398,9 @@ export const YELP_SEARCH_JS = buildCollectorScript({
   providerId: 'yelp',
   payloadType: 'rating-search',
   hasDataJs: 'out.candidates.length > 0',
-  initialDelayMs: 1500,
-  retryIntervalMs: 2500,
-  maxAttempts: 5,
+  initialDelayMs: 0,
+  retryIntervalMs: 500,
+  maxAttempts: 20,
   collectBodyJs: `    out.candidates = [];
     var seen = {};
     var next = document.getElementById('__NEXT_DATA__');

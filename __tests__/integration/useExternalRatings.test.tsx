@@ -14,6 +14,7 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 
 import { STAGE_TIMEOUT_MS, useExternalRatings } from '../../src/hooks/useExternalRatings';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
+import { clearSessionPlaceRatings } from '../../src/services/places/placeRatingSessionCache';
 import type { ExternalRatingQuery } from '../../src/services/poi/externalRatings/types';
 
 const QUERY: ExternalRatingQuery = {
@@ -49,6 +50,7 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     browseScheduler.reset();
+    clearSessionPlaceRatings();
     mockResolveKnownListing.mockReset();
     mockFetchAndParseRating.mockReset();
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>

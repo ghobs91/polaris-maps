@@ -1,6 +1,9 @@
 import {
+  clearExternalRatingMisses,
   clearSessionPlaceRatings,
   getSessionPlaceRating,
+  isExternalRatingMiss,
+  markExternalRatingMiss,
   placeRatingKey,
   setSessionPlaceRating,
   subscribeSessionPlaceRatings,
@@ -56,5 +59,32 @@ describe('placeRatingSessionCache', () => {
     clearSessionPlaceRatings();
     expect(getSessionPlaceRating(key)).toBeNull();
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('external rating miss record', () => {
+  beforeEach(() => clearExternalRatingMisses());
+
+  it('records a miss and reports it', () => {
+    expect(isExternalRatingMiss('yelp|foo|1.00000,2.00000')).toBe(false);
+    markExternalRatingMiss('yelp|foo|1.00000,2.00000');
+    expect(isExternalRatingMiss('yelp|foo|1.00000,2.00000')).toBe(true);
+  });
+
+  it('expires a miss after its TTL', () => {
+    const now = jest.spyOn(Date, 'now');
+    now.mockReturnValue(1_000);
+    markExternalRatingMiss('yelp|x', 100);
+    now.mockReturnValue(1_050);
+    expect(isExternalRatingMiss('yelp|x')).toBe(true);
+    now.mockReturnValue(1_200);
+    expect(isExternalRatingMiss('yelp|x')).toBe(false);
+    now.mockRestore();
+  });
+
+  it('clears misses together with the session cache', () => {
+    markExternalRatingMiss('yelp|x');
+    clearSessionPlaceRatings();
+    expect(isExternalRatingMiss('yelp|x')).toBe(false);
   });
 });

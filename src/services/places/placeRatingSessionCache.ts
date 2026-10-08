@@ -30,6 +30,13 @@ export function placeRatingKey(input: { name: string; lat: number; lng: number }
 const cache = new Map<string, SessionPlaceRating>();
 const listeners = new Set<() => void>();
 
+// Session-scoped record of provider/place pairs that settled with no rating, so
+// re-opening a card does not re-run the full browse pipeline. Transient and
+// in-memory like the ratings themselves; a TTL lets a provider be retried later.
+const MISS_TTL_MS = 10 * 60 * 1000;
+const MAX_MISS_ENTRIES = 500;
+const misses = new Map<string, number>();
+
 export function getSessionPlaceRating(key: string): SessionPlaceRating | null {
   return cache.get(key) ?? null;
 }
@@ -56,8 +63,37 @@ export function subscribeSessionPlaceRatings(listener: () => void): () => void {
   };
 }
 
+/**
+ * Record that a provider resolved to no rating for a place, within this session.
+ * Uses the same stable key shape as {@link placeRatingKey}, prefixed by provider.
+ */
+export function markExternalRatingMiss(key: string, ttlMs: number = MISS_TTL_MS): void {
+  if (misses.size >= MAX_MISS_ENTRIES) {
+    const oldest = misses.keys().next().value;
+    if (oldest !== undefined) misses.delete(oldest);
+  }
+  misses.set(key, Date.now() + ttlMs);
+}
+
+/** True while a provider is still known to have no rating for a place. */
+export function isExternalRatingMiss(key: string): boolean {
+  const expiresAt = misses.get(key);
+  if (expiresAt === undefined) return false;
+  if (Date.now() >= expiresAt) {
+    misses.delete(key);
+    return false;
+  }
+  return true;
+}
+
+/** Clear the session miss record (tests / teardown). */
+export function clearExternalRatingMisses(): void {
+  misses.clear();
+}
+
 /** Drop the session cache (tests / teardown). */
 export function clearSessionPlaceRatings(): void {
+  clearExternalRatingMisses();
   if (cache.size === 0) return;
   cache.clear();
   listeners.forEach((listener) => listener());
