@@ -595,6 +595,26 @@ describe('CarPlayManager', () => {
     );
   });
 
+  it('scales the time-to-turn with route traffic like the phone', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    jest.clearAllMocks();
+
+    const route = makeRoute(); // base route 600 s; guidance turn 800 m / 90 s
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+    // TomTom says the trip takes 1200 s for a 600 s base route (2× congestion).
+    useNavigationStore.getState().updateTrafficEta(1200, 600, 1);
+    useNavigationTrackingStore.getState().setDistanceToTurn(800);
+
+    // The maneuver card must reflect congestion (90 s × 2), not the free-flow
+    // 90 s, or the head unit reads half the phone's ETA.
+    expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ distanceToTurnMeters: 800, durationToTurnSeconds: 180 }),
+    );
+  });
+
   it('sends the phone route-preview summary and banner text on start', () => {
     initCarPlay();
     fireEvent('carPlayConnected');
@@ -1249,6 +1269,27 @@ describe('CarPlayManager', () => {
       }),
     );
     expect(NativeModules.PolarisCarPlay.startNavigation).not.toHaveBeenCalled();
+  });
+
+  it('previews the traffic-adjusted ETA on the primary route like the phone header', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    const route = makeRoute(); // summary.durationSeconds = 600 (10 min)
+    useNavigationStore
+      .getState()
+      .setRoutePreview(route, [], { lat: 40.76, lng: -73.97, name: 'Costco' }, 'auto');
+
+    // TomTom resolves with a traffic-adjusted full-route ETA (28 min) after the
+    // preview appears — exactly what the phone's route-preview header shows
+    // (`routePreviewTrafficEta ?? routePreview.summary.durationSeconds`).
+    useNavigationStore.getState().setRoutePreviewTrafficEta(1680);
+
+    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        routes: [expect.objectContaining({ durationSeconds: 1680 })],
+      }),
+    );
   });
 
   it('starts the selected route when the driver taps Go in the preview', async () => {

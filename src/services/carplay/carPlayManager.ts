@@ -386,7 +386,14 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     // Live countdown from the tracking pipeline (like the phone banner),
     // falling back to the static route value before the first GPS fix.
     distanceToTurnMeters: liveDistance,
-    durationToTurnSeconds: liveDurationToTurnSeconds(maneuver, liveDistance),
+    // Traffic-scaled like the phone's `EtaDisplay` next-stop countdown: the
+    // maneuver card mustn't show the free-flow time while the trip bar shows
+    // the congested one, or the head unit reads far faster than the phone.
+    durationToTurnSeconds: liveDurationToTurnSeconds(
+      maneuver,
+      liveDistance,
+      selectCarPlayTrafficScale(state),
+    ),
     // Traffic-scaled remaining ETA, exactly like the phone's EtaDisplay.
     etaSeconds: selectCarPlayEtaSeconds(state),
     remainingDistanceMeters: state.remainingDistanceMeters ?? 0,
@@ -480,7 +487,15 @@ function syncRoutePreview(state: ReturnType<typeof useNavigationStore.getState>)
 
   const destination = state.routePreviewDestination;
   const routes = [state.routePreview, ...state.routePreviewAlternates];
-  const key = `${routes.map((route) => route.geometry).join('|')}:${destination.lat}:${destination.lng}`;
+  // The TomTom traffic ETA resolves asynchronously after the preview appears and
+  // is car-only, matching the phone's route-preview header
+  // (`routePreviewTrafficEta ?? summary.durationSeconds` when costing is auto).
+  const primaryTrafficEta =
+    state.routePreviewCosting === 'auto' ? state.routePreviewTrafficEta : null;
+  // Fold the traffic ETA into the dedupe key: without it the store change that
+  // carries the resolved ETA would be treated as a no-op and the head unit would
+  // keep the base duration.
+  const key = `${routes.map((route) => route.geometry).join('|')}:${destination.lat}:${destination.lng}:${primaryTrafficEta ?? ''}`;
   if (key === previewKey) return;
   previewKey = key;
 
@@ -489,15 +504,20 @@ function syncRoutePreview(state: ReturnType<typeof useNavigationStore.getState>)
     destinationLat: destination.lat,
     destinationLng: destination.lng,
     useMetric: useSettingsStore.getState().useMetric,
-    routes: routes.map((route) => ({
-      encodedPolyline: route.geometry,
-      summary: formatCarPlayRouteSummary(
-        route.summary.distanceMeters,
-        route.summary.durationSeconds,
-      ),
-      distanceMeters: route.summary.distanceMeters,
-      durationSeconds: route.summary.durationSeconds,
-    })),
+    routes: routes.map((route, index) => {
+      // Only the primary route carries a traffic ETA; the phone shows base
+      // durations for alternates (no per-alternate traffic fetch).
+      const durationSeconds =
+        index === 0 && primaryTrafficEta != null
+          ? primaryTrafficEta
+          : route.summary.durationSeconds;
+      return {
+        encodedPolyline: route.geometry,
+        summary: formatCarPlayRouteSummary(route.summary.distanceMeters, durationSeconds),
+        distanceMeters: route.summary.distanceMeters,
+        durationSeconds,
+      };
+    }),
   });
 }
 
@@ -702,9 +722,25 @@ export function selectCarPlayEtaSeconds(
 }
 
 /**
+ * Route-wide traffic factor (live ÷ free-flow), matching the phone
+ * `EtaDisplay`'s `trafficScale`. Live TomTom traffic is slower than the base
+ * route, so the factor is ≥ 1 under congestion; without traffic it is 1.
+ */
+export function selectCarPlayTrafficScale(
+  state: Pick<ReturnType<typeof useNavigationStore.getState>, 'activeRoute' | 'trafficEtaSeconds'>,
+): number {
+  const baseSeconds = state.activeRoute?.summary.durationSeconds ?? 0;
+  if (state.trafficEtaSeconds != null && baseSeconds > 0) {
+    return state.trafficEtaSeconds / baseSeconds;
+  }
+  return 1;
+}
+
+/**
  * Live time-to-turn for CarPlay: the static maneuver duration scaled by the
- * remaining fraction of the maneuver so the CarPlay card counts down like
- * the phone banner's distance countdown.
+ * remaining fraction of the maneuver and the route traffic factor, so the
+ * CarPlay card counts down like the phone banner's distance countdown without
+ * under-reporting congested time.
  */
 export function liveDurationToTurnSeconds(
   maneuver: Pick<
@@ -712,9 +748,13 @@ export function liveDurationToTurnSeconds(
     'distanceMeters' | 'durationSeconds'
   >,
   liveDistanceMeters: number,
+  trafficScale = 1,
 ): number {
-  if (maneuver.distanceMeters <= 0) return maneuver.durationSeconds;
-  return (maneuver.durationSeconds * Math.max(liveDistanceMeters, 0)) / maneuver.distanceMeters;
+  if (maneuver.distanceMeters <= 0) return maneuver.durationSeconds * trafficScale;
+  return (
+    (maneuver.durationSeconds * trafficScale * Math.max(liveDistanceMeters, 0)) /
+    maneuver.distanceMeters
+  );
 }
 
 /** Route-preview duration format, mirroring the phone's FloatingSearchPanel. */
