@@ -132,6 +132,10 @@ class PolarisCarPlay: RCTEventEmitter {
     DispatchQueue.main.async {
       Self.mapTemplateManager.dashboardControllerDidConnect(dashboardController)
       Self.attachPendingDashboardIfNeeded()
+      // The dashboard scene can connect on its own; make sure the head unit's
+      // light/dark content style is known before publishing the connection so
+      // the dashboard map isn't forced to light.
+      Self.mapTemplateManager.ensureSessionConfiguration()
       Self.publishSceneConnectionIfNeeded()
     }
   }
@@ -679,6 +683,23 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   /// phone (miles vs km) instead of CarPlay's raw meters.
   private var useMetric = false
 
+  /// Creates the CarPlay session configuration on demand.
+  ///
+  /// This object is the only source of the head unit's light/dark content
+  /// style, and it was previously created only in `activate` (the full-screen
+  /// template scene). When the Dashboard scene is the only attached scene (the
+  /// app never opened to full screen), `sessionConfiguration` was nil, so the
+  /// connection publish reported a false "light" style and the dashboard map
+  /// was forced light until the full-screen scene connected. Creating it here
+  /// lets the dashboard alone report the real content style.
+  @discardableResult
+  func ensureSessionConfiguration() -> CPSessionConfiguration {
+    if let existing = sessionConfiguration { return existing }
+    let config = CPSessionConfiguration(delegate: self)
+    sessionConfiguration = config
+    return config
+  }
+
   func activate(interfaceController: CPInterfaceController, window: CPWindow) {
     if self.interfaceController != nil {
       // Same scene re-activating: nothing to rebuild.
@@ -714,7 +735,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     search.delegate = self
     searchTemplate = search
 
-    sessionConfiguration = CPSessionConfiguration(delegate: self)
+    ensureSessionConfiguration()
 
     // Reconnecting while the Dashboard scene kept the session alive leaves JS
     // believing CarPlay was never disconnected, so replay the current
@@ -749,7 +770,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     interfaceController = nil
     mapTemplate = nil
     searchTemplate = nil
-    sessionConfiguration = nil
+    // Keep `sessionConfiguration` alive: the Dashboard scene can outlive the
+    // full-screen template scene and still needs head-unit light/dark updates.
     navigationSession = nil
     maneuverSignature = ""
     activeAlert = nil
