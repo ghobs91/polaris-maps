@@ -390,4 +390,30 @@ describe('CarPlay iOS configuration', () => {
       expect(nativeModule).not.toContain('makeMapButton(systemName: "xmark.circle.fill")');
     }
   });
+
+  it('starts React Native when the CarPlay scene cold-launches the app', () => {
+    // A cold launch from the CarPlay home screen creates only the CarPlay
+    // scene: the phone window scene never connects, so React Native must start
+    // from the CarPlay scene (headlessly, with no phone window) or the native
+    // template renders with every JS-backed feature dead until the phone app is
+    // opened.
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const appDelegate = readRepoFile(`${root}/AppDelegate.swift`);
+      const sceneDelegate = readRepoFile(`${root}/CarPlaySceneDelegate.swift`);
+
+      // One-shot, headless-capable startup owned by the app delegate.
+      expect(appDelegate).toContain('func startReactNativeIfNeeded(in window: UIWindow?)');
+      expect(appDelegate).toContain('private var hasStartedReactNative = false');
+      expect(appDelegate).toContain('reactNativeRootViewController');
+      // The phone scene adopts the CarPlay-started instance instead of starting
+      // a second bridge.
+      expect(appDelegate).toContain('appDelegate.startReactNativeIfNeeded(in: window)');
+
+      // Both CarPlay surfaces can be the only scene, so both start React Native.
+      const startCalls = sceneDelegate.match(/startReactNativeIfNeeded\(in: nil\)/g) ?? [];
+      expect(startCalls).toHaveLength(2);
+      expect(sceneDelegate).toContain('PolarisCarPlay.sceneDidConnect');
+      expect(sceneDelegate).toContain('PolarisCarPlay.dashboardSceneDidConnect');
+    }
+  });
 });

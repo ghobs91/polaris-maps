@@ -12,6 +12,59 @@ class AppDelegate: ExpoAppDelegate {
   var reactNativeDelegate: ExpoReactNativeFactoryDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
 
+  /// Guards the one-shot React Native startup (see `startReactNativeIfNeeded`).
+  private var hasStartedReactNative = false
+  /// The single React Native root view controller. Retained here so the React
+  /// tree — and the CarPlay manager it initialises — stays alive when React
+  /// Native is started by the CarPlay scene with no phone window to hold it.
+  private(set) var reactNativeRootViewController: UIViewController?
+
+  /// Starts React Native exactly once and returns its root view controller.
+  ///
+  /// A CarPlay cold launch — the driver connects to the car with the phone app
+  /// closed — creates only the CarPlay scene: the phone window scene never
+  /// connects, so starting React Native only from `SceneDelegate` left it (and
+  /// every JS-backed CarPlay feature: search, routing, favorites) dead until
+  /// the phone app was opened. Whichever scene connects first now starts React
+  /// Native. `window` is the phone scene's window when the phone UI launches
+  /// it, and nil when the CarPlay scene launches it (there is no phone window
+  /// yet). The root view controller is retained here, so a headless start still
+  /// runs the app and a later phone scene adopts it instead of starting a
+  /// second bridge.
+  @discardableResult
+  func startReactNativeIfNeeded(in window: UIWindow?) -> UIViewController? {
+    guard let factory = reactNativeFactory else { return nil }
+
+    if hasStartedReactNative {
+      // CarPlay cold-launched React Native before the phone UI existed: adopt
+      // the retained root view controller into the phone window now.
+      if let window = window, let rootViewController = reactNativeRootViewController,
+        window.rootViewController !== rootViewController
+      {
+        window.rootViewController = rootViewController
+        window.makeKeyAndVisible()
+      }
+      return reactNativeRootViewController
+    }
+
+    hasStartedReactNative = true
+
+    // Mirrors `RCTReactNativeFactory.startReactNative` so the Expo root view
+    // (through `EXReactRootViewFactory` and the Expo react delegate) is created
+    // exactly as before — but without requiring a window: with a nil window the
+    // root view controller is retained here instead.
+    let rootView = factory.rootViewFactory.view(withModuleName: "main")
+    let rootViewController = reactNativeDelegate?.createRootViewController() ?? UIViewController()
+    reactNativeDelegate?.setRootView(rootView, toRootViewController: rootViewController)
+    reactNativeRootViewController = rootViewController
+
+    if let window = window {
+      window.rootViewController = rootViewController
+      window.makeKeyAndVisible()
+    }
+    return rootViewController
+  }
+
   public override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -25,8 +78,10 @@ class AppDelegate: ExpoAppDelegate {
     reactNativeDelegate = delegate
     reactNativeFactory = factory
 
-    // The window is created and React Native is started by `SceneDelegate`
-    // under the scene-based lifecycle (required by the iOS 27 SDK).
+    // The window is created and React Native is started by whichever scene
+    // connects first — the phone `SceneDelegate`, or the CarPlay scene on a
+    // cold launch from the car (see `startReactNativeIfNeeded`) — under the
+    // scene-based lifecycle required by the iOS 27 SDK.
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -119,8 +174,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   ) {
     guard
       let windowScene = scene as? UIWindowScene,
-      let appDelegate = UIApplication.shared.delegate as? AppDelegate,
-      let factory = appDelegate.reactNativeFactory
+      let appDelegate = UIApplication.shared.delegate as? AppDelegate
     else {
       return
     }
@@ -131,7 +185,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // `UIApplication.shared.delegate?.window` keeps working (e.g. expo-system-ui).
     appDelegate.window = window
 
-    factory.startReactNative(withModuleName: "main", in: window, launchOptions: nil)
+    // Starts React Native, or adopts the instance the CarPlay scene already
+    // started when the app was cold-launched from the car with no phone window.
+    appDelegate.startReactNativeIfNeeded(in: window)
 
     // Deep links / universal links delivered at launch.
     connectionOptions.urlContexts.forEach { urlContext in
