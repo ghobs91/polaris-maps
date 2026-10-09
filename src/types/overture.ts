@@ -1,6 +1,7 @@
 /**
  * TypeScript types for Overture Maps Foundation Places schema.
- * Based on schema v1.16.0 (2026-02-18.0 release).
+ * Based on schema v2.0.0 (2026-09-23 release), which removed the `categories`
+ * property in favour of `basic_category` and `taxonomy`.
  * See: https://docs.overturemaps.org/schema/reference/places/place/
  */
 
@@ -19,6 +20,7 @@ export interface OverturePlaceProperties {
   id: string;
   version?: number;
   names?: OvertureNames;
+  /** Removed in schema v2.0.0 (2026-09). Kept for legacy region packs. */
   categories?: OvertureCategories;
   basic_category?: string;
   taxonomy?: OvertureTaxonomy;
@@ -47,6 +49,9 @@ export interface OvertureCategories {
 export interface OvertureTaxonomy {
   hierarchy?: string[];
   primary?: string;
+  /** Current field name (schema v2.0.0+). */
+  alternates?: string[];
+  /** Legacy singular spelling, retained for older region packs. */
   alternate?: string[];
 }
 

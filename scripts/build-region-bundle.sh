@@ -12,6 +12,7 @@ SLUG="${1:?Usage: $0 <geofabrik-slug>  (e.g. us/new-york)}"
 REGION_ID="${SLUG//\//-}"
 HUMAN_NAME="$(echo "$SLUG" | sed 's|.*/||; s/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')"
 VERSION="$(date +%Y-%m-%d)"
+OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-09-23.1}"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() { rm -rf "$WORK_DIR"; }
@@ -69,7 +70,9 @@ duckdb -c "
       id,
       names.primary AS name,
       basic_category,
-      categories.primary AS category_primary,
+      -- `category_primary` kept for bundle-schema compatibility; the removed
+      -- `categories` column is replaced by `taxonomy.primary`.
+      taxonomy.primary AS category_primary,
       taxonomy.primary AS taxonomy_primary,
       to_json(taxonomy.hierarchy) AS taxonomy_hierarchy,
       confidence,
@@ -86,7 +89,7 @@ duckdb -c "
       brand.wikidata AS brand_wikidata,
       brand.names.primary AS brand_name
     FROM read_parquet(
-      's3://overturemaps-us-west-2/release/2026-03-18.0/theme=places/type=place/*',
+      's3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/type=place/*',
       hive_partitioning=1
     )
     WHERE bbox.xmin BETWEEN ${WEST} AND ${EAST}

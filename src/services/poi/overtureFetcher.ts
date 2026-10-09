@@ -1,26 +1,87 @@
 import { getDatabase } from '../database/init';
 import { encode as geohashEncode } from '../../utils/geohash';
-import { OVERTURE_PLACES_PM_TILES_URL } from '../../constants/config';
+import {
+  OVERTURE_PLACES_PM_TILES_URL,
+  OVERTURE_STAC_CATALOG_URL,
+  overturePmtilesUrl,
+} from '../../constants/config';
 import { PMTiles } from 'pmtiles';
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
 import type { Place, PlaceCategory } from '../../models/poi';
 import type { OverturePlace, OverturePlaceCollection } from '../../types/overture';
 import type { SQLiteBindValue } from 'expo-sqlite';
-import { throwIfAborted, withSourceTimeout } from '../search/abortUtils';
+import { throwIfAborted, withSourceTimeout, withTimeout } from '../search/abortUtils';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
 
+/** Preferred place-tile zoom; clamped to the archive header's `maxZoom` at runtime. */
 const TILE_ZOOM = 15;
 const MAX_TILE_FEATURE_CACHE_ENTRIES = 256;
 /** Upper bound for a single PMTiles tile request (ms). */
 const TILE_FETCH_TIMEOUT_MS = 8_000;
+/** Upper bound for the STAC catalog lookup that resolves the current release. */
+const STAC_FETCH_TIMEOUT_MS = 4_000;
 let pmtilesArchive: PMTiles | null = null;
+let pmtilesArchiveUrl: string | null = null;
+/** PMTiles URL resolved this session (STAC latest, override, or pinned fallback). */
+let resolvedPmtilesUrl: string | null = null;
+let resolvingPmtilesUrl: Promise<string | null> | null = null;
 const tileFeatureCache = new Map<string, Promise<OverturePlace[]>>();
 
-function getPmtilesArchive(): PMTiles | null {
-  if (!OVERTURE_PLACES_PM_TILES_URL) return null;
-  if (!pmtilesArchive) {
-    pmtilesArchive = new PMTiles(OVERTURE_PLACES_PM_TILES_URL);
+/** `yyyy-mm-dd.x` release tag, e.g. `2026-09-23.1`. */
+const OVERTURE_RELEASE_RE = /^\d{4}-\d{2}-\d{2}\.\d+$/;
+
+/**
+ * Resolve the PMTiles archive URL for this session. An explicit
+ * `EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL` override wins (pinning or
+ * self-hosting). Otherwise read Overture's STAC catalog for the current release
+ * and fall back to the pinned {@link OVERTURE_PLACES_PM_TILES_URL} when the
+ * lookup fails. Overture retires releases after ~60 days, so a hard-coded path
+ * silently 404s/410s; the STAC lookup keeps the archive current. One lookup per
+ * session; the result is memoised.
+ */
+async function resolvePmtilesUrl(): Promise<string | null> {
+  const override = process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL;
+  if (override) return override;
+  if (resolvedPmtilesUrl) return resolvedPmtilesUrl;
+  if (!resolvingPmtilesUrl) {
+    resolvingPmtilesUrl = (async () => {
+      try {
+        const { signal, cleanup } = withTimeout(undefined, STAC_FETCH_TIMEOUT_MS);
+        try {
+          const response = await fetch(OVERTURE_STAC_CATALOG_URL, {
+            headers: { Accept: 'application/json' },
+            signal,
+          });
+          if (response.ok) {
+            const catalog: { latest?: unknown } = await response.json();
+            const latest = catalog?.latest;
+            if (typeof latest === 'string' && OVERTURE_RELEASE_RE.test(latest)) {
+              resolvedPmtilesUrl = overturePmtilesUrl(latest);
+              return resolvedPmtilesUrl;
+            }
+          }
+        } finally {
+          cleanup();
+        }
+      } catch {
+        // STAC unavailable (offline / timeout) — fall through to the pinned URL.
+      }
+      resolvedPmtilesUrl = OVERTURE_PLACES_PM_TILES_URL || null;
+      return resolvedPmtilesUrl;
+    })();
+  }
+  return resolvingPmtilesUrl;
+}
+
+async function getPmtilesArchive(): Promise<PMTiles | null> {
+  const url = await resolvePmtilesUrl();
+  if (!url) return null;
+  if (!pmtilesArchive || pmtilesArchiveUrl !== url) {
+    pmtilesArchive = new PMTiles(url);
+    pmtilesArchiveUrl = url;
+    // Cached decoded tiles belong to the previous archive URL.
+    tileFeatureCache.clear();
   }
   return pmtilesArchive;
 }
@@ -117,6 +178,8 @@ function toOvertureFeature(rawFeature: GeoJSON.Feature): OverturePlace | null {
             ? Number(properties.version)
             : undefined,
       names: parseJsonProperty(properties.names),
+      // `categories` was removed from the places schema in the v2.0.0
+      // (September 2026) release; parsed only for older region packs.
       categories: parseJsonProperty(properties.categories),
       basic_category:
         typeof properties.basic_category === 'string' ? properties.basic_category : undefined,
@@ -147,7 +210,7 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
   const cached = tileFeatureCache.get(cacheKey);
   if (cached) return cached;
 
-  const archive = getPmtilesArchive();
+  const archive = await getPmtilesArchive();
   if (!archive) return [];
 
   const promise = (async () => {
@@ -182,6 +245,9 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
 
 export function resetOverturePmtilesStateForTests(): void {
   pmtilesArchive = null;
+  pmtilesArchiveUrl = null;
+  resolvedPmtilesUrl = null;
+  resolvingPmtilesUrl = null;
   tileFeatureCache.clear();
 }
 
@@ -189,6 +255,26 @@ export function overtureFeatureFromVectorTileGeoJSON(
   rawFeature: GeoJSON.Feature,
 ): OverturePlace | null {
   return toOvertureFeature(rawFeature);
+}
+
+/**
+ * Resolve the tile zoom to request from Overture's archive. The published
+ * `places.pmtiles` is capped at a lower zoom than {@link TILE_ZOOM} (currently
+ * 14), and PMTiles `getZxy` returns `undefined` for `z > maxZoom` — so an
+ * unclamped request silently yields no tiles. Clamping keeps points accurate
+ * because features are filtered to the requested bbox after decoding.
+ */
+async function resolveTileZoom(archive: PMTiles): Promise<number> {
+  try {
+    const header = await withSourceTimeout(archive.getHeader(), TILE_FETCH_TIMEOUT_MS);
+    if (typeof header?.maxZoom === 'number' && header.maxZoom >= 0) {
+      return Math.min(TILE_ZOOM, header.maxZoom);
+    }
+  } catch {
+    // Header unavailable — fall back to the preferred zoom. Per-tile fetches
+    // below fail the same way and are handled individually.
+  }
+  return TILE_ZOOM;
 }
 
 /**
@@ -204,10 +290,15 @@ export async function fetchOverturePlaces(
   limit: number = 200,
   opts?: { signal?: AbortSignal },
 ): Promise<Place[]> {
-  if (!OVERTURE_PLACES_PM_TILES_URL) return [];
   throwIfAborted(opts?.signal);
 
-  const tiles = getTileCoordsForBounds(south, west, north, east, TILE_ZOOM);
+  const archive = await getPmtilesArchive();
+  if (!archive) return [];
+
+  const zoom = await resolveTileZoom(archive);
+  throwIfAborted(opts?.signal);
+
+  const tiles = getTileCoordsForBounds(south, west, north, east, zoom);
   if (tiles.length === 0) return [];
 
   const responses = await Promise.all(
@@ -1005,8 +1096,11 @@ const CATEGORY_MAP: Record<string, PlaceCategory> = {
 };
 
 /**
- * Map an Overture basic_category / categories.primary to a Polaris PlaceCategory.
- * Falls back through taxonomy hierarchy, then to 'other'.
+ * Map an Overture `basic_category` / `taxonomy` to a Polaris PlaceCategory.
+ * The `categories` property was removed from the places schema in the September
+ * 2026 (v2.0.0) release, so `taxonomy` is preferred; `categories` is still read
+ * as a legacy fallback for region packs built from older releases.
+ * Falls back to 'other'.
  */
 export function mapOvertureCategory(feature: OverturePlace): PlaceCategory {
   const props = feature.properties;
@@ -1016,9 +1110,9 @@ export function mapOvertureCategory(feature: OverturePlace): PlaceCategory {
     return CATEGORY_MAP[props.basic_category];
   }
 
-  // Try categories.primary
-  if (props.categories?.primary && CATEGORY_MAP[props.categories.primary]) {
-    return CATEGORY_MAP[props.categories.primary];
+  // Try taxonomy.primary
+  if (props.taxonomy?.primary && CATEGORY_MAP[props.taxonomy.primary]) {
+    return CATEGORY_MAP[props.taxonomy.primary];
   }
 
   // Walk taxonomy hierarchy from specific to broad
@@ -1029,9 +1123,9 @@ export function mapOvertureCategory(feature: OverturePlace): PlaceCategory {
     }
   }
 
-  // Try taxonomy primary
-  if (props.taxonomy?.primary && CATEGORY_MAP[props.taxonomy.primary]) {
-    return CATEGORY_MAP[props.taxonomy.primary];
+  // Legacy (pre-v2.0.0 data / region packs) still carry `categories`.
+  if (props.categories?.primary && CATEGORY_MAP[props.categories.primary]) {
+    return CATEGORY_MAP[props.categories.primary];
   }
 
   return 'other';

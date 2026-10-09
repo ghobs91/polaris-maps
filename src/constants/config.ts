@@ -37,16 +37,42 @@ export const TRAFFIC_FETCH_DEBOUNCE_MS = 800;
 export const TRAFFIC_REFRESH_INTERVAL_MS = 60_000;
 
 /**
- * Overture-hosted PMTiles archive for places.
- * Defaults to Overture's published release artifact so Polaris does not need
- * to host its own backend or tileset.
+ * Overture Maps data release pinned as the fallback / offline default. The
+ * app discovers the live release from {@link OVERTURE_STAC_CATALOG_URL} at
+ * runtime (releases are rotated and only retained ~60 days), so this only
+ * needs to be fresh enough to be a valid fallback.
+ */
+export const OVERTURE_RELEASE = '2026-09-23.1';
+
+/**
+ * Overture's STAC catalog. Its `latest` field names the current release; Overture
+ * recommends resolving the release here rather than hard-coding a date, because
+ * public releases are retired after ~60 days.
+ * See https://docs.overturemaps.org/getting-data/cloud-sources/
+ */
+export const OVERTURE_STAC_CATALOG_URL = 'https://stac.overturemaps.org/catalog.json';
+
+/**
+ * Overture-hosted PMTiles archive URL for a given release and theme.
+ *
+ * Warning: Overture publishes these tiles for data inspection only and does not
+ * guarantee their layers, properties, or zoom levels across releases. The
+ * `overtureFetcher` clamps tile requests to the archive header's `maxZoom` and
+ * resolves the current release from STAC so a rotating release path can't
+ * silently empty the map.
+ * See https://docs.overturemaps.org/examples/overture-tiles/
+ */
+export function overturePmtilesUrl(release: string, theme = 'places'): string {
+  return `https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${release}/${theme}.pmtiles`;
+}
+
+/**
+ * Fallback PMTiles archive for places (the pinned {@link OVERTURE_RELEASE}
+ * unless explicitly overridden). `overtureFetcher` prefers the STAC-resolved
+ * release and treats this as the offline / failure fallback.
  */
 export const OVERTURE_PLACES_PM_TILES_URL: string =
-  process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL ??
-  'https://tiles.overturemaps.org/2026-04-15.0/places.pmtiles';
-
-/** Overture Maps data release version used for region generation. */
-export const OVERTURE_RELEASE = '2026-04-15.0';
+  process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL ?? overturePmtilesUrl(OVERTURE_RELEASE);
 
 /** Overture GeoParquet S3 path for places. */
 export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/type=place/*`;

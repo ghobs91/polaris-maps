@@ -266,7 +266,7 @@ fi
 # Step 5: Extract Overture Maps places for the region
 # ---------------------------------------------------------------------------
 OVERTURE_PLACES="${DEST_DIR}/overture-places.geojson"
-OVERTURE_RELEASE="2026-02-18.0"
+OVERTURE_RELEASE="${OVERTURE_RELEASE:-2026-09-23.1}"
 if [ -f "${OVERTURE_PLACES}" ]; then
   echo "[5/5] Overture places already extracted, skipping."
 else
@@ -316,10 +316,11 @@ else
               'names', CASE WHEN names IS NOT NULL
                 THEN json_object('primary', names.primary)
                 ELSE NULL END,
-              'categories', CASE WHEN categories IS NOT NULL
+              'taxonomy', CASE WHEN taxonomy IS NOT NULL
                 THEN json_object(
-                  'primary', categories.primary,
-                  'alternate', categories.alternate
+                  'primary', taxonomy.primary,
+                  'hierarchy', taxonomy.hierarchy,
+                  'alternates', taxonomy.alternates
                 )
                 ELSE NULL END,
               'basic_category', basic_category,

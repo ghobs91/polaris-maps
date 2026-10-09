@@ -54,6 +54,8 @@ function makeOverturePlace(overrides: Partial<OverturePlace['properties']> = {})
 }
 
 beforeEach(() => {
+  // Pin the archive URL so fetchOverturePlaces doesn't hit the STAC catalog.
+  process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL = 'https://overture.test/places.pmtiles';
   resetOverturePmtilesStateForTests();
   jest.clearAllMocks();
 
@@ -68,6 +70,10 @@ beforeEach(() => {
     execAsync: jest.fn().mockResolvedValue(undefined),
     getFirstAsync: jest.fn().mockResolvedValue({ n: 0 }),
   });
+});
+
+afterEach(() => {
+  delete process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL;
 });
 
 // ---------------------------------------------------------------------------
@@ -192,6 +198,49 @@ describe('fetchOverturePlaces', () => {
     expect(first.map((place) => place.name)).toEqual(['Calda Pizzeria']);
     expect(second.map((place) => place.name)).toEqual(['Calda Pizzeria']);
     expect(mockGetZxy).toHaveBeenCalledTimes(1);
+  });
+
+  it('clamps the requested tile zoom to the archive maxZoom', async () => {
+    const mockGetZxy = jest.fn().mockResolvedValue({ data: new Uint8Array([1]) });
+    (PMTiles as jest.Mock).mockImplementation(() => ({
+      getHeader: jest.fn().mockResolvedValue({ maxZoom: 14 }),
+      getZxy: mockGetZxy,
+    }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+    (VectorTile as jest.Mock).mockImplementation(() => ({ layers: {} }));
+
+    // Requested zoom comes from the tile coords passed to getZxy.
+    await fetchOverturePlaces(40.7239, -73.5287, 40.7243, -73.5282, 50);
+
+    expect(mockGetZxy).toHaveBeenCalled();
+    expect(mockGetZxy.mock.calls[0][0]).toBe(14);
+  });
+
+  it('resolves the current release from the STAC catalog', async () => {
+    delete process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL;
+    resetOverturePmtilesStateForTests();
+
+    const originalFetch = (global as { fetch?: unknown }).fetch;
+    (global as { fetch?: unknown }).fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ latest: '2026-10-21.0' }),
+    });
+
+    (PMTiles as jest.Mock).mockImplementation(() => ({
+      getHeader: jest.fn().mockResolvedValue({ maxZoom: 14 }),
+      getZxy: jest.fn().mockResolvedValue(undefined),
+    }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+    (VectorTile as jest.Mock).mockImplementation(() => ({ layers: {} }));
+
+    try {
+      await fetchOverturePlaces(40.7239, -73.5287, 40.7243, -73.5282, 50);
+      expect(PMTiles).toHaveBeenCalledWith(
+        'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-10-21.0/places.pmtiles',
+      );
+    } finally {
+      (global as { fetch?: unknown }).fetch = originalFetch;
+    }
   });
 });
 
