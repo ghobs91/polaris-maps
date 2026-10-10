@@ -7,9 +7,9 @@ import type { RegionManifest } from '../services/regions/regionManifest';
  * check. Remote manifests must verify against `TRUSTED_REGION_PUBLISHERS` (see
  * `regionPublishers.ts`) and may only fill regions absent here.
  *
- * Pilot target: `us-ny-new-york`. Populate an entry by running the publishing
- * device's authoring path (seed a pack with no canonical key) and committing the
- * returned manifest.
+ * Populate an entry by authoring a pack on the publishing device
+ * (Settings → Developer → Publish Region Manifest) and pasting the returned
+ * manifest verbatim.
  */
 export const BUNDLED_REGION_MANIFESTS: readonly RegionManifest[] = [];
 

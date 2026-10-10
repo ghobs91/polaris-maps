@@ -426,6 +426,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
                     version: region.version ?? '1.0',
                     overtureRelease: null,
                   });
+                  // Single-line log so the exact JSON can be copied verbatim.
+                  console.log(`[region-manifest] ${JSON.stringify(manifest)}`);
                   Alert.alert(`Region manifest (${region.id})`, JSON.stringify(manifest, null, 2));
                 } catch (err) {
                   Alert.alert('Publish failed', err instanceof Error ? err.message : String(err));
