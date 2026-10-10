@@ -400,21 +400,33 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           />
           <SettingsRow
             title="Publish Region Manifest"
-            value="us-ny-new-york"
+            value="latest downloaded region"
             onPress={() => {
               void (async () => {
                 try {
-                  const [fs, { publishRegionPack }] = await Promise.all([
+                  const [fs, { publishRegionPack }, { getDownloadedRegions }] = await Promise.all([
                     import('expo-file-system/legacy'),
                     import('../../services/regions/regionManifestPublisher'),
+                    import('../../services/regions/regionRepository'),
                   ]);
+
+                  const regions = await getDownloadedRegions();
+                  if (regions.length === 0) {
+                    Alert.alert(
+                      'No downloaded region',
+                      'Download a region first, then publish its manifest.',
+                    );
+                    return;
+                  }
+
+                  const region = regions[0];
                   const manifest = await publishRegionPack({
-                    regionId: 'us-ny-new-york',
-                    filesDir: `${fs.documentDirectory}regions/us-ny-new-york/`,
-                    version: '1.0',
+                    regionId: region.id,
+                    filesDir: `${fs.documentDirectory}regions/${region.id}/`,
+                    version: region.version ?? '1.0',
                     overtureRelease: null,
                   });
-                  Alert.alert('Region manifest', JSON.stringify(manifest, null, 2));
+                  Alert.alert(`Region manifest (${region.id})`, JSON.stringify(manifest, null, 2));
                 } catch (err) {
                   Alert.alert('Publish failed', err instanceof Error ? err.message : String(err));
                 }
