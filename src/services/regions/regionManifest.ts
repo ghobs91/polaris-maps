@@ -110,7 +110,7 @@ export function verifyRegionManifest(
  */
 export function computePackContentHash(entries: readonly PackIndexEntry[]): string {
   const canonical = [...entries]
-    .sort((a, b) => a.path.localeCompare(b.path))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .map((entry) => `${entry.path}\u0000${entry.size}`)
     .join('\n');
   return bytesToHex(sha256(new TextEncoder().encode(canonical)));

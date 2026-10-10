@@ -135,6 +135,7 @@ function sendError(requestId, error) {
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 
 async function handleExtractTar(command) {
   const { srcPath, destDir, requestId } = command;
@@ -268,6 +269,8 @@ async function handleHdSeed(command) {
           discoveryKey: existing.drive.discoveryKey.toString('hex'),
           key: existingKey,
           readOnly: Boolean(key),
+          contentHash: existing.contentHash || undefined,
+          bytes: existing.bytes,
         });
       }
       // The requested canonical key differs from what we're seeding — swap.
@@ -280,6 +283,8 @@ async function handleHdSeed(command) {
     const store = new Corestore(storePath);
 
     let drive;
+    let contentHash = null;
+    let bytes = 0;
     const readOnly = Boolean(key);
     if (readOnly) {
       // Canonical replica: content-addressed, authored elsewhere. We join the
@@ -298,6 +303,8 @@ async function handleHdSeed(command) {
         const content = fs.readFileSync(absolutePath);
         await drive.put(relativePath, content);
       }
+
+      ({ contentHash, bytes } = computePackIndex(filesToImport));
     }
 
     // Join swarm to make this drive discoverable (all readers/writers of a
@@ -306,7 +313,7 @@ async function handleHdSeed(command) {
     const discovery = sw.join(drive.discoveryKey);
     await discovery.flushed();
 
-    seededDrives.set(regionId, { drive, discovery, store, readOnly });
+    seededDrives.set(regionId, { drive, discovery, store, readOnly, contentHash, bytes });
 
     console.log(
       `[Hyperdrive] Seeding ${regionId} (${readOnly ? 'read-only' : 'author'}) — ` +
@@ -318,6 +325,8 @@ async function handleHdSeed(command) {
       discoveryKey: drive.discoveryKey.toString('hex'),
       key: drive.key.toString('hex'),
       readOnly,
+      contentHash: contentHash || undefined,
+      bytes,
     });
   } catch (err) {
     sendError(requestId, err.message || String(err));
@@ -460,6 +469,27 @@ function collectFiles(baseDir, currentDir, result) {
       result.push({ relativePath: rel, absolutePath: abs });
     }
   }
+}
+
+/**
+ * Deterministic pack index hash + total size. MUST match
+ * `computePackContentHash` in src/services/regions/regionManifest.ts
+ * (sorted `path\0size` lines, SHA-256 hex).
+ */
+function computePackIndex(filesToImport) {
+  const entries = filesToImport
+    .map(({ relativePath, absolutePath }) => ({
+      path: relativePath,
+      size: fs.statSync(absolutePath).size,
+    }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+
+  const contentHash = crypto
+    .createHash('sha256')
+    .update(entries.map((e) => `${e.path}\u0000${e.size}`).join('\n'), 'utf8')
+    .digest('hex');
+  const bytes = entries.reduce((n, e) => n + e.size, 0);
+  return { contentHash, bytes };
 }
 
 initWaku().catch(console.error);

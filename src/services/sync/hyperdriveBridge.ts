@@ -11,6 +11,8 @@ interface HdEvent {
   bytes?: number;
   /** True when the drive was opened as a read-only canonical replica. */
   readOnly?: boolean;
+  /** Deterministic pack content hash, returned when authoring a pack. */
+  contentHash?: string;
   drives?: Array<{
     regionId: string;
     key: string;
@@ -97,7 +99,13 @@ export async function seedRegion(
   regionId: string,
   filesDir: string,
   canonicalKey?: string,
-): Promise<{ key: string; discoveryKey: string; readOnly: boolean }> {
+): Promise<{
+  key: string;
+  discoveryKey: string;
+  readOnly: boolean;
+  contentHash?: string;
+  bytes?: number;
+}> {
   const requestId = getRequestId();
   const result = await sendCommand({
     type: 'hd-seed',
@@ -110,6 +118,8 @@ export async function seedRegion(
     key: result.key!,
     discoveryKey: result.discoveryKey!,
     readOnly: canonicalKey != null,
+    contentHash: result.contentHash,
+    bytes: result.bytes,
   };
 }
 
