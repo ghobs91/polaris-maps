@@ -7,7 +7,7 @@ Decentralized data synchronization layer using Hypercore, Hyperdrive, and Gun.js
 The sync layer manages all peer-to-peer data exchange beyond real-time traffic (which has its own Hyperswarm bridge). It handles:
 
 1. **Hypercore feed sync** — region data replication between peers, with download progress tracking
-2. **Hyperdrive bridge** — IPC between React Native and the nodejs-mobile sidecar for seeding/downloading file archives
+2. **Hyperdrive bridge** — IPC between React Native and the **Bare Hyperdrive worklet** (`backend/hyperdrive.mjs`, `react-native-bare-kit` + `bare-rpc`) for seeding/downloading file archives and gunzip/tar extraction
 3. **Offline queue** — queues outbound actions (traffic probes, POI edits, reviews, attestations) in MMKV when offline, replayed when connectivity returns
 4. **Peer service** — manages the local peer node identity, resource usage, and uptime metrics in SQLite
 5. **Resource management** — computes device-adaptive budgets for storage, bandwidth, and battery consumption automatically
@@ -17,9 +17,9 @@ The sync layer manages all peer-to-peer data exchange beyond real-time traffic (
 ```
 React Native (UI thread)
     ↓
-hyperdriveBridge.ts ←──→ nodejs-assets/nodejs-project/index.js
+hyperdriveBridge.ts ←──→ backend/hyperdrive.mjs (Bare worklet, bare-rpc)
     ↓                          ↓
-feedSyncService.ts        Hyperdrive seed / download / tar extract
+feedSyncService.ts        Hyperdrive seed / download / gunzip / tar extract
     ↓
 peerService.ts → peer_node SQLite table
     ↓
@@ -30,13 +30,13 @@ offlineQueue.ts ← MMKV (500-entry cap)
 
 ## Files
 
-| File                  | Description                                                                                                                                                                       |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `feedSyncService.ts`  | Manages Hypercore feed lifecycle — join, leave, get entries for region data replication. Tracks download progress and peer counts per feed.                                       |
-| `hyperdriveBridge.ts` | Bridge between React Native and the nodejs-mobile sidecar for Hyperdrive operations (seed, download, status). Uses `NativeEventEmitter` + request/response IPC pattern.           |
-| `offlineQueue.ts`     | Queues outbound actions in MMKV when offline. Supports traffic probes, POI edits, reviews, and attestations. 500-entry cap with FIFO eviction. Replays when connectivity returns. |
-| `peerService.ts`      | Manages local peer node identity in SQLite — joining the P2P network, recording computed resource limits, uptime, and data served metrics.                                        |
-| `resourceManager.ts`  | Computes adaptive resource budgets (storage MB, bandwidth Mbps, battery %/hr) from free disk space and network type, then checks current usage against those limits.              |
+| File                  | Description                                                                                                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feedSyncService.ts`  | Manages Hypercore feed lifecycle — join, leave, get entries for region data replication. Tracks download progress and peer counts per feed.                                                        |
+| `hyperdriveBridge.ts` | Bridge between React Native and the Bare Hyperdrive worklet (`backend/hyperdrive.mjs`) for seed, download, status, gunzip, and tar extract. Uses `react-native-bare-kit`'s `Worklet` + `bare-rpc`. |
+| `offlineQueue.ts`     | Queues outbound actions in MMKV when offline. Supports traffic probes, POI edits, reviews, and attestations. 500-entry cap with FIFO eviction. Replays when connectivity returns.                  |
+| `peerService.ts`      | Manages local peer node identity in SQLite — joining the P2P network, recording computed resource limits, uptime, and data served metrics.                                                         |
+| `resourceManager.ts`  | Computes adaptive resource budgets (storage MB, bandwidth Mbps, battery %/hr) from free disk space and network type, then checks current usage against those limits.                               |
 
 ## P2P Data Flow
 
@@ -57,8 +57,9 @@ offlineQueue.ts ← MMKV (500-entry cap)
 
 ## Related Files
 
-- [`nodejs-assets/nodejs-project/`](../../../nodejs-assets/nodejs-project/) — Node.js sidecar with Hyperdrive, tar, and gunzip handlers
+- [`backend/hyperdrive.mjs`](../../../backend/hyperdrive.mjs) — Bare worklet hosting Hyperdrive + Corestore (+ gunzip/tar); exported as `hdRpcCommands.ts`
 - [`backend/traffic-swarm.mjs`](../../../backend/traffic-swarm.mjs) — Hyperswarm Bare worklet for traffic P2P
+- [`nodejs-assets/nodejs-project/`](../../../nodejs-assets/nodejs-project/) — legacy Node sidecar (region packs now use the Bare worklet; only attestation publish remains on `NodeChannel`)
 - [`src/services/gun/init.ts`](../gun/init.ts) — Gun.js initialization with MMKV adapter
 - [`src/stores/peerStore.ts`](../../stores/peerStore.ts) — Zustand store for peer state
 - [`src/services/regions/`](../regions/) — Region download orchestration using Hyperdrive

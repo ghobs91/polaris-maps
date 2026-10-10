@@ -11,6 +11,8 @@
 
 ## 3. Verify
 
-- [ ] 3.1 Native rebuild succeeds with the vendored addons embedded
-- [ ] 3.2 Enable the Hyperdrive worklet (`EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET=1`) and confirm it starts without SIGABRT
+- [x] 3.1 Native rebuild succeeds with the vendored addons embedded
+- [x] 3.2 Enable the Hyperdrive worklet (`EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET=1`) and confirm it starts without SIGABRT
 - [ ] 3.3 Complete the `us-ny-new-york` publish + seed/download smoke test
+
+> Device progress: the worklet starts, loads `rocksdb-native`/`sodium-native`, and the publisher authored + signed `north-america-us-new-york` (manifest returned + signature verified locally, committed `7fd94b3c`). The cross-device seed/download smoke remains.

@@ -27,5 +27,7 @@
 
 - [x] 5.1 Run `pnpm typecheck && pnpm lint && pnpm format:check`
 - [x] 5.2 Run the new bridge unit tests and report actual results
-- [ ] 5.3 Update `src/services/sync/README.md` and `src/services/regions/README.md` for the Bare Hyperdrive worklet
+- [x] 5.3 Update `src/services/sync/README.md` and `src/services/regions/README.md` for the Bare Hyperdrive worklet
 - [ ] 5.4 Device smoke: author `us-ny-new-york` on one device, seed it, download it on a second via the canonical key
+
+> On-device authoring is verified (manifest returned + signature verified). Region-pack places `gunzip` and routing `tar` were also ported from the dead Node sidecar onto this worklet (commit `45bc6a16`), so downloaded packs are complete. The second-device download smoke remains.

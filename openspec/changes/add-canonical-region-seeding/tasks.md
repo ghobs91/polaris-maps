@@ -38,3 +38,5 @@
 - [x] 6.2 Run the targeted Jest suites for the manifest + seeding changes and report actual results
 - [x] 6.3 Update `src/services/regions/README.md` and `src/services/sync/README.md` for canonical seeding
 - [ ] 6.4 Manual smoke: seed a region on one device/sim, discover and download it on a second via the canonical key
+
+> Device progress: the `north-america-us-new-york` pilot manifest was authored + signed on the publisher device, committed as the bundled root of trust (`7fd94b3c`), and its signature verified locally. The second-device download smoke remains.
