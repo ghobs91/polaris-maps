@@ -45,6 +45,7 @@
       "./plugins/withCarPlay",
       "./plugins/withValhalla",
       "./plugins/withLiveActivities",
+      "./plugins/withBareAddons",
       "@maplibre/maplibre-react-native",
       "expo-router",
       "expo-secure-store",
