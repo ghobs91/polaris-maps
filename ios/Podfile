@@ -59,6 +59,14 @@ target 'PolarisMaps' do
   )
 
   post_install do |installer|
+    # @generated begin polaris-fix-bare-addon-min-os - expo prebuild (DO NOT MODIFY)
+    # App Store validation (ITMS-90208) rejects embedded frameworks whose declared
+    # MinimumOSVersion is lower than the min-OS their binary was built for.
+    # bare-link regenerates the addon frameworks during pod install, normalize here.
+    bare_addon_minos = File.join(__dir__, '..', 'scripts', 'fix-bare-addon-min-os.mjs')
+    system('node', bare_addon_minos) if File.exist?(bare_addon_minos)
+    # @generated end polaris-fix-bare-addon-min-os
+
     # Xcode 16 / 17 treats user script sandboxing as a strict default, which breaks
     # many React Native/Expo script phases (e.g. ExpoModulesJSI) by flagging any
     # stderr output as a build error. Disable it across all targets.
