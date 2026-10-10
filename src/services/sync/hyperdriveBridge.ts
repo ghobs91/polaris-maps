@@ -15,6 +15,8 @@ import {
   CMD_HD_DOWNLOAD,
   CMD_HD_STATUS,
   CMD_HD_UNSEED,
+  CMD_HD_GUNZIP,
+  CMD_HD_EXTRACT_TAR,
   CMD_HD_DOWNLOAD_PROGRESS,
 } from './hdRpcCommands';
 
@@ -257,6 +259,24 @@ export async function getHyperdriveStatus(): Promise<{
   } catch {
     return { drives: [], swarmConnections: 0 };
   }
+}
+
+/** Gunzip a file in place (region-pack assembly). */
+export async function gunzipFile(inputPath: string, outputPath: string): Promise<void> {
+  await sendRequest(
+    CMD_HD_GUNZIP,
+    { inputPath: toFsPath(inputPath), outputPath: toFsPath(outputPath) },
+    TRANSFER_TIMEOUT_MS,
+  );
+}
+
+/** Extract a (optionally gzipped) tar archive (region-pack assembly). */
+export async function extractTar(srcPath: string, destDir: string): Promise<void> {
+  await sendRequest(
+    CMD_HD_EXTRACT_TAR,
+    { srcPath: toFsPath(srcPath), destDir: toFsPath(destDir) },
+    TRANSFER_TIMEOUT_MS,
+  );
 }
 
 /** Terminate the worklet and clear handlers. */

@@ -38,10 +38,18 @@ jest.mock('expo-file-system/legacy', () => ({ documentDirectory: 'file:///docs/'
 import {
   seedRegion,
   downloadFromPeers,
+  gunzipFile,
+  extractTar,
   getHyperdriveStatus,
   disposeHyperdriveBridge,
 } from '../../src/services/sync/hyperdriveBridge';
-import { CMD_HD_SEED, CMD_HD_DOWNLOAD, CMD_HD_STATUS } from '../../src/services/sync/hdRpcCommands';
+import {
+  CMD_HD_SEED,
+  CMD_HD_DOWNLOAD,
+  CMD_HD_STATUS,
+  CMD_HD_GUNZIP,
+  CMD_HD_EXTRACT_TAR,
+} from '../../src/services/sync/hdRpcCommands';
 
 beforeEach(() => {
   process.env.EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET = '1';
@@ -123,6 +131,29 @@ describe('hyperdriveBridge', () => {
     mockResponder = () => ({ error: 'boom' });
     const status = await getHyperdriveStatus();
     expect(status).toEqual({ drives: [], swarmConnections: 0 });
+  });
+
+  it('gunzips a file via the worklet, stripping file:// URIs', async () => {
+    mockResponder = (cmd, payload) => {
+      expect(cmd).toBe(CMD_HD_GUNZIP);
+      expect(payload).toEqual({
+        inputPath: '/docs/places.sqlite.gz',
+        outputPath: '/docs/places.sqlite',
+      });
+      return { outputPath: '/docs/places.sqlite' };
+    };
+
+    await gunzipFile('file:///docs/places.sqlite.gz', 'file:///docs/places.sqlite');
+  });
+
+  it('extracts a tar via the worklet, stripping file:// URIs', async () => {
+    mockResponder = (cmd, payload) => {
+      expect(cmd).toBe(CMD_HD_EXTRACT_TAR);
+      expect(payload).toEqual({ srcPath: '/docs/routing.tar', destDir: '/docs/routing/' });
+      return { success: true };
+    };
+
+    await extractTar('file:///docs/routing.tar', 'file:///docs/routing/');
   });
 
   it('does not start the worklet unless explicitly enabled', async () => {

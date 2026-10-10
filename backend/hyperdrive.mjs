@@ -23,6 +23,7 @@ import b4a from 'b4a';
 import fs from 'bare-fs';
 import path from 'bare-path';
 import goodbye from 'graceful-goodbye';
+import { ungzip } from 'pako';
 import { sha256 } from './node_modules/@noble/hashes/sha256.js';
 
 // ── RPC command IDs (shared with src/services/sync/hdRpcCommands.ts) ─
@@ -31,6 +32,8 @@ const CMD_HD_SEED = 0; // RN → worklet
 const CMD_HD_DOWNLOAD = 1; // RN → worklet
 const CMD_HD_STATUS = 2; // RN → worklet
 const CMD_HD_UNSEED = 3; // RN → worklet
+const CMD_HD_GUNZIP = 4; // RN → worklet: gunzip a file in place
+const CMD_HD_EXTRACT_TAR = 5; // RN → worklet: extract a (gzipped) tar archive
 const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN
 
 // ── State ───────────────────────────────────────────────────────────
@@ -99,6 +102,12 @@ async function handleRequest(req) {
         break;
       case CMD_HD_UNSEED:
         await handleUnseed(req);
+        break;
+      case CMD_HD_GUNZIP:
+        handleGunzip(req);
+        break;
+      case CMD_HD_EXTRACT_TAR:
+        handleExtractTar(req);
         break;
       default:
         reply(req, { error: `unknown command ${req.command}` });
@@ -256,6 +265,75 @@ async function handleUnseed(req) {
     await closeStore(corestorePath(entry.root, regionId));
     seededDrives.delete(regionId);
   }
+  reply(req, { success: true });
+}
+
+// ── File transforms (region-pack assembly) ──────────────────────────
+
+/** Gunzip a file in place: read `inputPath`, write to `outputPath`. */
+function handleGunzip(req) {
+  const { inputPath, outputPath } = JSON.parse(b4a.toString(req.data));
+  const out = ungzip(fs.readFileSync(inputPath));
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, out);
+  reply(req, { outputPath });
+}
+
+/**
+ * Extract a (optionally gzipped) USTAR archive, ported from the old Node
+ * sidecar. Guards against path traversal and decompression bombs.
+ */
+function handleExtractTar(req) {
+  const { srcPath, destDir } = JSON.parse(b4a.toString(req.data));
+  const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
+
+  if (!fs.existsSync(srcPath)) {
+    return reply(req, { error: `Source file not found: ${srcPath}` });
+  }
+
+  let buf = fs.readFileSync(srcPath);
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    buf = ungzip(buf);
+    if (buf.length > MAX_UNCOMPRESSED_BYTES) {
+      return reply(req, { error: 'Archive exceeds the uncompressed size limit' });
+    }
+  }
+  if (buf.length < 512) {
+    return reply(req, { error: 'Archive is too small to be a valid tar' });
+  }
+
+  fs.mkdirSync(destDir, { recursive: true });
+  const resolvedDestDir = path.resolve(destDir);
+
+  let offset = 0;
+  while (offset + 512 <= buf.length) {
+    const header = buf.subarray(offset, offset + 512);
+    if (header.every((b) => b === 0)) break; // end-of-archive
+
+    const nameRaw = b4a.toString(header.subarray(0, 100)).replace(/\0/g, '');
+    const sizeOctal = b4a.toString(header.subarray(124, 136)).replace(/\0/g, '').trim();
+    const typeFlag = header[156];
+    const size = parseInt(sizeOctal, 8) || 0;
+    offset += 512;
+
+    if (!nameRaw) break;
+
+    const fullPath = path.resolve(resolvedDestDir, nameRaw);
+    if (!fullPath.startsWith(resolvedDestDir + path.sep) && fullPath !== resolvedDestDir) {
+      offset += Math.ceil(size / 512) * 512; // skip path-traversal entries
+      continue;
+    }
+
+    if (typeFlag === 53 || nameRaw.endsWith('/')) {
+      fs.mkdirSync(fullPath, { recursive: true });
+    } else {
+      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      fs.writeFileSync(fullPath, buf.subarray(offset, offset + size));
+    }
+
+    offset += Math.ceil(size / 512) * 512;
+  }
+
   reply(req, { success: true });
 }
 

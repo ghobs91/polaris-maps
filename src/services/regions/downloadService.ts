@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
-import { downloadFromPeers, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
+import { downloadFromPeers, gunzipFile, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
 import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
 import { downloadOfflineFonts } from '../map/offlineFonts';
@@ -578,37 +578,12 @@ export async function deleteRegionData(regionId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 import * as SQLite from 'expo-sqlite';
-import { NativeEventEmitter, NativeModules } from 'react-native';
 
 /**
- * Send a gunzip command to the Node.js sidecar via NodeChannel and wait for the result.
- * Uses a unique requestId to avoid races when multiple gunzips run concurrently.
+ * Gunzip a file via the Bare worklet (replaces the dead Node sidecar).
  */
 function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
-  const { NodeChannel } = NativeModules;
-  if (!NodeChannel) return Promise.reject(new Error('NodeChannel not available'));
-
-  const requestId = `gunzip_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-  return new Promise((resolve, reject) => {
-    const emitter = new NativeEventEmitter(NodeChannel);
-    const sub = emitter.addListener('message', (raw: string) => {
-      try {
-        const data = JSON.parse(raw);
-        if (data.requestId !== requestId) return;
-        sub.remove();
-        if (data.action === 'gunzip_done') {
-          resolve();
-        } else if (data.action === 'gunzip_error') {
-          reject(new Error(data.error));
-        }
-      } catch {
-        // Ignore non-JSON messages
-      }
-    });
-
-    NodeChannel.send(JSON.stringify({ type: 'gunzip', inputPath, outputPath, requestId }));
-  });
+  return gunzipFile(inputPath, outputPath);
 }
 
 /**
