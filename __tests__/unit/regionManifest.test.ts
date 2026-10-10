@@ -16,6 +16,7 @@ import {
   type RegionManifest,
   type RegionManifestCore,
 } from '../../src/services/regions/regionManifest';
+import { BUNDLED_REGION_MANIFESTS } from '../../src/constants/regionManifests';
 
 function makeKeypair(): { privateKey: Uint8Array; publicKey: string } {
   const privateKey = schnorr.utils.randomPrivateKey();
@@ -204,5 +205,14 @@ describe('manifest version + quorum resolution', () => {
     );
 
     expect(selectResolvedManifest([v1, v2], 1)?.driveKey).toBe('e'.repeat(64));
+  });
+});
+
+describe('bundled pilot manifest', () => {
+  it('verifies against its publisher key', () => {
+    const manifest = BUNDLED_REGION_MANIFESTS[0];
+    expect(manifest).toBeDefined();
+    expect(manifest.regionId).toBe('north-america-us-new-york');
+    expect(verifyRegionManifest(manifest, [manifest.publisherPubkey])).toBe(true);
   });
 });
