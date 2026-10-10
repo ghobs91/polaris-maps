@@ -35,7 +35,31 @@ const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN
 // ── State ───────────────────────────────────────────────────────────
 
 let swarm = null;
-const seededDrives = new Map(); // regionId → { drive, discovery, store, readOnly, contentHash, bytes }
+const seededDrives = new Map(); // regionId → { drive, discovery, store, readOnly, contentHash, bytes, root }
+// Corestores are file-locked. Reuse one per storage path and close it on
+// release, otherwise a second open of the same path fails to lock
+// ("File descriptor could not be locked").
+const stores = new Map(); // storePath → Corestore
+
+function getStore(storePath) {
+  let store = stores.get(storePath);
+  if (!store) {
+    store = new Corestore(storePath);
+    stores.set(storePath, store);
+  }
+  return store;
+}
+
+async function closeStore(storePath) {
+  const store = stores.get(storePath);
+  if (!store) return;
+  stores.delete(storePath);
+  try {
+    await store.close();
+  } catch {
+    /* already closed */
+  }
+}
 
 const { IPC } = BareKit;
 const rpc = new RPC(IPC, (req) => {
@@ -88,27 +112,31 @@ async function handleRequest(req) {
 
 async function handleSeed(req) {
   const { regionId, filesDir, key, corestoreRoot } = JSON.parse(b4a.toString(req.data));
+  const readOnly = Boolean(key);
+  const storePath = corestorePath(corestoreRoot, regionId);
+
+  if (!readOnly && !fs.existsSync(filesDir)) {
+    return reply(req, { error: `Pack directory not found: ${filesDir}` });
+  }
 
   const existing = seededDrives.get(regionId);
   if (existing) {
     const existingKey = b4a.toString(existing.drive.key, 'hex');
     if (!key || existingKey === key) {
-      const discoveryKey = b4a.toString(existing.drive.discoveryKey, 'hex');
       return reply(req, {
         key: existingKey,
-        discoveryKey,
+        discoveryKey: b4a.toString(existing.drive.discoveryKey, 'hex'),
         readOnly: existing.readOnly,
         contentHash: existing.contentHash || undefined,
         bytes: existing.bytes,
       });
     }
     await existing.discovery.destroy();
-    await existing.store.close();
+    await closeStore(storePath);
     seededDrives.delete(regionId);
   }
 
-  const store = new Corestore(corestorePath(corestoreRoot, regionId));
-  const readOnly = Boolean(key);
+  const store = getStore(storePath);
   let drive;
   let contentHash = null;
   let bytes = 0;
@@ -138,6 +166,7 @@ async function handleSeed(req) {
     readOnly,
     contentHash,
     bytes,
+    root: corestoreRoot,
   });
 
   reply(req, {
@@ -153,7 +182,8 @@ async function handleSeed(req) {
 
 async function handleDownload(req) {
   const { driveKey, destDir, corestoreRoot } = JSON.parse(b4a.toString(req.data));
-  const store = new Corestore(corestorePath(corestoreRoot, '_dl_' + driveKey.slice(0, 16)));
+  const storePath = corestorePath(corestoreRoot, '_dl_' + driveKey.slice(0, 16));
+  const store = getStore(storePath);
   const drive = new Hyperdrive(store, b4a.from(driveKey, 'hex'));
   await drive.ready();
 
@@ -173,7 +203,7 @@ async function handleDownload(req) {
 
   if (!peerFound) {
     await discovery.destroy();
-    await store.close();
+    await closeStore(storePath);
     return reply(req, { error: 'No peers found for this drive' });
   }
 
@@ -198,7 +228,7 @@ async function handleDownload(req) {
   }
 
   await discovery.destroy();
-  await store.close();
+  await closeStore(storePath);
   reply(req, { totalBytes });
 }
 
@@ -222,7 +252,7 @@ async function handleUnseed(req) {
   const entry = seededDrives.get(regionId);
   if (entry) {
     await entry.discovery.destroy();
-    await entry.store.close();
+    await closeStore(corestorePath(entry.root, regionId));
     seededDrives.delete(regionId);
   }
   reply(req, { success: true });
