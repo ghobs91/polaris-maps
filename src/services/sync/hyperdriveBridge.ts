@@ -1,95 +1,153 @@
-import { NativeEventEmitter, NativeModules } from 'react-native';
+/**
+ * Region-pack transport bridge.
+ *
+ * IPC from React Native (Hermes) to the Bare worklet running Hyperdrive
+ * (`backend/hyperdrive.mjs` → committed `backend/hyperdrive.bundle.mjs`), using
+ * `react-native-bare-kit`'s Worklet + `bare-rpc`.
+ *
+ * Replaces the previous `nodejs-mobile` sidecar (`NativeModules.NodeChannel`),
+ * which was never wired and always rejected. The public API is unchanged.
+ */
 
-interface HdEvent {
-  type: string;
-  requestId?: string;
-  error?: string;
-  key?: string;
-  discoveryKey?: string;
-  totalBytes?: number;
+import * as FileSystem from 'expo-file-system/legacy';
+import {
+  CMD_HD_SEED,
+  CMD_HD_DOWNLOAD,
+  CMD_HD_STATUS,
+  CMD_HD_UNSEED,
+  CMD_HD_DOWNLOAD_PROGRESS,
+} from './hdRpcCommands';
+
+// react-native-bare-kit's Worklet; bare-rpc's RPC. Lazily resolved so the module
+// loads even before a native rebuild / in Jest.
+let WorkletClass:
+  | (new () => {
+      start(entry: string, bundle: string, args: string[]): void;
+      terminate(): void;
+      IPC: unknown;
+    })
+  | null = null;
+
+interface OutgoingRequest {
+  send(data: Uint8Array): void;
+  reply(): Promise<Uint8Array | string | null>;
+}
+
+interface RpcRequest {
+  command: number;
+  data: Uint8Array;
+  send: (d: Uint8Array) => void;
+}
+
+let RPCClass:
+  | (new (
+      ipc: unknown,
+      onrequest: (req: RpcRequest) => void,
+    ) => {
+      request(cmd: number): OutgoingRequest;
+    })
+  | null = null;
+
+function resolveNativeDeps(): boolean {
+  if (WorkletClass && RPCClass) return true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    WorkletClass = (require('react-native-bare-kit') as { Worklet: typeof WorkletClass }).Worklet;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    RPCClass = require('bare-rpc') as typeof RPCClass;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let worklet: {
+  start(entry: string, bundle: string, args: string[]): void;
+  terminate(): void;
+  IPC: unknown;
+} | null = null;
+let rpc: { request(cmd: number): OutgoingRequest } | null = null;
+let started = false;
+
+interface DownloadProgress {
   file?: string;
   bytes?: number;
-  /** True when the drive was opened as a read-only canonical replica. */
-  readOnly?: boolean;
-  /** Deterministic pack content hash, returned when authoring a pack. */
-  contentHash?: string;
-  drives?: Array<{
-    regionId: string;
-    key: string;
-    discoveryKey: string;
-    peers: number;
-  }>;
-  swarmConnections?: number;
+  totalBytes?: number;
+}
+let progressHandlers: Array<(event: DownloadProgress) => void> = [];
+
+/** Root of the worklet's Corestore (one sub-store per region). */
+function corestoreRoot(): string {
+  return `${FileSystem.documentDirectory ?? ''}.polaris-corestore`;
 }
 
-const pendingRequests = new Map<
-  string,
-  { resolve: (value: HdEvent) => void; reject: (reason: Error) => void }
->();
-
-let requestCounter = 0;
-let emitterSub: ReturnType<NativeEventEmitter['addListener']> | null = null;
-let progressHandlers: Array<(event: HdEvent) => void> = [];
-
-function getRequestId(): string {
-  return `hd_${++requestCounter}_${Date.now()}`;
+function handleRequest(req: RpcRequest): void {
+  if (req.command !== CMD_HD_DOWNLOAD_PROGRESS) return;
+  try {
+    const event = JSON.parse(new TextDecoder().decode(req.data)) as DownloadProgress;
+    for (const handler of progressHandlers) handler(event);
+  } catch {
+    /* malformed */
+  }
 }
 
-function ensureListener(): void {
-  if (emitterSub) return;
-  const { NodeChannel } = NativeModules;
-  if (!NodeChannel) return;
-  const emitter = new NativeEventEmitter(NodeChannel);
-  emitterSub = emitter.addListener('message', (raw: string) => {
-    try {
-      const event: HdEvent = JSON.parse(raw);
-      if (!event.type?.startsWith('hd-')) return;
+/** Start the Hyperdrive worklet if the runtime and bundle are available. */
+export function initHyperdriveBridge(): void {
+  if (started) return;
+  if (!resolveNativeDeps() || !WorkletClass || !RPCClass) return;
 
-      // Progress events are broadcast, not request/response
-      if (event.type === 'hd-download-progress') {
-        for (const handler of progressHandlers) handler(event);
-        return;
-      }
+  let bundle: string | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    bundle = require('../../../backend/hyperdrive.bundle.mjs') as string;
+  } catch {
+    return; // Bundle not built — transport unavailable.
+  }
 
-      if (event.requestId && pendingRequests.has(event.requestId)) {
-        const pending = pendingRequests.get(event.requestId)!;
-        pendingRequests.delete(event.requestId);
-        if (event.type === 'error') {
-          pending.reject(new Error(event.error ?? 'Hyperdrive error'));
-        } else {
-          pending.resolve(event);
-        }
-      }
-    } catch {
-      // Not our message
-    }
-  });
+  worklet = new WorkletClass();
+  worklet.start('/hyperdrive.bundle', bundle, []);
+  started = true;
+
+  rpc = new RPCClass(worklet.IPC, (req: RpcRequest) => handleRequest(req));
 }
 
-function sendCommand(command: Record<string, unknown>): Promise<HdEvent> {
-  const { NodeChannel } = NativeModules;
-  if (!NodeChannel) return Promise.reject(new Error('NodeChannel not available'));
+/** How long to wait for a seed/download reply (peer discovery can be slow). */
+const TRANSFER_TIMEOUT_MS = 120_000;
+/** How long to wait for a status reply. */
+const STATUS_TIMEOUT_MS = 3_000;
 
-  ensureListener();
-  const requestId = command.requestId as string;
+async function sendRequest(
+  command: number,
+  payload: unknown,
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  initHyperdriveBridge();
+  if (!rpc) throw new Error('Hyperdrive worklet not available');
 
-  return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
-    NodeChannel.send(JSON.stringify(command));
+  const req = rpc.request(command);
+  req.send(new TextEncoder().encode(JSON.stringify(payload)));
 
-    // Timeout after 120s (peer discovery + file transfer can be slow)
-    setTimeout(() => {
-      if (pendingRequests.has(requestId)) {
-        pendingRequests.delete(requestId);
-        reject(new Error(`Hyperdrive command timed out: ${command.type}`));
-      }
-    }, 120_000);
-  });
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const reply = await Promise.race([
+      req.reply().catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+    if (reply == null) throw new Error('Hyperdrive request timed out');
+
+    const text = typeof reply === 'string' ? reply : new TextDecoder().decode(reply);
+    const parsed = (text ? JSON.parse(text) : {}) as Record<string, unknown>;
+    if (typeof parsed.error === 'string') throw new Error(parsed.error);
+    return parsed;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**
- * Seed a downloaded region's files into a Hyperdrive.
- * Returns the drive key that other peers can use to download.
+ * Seed a downloaded region's files into Hyperdrive.
  *
  * With `canonicalKey`, the pack is seeded as a read-only canonical replica so
  * every seeder advertises the same discovery key. Without it, this device
@@ -106,53 +164,47 @@ export async function seedRegion(
   contentHash?: string;
   bytes?: number;
 }> {
-  const requestId = getRequestId();
-  const result = await sendCommand({
-    type: 'hd-seed',
-    regionId,
-    filesDir,
-    key: canonicalKey,
-    requestId,
-  });
+  const result = await sendRequest(
+    CMD_HD_SEED,
+    { regionId, filesDir, key: canonicalKey, corestoreRoot: corestoreRoot() },
+    TRANSFER_TIMEOUT_MS,
+  );
   return {
-    key: result.key!,
-    discoveryKey: result.discoveryKey!,
+    key: String(result.key),
+    discoveryKey: String(result.discoveryKey),
     readOnly: canonicalKey != null,
-    contentHash: result.contentHash,
-    bytes: result.bytes,
+    contentHash: typeof result.contentHash === 'string' ? result.contentHash : undefined,
+    bytes: typeof result.bytes === 'number' ? result.bytes : undefined,
   };
 }
 
-/**
- * Download a region's files from a peer via Hyperdrive key.
- */
+/** Download a region's files from a peer via Hyperdrive key. */
 export async function downloadFromPeers(
   driveKey: string,
   destDir: string,
   onProgress?: (file: string, bytes: number, totalBytes: number) => void,
 ): Promise<{ totalBytes: number }> {
-  const requestId = getRequestId();
-
-  const removeProgress = onProgress
-    ? onDownloadProgress((event) => {
-        if (event.requestId === requestId) {
-          onProgress(event.file ?? '', event.bytes ?? 0, event.totalBytes ?? 0);
-        }
-      })
+  const handler = onProgress
+    ? (event: DownloadProgress) =>
+        onProgress(event.file ?? '', event.bytes ?? 0, event.totalBytes ?? 0)
     : undefined;
+  if (handler) progressHandlers.push(handler);
 
   try {
-    const result = await sendCommand({ type: 'hd-download', driveKey, destDir, requestId });
-    return { totalBytes: result.totalBytes ?? 0 };
+    const result = await sendRequest(
+      CMD_HD_DOWNLOAD,
+      { driveKey, destDir, corestoreRoot: corestoreRoot() },
+      TRANSFER_TIMEOUT_MS,
+    );
+    return { totalBytes: Number(result.totalBytes ?? 0) };
   } finally {
-    removeProgress?.();
+    if (handler) progressHandlers = progressHandlers.filter((h) => h !== handler);
   }
 }
 
 /** Stop seeding a region. */
 export async function unseedRegion(regionId: string): Promise<void> {
-  const requestId = getRequestId();
-  await sendCommand({ type: 'hd-unseed', regionId, requestId });
+  await sendRequest(CMD_HD_UNSEED, { regionId }, STATUS_TIMEOUT_MS);
 }
 
 /** Get status of all seeded drives. */
@@ -160,26 +212,35 @@ export async function getHyperdriveStatus(): Promise<{
   drives: Array<{ regionId: string; key: string; discoveryKey: string; peers: number }>;
   swarmConnections: number;
 }> {
-  const requestId = getRequestId();
-  const result = await sendCommand({ type: 'hd-status', requestId });
-  return {
-    drives: result.drives ?? [],
-    swarmConnections: result.swarmConnections ?? 0,
-  };
+  try {
+    const result = await sendRequest(CMD_HD_STATUS, {}, STATUS_TIMEOUT_MS);
+    return {
+      drives: Array.isArray(result.drives)
+        ? (result.drives as Array<{
+            regionId: string;
+            key: string;
+            discoveryKey: string;
+            peers: number;
+          }>)
+        : [],
+      swarmConnections: Number(result.swarmConnections ?? 0),
+    };
+  } catch {
+    return { drives: [], swarmConnections: 0 };
+  }
 }
 
-/** Register a handler for download progress events. Returns unsubscribe function. */
-function onDownloadProgress(handler: (event: HdEvent) => void): () => void {
-  ensureListener();
-  progressHandlers.push(handler);
-  return () => {
-    progressHandlers = progressHandlers.filter((h) => h !== handler);
-  };
-}
-
+/** Terminate the worklet and clear handlers. */
 export function disposeHyperdriveBridge(): void {
-  emitterSub?.remove();
-  emitterSub = null;
+  rpc = null;
+  if (worklet) {
+    try {
+      worklet.terminate();
+    } catch {
+      // Already gone.
+    }
+    worklet = null;
+  }
+  started = false;
   progressHandlers = [];
-  pendingRequests.clear();
 }
