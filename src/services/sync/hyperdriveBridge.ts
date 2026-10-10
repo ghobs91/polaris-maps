@@ -98,11 +98,15 @@ export function initHyperdriveBridge(): void {
 
   let bundle: string | null = null;
   try {
+    // bare-pack emits `export default "<source>"`, so `require` yields the ESM
+    // namespace object; unwrap it to the source string Worklet.start expects.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    bundle = require('../../../backend/hyperdrive.bundle.mjs') as string;
+    const mod = require('../../../backend/hyperdrive.bundle.mjs') as string | { default?: string };
+    bundle = typeof mod === 'string' ? mod : (mod?.default ?? null);
   } catch {
     return; // Bundle not built — transport unavailable.
   }
+  if (!bundle) return;
 
   worklet = new WorkletClass();
   worklet.start('/hyperdrive.bundle', bundle, []);

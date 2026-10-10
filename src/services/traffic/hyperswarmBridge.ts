@@ -82,9 +82,11 @@ import type { WireTilePayload } from '../../models/trafficTile';
 // The bundle is produced by `npx bare-pack --target ios --target android --linked`
 let trafficBundle: string | null = null;
 try {
-  // Dynamic require — bare-pack writes this after bundling the backend
+  // Dynamic require — bare-pack writes this after bundling the backend.
+  // bare-pack emits `export default "<source>"`, so unwrap the ESM namespace.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  trafficBundle = require('../../../backend/traffic-swarm.bundle.mjs');
+  const mod = require('../../../backend/traffic-swarm.bundle.mjs') as string | { default?: string };
+  trafficBundle = typeof mod === 'string' ? mod : (mod?.default ?? null);
 } catch {
   // Bundle not yet built — worklet won't start
 }

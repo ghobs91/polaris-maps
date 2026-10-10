@@ -32,7 +32,7 @@ jest.mock('react-native-bare-kit', () => ({
   },
 }));
 
-jest.mock('../../backend/hyperdrive.bundle.mjs', () => 'BUNDLE');
+jest.mock('../../backend/hyperdrive.bundle.mjs', () => ({ default: 'BUNDLE' }));
 jest.mock('expo-file-system/legacy', () => ({ documentDirectory: 'file:///docs/' }));
 
 import {
