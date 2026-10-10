@@ -9,6 +9,8 @@ interface HdEvent {
   totalBytes?: number;
   file?: string;
   bytes?: number;
+  /** True when the drive was opened as a read-only canonical replica. */
+  readOnly?: boolean;
   drives?: Array<{
     regionId: string;
     key: string;
@@ -86,14 +88,29 @@ function sendCommand(command: Record<string, unknown>): Promise<HdEvent> {
 /**
  * Seed a downloaded region's files into a Hyperdrive.
  * Returns the drive key that other peers can use to download.
+ *
+ * With `canonicalKey`, the pack is seeded as a read-only canonical replica so
+ * every seeder advertises the same discovery key. Without it, this device
+ * authors the canonical writable drive.
  */
 export async function seedRegion(
   regionId: string,
   filesDir: string,
-): Promise<{ key: string; discoveryKey: string }> {
+  canonicalKey?: string,
+): Promise<{ key: string; discoveryKey: string; readOnly: boolean }> {
   const requestId = getRequestId();
-  const result = await sendCommand({ type: 'hd-seed', regionId, filesDir, requestId });
-  return { key: result.key!, discoveryKey: result.discoveryKey! };
+  const result = await sendCommand({
+    type: 'hd-seed',
+    regionId,
+    filesDir,
+    key: canonicalKey,
+    requestId,
+  });
+  return {
+    key: result.key!,
+    discoveryKey: result.discoveryKey!,
+    readOnly: canonicalKey != null,
+  };
 }
 
 /**

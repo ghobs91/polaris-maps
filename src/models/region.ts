@@ -14,6 +14,10 @@ export interface Region {
   geocodingSizeBytes: number | null;
   downloadedAt: number | null;
   lastUpdated: number | null;
+  /**
+   * Canonical Hyperdrive key of the region pack — shared by every seeder. Null
+   * until the pack has been seeded on this device.
+   */
   driveKey: string | null;
   geocodingUrl: string | null;
   /** URL of the region's gzipped Overture places extract, when published. */

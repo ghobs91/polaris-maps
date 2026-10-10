@@ -245,52 +245,79 @@ function ensureSwarm() {
 
 /**
  * Seed a region: import local files into a Hyperdrive, join the swarm.
- * Returns the drive's discovery key (hex) for other peers to find it.
  *
- * Command: { type: 'hd-seed', regionId, filesDir, requestId }
+ * With a canonical `key`: open a read-only replica of the pack authored
+ * elsewhere and join its (canonical) discovery key, so every seeder advertises
+ * the same swarm. Without a key: author the canonical writable drive from
+ * `filesDir` and return its key.
+ *
+ * Returns the canonical drive key + discovery key (hex).
+ *
+ * Command: { type: 'hd-seed', regionId, filesDir, key?, requestId }
  * filesDir contains: tiles.pmtiles, routing/ (dir), geocoding.db
  */
 async function handleHdSeed(command) {
-  const { regionId, filesDir, requestId } = command;
+  const { regionId, filesDir, key, requestId } = command;
   try {
-    if (seededDrives.has(regionId)) {
-      const existing = seededDrives.get(regionId);
-      return sendResponse(requestId, {
-        type: 'hd-seed-result',
-        discoveryKey: existing.drive.discoveryKey.toString('hex'),
-        key: existing.drive.key.toString('hex'),
-      });
+    const existing = seededDrives.get(regionId);
+    if (existing) {
+      const existingKey = existing.drive.key.toString('hex');
+      if (!key || existingKey === key) {
+        return sendResponse(requestId, {
+          type: 'hd-seed-result',
+          discoveryKey: existing.drive.discoveryKey.toString('hex'),
+          key: existingKey,
+          readOnly: Boolean(key),
+        });
+      }
+      // The requested canonical key differs from what we're seeding — swap.
+      await existing.discovery.destroy();
+      await existing.store.close();
+      seededDrives.delete(regionId);
     }
 
     const storePath = path.join(getCorestorePath(), regionId);
     const store = new Corestore(storePath);
-    const drive = new Hyperdrive(store);
-    await drive.ready();
 
-    // Import region files into the drive
-    const filesToImport = [];
-    collectFiles(filesDir, filesDir, filesToImport);
+    let drive;
+    const readOnly = Boolean(key);
+    if (readOnly) {
+      // Canonical replica: content-addressed, authored elsewhere. We join the
+      // canonical discovery key and serve/replicate blocks; no writes.
+      drive = new Hyperdrive(store, Buffer.from(key, 'hex'));
+      await drive.ready();
+    } else {
+      // Publisher path: author the canonical writable drive once.
+      drive = new Hyperdrive(store);
+      await drive.ready();
 
-    for (const { relativePath, absolutePath } of filesToImport) {
-      const content = fs.readFileSync(absolutePath);
-      await drive.put(relativePath, content);
+      const filesToImport = [];
+      collectFiles(filesDir, filesDir, filesToImport);
+
+      for (const { relativePath, absolutePath } of filesToImport) {
+        const content = fs.readFileSync(absolutePath);
+        await drive.put(relativePath, content);
+      }
     }
 
-    // Join swarm to make this drive discoverable
+    // Join swarm to make this drive discoverable (all readers/writers of a
+    // canonical key join the same discovery key).
     const sw = ensureSwarm();
     const discovery = sw.join(drive.discoveryKey);
     await discovery.flushed();
 
-    seededDrives.set(regionId, { drive, discovery, store });
+    seededDrives.set(regionId, { drive, discovery, store, readOnly });
 
     console.log(
-      `[Hyperdrive] Seeding ${regionId} — key: ${drive.key.toString('hex').slice(0, 16)}…`,
+      `[Hyperdrive] Seeding ${regionId} (${readOnly ? 'read-only' : 'author'}) — ` +
+        `key: ${drive.key.toString('hex').slice(0, 16)}…`,
     );
 
     sendResponse(requestId, {
       type: 'hd-seed-result',
       discoveryKey: drive.discoveryKey.toString('hex'),
       key: drive.key.toString('hex'),
+      readOnly,
     });
   } catch (err) {
     sendError(requestId, err.message || String(err));

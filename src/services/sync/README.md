@@ -52,7 +52,7 @@ offlineQueue.ts ← MMKV (500-entry cap)
 
 1. Hyperswarm peers exchange traffic probes via the Bare worklet
 2. Gun.js syncs POI edits, reviews, and reputation data with relay peers
-3. Hyperdrive replicates region file packs from seeding peers
+3. Hyperdrive replicates region file packs from seeding peers. Region packs are content-addressed by a canonical key: the authoring device seeds the writable drive, every other device seeds a **read-only replica** of the same key, so all seeders share one discovery key. The canonical key is advertised by a signed region manifest (see `src/services/regions/regionManifest.ts`).
 
 ## Related Files
 

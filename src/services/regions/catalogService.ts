@@ -8,7 +8,9 @@
 import { storage } from '../storage/mmkv';
 import { isOnline } from './connectivityService';
 import { upsertRegion, getRegionById } from './regionRepository';
+import { setRemoteRegionManifests } from './regionManifestResolver';
 import { REGION_CATALOG_URL } from '../../constants/config';
+import type { RegionManifest } from './regionManifest';
 import type { Region, RegionDownloadStatus } from '../../models/region';
 
 const MMKV_CATALOG_KEY = 'region_catalog_v1';
@@ -17,6 +19,8 @@ interface CatalogManifest {
   version: string;
   updated_at: string;
   regions: CatalogEntry[];
+  /** Verified remote region-pack manifests, merged over the bundled set. */
+  manifests?: RegionManifest[];
 }
 
 interface CatalogEntry {
@@ -28,6 +32,8 @@ interface CatalogEntry {
   geocodingSizeBytes?: number;
   placesUrl?: string;
   placesSizeBytes?: number;
+  /** Optional per-entry signed manifest with the region's canonical drive key. */
+  manifest?: RegionManifest;
 }
 
 /**
@@ -91,6 +97,16 @@ export function getCatalogIds(): string[] {
 }
 
 async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
+  // Feed any signed manifests into the resolver (verified lazily on merge; the
+  // bundled manifest always wins). Root-level entries plus per-region ones.
+  const remoteManifests: RegionManifest[] = [
+    ...(manifest.manifests ?? []),
+    ...manifest.regions
+      .map((entry) => entry.manifest)
+      .filter((m): m is RegionManifest => m != null),
+  ];
+  setRemoteRegionManifests(remoteManifests);
+
   for (const entry of manifest.regions) {
     // Only seed if the region is not already fully downloaded
     const existing = await getRegionById(entry.id);

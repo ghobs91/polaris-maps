@@ -16,6 +16,7 @@ import {
 import { importRegionPlaceDetails } from './placeDetailImporter';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
+import { getRegionManifest } from './regionManifestResolver';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -145,16 +146,17 @@ export async function downloadRegion(
   try {
     let usedP2P = false;
 
-    // Only try P2P if:
-    // 1. A drive key is known (peers have seeded this region)
-    // 2. We either verified the version matches latest, OR we can't reach
-    //    OpenFreeMap at all (offline fallback — best effort from peers)
-    if (region.driveKey) {
+    // Only try P2P if a canonical key is known — either the region's stored
+    // key or the bundled/verified manifest key (so a fresh install can fetch
+    // from peers before hitting any origin). Also require the version to match
+    // latest, unless we're offline and treating peers as best effort.
+    const canonicalKey = region.driveKey ?? getRegionManifest(region.id)?.driveKey ?? null;
+    if (canonicalKey) {
       const versionOk =
         !latestVersion || // offline — trust P2P as best effort
         region.tileVersion === latestVersion; // version matches latest
       if (versionOk) {
-        usedP2P = await tryPeerDownload(region, destDir, onProgress);
+        usedP2P = await tryPeerDownload(region, destDir, onProgress, canonicalKey);
       }
     }
 
@@ -267,8 +269,10 @@ async function tryPeerDownload(
   region: Region,
   destDir: string,
   onProgress?: ProgressCallback,
+  driveKey?: string | null,
 ): Promise<boolean> {
-  if (!region.driveKey) return false;
+  const key = driveKey ?? region.driveKey ?? getRegionManifest(region.id)?.driveKey ?? null;
+  if (!key) return false;
   try {
     onProgress?.({
       regionId: region.id,
@@ -278,7 +282,7 @@ async function tryPeerDownload(
       stage: 'tiles',
     });
 
-    await downloadFromPeers(region.driveKey, destDir, (_file, _bytes, totalBytes) => {
+    await downloadFromPeers(key, destDir, (_file, _bytes, totalBytes) => {
       onProgress?.({
         regionId: region.id,
         totalBytes,
@@ -486,14 +490,30 @@ function getTilesForBounds(
   return tiles;
 }
 
-/** Seed a downloaded region in the background and persist the drive key. */
+/** Seed a downloaded region in the background and persist the canonical key. */
 async function autoSeedRegion(
   regionId: string,
   filesDir: string,
   db: Awaited<ReturnType<typeof getDatabase>>,
 ): Promise<void> {
-  const { key } = await seedRegion(regionId, filesDir);
+  // Seed against the canonical pack key when known (read-only replica shared by
+  // every peer); otherwise author the canonical drive on this device.
+  const canonicalKey = getRegionManifest(regionId)?.driveKey;
+
+  // A previously stored per-device key is stale under canonical seeding; drop
+  // its Hypercore feed once the new key is known.
+  const previous = await db.getFirstAsync<{ drive_key: string | null }>(
+    'SELECT drive_key FROM regions WHERE id = ?',
+    [regionId],
+  );
+
+  const { key } = await seedRegion(regionId, filesDir, canonicalKey);
   await db.runAsync('UPDATE regions SET drive_key = ? WHERE id = ?', [key, regionId]);
+
+  const staleKey = previous?.drive_key;
+  if (staleKey && staleKey !== key) {
+    leaveRegionFeed(staleKey).catch(() => {});
+  }
   joinRegionFeed(regionId, key).catch(() => {});
 }
 
@@ -627,7 +647,12 @@ async function downloadAndImportGeocodingBundle(
   await gunzipViaNode(gzPath, dbPath);
 
   // Open the downloaded SQLite as read-only
-  const srcDb = await SQLite.openDatabaseAsync(dbPath, { enableChangeListener: false });
+  const srcDb = await SQLite.openDatabaseAsync(dbPath, {
+    enableChangeListener: false,
+    // The geocoding bundle carries an FTS5 index; see database/init.ts
+    // (expo/expo#38168).
+    finalizeUnusedStatementsBeforeClosing: false,
+  });
   const appDb = await getDatabase();
 
   try {
