@@ -44,11 +44,29 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
   const [cachedPlaceCount, setCachedPlaceCount] = useState<number | null>(null);
+  const [identityPubkey, setIdentityPubkey] = useState<string | null>(null);
 
   useEffect(() => {
     countPlaceDetailCache()
       .then(setCachedPlaceCount)
       .catch(() => setCachedPlaceCount(null));
+  }, []);
+
+  // Dev-only: surface the app identity public key so it can be added to the
+  // trusted region-manifest publisher allowlist. Lazy-imported so it never
+  // affects the normal render path (or tests that don't expect SecureStore).
+  useEffect(() => {
+    if (!__DEV__) return;
+    let cancelled = false;
+    import('../../services/identity/keypair')
+      .then((identity) => identity.getOrCreateKeypair())
+      .then(({ publicKey }) => {
+        if (!cancelled) setIdentityPubkey(publicKey);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
   const bskySession = useAtprotoAuthStore((s) => s.session);
   const bskyError = useAtprotoAuthStore((s) => s.error);
@@ -367,6 +385,21 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           onPress={() => Linking.openURL('https://app.polarismaps.app/terms')}
         />
       </SettingsGroup>
+
+      {__DEV__ && (
+        <SettingsGroup
+          header="Developer"
+          footer="App identity public key — add it to the trusted region-manifest publisher allowlist to publish signed regional packs."
+        >
+          <SettingsRow
+            title="Identity Public Key"
+            value={identityPubkey ? `${identityPubkey.slice(0, 12)}…` : 'Unavailable'}
+            onPress={() =>
+              identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
+            }
+          />
+        </SettingsGroup>
+      )}
     </ScrollView>
   );
 }
