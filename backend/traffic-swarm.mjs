@@ -13,6 +13,7 @@
 
 /* global Bare, BareKit */
 
+import './process-shim.mjs';
 import RPC from 'bare-rpc';
 import Hyperswarm from 'hyperswarm';
 // Import the CJS build directly (pure JS, no node:crypto). The package's

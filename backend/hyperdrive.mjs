@@ -14,6 +14,7 @@
 
 /* global Bare, BareKit */
 
+import './process-shim.mjs';
 import RPC from 'bare-rpc';
 import Hyperswarm from 'hyperswarm';
 import Hyperdrive from 'hyperdrive';
