@@ -17,3 +17,18 @@ export const TRUSTED_REGION_PUBLISHERS: readonly string[] = [
   // Publisher app-identity public key (pilot device).
   '530601b0fd1879b525079aff4da67ac95315cd4ed6df36c9935b90ad6dcac8fb',
 ];
+
+/**
+ * Optional per-region M-of-N quorum. A region absent here defaults to 1 (any
+ * single trusted publisher). Higher values require that many distinct trusted
+ * publishers advertise the same `driveKey` before a manifest is trusted.
+ *
+ * Example: `{ 'us-ny-new-york': 2 }`
+ */
+export const REGION_MANIFEST_QUORUM: Readonly<Record<string, number>> = {};
+
+/** Required distinct-publisher count for a region (default 1). */
+export function getRegionManifestQuorum(regionId: string): number {
+  const configured = REGION_MANIFEST_QUORUM[regionId];
+  return typeof configured === 'number' && configured > 0 ? configured : 1;
+}

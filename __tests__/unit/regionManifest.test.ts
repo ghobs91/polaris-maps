@@ -5,11 +5,13 @@ jest.mock('expo-secure-store', () => ({}));
 
 import { schnorr } from '@noble/curves/secp256k1';
 import {
+  compareManifestVersion,
   computePackContentHash,
   createRegionManifest,
   isTrustedPublisher,
   mergeRegionManifests,
   regionManifestPayload,
+  selectResolvedManifest,
   verifyRegionManifest,
   type RegionManifest,
   type RegionManifestCore,
@@ -147,5 +149,60 @@ describe('mergeRegionManifests', () => {
 
     const merged = mergeRegionManifests([], [remote], [trusted.publicKey]);
     expect(merged.has('us-ca-los-angeles')).toBe(false);
+  });
+});
+
+describe('manifest version + quorum resolution', () => {
+  it('compares dotted numeric versions', () => {
+    expect(compareManifestVersion('1.0', '1.2')).toBe(-1);
+    expect(compareManifestVersion('2.0', '1.9')).toBe(1);
+    expect(compareManifestVersion('1.0', '1.0')).toBe(0);
+  });
+
+  it('accepts a single trusted publisher by default', async () => {
+    const { privateKey, publicKey } = makeKeypair();
+    const manifest = await createRegionManifest(core(publicKey), privateKey);
+    expect(selectResolvedManifest([manifest], 1)?.driveKey).toBe(manifest.driveKey);
+  });
+
+  it('requires distinct publishers to agree on driveKey for a quorum', async () => {
+    const a = makeKeypair();
+    const b = makeKeypair();
+    const ma = await createRegionManifest(core(a.publicKey), a.privateKey);
+    const mb = await createRegionManifest(core(b.publicKey), b.privateKey);
+
+    // same default driveKey, two publishers → quorum 2 satisfied
+    expect(selectResolvedManifest([ma, mb], 2)?.driveKey).toBe(ma.driveKey);
+    // one publisher cannot satisfy quorum 2
+    expect(selectResolvedManifest([ma], 2)).toBeNull();
+  });
+
+  it('does not pick arbitrarily when trusted publishers conflict at the top version', async () => {
+    const a = makeKeypair();
+    const b = makeKeypair();
+    const ma = await createRegionManifest(
+      { ...core(a.publicKey), driveKey: 'd'.repeat(64) },
+      a.privateKey,
+    );
+    const mb = await createRegionManifest(
+      { ...core(b.publicKey), driveKey: 'e'.repeat(64) },
+      b.privateKey,
+    );
+
+    expect(selectResolvedManifest([ma, mb], 1)).toBeNull();
+  });
+
+  it('prefers the higher version and ignores the lower', async () => {
+    const { privateKey, publicKey } = makeKeypair();
+    const v1 = await createRegionManifest(
+      { ...core(publicKey), version: '1.0', driveKey: 'd'.repeat(64) },
+      privateKey,
+    );
+    const v2 = await createRegionManifest(
+      { ...core(publicKey), version: '2.0', driveKey: 'e'.repeat(64) },
+      privateKey,
+    );
+
+    expect(selectResolvedManifest([v1, v2], 1)?.driveKey).toBe('e'.repeat(64));
   });
 });

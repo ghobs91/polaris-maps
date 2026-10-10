@@ -123,26 +123,103 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 /**
+ * Compare two manifest versions. Dotted numeric segments compare numerically
+ * (`1.0` < `1.2` < `2.0`); non-numeric/odd strings fall back to lexicographic
+ * comparison. This is the pinned monotonic encoding for manifest supersede.
+ */
+export function compareManifestVersion(a: string, b: string): number {
+  const pa = a.split('.');
+  const pb = b.split('.');
+  const numeric = pa.every((s) => /^\d+$/.test(s)) && pb.every((s) => /^\d+$/.test(s));
+  if (numeric) {
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const x = Number(pa[i] ?? 0);
+      const y = Number(pb[i] ?? 0);
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    return 0;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Deterministically select the manifest to trust for a region from verified
+ * candidates.
+ *
+ * - Group candidates by `driveKey`; a group is only eligible when at least
+ *   `quorum` distinct publishers advertise that same `driveKey`.
+ * - Among eligible groups, take the highest `version`.
+ * - If more than one eligible group ties at the top version (trusted publishers
+ *   disagree), return null — never pick one arbitrarily.
+ */
+export function selectResolvedManifest(
+  candidates: readonly RegionManifest[],
+  quorum = 1,
+): RegionManifest | null {
+  if (candidates.length === 0) return null;
+  const minPublishers = Math.max(1, quorum);
+
+  const groups = new Map<string, { publishers: Set<string>; best: RegionManifest }>();
+  for (const manifest of candidates) {
+    const group = groups.get(manifest.driveKey) ?? {
+      publishers: new Set<string>(),
+      best: manifest,
+    };
+    group.publishers.add(manifest.publisherPubkey.trim().toLowerCase());
+    if (compareManifestVersion(manifest.version, group.best.version) > 0) {
+      group.best = manifest;
+    }
+    groups.set(manifest.driveKey, group);
+  }
+
+  const eligible = [...groups.values()].filter((g) => g.publishers.size >= minPublishers);
+  if (eligible.length === 0) return null;
+
+  let topVersion = eligible[0].best.version;
+  for (const group of eligible) {
+    if (compareManifestVersion(group.best.version, topVersion) > 0) topVersion = group.best.version;
+  }
+  const topGroups = eligible.filter(
+    (g) => compareManifestVersion(g.best.version, topVersion) === 0,
+  );
+  if (topGroups.length !== 1) return null; // conflicting trusted publishers
+  return topGroups[0].best;
+}
+
+/**
  * Resolve the effective canonical manifest per region.
  *
  * The bundled manifest is the compiled-in root of trust, so it always wins for
  * its regions. Remote entries are trusted only when their signature verifies
- * against `trusted`; they may fill regions the bundle does not cover but never
- * override a bundled entry.
+ * against `trusted`; for regions the bundle does not cover they are grouped by
+ * `driveKey` and resolved with {@link selectResolvedManifest} (highest version,
+ * M-of-N quorum, no arbitrary choice on conflict).
  */
 export function mergeRegionManifests(
   bundled: readonly RegionManifest[],
   remote: readonly RegionManifest[] = [],
   trusted: readonly string[] = TRUSTED_REGION_PUBLISHERS,
+  quorumFor: (regionId: string) => number = () => 1,
 ): Map<string, RegionManifest> {
   const resolved = new Map<string, RegionManifest>();
   for (const manifest of bundled) {
     resolved.set(manifest.regionId, manifest);
   }
+
+  const byRegion = new Map<string, RegionManifest[]>();
   for (const manifest of remote) {
-    if (resolved.has(manifest.regionId)) continue;
     if (!verifyRegionManifest(manifest, trusted)) continue;
-    resolved.set(manifest.regionId, manifest);
+    const list = byRegion.get(manifest.regionId);
+    if (list) list.push(manifest);
+    else byRegion.set(manifest.regionId, [manifest]);
   }
+
+  for (const [regionId, candidates] of byRegion) {
+    if (resolved.has(regionId)) continue; // bundled wins
+    const selected = selectResolvedManifest(candidates, quorumFor(regionId));
+    if (selected) resolved.set(regionId, selected);
+  }
+
   return resolved;
 }

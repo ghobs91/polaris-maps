@@ -6,10 +6,13 @@
  */
 
 import { BUNDLED_REGION_MANIFESTS } from '../../constants/regionManifests';
+import { getRegionManifestQuorum } from '../../constants/regionPublishers';
 import { mergeRegionManifests, type RegionManifest } from './regionManifest';
 
 let remoteManifests: readonly RegionManifest[] = [];
 let resolved: Map<string, RegionManifest> | null = null;
+/** Test-only override of the trusted publisher set. */
+let trustedOverride: readonly string[] | null = null;
 
 /** Replace the runtime remote manifests (verified lazily on merge). */
 export function setRemoteRegionManifests(manifests: readonly RegionManifest[]): void {
@@ -17,12 +20,37 @@ export function setRemoteRegionManifests(manifests: readonly RegionManifest[]): 
   resolved = null;
 }
 
+/** The remote manifests currently held (verified or not). */
+export function getRemoteRegionManifests(): readonly RegionManifest[] {
+  return remoteManifests;
+}
+
+function resolveAll(): Map<string, RegionManifest> {
+  if (!resolved) {
+    resolved = mergeRegionManifests(
+      BUNDLED_REGION_MANIFESTS,
+      remoteManifests,
+      trustedOverride ?? undefined,
+      getRegionManifestQuorum,
+    );
+  }
+  return resolved;
+}
+
+/** Test-only: override the trusted publisher set (pass null to restore). */
+export function __setTrustedRegionPublishersForTests(pubkeys: readonly string[] | null): void {
+  trustedOverride = pubkeys;
+  resolved = null;
+}
+
 /** Canonical manifest for a region, or null when none is known. */
 export function getRegionManifest(regionId: string): RegionManifest | null {
-  if (!resolved) {
-    resolved = mergeRegionManifests(BUNDLED_REGION_MANIFESTS, remoteManifests);
-  }
-  return resolved.get(regionId) ?? null;
+  return resolveAll().get(regionId) ?? null;
+}
+
+/** All resolved canonical manifests (bundled + verified remote). */
+export function getResolvedRegionManifests(): RegionManifest[] {
+  return [...resolveAll().values()];
 }
 
 /** Drop the cached merge (tests, or after replacing remote manifests). */

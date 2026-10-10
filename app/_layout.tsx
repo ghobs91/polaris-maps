@@ -125,6 +125,29 @@ function RootLayoutInner() {
     };
   }, []);
 
+  useEffect(() => {
+    // Discover region manifests peer-to-peer over Gun.js and feed verified ones
+    // into the resolver, so canonical-pack discovery no longer needs the CDN.
+    let stop: (() => void) | undefined;
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        try {
+          const [{ getGun }, { startRegionManifestGossip }] = await Promise.all([
+            import('@/services/gun/init'),
+            import('@/services/regions/regionManifestGossip'),
+          ]);
+          stop = startRegionManifestGossip(getGun());
+        } catch {
+          // Gun unavailable — gossip is best-effort.
+        }
+      })();
+    });
+    return () => {
+      task.cancel();
+      stop?.();
+    };
+  }, []);
+
   // Theme-aware header chrome so the nav bar matches dark/light Settings.
   const screenOptions = useMemo(
     () => ({
