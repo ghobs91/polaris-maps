@@ -11,6 +11,7 @@ The regions service enables fully offline map usage by downloading region packs 
 3. **P2P seeding** — downloaded regions are seeded via Hyperdrive against the pack's canonical key (shared by every seeder, so peers find each other on one swarm). Canonical keys come from a signed region manifest; a bundled manifest provides the offline bootstrap.
 4. **Overture import** — the region's prebuilt Overture places SQLite bundle (or a GeoJSON extract from a P2P seed) is imported into the local `places` SQLite table for offline POI search
 5. **Connectivity monitoring** — network quality assessment (good/poor/none) via NetInfo for download scheduling decisions
+6. **Manifest gossip** — signed region manifests (with canonical pack keys) are discovered peer-to-peer over Gun.js, verified before merge, relayed, and persisted so discovery does not depend on the catalog CDN. Bundled manifests remain the compiled-in root of trust; an optional per-region M-of-N publisher quorum guards against a single compromised publisher.
 
 ## Files
 
@@ -22,13 +23,15 @@ The regions service enables fully offline map usage by downloading region packs 
 | `regionManifest.ts`          | Signed region-manifest model: canonical payload/signing, signature + trusted-publisher verification, content hashing, and bundled-first/verified-remote merge. Pure (no device identity).                                 |
 | `regionManifestPublisher.ts` | Publisher-side manifest signing with the app identity keypair (kept separate so verification stays free of SecureStore).                                                                                                  |
 | `regionManifestResolver.ts`  | Resolves the canonical manifest per region from the bundled set merged with verified remote manifests; consulted by the download flow.                                                                                    |
+| `regionManifestGossip.ts`    | Peer-to-peer manifest discovery over Gun.js — publish/subscribe at `polaris/region-manifests/<regionId>/<publisherPubkey>`, verify-before-merge, relay, and bounded MMKV persistence.                                     |
 | `regionRepository.ts`        | SQLite CRUD for the `regions` table — get all, get by ID, spatial point lookup (`getRegionForPoint`), upsert, and filter by download status.                                                                              |
 | `connectivityService.ts`     | Monitors network connectivity via `@react-native-community/netinfo`. Derives connection quality (good/poor/none) and exposes `isOnline()` for the rest of the app.                                                        |
 
 ## Download Flow
 
 ```
-Region catalog (CDN) → catalogService.ts → regions SQLite table
+Region catalog (CDN, optional) ─┐
+Signed manifest gossip (Gun.js) ─┴→ regionManifestResolver → canonical pack key
     ↓
 User taps "Download"
     ↓
@@ -37,7 +40,7 @@ downloadService.ts
     ├── Overture SQLite bundle → overtureImporter.ts → places SQLite table
     └── Routing/geocoding assets
     ↓
-hyperdriveBridge.ts → seed to P2P network
+hyperdriveBridge.ts → seed to P2P network (canonical key)
     ↓
 Other peers can download from this device
 ```

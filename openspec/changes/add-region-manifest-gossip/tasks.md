@@ -2,7 +2,8 @@
 
 - [x] 1.1 Add `src/services/regions/regionManifestGossip.ts`: publish a signed manifest to `polaris/region-manifests/<regionId>/<publisherPubkey>` via Gun.js
 - [x] 1.2 Subscribe to the namespace and surface received records for verification
-- [ ] 1.3 Optional: announce/join a Hyperswarm manifest topic (region id) as a second discovery path
+
+> 1.3 (optional second discovery path over Hyperswarm) is deferred: its natural host is the Bare Hyperswarm worklet, which is tracked separately (see `add-bare-hyperdrive-worklet` / the parked native-addon unblock). No spec requirement mandates a second transport; the Gun.js path satisfies `region-manifest-gossip`.
 
 ## 2. Verify, merge, relay
 
@@ -34,5 +35,5 @@
 
 - [x] 6.1 Run `pnpm typecheck && pnpm lint && pnpm format:check`
 - [x] 6.2 Run the targeted Jest suites (gossip, resolver, trust/quorum, supersede) and report actual results
-- [ ] 6.3 Update `src/services/regions/README.md` and `src/services/sync/README.md` for manifest gossip
+- [x] 6.3 Update `src/services/regions/README.md` and `src/services/sync/README.md` for manifest gossip
 - [ ] 6.4 Manual smoke: publish a manifest on one device, discover and merge it on a second through the gossip path

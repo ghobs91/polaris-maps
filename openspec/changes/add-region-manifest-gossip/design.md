@@ -53,4 +53,4 @@ _Consequence:_ higher M trades liveness for resistance to a single compromised p
 - Version encoding to use for monotonic supersede (step 1 currently uses `'1.0'`).
 - Whether quorum is configured per region in the bundled manifest or globally.
 - Whether to add signed timestamps now to bound rollback.
-- Hyperswarm announce topic derivation (region id vs geohash).
+- Second discovery path (Hyperswarm announce) is deferred to the Bare Hyperswarm worklet unblock; Gun.js already satisfies the capability. When it lands, topic derivation (region id vs geohash) is the open detail.

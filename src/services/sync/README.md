@@ -53,6 +53,7 @@ offlineQueue.ts ← MMKV (500-entry cap)
 1. Hyperswarm peers exchange traffic probes via the Bare worklet
 2. Gun.js syncs POI edits, reviews, and reputation data with relay peers
 3. Hyperdrive replicates region file packs from seeding peers. Region packs are content-addressed by a canonical key: the authoring device seeds the writable drive, every other device seeds a **read-only replica** of the same key, so all seeders share one discovery key. The canonical key is advertised by a signed region manifest (see `src/services/regions/regionManifest.ts`).
+4. Region **manifest gossip** — signed manifests are discovered peer-to-peer over Gun.js (`polaris/region-manifests/<regionId>/<publisherPubkey>`): verified before merge, relayed, and persisted, so canonical-key discovery does not depend on the catalog CDN. Bundled manifests are the compiled-in root of trust.
 
 ## Related Files
 
