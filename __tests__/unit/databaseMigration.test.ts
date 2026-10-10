@@ -28,6 +28,8 @@ jest.mock('expo-sqlite', () => ({
 
 import { getDatabase } from '../../src/services/database/init';
 
+const SQLite = jest.requireMock('expo-sqlite') as { openDatabaseAsync: jest.Mock };
+
 describe('reviews foreign-key migration', () => {
   it('rebuilds the reviews table without the places foreign key', async () => {
     await getDatabase();
@@ -51,6 +53,17 @@ describe('reviews foreign-key migration', () => {
     const joined = execCalls.join('\n');
     expect(joined).toContain(
       'CREATE INDEX IF NOT EXISTS idx_places_bounds ON places (status, lat, lng)',
+    );
+  });
+
+  it('disables expo-sqlite finalize-all cleanup that double-frees FTS5 statements', async () => {
+    await getDatabase();
+
+    // expo/expo#38168: the default pre-close finalize walk frees FTS5's own
+    // statements, which sqlite3_close then finalizes again (use-after-free).
+    expect(SQLite.openDatabaseAsync).toHaveBeenCalledWith(
+      'polaris-maps.db',
+      expect.objectContaining({ finalizeUnusedStatementsBeforeClosing: false }),
     );
   });
 });

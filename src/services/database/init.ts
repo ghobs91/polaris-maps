@@ -26,7 +26,14 @@ const REVIEWS_TABLE_COLUMNS = `
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (db) return db;
-  db = await SQLite.openDatabaseAsync('polaris-maps.db');
+  db = await SQLite.openDatabaseAsync('polaris-maps.db', {
+    // expo-sqlite's pre-close "finalize unused statements" walk also finalizes
+    // the persistent statements owned by virtual tables (FTS5 here), which
+    // SQLite then finalizes a second time in sqlite3_close — a use-after-free
+    // that crashes in sqlite3Fts5IndexClose. Disable the walk; the app always
+    // finalizes the statements it prepares. See expo/expo#38168.
+    finalizeUnusedStatementsBeforeClosing: false,
+  });
   await initializeSchema(db);
   return db;
 }
