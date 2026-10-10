@@ -398,6 +398,29 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
               identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
             }
           />
+          <SettingsRow
+            title="Publish Region Manifest"
+            value="us-ny-new-york"
+            onPress={() => {
+              void (async () => {
+                try {
+                  const [fs, { publishRegionPack }] = await Promise.all([
+                    import('expo-file-system/legacy'),
+                    import('../../services/regions/regionManifestPublisher'),
+                  ]);
+                  const manifest = await publishRegionPack({
+                    regionId: 'us-ny-new-york',
+                    filesDir: `${fs.documentDirectory}regions/us-ny-new-york/`,
+                    version: '1.0',
+                    overtureRelease: null,
+                  });
+                  Alert.alert('Region manifest', JSON.stringify(manifest, null, 2));
+                } catch (err) {
+                  Alert.alert('Publish failed', err instanceof Error ? err.message : String(err));
+                }
+              })();
+            }}
+          />
         </SettingsGroup>
       )}
     </ScrollView>

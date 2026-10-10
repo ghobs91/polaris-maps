@@ -7,13 +7,13 @@
  * app identity uses).
  *
  * The publisher identity is the app identity keypair
- * (`src/services/identity/keypair.ts`): run the app and read `getPublicKey()`
- * on the publishing device, then add that value here.
+ * (`src/services/identity/keypair.ts`): read it from the publishing device
+ * (Settings → Developer → Identity Public Key) and add it here.
  *
- * Empty by default (no publisher trusted yet). When empty, `verifyRegionManifest`
- * accepts no signed manifest; bundled manifest entries are still trusted because
- * they ship inside the app binary.
+ * Bundled manifest entries ship inside the app binary and are trusted without a
+ * signature check; this set gates *remote* manifests (catalog + gossip).
  */
 export const TRUSTED_REGION_PUBLISHERS: readonly string[] = [
-  // 'TODO: <publisher app-identity public key, 64 hex chars>',
+  // Publisher app-identity public key (pilot device).
+  '530601b0fd1879b525079aff4da67ac95315cd4ed6df36c9935b90ad6dcac8fb',
 ];
