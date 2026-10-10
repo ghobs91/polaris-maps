@@ -1,0 +1,258 @@
+/**
+ * Bare worklet entry point: Hyperdrive-based region-pack transport.
+ *
+ * Runs inside react-native-bare-kit's Bare runtime — NOT Hermes, NOT Node.js.
+ * Communication with React Native is via BareKit.IPC + bare-rpc. This replaces
+ * the never-wired `NodeChannel` nodejs-mobile sidecar.
+ *
+ * Responsibilities:
+ *   1. Host a Corestore + Hyperdrive per region pack under the app documents dir
+ *   2. Author a canonical writable drive, or join a read-only replica by key
+ *   3. Download a pack from peers by canonical key, reporting byte progress
+ *   4. Report seeded-drive status and release drives on request
+ */
+
+/* global Bare, BareKit */
+
+import RPC from 'bare-rpc';
+import Hyperswarm from 'hyperswarm';
+import Hyperdrive from 'hyperdrive';
+import Corestore from 'corestore';
+import b4a from 'b4a';
+import fs from 'bare-fs';
+import path from 'bare-path';
+import goodbye from 'graceful-goodbye';
+import { sha256 } from './node_modules/@noble/hashes/sha256.js';
+
+// ── RPC command IDs (shared with src/services/sync/hdRpcCommands.ts) ─
+
+const CMD_HD_SEED = 0; // RN → worklet
+const CMD_HD_DOWNLOAD = 1; // RN → worklet
+const CMD_HD_STATUS = 2; // RN → worklet
+const CMD_HD_UNSEED = 3; // RN → worklet
+const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN
+
+// ── State ───────────────────────────────────────────────────────────
+
+let swarm = null;
+const seededDrives = new Map(); // regionId → { drive, discovery, store, readOnly, contentHash, bytes }
+
+const { IPC } = BareKit;
+const rpc = new RPC(IPC, (req) => {
+  handleRequest(req);
+});
+
+function reply(req, obj) {
+  req.reply(b4a.from(JSON.stringify(obj)));
+}
+
+function corestorePath(rootDir, regionId) {
+  return path.join(rootDir, regionId);
+}
+
+function ensureSwarm() {
+  if (swarm) return swarm;
+  swarm = new Hyperswarm();
+  swarm.on('connection', (conn) => {
+    for (const { store } of seededDrives.values()) store.replicate(conn);
+  });
+  goodbye(() => swarm.destroy());
+  return swarm;
+}
+
+async function handleRequest(req) {
+  try {
+    switch (req.command) {
+      case CMD_HD_SEED:
+        await handleSeed(req);
+        break;
+      case CMD_HD_DOWNLOAD:
+        await handleDownload(req);
+        break;
+      case CMD_HD_STATUS:
+        handleStatus(req);
+        break;
+      case CMD_HD_UNSEED:
+        await handleUnseed(req);
+        break;
+      default:
+        reply(req, { error: `unknown command ${req.command}` });
+    }
+  } catch (err) {
+    console.error('[hyperdrive] RPC error:', err);
+    reply(req, { error: err && err.message ? err.message : String(err) });
+  }
+}
+
+// ── Seed (author / read-only) ───────────────────────────────────────
+
+async function handleSeed(req) {
+  const { regionId, filesDir, key, corestoreRoot } = JSON.parse(b4a.toString(req.data));
+
+  const existing = seededDrives.get(regionId);
+  if (existing) {
+    const existingKey = b4a.toString(existing.drive.key, 'hex');
+    if (!key || existingKey === key) {
+      const discoveryKey = b4a.toString(existing.drive.discoveryKey, 'hex');
+      return reply(req, {
+        key: existingKey,
+        discoveryKey,
+        readOnly: existing.readOnly,
+        contentHash: existing.contentHash || undefined,
+        bytes: existing.bytes,
+      });
+    }
+    await existing.discovery.destroy();
+    await existing.store.close();
+    seededDrives.delete(regionId);
+  }
+
+  const store = new Corestore(corestorePath(corestoreRoot, regionId));
+  const readOnly = Boolean(key);
+  let drive;
+  let contentHash = null;
+  let bytes = 0;
+
+  if (readOnly) {
+    drive = new Hyperdrive(store, b4a.from(key, 'hex'));
+    await drive.ready();
+  } else {
+    drive = new Hyperdrive(store);
+    await drive.ready();
+
+    const files = collectFiles(filesDir, filesDir);
+    for (const { rel, abs } of files) {
+      await drive.put(rel, fs.readFileSync(abs));
+    }
+    ({ contentHash, bytes } = computePackIndex(files));
+  }
+
+  const sw = ensureSwarm();
+  const discovery = sw.join(drive.discoveryKey);
+  await discovery.flushed();
+
+  seededDrives.set(regionId, {
+    drive,
+    discovery,
+    store,
+    readOnly,
+    contentHash,
+    bytes,
+  });
+
+  reply(req, {
+    key: b4a.toString(drive.key, 'hex'),
+    discoveryKey: b4a.toString(drive.discoveryKey, 'hex'),
+    readOnly,
+    contentHash: contentHash || undefined,
+    bytes,
+  });
+}
+
+// ── Download ────────────────────────────────────────────────────────
+
+async function handleDownload(req) {
+  const { driveKey, destDir, corestoreRoot } = JSON.parse(b4a.toString(req.data));
+  const store = new Corestore(corestorePath(corestoreRoot, '_dl_' + driveKey.slice(0, 16)));
+  const drive = new Hyperdrive(store, b4a.from(driveKey, 'hex'));
+  await drive.ready();
+
+  const sw = ensureSwarm();
+  sw.on('connection', (conn) => store.replicate(conn));
+
+  const discovery = sw.join(drive.discoveryKey);
+  await discovery.flushed();
+
+  const peerFound = await Promise.race([
+    new Promise((resolve) => {
+      if (drive.core.peers.length > 0) return resolve(true);
+      sw.once('connection', () => resolve(true));
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(false), 30_000)),
+  ]);
+
+  if (!peerFound) {
+    await discovery.destroy();
+    await store.close();
+    return reply(req, { error: 'No peers found for this drive' });
+  }
+
+  fs.mkdirSync(destDir, { recursive: true });
+  const resolvedDest = path.resolve(destDir);
+  let totalBytes = 0;
+
+  for await (const entry of drive.list('/')) {
+    const filePath = path.resolve(destDir, entry.key);
+    if (!filePath.startsWith(resolvedDest + path.sep)) continue; // traversal guard
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+    const content = await drive.get(entry.key);
+    if (content) {
+      fs.writeFileSync(filePath, content);
+      totalBytes += content.length;
+      const progress = rpc.request(CMD_HD_DOWNLOAD_PROGRESS);
+      progress.send(
+        b4a.from(JSON.stringify({ file: entry.key, bytes: content.length, totalBytes })),
+      );
+    }
+  }
+
+  await discovery.destroy();
+  await store.close();
+  reply(req, { totalBytes });
+}
+
+// ── Status / unseed ─────────────────────────────────────────────────
+
+function handleStatus(req) {
+  const drives = [];
+  for (const [regionId, { drive }] of seededDrives) {
+    drives.push({
+      regionId,
+      key: b4a.toString(drive.key, 'hex'),
+      discoveryKey: b4a.toString(drive.discoveryKey, 'hex'),
+      peers: drive.core.peers ? drive.core.peers.length : 0,
+    });
+  }
+  reply(req, { drives, swarmConnections: swarm ? swarm.connections.size : 0 });
+}
+
+async function handleUnseed(req) {
+  const { regionId } = JSON.parse(b4a.toString(req.data));
+  const entry = seededDrives.get(regionId);
+  if (entry) {
+    await entry.discovery.destroy();
+    await entry.store.close();
+    seededDrives.delete(regionId);
+  }
+  reply(req, { success: true });
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Recursively collect files as `/relative` paths under `baseDir`. */
+function collectFiles(baseDir, currentDir, result = []) {
+  for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+    const abs = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) collectFiles(baseDir, abs, result);
+    else result.push({ rel: '/' + path.relative(baseDir, abs), abs });
+  }
+  return result;
+}
+
+/**
+ * Deterministic pack index hash + total size. MUST match
+ * `computePackContentHash` in src/services/regions/regionManifest.ts
+ * (sorted `path\0size` lines, SHA-256 hex).
+ */
+function computePackIndex(files) {
+  const entries = files
+    .map(({ rel, abs }) => ({ path: rel, size: fs.statSync(abs).size }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const contentHash = b4a.toString(
+    sha256(b4a.from(entries.map((e) => `${e.path}\u0000${e.size}`).join('\n'))),
+    'hex',
+  );
+  const bytes = entries.reduce((n, e) => n + e.size, 0);
+  return { contentHash, bytes };
+}
