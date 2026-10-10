@@ -44,8 +44,13 @@ import {
 import { CMD_HD_SEED, CMD_HD_DOWNLOAD, CMD_HD_STATUS } from '../../src/services/sync/hdRpcCommands';
 
 beforeEach(() => {
+  process.env.EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET = '1';
   disposeHyperdriveBridge();
   mockResponder = () => ({});
+});
+
+afterEach(() => {
+  delete process.env.EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET;
 });
 
 describe('hyperdriveBridge', () => {
@@ -118,5 +123,12 @@ describe('hyperdriveBridge', () => {
     mockResponder = () => ({ error: 'boom' });
     const status = await getHyperdriveStatus();
     expect(status).toEqual({ drives: [], swarmConnections: 0 });
+  });
+
+  it('does not start the worklet unless explicitly enabled', async () => {
+    delete process.env.EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET;
+    disposeHyperdriveBridge();
+
+    await expect(seedRegion('us-ny-new-york', '/d/')).rejects.toThrow(/not available/i);
   });
 });

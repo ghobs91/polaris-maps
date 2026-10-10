@@ -69,6 +69,17 @@ let worklet: {
 let rpc: { request(cmd: number): OutgoingRequest } | null = null;
 let started = false;
 
+/**
+ * The Hyperdrive worklet links the `rocksdb-native` addon, which must be
+ * vendored into the app (react-native-bare-kit's `bare-link` → `ios/addons`
+ * xcframeworks) before the Bare runtime can load it. Until that native wiring
+ * exists, starting the worklet aborts (SIGABRT), so it is disabled by default.
+ * Enable with `EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET=1` once the addon is linked.
+ */
+function workletEnabled(): boolean {
+  return process.env.EXPO_PUBLIC_BARE_HYPERDRIVE_WORKLET === '1';
+}
+
 interface DownloadProgress {
   file?: string;
   bytes?: number;
@@ -107,7 +118,7 @@ function handleRequest(req: RpcRequest): void {
 
 /** Start the Hyperdrive worklet if the runtime and bundle are available. */
 export function initHyperdriveBridge(): void {
-  if (started) return;
+  if (started || !workletEnabled()) return;
   if (!resolveNativeDeps() || !WorkletClass || !RPCClass) return;
 
   let bundle: string | null = null;
