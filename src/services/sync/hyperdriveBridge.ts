@@ -78,7 +78,21 @@ let progressHandlers: Array<(event: DownloadProgress) => void> = [];
 
 /** Root of the worklet's Corestore (one sub-store per region). */
 function corestoreRoot(): string {
-  return `${FileSystem.documentDirectory ?? ''}.polaris-corestore`;
+  return toFsPath(`${FileSystem.documentDirectory ?? ''}.polaris-corestore`);
+}
+
+/**
+ * Convert an expo `file://` URI to a plain filesystem path. `bare-fs` and
+ * RocksDB (via Corestore) expect OS paths, not URLs.
+ */
+function toFsPath(uri: string): string {
+  if (!uri.startsWith('file://')) return uri;
+  const withoutScheme = uri.slice('file://'.length);
+  try {
+    return decodeURIComponent(withoutScheme);
+  } catch {
+    return withoutScheme;
+  }
 }
 
 function handleRequest(req: RpcRequest): void {
@@ -170,7 +184,7 @@ export async function seedRegion(
 }> {
   const result = await sendRequest(
     CMD_HD_SEED,
-    { regionId, filesDir, key: canonicalKey, corestoreRoot: corestoreRoot() },
+    { regionId, filesDir: toFsPath(filesDir), key: canonicalKey, corestoreRoot: corestoreRoot() },
     TRANSFER_TIMEOUT_MS,
   );
   return {
@@ -197,7 +211,7 @@ export async function downloadFromPeers(
   try {
     const result = await sendRequest(
       CMD_HD_DOWNLOAD,
-      { driveKey, destDir, corestoreRoot: corestoreRoot() },
+      { driveKey, destDir: toFsPath(destDir), corestoreRoot: corestoreRoot() },
       TRANSFER_TIMEOUT_MS,
     );
     return { totalBytes: Number(result.totalBytes ?? 0) };

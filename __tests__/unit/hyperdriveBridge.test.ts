@@ -54,8 +54,8 @@ describe('hyperdriveBridge', () => {
       expect(cmd).toBe(CMD_HD_SEED);
       expect(payload).toEqual({
         regionId: 'us-ny-new-york',
-        filesDir: 'file:///docs/regions/us-ny-new-york/',
-        corestoreRoot: 'file:///docs/.polaris-corestore',
+        filesDir: '/docs/regions/us-ny-new-york/',
+        corestoreRoot: '/docs/.polaris-corestore',
       });
       return {
         key: 'a'.repeat(64),
