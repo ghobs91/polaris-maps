@@ -108,8 +108,8 @@ export function placeToOsmPoi(place: Place): OsmPoi {
  * submitting to OpenStreetMap.
  *
  * Only tags that are meaningful in OSM-land are included: name, a
- * category-mapped primary tag (amenity/shop/tourism/leisure), phone, website,
- * opening_hours, and address parts.
+ * category-mapped primary tag (amenity/shop/tourism/leisure), brand, contact
+ * details, opening_hours, and address parts.
  *
  * When the category falls through to the 'other' fallback, NO primary tag
  * is emitted — "amenity=place" is not a valid OSM tag and submitting it
@@ -130,14 +130,50 @@ export function placeToOsmTags(place: Place): Record<string, string> {
     tags[mapping.type] = mapping.subtype;
   }
 
+  if (place.brandName) tags['brand'] = place.brandName;
+  if (place.brandWikidata) tags['brand:wikidata'] = place.brandWikidata;
   if (place.phone) tags['phone'] = place.phone;
   if (place.website) tags['website'] = place.website;
+  if (place.emails && place.emails.length > 0) tags['email'] = place.emails[0];
   if (place.hours) tags['opening_hours'] = place.hours;
-  if (place.brandWikidata) tags['brand:wikidata'] = place.brandWikidata;
-  if (place.addressStreet) tags['addr:street'] = place.addressStreet;
+  // Overture `freeform` is an unstructured address line, so it maps to
+  // `addr:full` (using addr:street would mislabel city / state / postcode).
+  if (place.addressStreet) tags['addr:full'] = place.addressStreet;
   if (place.addressCity) tags['addr:city'] = place.addressCity;
   if (place.addressState) tags['addr:state'] = place.addressState;
   if (place.addressPostcode) tags['addr:postcode'] = place.addressPostcode;
+  if (place.addressCountry) tags['addr:country'] = place.addressCountry;
+
+  return tags;
+}
+
+/**
+ * Build a submission-ready OSM tag map from a rendered `OsmPoi`.
+ *
+ * Used as a fallback when the underlying Place can't be resolved (e.g. a
+ * live-viewport Overture POI that hasn't been cached locally). Drops
+ * Polaris-internal keys and the invalid `amenity=place` fallback so the
+ * result matches `placeToOsmTags` for the tags the card renders.
+ */
+export function osmTagsFromPoi(poi: OsmPoi): Record<string, string> {
+  const tags: Record<string, string> = {};
+  for (const [k, v] of Object.entries(poi.tags)) {
+    if (k.startsWith('polaris:')) continue;
+    if (k === 'amenity' && v === 'place') continue;
+    tags[k] = v;
+  }
+
+  if (!tags['name'] && poi.name) tags['name'] = poi.name;
+
+  // Ensure a valid primary tag when the rendered tags omitted one.
+  if (
+    poi.type &&
+    poi.subtype &&
+    !(poi.type === 'amenity' && poi.subtype === 'place') &&
+    tags[poi.type] === undefined
+  ) {
+    tags[poi.type] = poi.subtype;
+  }
 
   return tags;
 }

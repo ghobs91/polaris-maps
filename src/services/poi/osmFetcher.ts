@@ -1,5 +1,12 @@
 import { overpassFetch } from '../overpassClient';
 import { throwIfAborted, withTimeout } from '../search/abortUtils';
+import { buildOverpassNameRegex, normalizeOsmName } from '../../utils/osmNameMatch';
+import {
+  classifyOsmMatch,
+  derivePrimaryTag,
+  matchRadiusMeters,
+  type OsmCandidate,
+} from './osmMatchScorer';
 
 // ---------------------------------------------------------------------------
 // Bbox-keyed response cache
@@ -327,71 +334,128 @@ out body center;`;
 // Pre-submission existence check (Overture → OSM auto-seed guard)
 // ---------------------------------------------------------------------------
 
-/** Radius in meters for proximity check when determining if a POI exists in OSM. */
-const POI_EXISTS_RADIUS_M = 50;
+/** Name-bearing keys searched before scoring candidates locally. */
+const EXISTS_NAME_QUERY_KEYS = [
+  'name',
+  'name:en',
+  'alt_name',
+  'official_name',
+  'short_name',
+  'brand',
+  'operator',
+];
 
-/** In-memory cache for existence checks — avoids repeated Overpass queries. */
-const existsCache = new Map<string, boolean>();
+/** Existence results are cached briefly so repeated selections are cheap. */
+const EXISTS_CACHE_TTL_MS = 10 * 60 * 1000;
 const EXISTS_CACHE_MAX = 200;
 
-function existsCacheKey(lat: number, lng: number, name: string): string {
+interface ExistsCacheEntry {
+  value: boolean;
+  expiresAt: number;
+}
+
+const existsCache = new Map<string, ExistsCacheEntry>();
+
+function existsCacheKey(
+  lat: number,
+  lng: number,
+  name: string,
+  tags: Record<string, string>,
+): string {
   const r = (n: number) => Math.round(n * 10_000) / 10_000; // ~11m precision
-  const norm = name.trim().toLowerCase();
-  return `${r(lat)},${r(lng)},${norm}`;
+  const primary = derivePrimaryTag(tags);
+  return [
+    r(lat),
+    r(lng),
+    normalizeOsmName(name),
+    primary ? `${primary.type}=${primary.value}` : '',
+    tags['brand:wikidata'] ?? '',
+  ].join('|');
+}
+
+/** Normalize Overpass elements (nodes carry lat/lon, areas carry `center`). */
+function parseOverpassCandidates(elements: unknown[]): OsmCandidate[] {
+  const candidates: OsmCandidate[] = [];
+  for (const el of elements) {
+    if (!el || typeof el !== 'object') continue;
+    const elObj = el as {
+      type?: string;
+      id?: number;
+      lat?: number;
+      lon?: number;
+      center?: { lat?: number; lon?: number };
+      tags?: Record<string, string>;
+    };
+    const lat = typeof elObj.lat === 'number' ? elObj.lat : elObj.center?.lat;
+    const lng = typeof elObj.lon === 'number' ? elObj.lon : elObj.center?.lon;
+    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+    candidates.push({
+      type: typeof elObj.type === 'string' ? elObj.type : 'node',
+      id: typeof elObj.id === 'number' ? elObj.id : 0,
+      lat,
+      lng,
+      tags: elObj.tags && typeof elObj.tags === 'object' ? elObj.tags : {},
+    });
+  }
+  return candidates;
 }
 
 /**
- * Check if a POI with the given name already exists near the given coordinates
- * in OpenStreetMap.
+ * Check whether a place with the given name/tags already exists near the given
+ * coordinates in OpenStreetMap.
  *
- * Queries Overpass for nodes and ways with an exact case-insensitive name
- * match within POI_EXISTS_RADIUS_M meters.
+ * Queries Overpass for nodes, ways and relations matching any of the place's
+ * distinctive name tokens (or its name/brand/operator tags) within a
+ * category-aware radius, then scores each candidate locally on name
+ * similarity, category compatibility, distance and strong identifiers
+ * (brand Wikidata, phone, website).
  *
- * Results are cached in memory to avoid repeated Overpass queries for the
- * same POI during a session.
+ * The check is deliberately conservative: a place only counts as "already
+ * mapped" when a candidate is a confident match. Callers should treat a thrown
+ * error as "unverified" and skip submission rather than risk a duplicate.
  *
- * @returns true if at least one matching POI exists, false otherwise.
- * @throws on Overpass API errors (caller should handle gracefully — it is
- *   safer to proceed with submission than to block on a transient API error).
+ * @param tags OSM-style tags for the place (used for category/identifier
+ *   signals); optional for backward compatibility.
+ * @returns true if a confident matching POI exists, false otherwise.
+ * @throws on Overpass API errors.
  */
 export async function checkPoiExistsInOsm(
   lat: number,
   lng: number,
   name: string,
+  tags: Record<string, string> = {},
 ): Promise<boolean> {
   const trimmed = name.trim();
   if (!trimmed) return false;
 
-  // Check in-memory cache
-  const cacheKey = existsCacheKey(lat, lng, trimmed);
+  const cacheKey = existsCacheKey(lat, lng, trimmed, tags);
   const cached = existsCache.get(cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached && Date.now() < cached.expiresAt) return cached.value;
 
-  // Escape regex special characters for the Overpass regex query.
-  // We use ^...$ to ensure exact name matching, not substring matching.
-  // Also escapes " to avoid breaking the Overpass QL string delimiters.
-  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+  const regex = buildOverpassNameRegex(trimmed);
+  if (!regex) return false;
 
-  const query = `[out:json][timeout:10];
-(
-  node["name"~"^${escaped}$",i](around:${POI_EXISTS_RADIUS_M},${lat},${lng});
-  way["name"~"^${escaped}$",i](around:${POI_EXISTS_RADIUS_M},${lat},${lng});
-);
-out ids;`;
+  const radius = matchRadiusMeters(tags);
+  const clauses = EXISTS_NAME_QUERY_KEYS.map(
+    (key) => `nwr["${key}"~"${regex}",i](around:${radius},${lat},${lng});`,
+  ).join('\n  ');
+  const query = `[out:json][timeout:15];\n(\n  ${clauses}\n);\nout center tags;`;
 
-  const data = await overpassFetch<{ elements: any[] }>({
+  const data = await overpassFetch<{ elements: unknown[] }>({
     query,
-    timeoutMs: 10_000,
+    timeoutMs: 15_000,
   });
+  const candidates = parseOverpassCandidates(data.elements ?? []);
 
-  const exists = (data.elements?.length ?? 0) > 0;
+  const target = { name: trimmed, lat, lng, tags };
+  const exists = candidates.some((candidate) => classifyOsmMatch(target, candidate).match);
 
   // Cache the result (evict oldest when full)
   if (existsCache.size >= EXISTS_CACHE_MAX) {
     const oldestKey = existsCache.keys().next().value;
     if (oldestKey !== undefined) existsCache.delete(oldestKey);
   }
-  existsCache.set(cacheKey, exists);
+  existsCache.set(cacheKey, { value: exists, expiresAt: Date.now() + EXISTS_CACHE_TTL_MS });
 
   return exists;
 }

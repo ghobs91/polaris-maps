@@ -36,6 +36,7 @@ import {
 import { startMonitoring as startConnectivityMonitoring } from '@/services/regions/connectivityService';
 import { scheduleGeonamesDownload } from '@/services/geocoding/geonamesDownloadScheduler';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
+import { useOsmAuthStore } from '@/stores/osmAuthStore';
 import { useICloudSync } from '@/hooks/useICloudSync';
 
 // Keep the native launch screen up until the branded cold-open overlay is on
@@ -52,6 +53,9 @@ function RootLayoutInner() {
 
   useEffect(() => {
     useAtprotoAuthStore.getState().restore();
+    // Restore the persisted OSM session so a signed-in user is recognized
+    // app-wide (auto-seeding gates on it) instead of only on the edit screen.
+    void useOsmAuthStore.getState().hydrate();
     // Track connectivity for the banner, offline gating, and map fallback.
     // Previously never started, so isOnline() was stuck at its optimistic
     // default and the map never knew the connection was weak.

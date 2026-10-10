@@ -288,197 +288,161 @@ describe('fetchOsmPois', () => {
 // ---------------------------------------------------------------------------
 
 describe('checkPoiExistsInOsm', () => {
+  const LAT = 40.748;
+  const LNG = -73.985;
+
+  function overpass(elements: object[]) {
+    return { ok: true, json: async () => ({ elements }) };
+  }
+
+  function node(id: number, tags: Record<string, string>, lat = LAT, lon = LNG) {
+    return { type: 'node', id, lat, lon, tags };
+  }
+
+  function firstQuery(): string {
+    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
+    return decodeURIComponent(body.replace(/^data=/, ''));
+  }
+
   beforeEach(() => {
     clearExistenceCache();
     mockFetch.mockReset();
   });
 
-  it('returns true when a matching OSM node exists nearby', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        elements: [{ type: 'node', id: 12345 }],
-      }),
-    });
-
-    const result = await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
-    expect(result).toBe(true);
-    // Should have called fetch with the right query
-    expect(mockFetch).toHaveBeenCalled();
+  it('returns true when a matching named POI exists nearby', async () => {
+    mockFetch.mockResolvedValue(overpass([node(1, { name: 'Starbucks', amenity: 'cafe' })]));
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBe(true);
   });
 
-  it('returns true when a matching OSM way exists nearby', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        elements: [{ type: 'way', id: 67890 }],
-      }),
-    });
-
-    const result = await checkPoiExistsInOsm(40.748, -73.985, 'Central Park');
-    expect(result).toBe(true);
+  it('matches a way using its center coordinate', async () => {
+    mockFetch.mockResolvedValue(
+      overpass([
+        {
+          type: 'way',
+          id: 99,
+          center: { lat: LAT, lon: LNG },
+          tags: { name: 'Starbucks', amenity: 'cafe' },
+        },
+      ]),
+    );
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBe(true);
   });
 
-  it('returns false when no matching POIs exist', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        elements: [],
-      }),
-    });
-
-    const result = await checkPoiExistsInOsm(40.748, -73.985, 'Unknown Cafe');
-    expect(result).toBe(false);
+  it('matches a relation (multipolygon venues)', async () => {
+    mockFetch.mockResolvedValue(
+      overpass([
+        {
+          type: 'relation',
+          id: 5,
+          center: { lat: LAT, lon: LNG },
+          tags: { name: 'Starbucks', amenity: 'cafe' },
+        },
+      ]),
+    );
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBe(true);
   });
 
-  it('returns false for empty name (short-circuit)', async () => {
-    const result = await checkPoiExistsInOsm(40.748, -73.985, '');
-    expect(result).toBe(false);
-    // Should not have made any network call
+  it('recognises fuzzy name variants', async () => {
+    mockFetch.mockResolvedValue(overpass([node(1, { name: 'Starbucks Coffee', amenity: 'cafe' })]));
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBe(true);
+  });
+
+  it('recognises a brand:wikidata match even with a different name', async () => {
+    mockFetch.mockResolvedValue(
+      overpass([node(1, { name: 'Bucks Coffee', amenity: 'cafe', 'brand:wikidata': 'Q37158' })]),
+    );
+    expect(
+      await checkPoiExistsInOsm(LAT, LNG, "Joe's Coffee", {
+        amenity: 'cafe',
+        'brand:wikidata': 'Q37158',
+      }),
+    ).toBe(true);
+  });
+
+  it('returns false when the nearby candidate has a different name', async () => {
+    mockFetch.mockResolvedValue(overpass([node(1, { name: 'Subway', amenity: 'fast_food' })]));
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBe(false);
+  });
+
+  it('returns false when a same-name candidate is out of range', async () => {
+    mockFetch.mockResolvedValue(
+      overpass([node(1, { name: 'Starbucks', amenity: 'cafe' }, 40.8005, LNG)]),
+    );
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBe(false);
+  });
+
+  it('returns false when the name is similar but the category conflicts', async () => {
+    mockFetch.mockResolvedValue(overpass([node(1, { name: 'Golden Dragons', shop: 'hardware' })]));
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Golden Dragon', { amenity: 'restaurant' })).toBe(
+      false,
+    );
+  });
+
+  it('returns false when no candidates exist', async () => {
+    mockFetch.mockResolvedValue(overpass([]));
+    expect(await checkPoiExistsInOsm(LAT, LNG, 'Unknown Cafe')).toBe(false);
+  });
+
+  it('returns false for empty or whitespace names without querying', async () => {
+    expect(await checkPoiExistsInOsm(LAT, LNG, '')).toBe(false);
+    expect(await checkPoiExistsInOsm(LAT, LNG, '   ')).toBe(false);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('returns false for whitespace-only name', async () => {
-    const result = await checkPoiExistsInOsm(40.748, -73.985, '   ');
-    expect(result).toBe(false);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
+  it('queries nwr with all name keys and a category-aware radius', async () => {
+    mockFetch.mockResolvedValue(overpass([]));
+    await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
+    let query = firstQuery();
+    expect(query).toContain('nwr["name"~"starbucks",i]');
+    expect(query).toContain('nwr["brand"~"starbucks",i]');
+    expect(query).toContain('around:120,');
+    expect(query).toContain('out center tags;');
 
-  it('returns cached result on second call with same params', async () => {
-    mockFetch.mockImplementation(() => {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ elements: [{ type: 'node', id: 1 }] }),
-      });
-    });
-
-    // First call — should hit network
-    const r1 = await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
-    expect(r1).toBe(true);
-
-    // Second call with exact same params — should use cache
     mockFetch.mockClear();
-    const r2 = await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    clearExistenceCache();
+    mockFetch.mockResolvedValue(overpass([]));
+    await checkPoiExistsInOsm(LAT, LNG, 'Central Park', { leisure: 'park' });
+    query = firstQuery();
+    expect(query).toContain('around:250,');
+  });
+
+  it('caches results with a TTL', async () => {
+    mockFetch.mockResolvedValue(overpass([node(1, { name: 'Starbucks', amenity: 'cafe' })]));
+    await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
+    mockFetch.mockClear();
+    const r2 = await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
     expect(r2).toBe(true);
-    // No additional fetch calls because the result was cached
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('caches false results too', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [] }),
-    });
-
-    // First call — empty result
-    await checkPoiExistsInOsm(40.748, -73.985, 'No Such Place');
+  it('keeps a distinct cache entry per category', async () => {
+    mockFetch.mockResolvedValue(overpass([]));
+    await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
     mockFetch.mockClear();
+    await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { shop: 'coffee' });
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
 
-    // Second call — should use cache, returning false without network
-    const r2 = await checkPoiExistsInOsm(40.748, -73.985, 'No Such Place');
-    expect(r2).toBe(false);
+  it('rounds coordinates to ~11m in the cache key', async () => {
+    mockFetch.mockResolvedValue(overpass([]));
+    await checkPoiExistsInOsm(40.748123, -73.985456, 'Starbucks', { amenity: 'cafe' });
+    mockFetch.mockClear();
+    await checkPoiExistsInOsm(40.748129, -73.98546, 'starbucks', { amenity: 'cafe' });
     expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('escapes regex special characters in the name', async () => {
-    // Name contains regex special chars: ., (, ), +
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [] }),
-    });
-
-    await checkPoiExistsInOsm(40.748, -73.985, 'Dr. Smith (Downtown)');
-    expect(mockFetch).toHaveBeenCalled();
-
-    // Extract the query from the fetch body (it's URL-encoded: data=<encoded>)
-    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
-    const encoded = body.replace(/^data=/, '');
-    const decoded = decodeURIComponent(encoded);
-
-    // The query should have escaped the special chars with backslashes
-    expect(decoded).toContain('Dr\\. Smith \\(Downtown\\)');
-  });
-
-  it('escapes double-quote characters to avoid breaking Overpass QL', async () => {
-    // Double quotes inside the name would prematurely terminate the Overpass
-    // regex string if not escaped.
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [] }),
-    });
-
-    await checkPoiExistsInOsm(40.748, -73.985, 'Joe\'s "Best" Cafe');
-    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
-    const encoded = body.replace(/^data=/, '');
-    const decoded = decodeURIComponent(encoded);
-
-    // The double quotes should be backslash-escaped in the Overpass regex
-    expect(decoded).toContain('\\"Best\\"');
-  });
-
-  it('is case-insensitive in matching', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [] }),
-    });
-
-    await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
-    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
-    const encoded = body.replace(/^data=/, '');
-    const decoded = decodeURIComponent(encoded);
-    // The Overpass query should include the case-insensitive flag ",i"
-    expect(decoded).toContain('"^Starbucks$",i');
-  });
-
-  it('trims whitespace from the name', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [] }),
-    });
-
-    await checkPoiExistsInOsm(40.748, -73.985, '  Starbucks  ');
-    const body = (mockFetch.mock.calls[0] as any[])[1]?.body as string;
-    const encoded = body.replace(/^data=/, '');
-    const decoded = decodeURIComponent(encoded);
-    // The query should use the trimmed name, not the raw input
-    expect(decoded).toContain('"^Starbucks$",i');
-    expect(decoded).not.toContain('  Starbucks');
   });
 
   it('throws on Overpass errors', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 503 });
-
-    await expect(checkPoiExistsInOsm(40.748, -73.985, 'Starbucks')).rejects.toThrow();
+    await expect(checkPoiExistsInOsm(LAT, LNG, 'Starbucks')).rejects.toThrow();
   });
 
   it('clearExistenceCache forces a fresh network call', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [{ type: 'node', id: 1 }] }),
-    });
-
-    await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    mockFetch.mockResolvedValue(overpass([]));
+    await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
     clearExistenceCache();
     mockFetch.mockClear();
-
-    await checkPoiExistsInOsm(40.748, -73.985, 'Starbucks');
+    await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
     // overpassClient fires to 3 Overpass instances in parallel
     expect(mockFetch).toHaveBeenCalledTimes(3);
-  });
-
-  it('cache keys round coordinates to ~11m precision', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ elements: [{ type: 'node', id: 1 }] }),
-    });
-
-    // First call at precise coordinates
-    await checkPoiExistsInOsm(40.748123, -73.985456, 'Starbucks');
-    mockFetch.mockClear();
-
-    // Second call at nearby coordinates (within ~11m rounding)
-    await checkPoiExistsInOsm(40.748129, -73.98546, 'starbucks');
-    // Should hit cache (coordinates round to same key, name is lowercased)
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

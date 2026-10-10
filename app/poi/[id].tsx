@@ -29,8 +29,11 @@ import { spacing, typography, borderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useThemedStyles, type Theme } from '../../src/hooks/useThemedStyles';
 import { placeToOsmTags } from '../../src/utils/placeToOsmPoi';
-import { checkPoiExistsInOsm } from '../../src/services/poi/osmFetcher';
-import { submitOsmNodeCreate } from '../../src/services/osm/osmEditService';
+import {
+  markPlaceHandled,
+  placeSeedKey,
+  seedPlaceToOsm,
+} from '../../src/services/osm/placeSeedService';
 import type { StreetImagery } from '../../src/models/imagery';
 import {
   fetchChargingStations,
@@ -53,14 +56,6 @@ function safePhone(raw: string): void {
   if (cleaned.length > 0) Linking.openURL(`tel:${cleaned}`);
 }
 
-/** Session-scoped dedup set to prevent re-submitting the same POI within one session. */
-const seededKeys = new Set<string>();
-
-function dedupKey(lat: number, lng: number, name: string): string {
-  const r = (n: number) => Math.round(n * 10_000) / 10_000;
-  return `${r(lat)},${r(lng)},${name.trim().toLowerCase()}`;
-}
-
 export default function POIDetailScreen() {
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
@@ -68,8 +63,14 @@ export default function POIDetailScreen() {
   const router = useRouter();
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const accessToken = useOsmAuthStore((s) => s.accessToken);
+  const login = useOsmAuthStore((s) => s.login);
   const contributionsEnabled = useSettingsStore((s) => s.permissions.poiContributionsEnabled);
-  const autoSeedFired = useRef(false);
+  // Auto-seed runs whenever the user has an OSM session and contributions are
+  // enabled; otherwise we keep the manual "Add to OpenStreetMap" button.
+  const canAutoSeed = !!accessToken && contributionsEnabled;
+  // Keyed on the place so navigating between places can seed each once, while
+  // a React Strict Mode double-mount only seeds the current place once.
+  const autoSeedKeyRef = useRef<string | null>(null);
   const {
     selectedPlace,
     selectedPlaceReviews,
@@ -130,69 +131,76 @@ export default function POIDetailScreen() {
     };
   }, [selectedPlace]);
 
-  // Selective auto-seed: when an Overture-sourced POI is opened, check if it
-  // already exists in OSM.  If not, submit it automatically.
+  // Selective auto-seed: when an Overture-sourced POI is opened, submit it to
+  // OSM if it isn't already there. Silent unless submission fails.
   useEffect(() => {
-    if (
-      !selectedPlace ||
-      selectedPlace.source !== 'overture' ||
-      !accessToken ||
-      !contributionsEnabled
-    ) {
+    if (!selectedPlace || selectedPlace.source !== 'overture' || !canAutoSeed || !accessToken) {
       return;
     }
 
-    // Prevent double-fire from React Strict Mode double-mount
-    if (autoSeedFired.current) return;
-    autoSeedFired.current = true;
+    const key = placeSeedKey(selectedPlace.lat, selectedPlace.lng, selectedPlace.name);
+    if (autoSeedKeyRef.current === key) return;
+    autoSeedKeyRef.current = key;
 
-    const key = dedupKey(selectedPlace.lat, selectedPlace.lng, selectedPlace.name);
-
-    // Session-scoped dedup — already submitted this POI this session
-    if (seededKeys.has(key)) return;
-
+    let cancelled = false;
     const trySeed = async () => {
       setSeedStatus('submitting');
+      const result = await seedPlaceToOsm(
+        {
+          lat: selectedPlace.lat,
+          lng: selectedPlace.lng,
+          name: selectedPlace.name,
+          tags: placeToOsmTags(selectedPlace),
+          overtureId: selectedPlace.uuid,
+        },
+        accessToken,
+      );
+      if (cancelled) return;
 
-      try {
-        const exists = await checkPoiExistsInOsm(
-          selectedPlace.lat,
-          selectedPlace.lng,
-          selectedPlace.name,
-        );
-        if (exists) {
-          setSeedStatus('idle');
-          return;
-        }
-      } catch {
-        // Overpass check failed — proceed with submission (fail-open).
-        // Better to risk a rare duplicate than to block a legitimate submission.
-      }
-
-      const tags = placeToOsmTags(selectedPlace);
-
-      try {
-        await submitOsmNodeCreate(
-          accessToken,
-          selectedPlace.lat,
-          selectedPlace.lng,
-          tags,
-          'Added Overture Maps POI via Polaris Maps',
-        );
-        seededKeys.add(key);
+      if (result.status === 'submitted') {
         setSeedStatus('success');
         setTimeout(() => setSeedStatus('idle'), 4000);
-      } catch (e) {
+      } else if (result.status === 'error') {
         setSeedStatus('idle');
         Alert.alert(
           'Submission Failed',
-          `Could not add this place to OpenStreetMap: ${(e as Error).message}`,
+          `Could not add this place to OpenStreetMap: ${result.error}`,
         );
+      } else {
+        setSeedStatus('idle');
       }
     };
 
-    trySeed();
-  }, [selectedPlace, accessToken, contributionsEnabled]);
+    void trySeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPlace, canAutoSeed, accessToken]);
+
+  // Manual fallback: only shown when automatic seeding is off (no OSM session
+  // or contributions disabled). Starts the OSM login flow when needed, then
+  // opens the manual add form.
+  const handleAddToOsm = useCallback(async () => {
+    if (!selectedPlace) return;
+    markPlaceHandled(selectedPlace.lat, selectedPlace.lng, selectedPlace.name);
+    if (!accessToken) {
+      try {
+        await login();
+      } catch (e) {
+        Alert.alert('Sign In Failed', (e as Error).message);
+        return;
+      }
+    }
+    router.push({
+      pathname: '/poi/osm-edit',
+      params: {
+        name: selectedPlace.name,
+        lat: String(selectedPlace.lat),
+        lng: String(selectedPlace.lng),
+        initialTags: JSON.stringify(placeToOsmTags(selectedPlace)),
+      },
+    });
+  }, [selectedPlace, accessToken, login, router]);
 
   const handleAttest = useCallback(async () => {
     if (!selectedPlace) return;
@@ -417,21 +425,10 @@ export default function POIDetailScreen() {
           <Button title="Verify I'm Here" onPress={handleAttest} variant="outline" />
           <Button title="Save to List" onPress={() => setShowSaveSheet(true)} variant="outline" />
 
-          {selectedPlace.source === 'overture' && (
+          {selectedPlace.source === 'overture' && !canAutoSeed && (
             <Pressable
               style={({ pressed }) => [styles.osmAddButton, pressed && styles.osmAddButtonPressed]}
-              onPress={() => {
-                const tags = placeToOsmTags(selectedPlace);
-                router.push({
-                  pathname: '/poi/osm-edit',
-                  params: {
-                    name: selectedPlace.name,
-                    lat: String(selectedPlace.lat),
-                    lng: String(selectedPlace.lng),
-                    initialTags: JSON.stringify(tags),
-                  },
-                });
-              }}
+              onPress={handleAddToOsm}
             >
               <Ionicons name="add-circle-outline" size={20} color="#fff" />
               <Text style={styles.osmAddButtonText}>Add to OpenStreetMap</Text>

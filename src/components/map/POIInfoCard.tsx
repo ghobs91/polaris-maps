@@ -21,6 +21,8 @@ import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { useMapStore } from '../../stores/mapStore';
 import { usePeerStore } from '../../stores/peerStore';
 import { useStreetViewStore } from '../../stores/streetViewStore';
+import { useOsmAuthStore } from '../../stores/osmAuthStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
@@ -32,6 +34,8 @@ import {
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
 import { getReviewsForPlace } from '../../services/poi/reviewService';
+import { markPlaceHandled, seedPlaceToOsm } from '../../services/osm/placeSeedService';
+import { osmTagsFromPoi, placeToOsmTags } from '../../utils/placeToOsmPoi';
 import { mergeRatings, type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
 import { normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
@@ -433,6 +437,12 @@ export function POIInfoCard() {
   const setPendingDirectionsTarget = useMapStore((s) => s.setPendingDirectionsTarget);
   const selectedPoi = useOsmPoiStore((s) => s.selectedPoi);
   const setSelectedPoi = useOsmPoiStore((s) => s.setSelectedPoi);
+  const osmAccessToken = useOsmAuthStore((s) => s.accessToken);
+  const osmLogin = useOsmAuthStore((s) => s.login);
+  const contributionsEnabled = useSettingsStore((s) => s.permissions.poiContributionsEnabled);
+  // Auto-seed whenever the user has an OSM session and contributions are on;
+  // otherwise we keep the manual "Add to OpenStreetMap" button.
+  const canAutoSeedOsm = !!osmAccessToken && contributionsEnabled;
   const [showSaveSheet, setShowSaveSheet] = useState(false);
   // Controlled sheet snap: 0 = peek, 1 = expanded.
   const [snapIndex, setSnapIndex] = useState(0);
@@ -443,6 +453,45 @@ export function POIInfoCard() {
   useEffect(() => {
     setSnapIndex(0);
   }, [selectedPoi]);
+
+  // Automatically seed Overture-sourced places into OpenStreetMap when they're
+  // actively selected and the user is signed in. Silent; the shared seed
+  // service dedupes across the map card and the detail screen.
+  useEffect(() => {
+    const target = selectedPoi;
+    if (
+      !target ||
+      target.id > 0 ||
+      target.tags['polaris:source'] !== 'overture' ||
+      !canAutoSeedOsm ||
+      !osmAccessToken
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      // Prefer the full Place (email/brand/structured address); fall back to
+      // the rendered tags when the place isn't cached locally.
+      const uuid = target.tags['polaris:uuid'];
+      const place = uuid ? await getPlaceById(uuid).catch(() => null) : null;
+      if (cancelled) return;
+      const tags = place ? placeToOsmTags(place) : osmTagsFromPoi(target);
+      await seedPlaceToOsm(
+        {
+          lat: target.lat,
+          lng: target.lng,
+          name: target.name,
+          tags,
+          overtureId: target.tags['polaris:uuid'],
+        },
+        osmAccessToken,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPoi, canAutoSeedOsm, osmAccessToken]);
 
   const poi = selectedPoi;
   // Charging stations are usually labelled generically ("Charging Station");
@@ -743,6 +792,31 @@ export function POIInfoCard() {
       },
     });
   }, [poi, detailsTarget, router, setSelectedPoi]);
+
+  // Manual fallback: shown when automatic seeding is off (no OSM session or
+  // contributions disabled). Starts OSM login when needed, then opens the
+  // manual add form.
+  const handleAddToOsm = useCallback(async () => {
+    if (!poi) return;
+    markPlaceHandled(poi.lat, poi.lng, poi.name);
+    if (!osmAccessToken) {
+      try {
+        await osmLogin();
+      } catch (e) {
+        Alert.alert('Sign In Failed', (e as Error).message);
+        return;
+      }
+    }
+    router.push({
+      pathname: '/poi/osm-edit',
+      params: {
+        name: poi.name || '',
+        lat: String(poi.lat),
+        lng: String(poi.lng),
+        initialTags: JSON.stringify(osmTagsFromPoi(poi)),
+      },
+    });
+  }, [poi, osmAccessToken, osmLogin, router]);
 
   // Resolve the local place (if any) once per selected POI so the Reviews
   // affordance can show the on-device review count.
@@ -1343,28 +1417,17 @@ export function POIInfoCard() {
               </TouchableOpacity>
             )}
 
-            {/* ── Add to OpenStreetMap (Overture POI) ───────────────── */}
+            {/* ── Add to OpenStreetMap (Overture POI) ─────────────────
+                Hidden when auto-seeding is active (signed in + contributions
+                enabled); shown otherwise as the manual/login fallback. */}
             {selectedPoi &&
               selectedPoi.id <= 0 &&
-              selectedPoi.tags['polaris:source'] === 'overture' && (
+              selectedPoi.tags['polaris:source'] === 'overture' &&
+              !canAutoSeedOsm && (
                 <TouchableOpacity
                   style={styles.osmAddBtn}
                   activeOpacity={0.7}
-                  onPress={() => {
-                    const initialTags: Record<string, string> = {};
-                    for (const [k, v] of Object.entries(selectedPoi.tags)) {
-                      if (!k.startsWith('polaris:')) initialTags[k] = v;
-                    }
-                    router.push({
-                      pathname: '/poi/osm-edit',
-                      params: {
-                        name: selectedPoi.name || '',
-                        lat: String(selectedPoi.lat),
-                        lng: String(selectedPoi.lng),
-                        initialTags: JSON.stringify(initialTags),
-                      },
-                    });
-                  }}
+                  onPress={handleAddToOsm}
                 >
                   <Ionicons name="add-circle-outline" size={18} color="#fff" />
                   <Text style={styles.osmAddBtnText}>Add to OpenStreetMap</Text>
