@@ -39,6 +39,11 @@ import type {
 
 export const STAGE_TIMEOUT_MS = 20_000;
 
+/** Dev-only stage tracing so on-device runs reveal exactly which step bails. */
+function log(...args: unknown[]): void {
+  if (__DEV__) console.log('[externalRatings]', ...args);
+}
+
 export type ExternalRatingStatus = 'idle' | 'searching' | 'loading' | 'loaded' | 'failed';
 
 type Origin = 'tag' | 'website' | 'search';
@@ -134,6 +139,7 @@ export function useExternalRatings(
       // browse pipeline for this provider. TTL-bounded and in-memory only, like
       // the ratings themselves.
       markExternalRatingMiss(missKeyFor(queryRef.current, id));
+      log(id, 'failed — no rating (miss remembered for session)');
       update(id, { status: 'failed', webView: null });
     },
     [update],
@@ -160,6 +166,12 @@ export function useExternalRatings(
     EXTERNAL_RATING_PROVIDERS.forEach((provider) => {
       const id = provider.id;
       const explicitTag = q.tags?.[`polaris:${id}`];
+      log(id, 'resolve start', {
+        hasTag: !!explicitTag,
+        hasWebsite: !!q.website,
+        address: q.address ?? null,
+        name: q.name,
+      });
 
       // A new place: reset this provider before re-resolving.
       update(id, blankState(id));
@@ -179,6 +191,7 @@ export function useExternalRatings(
           listingUrl = null;
         }
         if (cancelled) return;
+        log(id, listingUrl ? `known listing (${origin})` : 'no known listing', listingUrl ?? '');
 
         if (listingUrl) {
           let summary: ExternalRatingSummary | null = null;
@@ -191,10 +204,11 @@ export function useExternalRatings(
           }
           if (cancelled) return;
           if (summary) {
+            log(id, 'fetch hit', summary.rating, summary.reviewCount);
             update(id, { status: 'loaded', summary, listingUrl, webView: null, origin });
             return;
           }
-          armTimeout(id);
+          log(id, 'fetch miss → WebView listing', listingUrl);
           update(id, {
             status: 'loading',
             listingUrl,
@@ -210,7 +224,7 @@ export function useExternalRatings(
         }
 
         const searchUrl = provider.buildSearchUrl(q.name, q.address ?? null);
-        armTimeout(id);
+        log(id, 'search', searchUrl);
         update(id, {
           status: 'searching',
           origin: 'search',
@@ -231,7 +245,20 @@ export function useExternalRatings(
     };
     // Resolution is keyed to the place (`resetKey`), not to every query field,
     // so late enrichment can't reset an already-loaded rating.
-  }, [resetKey, update, armTimeout]);
+  }, [resetKey, update]);
+
+  // The section mounts at most one hidden WebView at a time — the first provider
+  // (registry order) exposing a stage. A stage's clock must start when its
+  // WebView actually mounts, not when it was scheduled; otherwise a provider
+  // queued behind another provider's stage counts down while it is not on
+  // screen and can time out before its page ever loads.
+  const activeProvider = states.find((s) => s.webView)?.provider ?? null;
+  useEffect(() => {
+    if (activeProvider == null) return;
+    log(activeProvider, 'stage active — clock started');
+    armTimeout(activeProvider);
+    return () => clearTimer(activeProvider);
+  }, [activeProvider, armTimeout, clearTimer]);
 
   const handleMessage = useCallback(
     (id: ExternalRatingProviderId, data: string) => {
@@ -243,6 +270,20 @@ export function useExternalRatings(
       if (current.webView.stage === 'search') {
         const candidates = candidatesFromSearchMessage(provider, data);
         const chosen = selectSearchCandidate(candidates, q);
+        log(
+          id,
+          'search results',
+          candidates.length,
+          chosen
+            ? {
+                name: chosen.name,
+                url: chosen.url,
+                hasRating: chosen.rating != null,
+                hasGeo: !!chosen.geo,
+                hasAddress: !!chosen.address,
+              }
+            : 'no candidate matched',
+        );
         if (!chosen) {
           clearTimer(id);
           fail(id);
@@ -274,12 +315,14 @@ export function useExternalRatings(
           if (summary) {
             setCachedExternalRating(id, inlineListingUrl, summary);
             clearTimer(id);
+            log(id, 'loaded (inline search card)', summary.rating, summary.reviewCount);
             update(id, { status: 'loaded', summary, listingUrl: inlineListingUrl, webView: null });
             return;
           }
         }
 
         armTimeout(id);
+        log(id, 'loading candidate listing', chosen.url);
         update(id, {
           status: 'loading',
           listingUrl: chosen.url,
@@ -300,6 +343,7 @@ export function useExternalRatings(
       if (raw.challenge) {
         browseScheduler.reportChallenge(hostOf(current.webView.uri));
         clearTimer(id);
+        log(id, 'challenge detected', hostOf(current.webView.uri));
         fail(id);
         return;
       }
@@ -311,6 +355,11 @@ export function useExternalRatings(
         );
         if (!confirmed) {
           clearTimer(id);
+          log(id, 'identity mismatch on listing', {
+            listingName: raw.listingName,
+            listingAddress: raw.listingAddress,
+            hasGeo: !!raw.geo,
+          });
           fail(id);
           return;
         }
@@ -320,11 +369,17 @@ export function useExternalRatings(
       const summary = validateExternalRating(raw, listingUrl, id, { expectedName: q.name });
       if (!summary) {
         clearTimer(id);
+        log(id, 'validation failed', {
+          rating: raw.rating,
+          reviewCount: raw.reviewCount,
+          listingName: raw.listingName,
+        });
         fail(id);
         return;
       }
       setCachedExternalRating(id, listingUrl, summary);
       clearTimer(id);
+      log(id, 'loaded', summary.rating, summary.reviewCount, listingUrl);
       update(id, { status: 'loaded', summary, webView: null });
     },
     [armTimeout, clearTimer, fail],
@@ -335,6 +390,7 @@ export function useExternalRatings(
       const current = statesRef.current.find((s) => s.provider === id);
       if (current?.webView) {
         browseScheduler.reportRateLimited(hostOf(current.webView.uri), 0);
+        log(id, 'webview error', hostOf(current.webView.uri));
       }
       clearTimer(id);
       fail(id);

@@ -27,6 +27,7 @@ const QUERY: ExternalRatingQuery = {
 };
 
 const YELP_LISTING = 'https://www.yelp.com/biz/foo-bar';
+const TA_LISTING = 'https://www.tripadvisor.com/Restaurant_Review-g1-d1-Review-Foo-Bar.html';
 
 const VALID_PAYLOAD = JSON.stringify({
   type: 'external-rating',
@@ -90,5 +91,36 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     const yelp = result.current.states.find((s) => s.provider === 'yelp');
     expect(yelp?.status).toBe('loaded');
     expect(yelp?.summary?.rating).toBe(4.2);
+  });
+
+  it('starts a queued provider stage clock only once its WebView mounts', async () => {
+    // Both providers have a listing, so both queue a hidden-WebView stage;
+    // TripAdvisor (registry order) holds the single slot.
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING : YELP_LISTING),
+    );
+
+    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
+
+    await act(async () => {
+      await flush();
+    });
+
+    expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.webView?.uri).toBe(
+      TA_LISTING,
+    );
+    expect(result.current.states.find((s) => s.provider === 'yelp')?.webView?.uri).toBe(
+      YELP_LISTING,
+    );
+
+    // TripAdvisor's stage times out. Yelp was queued behind it the whole time;
+    // its clock must not have been running, so it must not be failed.
+    act(() => {
+      jest.advanceTimersByTime(STAGE_TIMEOUT_MS + 5_000);
+    });
+
+    const yelp = result.current.states.find((s) => s.provider === 'yelp');
+    expect(yelp?.status).not.toBe('failed');
+    expect(yelp?.webView?.uri).toBe(YELP_LISTING);
   });
 });
