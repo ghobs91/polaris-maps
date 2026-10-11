@@ -13,6 +13,7 @@ import {
   overtureFeatureFromVectorTileGeoJSON,
   mapOvertureCategory,
   resetOverturePmtilesStateForTests,
+  extractYelpListingUrl,
 } from '../../src/services/poi/overtureFetcher';
 import { placeToOsmPoi } from '../../src/utils/placeToOsmPoi';
 import type { OverturePlace } from '../../src/types/overture';
@@ -142,6 +143,39 @@ describe('overtureFeatureToPlace', () => {
     const result = overtureFeatureToPlace(makeOverturePlace());
     expect(result!.geohash8).toBeDefined();
     expect(result!.geohash8.length).toBe(8);
+  });
+
+  it('extracts a canonical Yelp listing from socials/websites', () => {
+    const result = overtureFeatureToPlace(
+      makeOverturePlace({
+        websites: ['https://restaurants.ihop.com'],
+        socials: ['https://www.yelp.com/biz/ihop-levittown-3?utm_source=x#reviews'],
+      }),
+    );
+    expect(result!.yelp).toBe('https://www.yelp.com/biz/ihop-levittown-3');
+  });
+
+  it('leaves yelp undefined when no Yelp listing is present', () => {
+    expect(overtureFeatureToPlace(makeOverturePlace())!.yelp).toBeUndefined();
+  });
+});
+
+describe('extractYelpListingUrl', () => {
+  it('returns the first canonical Yelp business URL, skipping other links', () => {
+    expect(
+      extractYelpListingUrl([
+        'https://facebook.com/foo',
+        'https://yelp.ca/biz/foo',
+        'https://www.yelp.com/biz/foo-bar#reviews',
+      ]),
+    ).toBe('https://www.yelp.com/biz/foo-bar');
+  });
+
+  it('ignores Yelp search URLs and non-Yelp links', () => {
+    expect(
+      extractYelpListingUrl(['https://www.yelp.com/search?find_desc=foo', 'https://example.com']),
+    ).toBeUndefined();
+    expect(extractYelpListingUrl(undefined)).toBeUndefined();
   });
 });
 

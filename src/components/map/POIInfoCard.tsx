@@ -89,9 +89,12 @@ function buildAddress(tags: Record<string, string>): string | null {
   const parts: string[] = [];
   if (num && street) parts.push(`${num} ${street}`);
   else if (street) parts.push(street);
+  // Freeform `addr:full` stands in for the street line when no structured
+  // street exists, so a city/state/postcode tail can't hide it.
+  else if (full) parts.push(full);
   const tail = [city, state, postcode].filter(Boolean).join(' ');
   if (tail) parts.push(tail);
-  return parts.length ? parts.join(', ') : (full ?? null);
+  return parts.length ? parts.join(', ') : null;
 }
 
 function capitalise(s: string) {
@@ -1274,6 +1277,7 @@ export function POIInfoCard() {
             <ExternalRatingsSection
               poi={poi}
               enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
+              website={parsed.website}
               onWriteReview={handleWriteReview}
             />
 

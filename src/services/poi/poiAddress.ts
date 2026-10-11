@@ -17,14 +17,17 @@ export function assemblePoiAddress(
   const parts: string[] = [];
   const num = t['addr:housenumber'];
   const street = t['addr:street'];
+  // `addr:full` is a freeform address/street line (see `placeToOsmTags`). Treat
+  // it as the street component when no structured street is present; otherwise a
+  // city/state/postcode tail alone would hide it from the assembled address.
+  const full = t['addr:full'] ?? t['address'];
   if (num && street) parts.push(`${num} ${street}`);
   else if (street) parts.push(street);
+  else if (full) parts.push(full);
   const tail = [t['addr:city'], t['addr:state'], t['addr:postcode']].filter(Boolean).join(' ');
   if (tail) parts.push(tail);
   if (parts.length) return parts.join(', ');
 
-  const full = t['addr:full'] ?? t['address'];
-  if (full) return full;
   const formatted = formattedAddress?.trim();
   return formatted ? formatted : null;
 }

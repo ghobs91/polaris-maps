@@ -43,6 +43,7 @@ function createDb(): DatabaseSync {
       address_country TEXT,
       phone TEXT,
       website TEXT,
+      yelp TEXT,
       social_media TEXT,
       emails TEXT,
       brand_name TEXT,
@@ -118,6 +119,23 @@ describe('getPlacesInBounds', () => {
       2,
     );
     expect(places.map((p) => p.uuid)).toEqual(['in-high', 'in-low']);
+  });
+
+  it('maps the yelp column onto the returned place', async () => {
+    sqlite
+      .prepare(`UPDATE places SET yelp = ? WHERE uuid = ?`)
+      .run('https://www.yelp.com/biz/foo-bar', 'in-high');
+
+    const places = await getPlacesInBounds(
+      VIEWPORT.south,
+      VIEWPORT.west,
+      VIEWPORT.north,
+      VIEWPORT.east,
+      100,
+    );
+
+    expect(places[0].uuid).toBe('in-high');
+    expect(places[0].yelp).toBe('https://www.yelp.com/biz/foo-bar');
   });
 
   it('is served by the places bounds index', async () => {

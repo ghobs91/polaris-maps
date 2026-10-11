@@ -314,9 +314,9 @@ async function upsertPlaceCache(place: Place): Promise<void> {
     `INSERT OR REPLACE INTO places (
       uuid, name, category, lat, lng, geohash8,
       address_street, address_city, address_state, address_postcode, address_country,
-      phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
+      phone, website, yelp, social_media, emails, brand_name, hours, avg_rating, review_count,
       status, source, author_pubkey, signature, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       place.uuid,
       place.name,
@@ -331,6 +331,7 @@ async function upsertPlaceCache(place: Place): Promise<void> {
       place.addressCountry ?? null,
       place.phone ?? null,
       place.website ?? null,
+      place.yelp ?? null,
       place.socials?.length ? JSON.stringify(place.socials) : null,
       place.emails?.length ? JSON.stringify(place.emails) : null,
       place.brandName ?? null,
@@ -362,6 +363,7 @@ function placeToGunRecord(p: Place): Record<string, unknown> {
     address_country: p.addressCountry,
     phone: p.phone,
     website: p.website,
+    yelp: p.yelp,
     social_media: p.socials?.length ? JSON.stringify(p.socials) : undefined,
     emails: p.emails?.length ? JSON.stringify(p.emails) : undefined,
     brand_name: p.brandName,
@@ -389,6 +391,7 @@ interface PlaceRow {
   address_country: string | null;
   phone: string | null;
   website: string | null;
+  yelp: string | null;
   social_media: string | null;
   emails: string | null;
   brand_name: string | null;
@@ -418,6 +421,7 @@ function rowToPlace(row: PlaceRow): Place {
     addressCountry: row.address_country ?? undefined,
     phone: row.phone ?? undefined,
     website: row.website ?? undefined,
+    yelp: row.yelp ?? undefined,
     socials: row.social_media ? (JSON.parse(row.social_media) as string[]) : undefined,
     emails: row.emails ? (JSON.parse(row.emails) as string[]) : undefined,
     brandName: row.brand_name ?? undefined,

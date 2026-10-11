@@ -13,6 +13,7 @@ import type { OverturePlace, OverturePlaceCollection } from '../../types/overtur
 import type { SQLiteBindValue } from 'expo-sqlite';
 import { throwIfAborted, withSourceTimeout, withTimeout } from '../search/abortUtils';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
+import { canonicalYelpListingUrl } from './externalRatings/yelpProvider';
 
 /** Preferred place-tile zoom; clamped to the archive header's `maxZoom` at runtime. */
 const TILE_ZOOM = 15;
@@ -351,10 +352,10 @@ export async function importOverturePlacesFromGeoJSON(
 /** `places` insert columns, shared by the Overture upsert paths. */
 const PLACES_UPSERT_COLUMNS = `uuid, name, category, lat, lng, geohash8,
   address_street, address_city, address_state, address_postcode, address_country,
-  phone, website, social_media, emails, brand_name, hours, avg_rating, review_count,
+  phone, website, yelp, social_media, emails, brand_name, hours, avg_rating, review_count,
   status, source, author_pubkey, signature, created_at, updated_at`;
 
-/** Rows per multi-row INSERT; 25 columns keeps us under SQLite's 999-variable cap. */
+/** Rows per multi-row INSERT; 26 columns keeps us under SQLite's 999-variable cap. */
 const PLACES_INSERT_ROWS = 30;
 
 /** Map a `Place` to its `PLACES_UPSERT_COLUMNS` bind values (order matters). */
@@ -373,6 +374,7 @@ function placeToInsertParams(p: Place): SQLiteBindValue[] {
     p.addressCountry ?? null,
     p.phone ?? null,
     p.website ?? null,
+    p.yelp ?? null,
     p.socials?.length ? JSON.stringify(p.socials) : null,
     p.emails?.length ? JSON.stringify(p.emails) : null,
     p.brandName ?? null,
@@ -398,7 +400,7 @@ export async function upsertPlacesInBatches(
   batches: AsyncIterable<readonly Place[]>,
 ): Promise<number> {
   const db = await getDatabase();
-  const rowPlaceholders = `(${Array(25).fill('?').join(', ')})`;
+  const rowPlaceholders = `(${Array(26).fill('?').join(', ')})`;
   let written = 0;
 
   for await (const batch of batches) {
@@ -422,6 +424,7 @@ export async function upsertPlacesInBatches(
              address_country = COALESCE(excluded.address_country, places.address_country),
              phone = COALESCE(excluded.phone, places.phone),
              website = COALESCE(excluded.website, places.website),
+             yelp = COALESCE(excluded.yelp, places.yelp),
              social_media = COALESCE(excluded.social_media, places.social_media),
              emails = COALESCE(excluded.emails, places.emails),
              brand_name = COALESCE(excluded.brand_name, places.brand_name),
@@ -1146,6 +1149,21 @@ function mapStatus(status?: string): 'open' | 'closed_temporarily' | 'closed_per
 }
 
 /**
+ * First web link that is a canonical Yelp business listing, or undefined.
+ * Overture exposes Yelp listings via its `socials`/`websites` arrays.
+ */
+export function extractYelpListingUrl(
+  links: readonly (string | undefined)[] | undefined,
+): string | undefined {
+  for (const link of links ?? []) {
+    if (!link) continue;
+    const canonical = canonicalYelpListingUrl(link.trim());
+    if (canonical) return canonical;
+  }
+  return undefined;
+}
+
+/**
  * Convert a single Overture GeoJSON feature to a Polaris Place.
  * Returns null if the feature lacks required fields.
  */
@@ -1178,6 +1196,7 @@ export function overtureFeatureToPlace(feature: OverturePlace): Place | null {
     addressCountry: addr?.country ?? undefined,
     phone: props.phones?.[0] ?? undefined,
     website: props.websites?.[0] ?? undefined,
+    yelp: extractYelpListingUrl([...(props.socials ?? []), ...(props.websites ?? [])]),
     socials: props.socials?.length ? props.socials : undefined,
     emails: props.emails?.length ? props.emails : undefined,
     hours: undefined, // Overture doesn't include opening hours
@@ -1201,10 +1220,10 @@ export function overtureFeatureToPlace(feature: OverturePlace): Place | null {
 async function upsertOverturePlaces(places: Place[]): Promise<void> {
   const db = await getDatabase();
 
-  // SQLite variable limit is 999. With 25 columns per row, max ~39 rows per statement.
+  // SQLite variable limit is 999. With 26 columns per row, max ~38 rows per statement.
   // Use chunks of 30 rows to stay safely under the limit.
   const CHUNK_SIZE = PLACES_INSERT_ROWS;
-  const colCount = 25;
+  const colCount = 26;
 
   interface FtsRow {
     rowid: number;
@@ -1252,6 +1271,7 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
           address_country = COALESCE(excluded.address_country, places.address_country),
           phone = COALESCE(excluded.phone, places.phone),
           website = COALESCE(excluded.website, places.website),
+          yelp = COALESCE(excluded.yelp, places.yelp),
           social_media = COALESCE(excluded.social_media, places.social_media),
           emails = COALESCE(excluded.emails, places.emails),
           brand_name = COALESCE(excluded.brand_name, places.brand_name),

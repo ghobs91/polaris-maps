@@ -72,6 +72,7 @@ export interface Place {
   socials?: string[]; // Social media URLs (Overture socials[])
   emails?: string[]; // Email addresses (Overture emails[])
   tripadvisor?: string; // TripAdvisor listing URL (external review source)
+  yelp?: string; // Yelp listing URL (external review source)
   hours?: string; // JSON-encoded
   brandWikidata?: string;
   brandName?: string; // Brand display name (Overture brand.names.primary)

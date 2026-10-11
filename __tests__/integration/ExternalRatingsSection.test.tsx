@@ -115,6 +115,17 @@ describe('ExternalRatingsSection', () => {
     expect(screen.queryByTestId('external-ratings-pill-yelp')).toBeNull();
   });
 
+  it('passes the enriched website into the provider query when OSM carries none', async () => {
+    mockResolveKnownListing.mockResolvedValue(null);
+
+    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} website="https://foo.example.com" />);
+
+    await waitFor(() => expect(mockResolveKnownListing).toHaveBeenCalled());
+    expect(mockResolveKnownListing.mock.calls[0][1]).toMatchObject({
+      website: 'https://foo.example.com',
+    });
+  });
+
   it('falls back to search for both providers and matches by identity', async () => {
     mockResolveKnownListing.mockResolvedValue(null);
 

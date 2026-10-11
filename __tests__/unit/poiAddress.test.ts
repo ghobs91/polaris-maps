@@ -37,6 +37,17 @@ describe('assemblePoiAddress', () => {
   it('prefers structured tags over an enriched formatted address', () => {
     expect(assemblePoiAddress({ 'addr:street': 'Main St' }, 'Somewhere else')).toBe('Main St');
   });
+
+  it('keeps a freeform addr:full when only city/state/postcode tags exist', () => {
+    expect(
+      assemblePoiAddress({
+        'addr:full': '2890 HEMPSTEAD TRNPK, Unit 4',
+        'addr:city': 'LEVITTOWN',
+        'addr:state': 'NY',
+        'addr:postcode': '11756',
+      }),
+    ).toBe('2890 HEMPSTEAD TRNPK, Unit 4, LEVITTOWN NY 11756');
+  });
 });
 
 describe('normalizeAddress / addressesMatch', () => {

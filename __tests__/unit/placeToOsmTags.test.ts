@@ -1,4 +1,4 @@
-import { osmTagsFromPoi, placeToOsmTags } from '../../src/utils/placeToOsmPoi';
+import { osmTagsFromPoi, placeToOsmPoi, placeToOsmTags } from '../../src/utils/placeToOsmPoi';
 import type { Place } from '../../src/models/poi';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
 
@@ -98,5 +98,21 @@ describe('osmTagsFromPoi', () => {
     };
 
     expect(osmTagsFromPoi(poi)).toEqual({ name: 'Bakery', shop: 'bakery' });
+  });
+});
+
+describe('placeToOsmPoi', () => {
+  it('carries external rating listings through as polaris tags', () => {
+    const poi = placeToOsmPoi(
+      makePlace({
+        tripadvisor: 'https://www.tripadvisor.com/Restaurant_Review-g1-d1-Review-Foo.html',
+        yelp: 'https://www.yelp.com/biz/foo-bar',
+      }),
+    );
+
+    expect(poi.tags['polaris:tripadvisor']).toBe(
+      'https://www.tripadvisor.com/Restaurant_Review-g1-d1-Review-Foo.html',
+    );
+    expect(poi.tags['polaris:yelp']).toBe('https://www.yelp.com/biz/foo-bar');
   });
 });

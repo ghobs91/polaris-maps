@@ -162,6 +162,7 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       address_country TEXT,
       phone TEXT,
       website TEXT,
+      yelp TEXT,
       social_media TEXT,
       emails TEXT,
       brand_name TEXT,
@@ -292,6 +293,7 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     `ALTER TABLE places ADD COLUMN brand_name TEXT`,
     `ALTER TABLE places ADD COLUMN social_media TEXT`,
     `ALTER TABLE places ADD COLUMN emails TEXT`,
+    `ALTER TABLE places ADD COLUMN yelp TEXT`,
   ]) {
     try {
       await database.execAsync(ddl);

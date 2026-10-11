@@ -48,10 +48,13 @@ const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
 export function ExternalRatingsSection({
   poi,
   enrichedFormattedAddress,
+  website,
   onWriteReview,
 }: {
   poi: OsmPoi;
   enrichedFormattedAddress?: string | null;
+  /** MapKit-enriched place website, used when OSM carries no website tag. */
+  website?: string | null;
   /** Opens the write-a-review surface when no external rating is found. */
   onWriteReview?: () => void;
 }) {
@@ -63,10 +66,11 @@ export function ExternalRatingsSection({
       lat: poi.lat,
       lng: poi.lng,
       address: assemblePoiAddress(poi.tags, enrichedFormattedAddress ?? null),
-      website: poi.tags['website'] ?? poi.tags['contact:website'] ?? poi.tags['url'] ?? null,
+      website:
+        poi.tags['website'] ?? poi.tags['contact:website'] ?? poi.tags['url'] ?? website ?? null,
       tags: poi.tags,
     }),
-    [poi, enrichedFormattedAddress],
+    [poi, enrichedFormattedAddress, website],
   );
 
   const { states, handleMessage, handleError } = useExternalRatings(query, poi.id);
