@@ -32,7 +32,7 @@ The system SHALL provide a function that accepts a Place model and an OSM access
 - **WHEN** a selective auto-submission is triggered for an Overture-sourced Place
 - **AND** `checkPoiExistsInOsm()` returns false
 - **THEN** the system SHALL extract OSM-compatible tags using `placeToOsmTags()`
-- **AND** create a new OSM changeset with comment "Added Overture Maps POI via Polaris Maps"
+- **AND** create a new OSM changeset whose comment names the added place, its primary OSM tag, and the data source
 - **AND** call the OSM API to create the node
 - **AND** close the changeset
 - **AND** return the created node ID and changeset ID
@@ -56,7 +56,7 @@ The system SHALL create a dedicated OSM changeset for each auto-submission, tagg
 #### Scenario: Changeset created per submission
 
 - **WHEN** a selective auto-submission begins
-- **THEN** the system SHALL create a new OSM changeset with the comment "Added Overture Maps POI via Polaris Maps"
+- **THEN** the system SHALL create a new OSM changeset whose comment names the added place, its primary OSM tag, and the data source
 - **AND** tag the changeset with `created_by=Polaris Maps`
 
 #### Scenario: Changeset closed after node creation

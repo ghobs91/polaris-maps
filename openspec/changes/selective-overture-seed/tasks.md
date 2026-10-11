@@ -5,7 +5,7 @@
 - [x] 1.3 Before submitting, check the dedup Set — skip if already submitted this session
 - [x] 1.4 Call `checkPoiExistsInOsm()` from `osmFetcher.ts` — skip if POI already exists in OSM
 - [x] 1.5 On fail-open (Overpass error), proceed with submission rather than blocking
-- [x] 1.6 Call `submitOsmNodeCreate()` with tags from `placeToOsmTags()` and changeset comment `"Added Overture Maps POI via Polaris Maps"`
+- [x] 1.6 Call `submitOsmNodeCreate()` with tags from `placeToOsmTags()` and a place-specific changeset comment (place name + primary OSM tag + source)
 - [x] 1.7 On success, add the POI key to the dedup Set
 - [x] 1.8 On failure, surface error via `Alert.alert()` (existing pattern in the file)
 - [x] 1.9 The auto-submit MUST be silent (no intermediate UI changes during submission) — only notify user if submission fails

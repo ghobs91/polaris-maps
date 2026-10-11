@@ -22,9 +22,9 @@ jest.mock('../../src/services/osm/osmEditService', () => ({
 }));
 
 import {
+  buildSeedChangesetComment,
   clearPlaceSeedState,
   markPlaceHandled,
-  OVERTURE_SEED_CHANGESET_COMMENT,
   placeSeedKey,
   seedPlaceToOsm,
   wasPlaceSeedHandled,
@@ -74,7 +74,7 @@ describe('placeSeedService', () => {
       47.6,
       -122.3,
       target.tags,
-      OVERTURE_SEED_CHANGESET_COMMENT,
+      buildSeedChangesetComment(target),
     );
     expect(result).toEqual({ status: 'submitted', nodeId: 42, changesetId: 7 });
     // Recorded in the persistent ledger.
@@ -155,5 +155,40 @@ describe('placeSeedService', () => {
     expect(result.status).toBe('skipped');
     expect(mockExists).not.toHaveBeenCalled();
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildSeedChangesetComment', () => {
+  it('names the place and its primary OSM tag', () => {
+    expect(
+      buildSeedChangesetComment({
+        lat: 0,
+        lng: 0,
+        name: 'Tranquility Spa 3 Inc',
+        tags: { name: 'Tranquility Spa 3 Inc', amenity: 'spa' },
+      }),
+    ).toBe('Added "Tranquility Spa 3 Inc" (amenity=spa) · Source: Overture');
+  });
+
+  it('falls back to the name when there is no primary tag', () => {
+    expect(
+      buildSeedChangesetComment({
+        lat: 0,
+        lng: 0,
+        name: 'Mystery Place',
+        tags: { name: 'Mystery Place' },
+      }),
+    ).toBe('Added "Mystery Place" · Source: Overture');
+  });
+
+  it('trims the name', () => {
+    expect(
+      buildSeedChangesetComment({
+        lat: 0,
+        lng: 0,
+        name: '  Trimmed  ',
+        tags: { name: 'Trimmed', shop: 'bakery' },
+      }),
+    ).toBe('Added "Trimmed" (shop=bakery) · Source: Overture');
   });
 });

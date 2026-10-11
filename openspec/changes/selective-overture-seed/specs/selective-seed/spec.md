@@ -80,6 +80,6 @@ The system SHALL create and close a single OSM changeset for each selective auto
 #### Scenario: Changeset lifecycle
 
 - **WHEN** an Overture-sourced POI passes existence check and is submitted
-- **THEN** the system SHALL create a new changeset with the comment `"Added Overture Maps POI via Polaris Maps"`
+- **THEN** the system SHALL create a new changeset whose comment names the added place, its primary OSM tag, and the data source (e.g. `Added "Tranquility Spa" (amenity=spa) · Source: Overture`)
 - **AND** tag the changeset with `created_by=Polaris Maps`
 - **AND** close the changeset immediately after the node is created

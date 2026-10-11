@@ -19,11 +19,9 @@
  * duplicate.
  */
 import { checkPoiExistsInOsm } from '../poi/osmFetcher';
+import { derivePrimaryTag } from '../poi/osmMatchScorer';
 import { submitOsmNodeCreate } from './osmEditService';
 import { hasSeededOverturePlace, recordSeededOverturePlace } from './overtureSeedLedger';
-
-/** Changeset comment used for every auto-seeded node. */
-export const OVERTURE_SEED_CHANGESET_COMMENT = 'Added Overture Maps POI via Polaris Maps';
 
 export type PlaceSeedStatus = 'submitted' | 'exists' | 'skipped' | 'unverified' | 'error';
 
@@ -45,6 +43,28 @@ export interface PlaceSeedTarget {
   tags: Record<string, string>;
   /** Overture GERS id, used for the persistent on-device submission ledger. */
   overtureId?: string;
+}
+
+/** Appended to auto-seed changeset comments so OSM reviewers see the source. */
+const SEED_SOURCE_SUFFIX = ' · Source: Overture';
+
+/**
+ * Build a place-specific changeset comment.
+ *
+ * OSM reviewers read these in the changeset list, so lead with *what* was added
+ * — the place name and its primary OSM tag — rather than a generic batch label
+ * that repeats for every edit, then note the data source for QA transparency.
+ */
+export function buildSeedChangesetComment(target: PlaceSeedTarget): string {
+  const name = target.name.trim();
+  const primary = derivePrimaryTag(target.tags);
+  const tag = primary ? `${primary.type}=${primary.value}` : null;
+  let comment: string;
+  if (name && tag) comment = `Added "${name}" (${tag})`;
+  else if (name) comment = `Added "${name}"`;
+  else if (tag) comment = `Added a place (${tag})`;
+  else comment = 'Added a place';
+  return `${comment}${SEED_SOURCE_SUFFIX}`;
 }
 
 /** Round to ~11 m precision so sub-metre jitter doesn't defeat dedup. */
@@ -120,7 +140,7 @@ export async function seedPlaceToOsm(
       target.lat,
       target.lng,
       target.tags,
-      OVERTURE_SEED_CHANGESET_COMMENT,
+      buildSeedChangesetComment(target),
     );
     seededKeys.add(key);
     if (target.overtureId) recordSeededOverturePlace(target.overtureId, nodeId);
