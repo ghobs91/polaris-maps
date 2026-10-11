@@ -20,5 +20,12 @@ import './src/polyfills/abortSignal';
 // mounted, so relying on a route module to register it leaves the task undefined.
 import './src/services/navigation/backgroundLocationTask';
 
+// Boot CarPlay from the bundle, not a React effect: a CarPlay cold launch has no
+// phone window, where React effects and timers never run (see `bootCarPlay`).
+import { bootCarPlay } from './src/services/carplay/bootCarPlay';
+
 // Hand off to Expo Router's standard entry point.
 import 'expo-router/entry';
+
+// Subscribe the CarPlay manager now, while the bundle is being evaluated.
+bootCarPlay();

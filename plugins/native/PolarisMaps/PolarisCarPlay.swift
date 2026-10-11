@@ -44,6 +44,7 @@ class PolarisCarPlay: RCTEventEmitter {
   override init() {
     super.init()
     Self.instance = self
+    NSLog("[PolarisCarPlay] module init")
     // Activation is safe before JS attaches (the template is native), but the
     // connection event waits for `startObserving` so it isn't emitted into a
     // void: RCTEventEmitter drops events with no listeners, which would also
@@ -209,6 +210,7 @@ class PolarisCarPlay: RCTEventEmitter {
   }
 
   override func startObserving() {
+    NSLog("[PolarisCarPlay] startObserving: JS bridge attached")
     Self.attachPendingSceneIfNeeded()
     // A fresh JS runtime (first attach, or a fast refresh) needs the current
     // connection state even if an earlier publish went to a previous runtime —

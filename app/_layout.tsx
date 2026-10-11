@@ -79,7 +79,9 @@ function RootLayoutInner() {
 
   useEffect(() => {
     // Defer CarPlay init until after the initial render & layout pass completes.
-    // This avoids interfering with MapLibre's first camera setup.
+    // This avoids interfering with MapLibre's first camera setup. On a CarPlay
+    // cold launch (no phone window) this effect and its timer never run, so
+    // `index.js` boots CarPlay at bundle load instead and this call no-ops.
     const task = InteractionManager.runAfterInteractions(() => {
       initCarPlay();
     });
