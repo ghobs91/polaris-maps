@@ -3,6 +3,13 @@ import type { ValhallaRoute, ValhallaManeuver, CostingModel } from '../models/ro
 
 export type Waypoint = { lat: number; lng: number; name?: string; subtitle?: string };
 
+/** A traffic-aware alternative route the user can adopt mid-navigation. */
+export interface FasterRouteSuggestion {
+  route: ValhallaRoute;
+  /** Seconds the alternative saves versus the current route's remaining time. */
+  savingSeconds: number;
+}
+
 interface NavigationState {
   activeRoute: ValhallaRoute | null;
   alternateRoutes: ValhallaRoute[];
@@ -28,6 +35,9 @@ interface NavigationState {
   trafficEtaSeconds: number | null;
   freeFlowEtaSeconds: number | null;
   trafficMatchRatio: number | null;
+
+  // Faster-route suggestion (traffic-aware alternative offered during navigation)
+  fasterRouteSuggestion: FasterRouteSuggestion | null;
 
   // Route preview (directions mode, before turn-by-turn)
   routePreview: ValhallaRoute | null;
@@ -65,6 +75,12 @@ interface NavigationState {
   updateEta: (etaSeconds: number, remainingMeters: number) => void;
   updateTrafficEta: (trafficEta: number, freeFlowEta: number, matchRatio: number) => void;
   replaceRoute: (route: ValhallaRoute) => void;
+  /** Surface a traffic-aware faster-route suggestion during navigation. */
+  suggestFasterRoute: (route: ValhallaRoute, savingSeconds: number) => void;
+  /** Adopt the suggested route and clear the suggestion. */
+  acceptFasterRoute: () => void;
+  /** Dismiss the suggestion without changing the route. */
+  dismissFasterRoute: () => void;
   /** Switch to a precomputed alternative route mid-navigation. */
   switchToAlternate: (route: ValhallaRoute) => void;
   addWaypointAndReplaceRoute: (route: ValhallaRoute, waypoints: Waypoint[]) => void;
@@ -90,6 +106,8 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   trafficEtaSeconds: null,
   freeFlowEtaSeconds: null,
   trafficMatchRatio: null,
+
+  fasterRouteSuggestion: null,
 
   routePreview: null,
   routePreviewAlternates: [],
@@ -145,6 +163,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       trafficEtaSeconds: previewTrafficEta,
       freeFlowEtaSeconds: previewTrafficEta != null ? route.summary.durationSeconds : null,
       trafficMatchRatio: previewTrafficEta != null ? 1 : null,
+      fasterRouteSuggestion: null,
       // Clear preview when starting real navigation
       routePreview: null,
       routePreviewAlternates: [],
@@ -194,6 +213,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       trafficEtaSeconds: null,
       freeFlowEtaSeconds: null,
       trafficMatchRatio: null,
+      fasterRouteSuggestion: null,
     }),
 
   advanceStep: () => {
@@ -243,8 +263,21 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isRerouting: false,
       hasDeviated: false,
       hasArrived: false,
+      fasterRouteSuggestion: null,
     });
   },
+
+  suggestFasterRoute: (route, savingSeconds) =>
+    set({ fasterRouteSuggestion: { route, savingSeconds } }),
+
+  acceptFasterRoute: () => {
+    const { fasterRouteSuggestion } = get();
+    if (!fasterRouteSuggestion) return;
+    // replaceRoute clears the suggestion (and stale alternates).
+    get().replaceRoute(fasterRouteSuggestion.route);
+  },
+
+  dismissFasterRoute: () => set({ fasterRouteSuggestion: null }),
 
   switchToAlternate: (route) => {
     const { activeRoute, alternateRoutes } = get();
@@ -261,6 +294,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isRerouting: false,
       hasDeviated: false,
       hasArrived: false,
+      fasterRouteSuggestion: null,
     });
   },
 
@@ -276,6 +310,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       isRerouting: false,
       hasDeviated: false,
       hasArrived: false,
+      fasterRouteSuggestion: null,
       waypoints,
     });
   },

@@ -288,8 +288,8 @@ describe('CarPlayManager', () => {
   it('does not initialise twice', () => {
     initCarPlay();
     initCarPlay();
-    // addListener should be called only 13 times (once per event), not 26
-    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(13);
+    // addListener should be called only 15 times (once per event), not 30
+    expect(carPlayEmitter.addListener).toHaveBeenCalledTimes(15);
   });
 
   it('tracks connected state', () => {
@@ -1402,6 +1402,43 @@ describe('CarPlayManager', () => {
 
     it('returns null when no position is available', () => {
       expect(resolveReportPosition()).toBeNull();
+    });
+  });
+
+  describe('faster-route suggestion', () => {
+    function makeFasterRoute(): ValhallaRoute {
+      const route = makeRoute();
+      return {
+        ...route,
+        summary: { ...route.summary, durationSeconds: 300 },
+      };
+    }
+
+    it('adopts the suggested route when the driver taps Take it', () => {
+      initCarPlay();
+      fireEvent('carPlayConnected');
+      const primary = makeRoute();
+      const faster = makeFasterRoute();
+      useNavigationStore.getState().startNavigation(primary, [], { lat: 1, lng: 2 }, 'auto', []);
+      useNavigationStore.getState().suggestFasterRoute(faster, 300);
+
+      fireEvent('carPlayFasterRouteAccept');
+
+      expect(useNavigationStore.getState().activeRoute).toBe(faster);
+      expect(useNavigationStore.getState().fasterRouteSuggestion).toBeNull();
+    });
+
+    it('keeps the active route when the driver dismisses', () => {
+      initCarPlay();
+      fireEvent('carPlayConnected');
+      const primary = makeRoute();
+      useNavigationStore.getState().startNavigation(primary, [], { lat: 1, lng: 2 }, 'auto', []);
+      useNavigationStore.getState().suggestFasterRoute(makeFasterRoute(), 300);
+
+      fireEvent('carPlayFasterRouteDismiss');
+
+      expect(useNavigationStore.getState().activeRoute).toBe(primary);
+      expect(useNavigationStore.getState().fasterRouteSuggestion).toBeNull();
     });
   });
 });

@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
-import { NextTurnBanner, NavigationHud } from '@/components/navigation';
+import { NextTurnBanner, NavigationHud, FasterRouteBanner } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import { IncidentAheadBanner } from '@/components/navigation/IncidentAheadBanner';
@@ -588,6 +588,12 @@ export default function NavigationScreen() {
   if (isNavigating && carPlayConnected) {
     return (
       <View style={styles.container}>
+        <View
+          style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}
+          pointerEvents="box-none"
+        >
+          <FasterRouteBanner />
+        </View>
         <CarPlayNavigationCompanion
           route={activeRoute}
           currentStepIndex={guidanceIdx}
@@ -657,6 +663,7 @@ export default function NavigationScreen() {
             <Text style={styles.rerouteSub}>Using live GPS · auto-reroutes</Text>
           </View>
         )}
+        <FasterRouteBanner />
         <IncidentAheadBanner />
 
         {alternateRoutes.length > 0 && (

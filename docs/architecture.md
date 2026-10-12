@@ -92,7 +92,7 @@ flowchart TD
 
 Key flows:
 
-1. **Traffic** — anonymous speed probes broadcast on geohash4 Hyperswarm topics; fused with TomTom + HERE feeds; 25%+ delay triggers automatic rerouting.
+1. **Traffic** — anonymous speed probes broadcast on geohash4 Hyperswarm topics; fused with TomTom + HERE feeds; a candidate route 2+ minutes faster than the remaining trip surfaces a dismissible faster-route suggestion (never a silent swap).
 2. **Region downloads** — region packs (vector tiles, routing graphs, geocoding indexes) downloaded, then seeded back via Hyperdrive.
 3. **Search** — 3-phase: local Overture SQLite → parallel Overpass + Overture → Nominatim; MapKit enriches selected POIs on iOS.
 4. **Offline** — outbound actions queue in MMKV (cap 500) and replay on reconnect.

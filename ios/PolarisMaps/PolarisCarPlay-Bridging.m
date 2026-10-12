@@ -18,6 +18,8 @@ RCT_EXTERN_METHOD(showArrival:(NSDictionary *)data)
 
 RCT_EXTERN_METHOD(showIncidentAlert:(NSDictionary *)data)
 
+RCT_EXTERN_METHOD(showFasterRouteAlert:(NSDictionary *)data)
+
 RCT_EXTERN_METHOD(updateIncidents:(NSArray *)incidents)
 
 RCT_EXTERN_METHOD(updateMapStyle:(NSString *)json)

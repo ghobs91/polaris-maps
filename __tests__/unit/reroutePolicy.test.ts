@@ -1,8 +1,8 @@
 import {
   isRerouteCoolingDown,
-  isReplacementRouteAcceptable,
+  isSignificantlyFasterRoute,
+  MIN_FASTER_ROUTE_SAVING_SECONDS,
   REROUTE_COOLDOWN_MS,
-  SIGNIFICANT_DELAY_FACTOR,
 } from '../../src/services/traffic/reroutePolicy';
 
 describe('isRerouteCoolingDown', () => {
@@ -28,26 +28,28 @@ describe('isRerouteCoolingDown', () => {
   });
 });
 
-describe('isReplacementRouteAcceptable', () => {
-  it('accepts a route that is faster than the current one', () => {
-    expect(isReplacementRouteAcceptable(100, 200)).toBe(true);
+describe('isSignificantlyFasterRoute', () => {
+  it('accepts a candidate that saves at least the minimum', () => {
+    expect(isSignificantlyFasterRoute(600, 800)).toBe(true);
+    expect(isSignificantlyFasterRoute(800 - MIN_FASTER_ROUTE_SAVING_SECONDS, 800)).toBe(true);
   });
 
-  it('accepts a route within the tolerance band', () => {
-    // current * 1.25 = 250s; anything under that is accepted.
-    expect(isReplacementRouteAcceptable(240, 200)).toBe(true);
+  it('rejects a candidate that saves less than the minimum', () => {
+    expect(isSignificantlyFasterRoute(800 - MIN_FASTER_ROUTE_SAVING_SECONDS + 1, 800)).toBe(false);
   });
 
-  it('rejects a route at or beyond the tolerance factor', () => {
-    expect(isReplacementRouteAcceptable(250, 200)).toBe(false);
-    expect(isReplacementRouteAcceptable(260, 200)).toBe(false);
+  it('rejects a candidate that is slower or equal', () => {
+    expect(isSignificantlyFasterRoute(800, 800)).toBe(false);
+    expect(isSignificantlyFasterRoute(900, 800)).toBe(false);
   });
 
-  it('uses the documented factor boundary', () => {
-    const current = 200;
-    expect(isReplacementRouteAcceptable(current * SIGNIFICANT_DELAY_FACTOR, current)).toBe(false);
-    expect(isReplacementRouteAcceptable(current * SIGNIFICANT_DELAY_FACTOR - 1, current)).toBe(
-      true,
-    );
+  it('never treats a non-positive current duration as improvable', () => {
+    expect(isSignificantlyFasterRoute(0, 0)).toBe(false);
+    expect(isSignificantlyFasterRoute(10, -5)).toBe(false);
+  });
+
+  it('honours a custom minimum', () => {
+    expect(isSignificantlyFasterRoute(700, 800, 60)).toBe(true);
+    expect(isSignificantlyFasterRoute(750, 800, 60)).toBe(false);
   });
 });

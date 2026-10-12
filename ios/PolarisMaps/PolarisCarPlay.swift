@@ -254,6 +254,10 @@ class PolarisCarPlay: RCTEventEmitter {
     DispatchQueue.main.async { Self.mapTemplateManager.showIncidentAlert(with: data) }
   }
 
+  @objc func showFasterRouteAlert(_ data: NSDictionary) {
+    DispatchQueue.main.async { Self.mapTemplateManager.showFasterRouteAlert(with: data) }
+  }
+
   @objc func updateIncidents(_ incidents: NSArray) {
     let markers = incidents.compactMap { element -> CarPlayIncidentMarker? in
       guard let dict = element as? NSDictionary,
@@ -1524,6 +1528,31 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       ))
   }
 
+  /// Traffic-aware faster-route suggestion. "Take it" adopts the phone's
+  /// suggested route (via `carPlayFasterRouteAccept`); "Dismiss" declines it
+  /// and starts the phone's anti-thrash cooldown.
+  func showFasterRouteAlert(with data: NSDictionary) {
+    guard mapTemplate != nil, activeAlert == nil else { return }
+    let savingSeconds = (data["savingSeconds"] as? NSNumber)?.doubleValue ?? 0
+    let take = CPAlertAction(title: "Take it", style: .default) { [weak self] _ in
+      self?.hideNavigationAlert()
+      PolarisCarPlay.emitFasterRouteAccept()
+    }
+    let dismiss = CPAlertAction(title: "Dismiss", style: .cancel) { [weak self] _ in
+      self?.hideNavigationAlert()
+      PolarisCarPlay.emitFasterRouteDismiss()
+    }
+    presentAlert(
+      CPNavigationAlert(
+        titleVariants: ["Faster route"],
+        subtitleVariants: ["Save \(durationString(savingSeconds))"],
+        image: nil,
+        primaryAction: take,
+        secondaryAction: dismiss,
+        duration: 0
+      ))
+  }
+
   /// Arrival card shown when the destination is reached. "Done" ends the trip
   /// on both surfaces (the phone mirror stops via `carPlayArrivalDismiss`).
   func showArrival(with data: NSDictionary) {
@@ -2511,6 +2540,18 @@ extension PolarisCarPlay {
 
   fileprivate static func emitArrivalDismiss() {
     emit("carPlayArrivalDismiss", [:])
+  }
+
+  /// The driver accepted the faster-route suggestion on the head unit; JS
+  /// adopts the pending suggestion.
+  fileprivate static func emitFasterRouteAccept() {
+    emit("carPlayFasterRouteAccept", [:])
+  }
+
+  /// The driver declined the faster-route suggestion; JS clears it and starts
+  /// the cooldown.
+  fileprivate static func emitFasterRouteDismiss() {
+    emit("carPlayFasterRouteDismiss", [:])
   }
 
   /// Called from the dashboard scene delegate (separate file), so it must be

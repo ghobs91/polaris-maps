@@ -776,6 +776,47 @@ export async function reroute(
   }
 }
 
+/**
+ * Compute candidate reroutes from the current position, returning the primary
+ * plus any engine alternatives. The faster-route monitor compares these against
+ * the active route; alternatives are only requested on the online engine (which
+ * supports both alternates and an origin heading). With via points, or offline,
+ * it degrades to the single route that `reroute()` would return.
+ */
+export async function rerouteCandidates(
+  currentPosition: { lat: number; lng: number; bearing: number },
+  destination: { lat: number; lng: number },
+  costing: CostingModel,
+  options?: RerouteOptions & { alternates?: number },
+): Promise<ValhallaRoute[]> {
+  const via = options?.via ?? [];
+  const alternates = options?.alternates ?? 0;
+
+  // Alternates are only supported on the online multi-point engine; the native
+  // fast-path and MapKit return a single route, and Valhalla does not combine
+  // alternates with via points.
+  if (alternates > 0 && via.length === 0 && isOnline()) {
+    try {
+      const routes = await computeRouteOnline(
+        [{ lat: currentPosition.lat, lng: currentPosition.lng }, destination],
+        costing,
+        {
+          avoidTolls: options?.avoidTolls,
+          avoidHighways: options?.avoidHighways,
+          avoidFerries: options?.avoidFerries,
+          originHeading: options?.heading,
+          alternates,
+        },
+      );
+      if (routes.length) return routes;
+    } catch {
+      // Fall through to the single-route path.
+    }
+  }
+
+  return [await reroute(currentPosition, destination, costing, options)];
+}
+
 export async function updateTrafficSpeeds(speeds: Record<string, number>): Promise<void> {
   if (!initialized || !isOnline()) return;
   return Valhalla.updateTrafficSpeeds(speeds);

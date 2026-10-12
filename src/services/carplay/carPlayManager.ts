@@ -40,6 +40,7 @@ import { useCarPlayStore } from '../../stores/carPlayStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
 import { INCIDENT_TYPE_LABELS, isIncidentType } from '../traffic/incidentWire';
+import { noteFasterRouteDismissed } from '../traffic/rerouteCooldown';
 import { haversineMeters } from '../../utils/routeSnap';
 import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
 import type {
@@ -65,6 +66,7 @@ let carPlayDark: boolean | null = null;
 let carPlayRouteKey: string | null = null;
 let previewKey: string | null = null;
 let rerouteAlertShown = false;
+let fasterRouteAlertShown = false;
 let lastDistanceBucket: number | null = null;
 let lastTrafficSignature = '';
 let searchSession: SearchSession | null = null;
@@ -110,6 +112,8 @@ export function initCarPlay(): void {
     CarPlay.emitter.addListener('carPlayContentStyleChanged', onContentStyleChanged),
     CarPlay.emitter.addListener('carPlayToggleMute', onToggleMute),
     CarPlay.emitter.addListener('carPlayArrivalDismiss', onArrivalDismiss),
+    CarPlay.emitter.addListener('carPlayFasterRouteAccept', onFasterRouteAccept),
+    CarPlay.emitter.addListener('carPlayFasterRouteDismiss', onFasterRouteDismiss),
     CarPlay.emitter.addListener('carPlayDashboardFavorite', onDashboardFavorite),
     CarPlay.emitter.addListener('carPlayNavigationCancelled', onNavigationCancelled),
     CarPlay.emitter.addListener('carPlayLocateRequest', onLocateRequest),
@@ -163,6 +167,7 @@ export function teardownCarPlay(): void {
   carPlayUserLocation = null;
   stopIdleLocationUpdates();
   idleLocationStarting = false;
+  fasterRouteAlertShown = false;
 }
 
 /** Whether CarPlay is currently connected. */
@@ -310,6 +315,7 @@ function onDisconnected() {
   lastMapCenterLat = Number.NaN;
   lastMapCenterLng = Number.NaN;
   stopIdleLocationUpdates();
+  fasterRouteAlertShown = false;
 }
 
 function syncNavigationState(state: ReturnType<typeof useNavigationStore.getState>) {
@@ -341,6 +347,7 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     lastDistanceBucket = null;
     lastTrafficSignature = '';
     hideRerouteAlert();
+    syncFasterRouteAlert(null);
     syncIncidents();
     syncRoutePreview(state);
     return;
@@ -375,6 +382,7 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
   const tracking = useNavigationTrackingStore.getState();
   const rerouting = state.isRerouting || state.hasDeviated;
   syncRerouteAlert(rerouting);
+  syncFasterRouteAlert(state.fasterRouteSuggestion);
   const liveDistance = tracking.distanceToTurn ?? maneuver.distanceMeters;
   lastDistanceBucket = distanceBucket(liveDistance);
 
@@ -557,6 +565,17 @@ function onArrivalDismiss(): void {
   useNavigationStore.getState().stopNavigation();
 }
 
+/** The driver tapped "Take it" on the CarPlay faster-route suggestion. */
+function onFasterRouteAccept(): void {
+  useNavigationStore.getState().acceptFasterRoute();
+}
+
+/** The driver dismissed the CarPlay faster-route suggestion; start the cooldown. */
+function onFasterRouteDismiss(): void {
+  useNavigationStore.getState().dismissFasterRoute();
+  noteFasterRouteDismissed();
+}
+
 /** The driver ended the trip from CarPlay; stop navigation on the phone too. */
 function onNavigationCancelled(): void {
   const nav = useNavigationStore.getState();
@@ -674,7 +693,7 @@ function syncRerouteAlert(rerouting: boolean): void {
   rerouteAlertShown = rerouting;
   if (rerouting) {
     CarPlay.showReroutingAlert();
-  } else {
+  } else if (!fasterRouteAlertShown) {
     CarPlay.hideNavigationAlert();
   }
 }
@@ -682,7 +701,20 @@ function syncRerouteAlert(rerouting: boolean): void {
 function hideRerouteAlert(): void {
   if (!rerouteAlertShown) return;
   rerouteAlertShown = false;
-  CarPlay.hideNavigationAlert();
+  // Don't tear down a faster-route alert that now owns the head unit.
+  if (!fasterRouteAlertShown) CarPlay.hideNavigationAlert();
+}
+
+/** Shows/dismisses the CarPlay faster-route suggestion only on transitions. */
+function syncFasterRouteAlert(suggestion: { savingSeconds: number } | null): void {
+  const want = suggestion != null;
+  if (want === fasterRouteAlertShown) return;
+  fasterRouteAlertShown = want;
+  if (want) {
+    CarPlay.showFasterRouteAlert({ savingSeconds: suggestion!.savingSeconds });
+  } else if (!rerouteAlertShown) {
+    CarPlay.hideNavigationAlert();
+  }
 }
 
 /**

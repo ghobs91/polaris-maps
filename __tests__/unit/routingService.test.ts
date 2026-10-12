@@ -590,3 +590,47 @@ describe('routingService fallback', () => {
     });
   });
 });
+
+describe('rerouteCandidates', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIsOnline.mockReturnValue(true);
+    mockGetConnectionQuality.mockReturnValue('good');
+    mockMapKitAvailable.mockReturnValue(true);
+    global.fetch = mockFetchImpl;
+  });
+
+  it('requests alternates from the online engine when no via points are present', async () => {
+    const svc = loadRoutingService();
+    const trip = validValhallaResponse().trip;
+    mockFetchImpl.mockResolvedValue({
+      ok: true,
+      json: async () => ({ alternates: [{ trip }, { trip }, { trip }] }),
+    } as unknown as Response);
+
+    const routes = await svc.rerouteCandidates(reroutePos, destination, 'auto', {
+      heading: 90,
+      alternates: 2,
+    });
+
+    expect(mockFetchImpl).toHaveBeenCalled();
+    expect(routes.length).toBeGreaterThan(1);
+    // The alternates count is forwarded to the provider request body.
+    const body = JSON.parse((mockFetchImpl.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.alternates).toBe(2);
+  });
+
+  it('degrades to a single route when via points are present', async () => {
+    const svc = loadRoutingService();
+    mockIsOnline.mockReturnValue(false);
+    mockMapKitSuccess();
+
+    const routes = await svc.rerouteCandidates(reroutePos, destination, 'auto', {
+      via: [{ lat: 40.73, lng: -73.99 }],
+      alternates: 2,
+    });
+
+    expect(routes).toHaveLength(1);
+    expect(mockFetchImpl).not.toHaveBeenCalled();
+  });
+});

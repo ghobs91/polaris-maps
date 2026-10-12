@@ -47,6 +47,12 @@ export interface CarPlayIncidentData {
   distanceMeters: number;
 }
 
+/** A traffic-aware faster-route suggestion offered on the head unit. */
+export interface CarPlayFasterRouteData {
+  /** Seconds the alternative saves versus the active route's remaining time. */
+  savingSeconds: number;
+}
+
 export interface CarPlayIncidentMarker {
   type: string;
   lat: number;
@@ -128,6 +134,7 @@ export interface Spec extends TurboModule {
   hideTripPreview(): void;
   showArrival(data: object): void;
   showIncidentAlert(data: object): void;
+  showFasterRouteAlert(data: object): void;
   updateIncidents(incidents: Array<object>): void;
   updateRouteTraffic(ranges: Array<object>): void;
   showReroutingAlert(): void;

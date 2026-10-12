@@ -10,6 +10,7 @@ import type {
   CarPlayArrivalData,
   CarPlayIncidentData,
   CarPlayIncidentMarker,
+  CarPlayFasterRouteData,
 } from './NativePolarisCarPlay';
 
 export type {
@@ -23,6 +24,7 @@ export type {
   CarPlayArrivalData,
   CarPlayIncidentData,
   CarPlayIncidentMarker,
+  CarPlayFasterRouteData,
 };
 
 const NativeModule = Platform.OS === 'ios' ? NativeModules.PolarisCarPlay : null;
@@ -57,6 +59,10 @@ export function showArrival(data: CarPlayArrivalData): void {
 
 export function showIncidentAlert(data: CarPlayIncidentData): void {
   NativeModule?.showIncidentAlert(data);
+}
+
+export function showFasterRouteAlert(data: CarPlayFasterRouteData): void {
+  (NativeModule as any)?.showFasterRouteAlert?.(data);
 }
 
 export function updateIncidents(incidents: CarPlayIncidentMarker[]): void {
