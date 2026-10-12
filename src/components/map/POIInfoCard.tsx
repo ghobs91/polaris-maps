@@ -33,10 +33,9 @@ import {
 } from '../../services/places/placeDetailCache';
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
-import { getReviewsForPlace } from '../../services/poi/reviewService';
 import { markPlaceHandled, seedPlaceToOsm } from '../../services/osm/placeSeedService';
 import { osmTagsFromPoi, placeToOsmTags } from '../../utils/placeToOsmPoi';
-import { mergeRatings, type MergedRating } from '../../services/poi/reviewRanking';
+import { type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
 import { normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
 import {
@@ -822,46 +821,37 @@ export function POIInfoCard() {
   }, [poi, osmAccessToken, osmLogin, router]);
 
   // Resolve the local place (if any) once per selected POI so the Reviews
-  // affordance can show the on-device review count.
+  // affordance can show the on-device review count, and surface the community
+  // rating from the aggregate already stored on the place row. No network call
+  // on this path — reading `getReviewsForPlace` here made every POI tap wait on
+  // a PDS round-trip just to render a star rating.
   useEffect(() => {
     if (!poi) {
       setDetailsTarget(null);
+      setCommunityRating(null);
       return;
     }
     let cancelled = false;
     (async () => {
       const placeId = await findPlaceIdNear(poi.lat, poi.lng, poi.name).catch(() => null);
       let reviewCount = 0;
+      let merged: MergedRating | null = null;
       if (placeId) {
         const place = await getPlaceById(placeId).catch(() => null);
         reviewCount = place?.reviewCount ?? 0;
+        if (place && reviewCount > 0) {
+          merged = { average: place.avgRating ?? 0, count: reviewCount };
+        }
       }
-      if (!cancelled) setDetailsTarget({ placeId, reviewCount });
+      if (!cancelled) {
+        setDetailsTarget({ placeId, reviewCount });
+        setCommunityRating(merged);
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [poi]);
-
-  // Merge community ratings from local/ATProto reviews for the resolved place.
-  useEffect(() => {
-    const placeId = detailsTarget?.placeId;
-    if (!placeId) {
-      setCommunityRating(null);
-      return;
-    }
-    let cancelled = false;
-    getReviewsForPlace(placeId)
-      .then((reviews) => {
-        if (!cancelled) setCommunityRating(mergeRatings(reviews));
-      })
-      .catch(() => {
-        if (!cancelled) setCommunityRating(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detailsTarget]);
 
   const handleShare = useCallback(async () => {
     if (!poi) return;

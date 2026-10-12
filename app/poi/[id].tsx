@@ -71,6 +71,9 @@ export default function POIDetailScreen() {
   // Keyed on the place so navigating between places can seed each once, while
   // a React Strict Mode double-mount only seeds the current place once.
   const autoSeedKeyRef = useRef<string | null>(null);
+  // Tracks the place currently loaded so a late background ATProto review merge
+  // cannot overwrite the reviews state with a previous place's results.
+  const activeIdRef = useRef<string | null>(null);
   const {
     selectedPlace,
     selectedPlaceReviews,
@@ -89,10 +92,13 @@ export default function POIDetailScreen() {
   const loadPlace = useCallback(async () => {
     if (!id) return;
     setIsLoadingPlace(true);
+    activeIdRef.current = id;
     try {
       const [place, reviews, edits] = await Promise.all([
         getPlaceById(id),
-        getReviewsForPlace(id),
+        getReviewsForPlace(id, 50, (nextReviews) => {
+          if (activeIdRef.current === id) setSelectedPlaceReviews(nextReviews);
+        }),
         getPendingEdits(id),
       ]);
       setSelectedPlace(place);

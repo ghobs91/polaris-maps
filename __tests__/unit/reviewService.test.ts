@@ -189,7 +189,7 @@ describe('getReviewsForPlace', () => {
     expect(result[0].media?.map((m) => m.hash)).toEqual(['hash1', 'hash2']);
   });
 
-  it('merges ATProto results and deduplicates by atprotoUri', async () => {
+  it('returns local reviews immediately and merges ATProto results in the background', async () => {
     reviewRows = [
       {
         id: 'at://did:plc:user/io.polaris.place.review/rec1',
@@ -236,13 +236,20 @@ describe('getReviewsForPlace', () => {
     ];
     mockFetchReviewsFromAtproto.mockResolvedValue(atprotoReviews);
 
-    const result = await getReviewsForPlace('place1');
+    const onUpdate = jest.fn();
+    const immediate = await getReviewsForPlace('place1', 50, onUpdate);
 
-    // rec1 is already local (dedup), rec2 is new → total 2
-    expect(result).toHaveLength(2);
-    // Sorted by createdAt DESC
-    expect(result[0].createdAt).toBe(1700000200);
-    expect(result[1].createdAt).toBe(1700000100);
+    // Local reviews come back without waiting on the PDS round-trip.
+    expect(immediate).toHaveLength(1);
+    expect(immediate[0].id).toBe('at://did:plc:user/io.polaris.place.review/rec1');
+
+    // The background merge reports deduped (rec1) results newest-first.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    const merged = onUpdate.mock.calls[0][0] as Review[];
+    expect(merged).toHaveLength(2);
+    expect(merged[0].createdAt).toBe(1700000200);
+    expect(merged[1].createdAt).toBe(1700000100);
   });
 });
 

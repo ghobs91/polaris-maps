@@ -16,7 +16,11 @@ import {
 } from './reviewMediaService';
 import type { Review, ReviewMedia, PlaceReviewContext } from '../../models/review';
 
-export async function getReviewsForPlace(placeUuid: string, limit: number = 50): Promise<Review[]> {
+export async function getReviewsForPlace(
+  placeUuid: string,
+  limit: number = 50,
+  onUpdate?: (reviews: Review[]) => void,
+): Promise<Review[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<ReviewRow>(
     'SELECT * FROM reviews WHERE poi_uuid = ? ORDER BY created_at DESC LIMIT ?',
@@ -25,24 +29,40 @@ export async function getReviewsForPlace(placeUuid: string, limit: number = 50):
   const localReviews = rows.map(rowToReview);
   await attachMediaToReviews(localReviews);
 
-  // Fetch ATProto reviews (returns [] if no session — always safe)
-  const atprotoReviews = await fetchReviewsFromAtproto(placeUuid);
+  // Local reviews render immediately. ATProto reviews live in the user's PDS
+  // and can only be listed collection-wide (there is no server-side filter by
+  // POI), so that sync runs in the background and reports back through
+  // `onUpdate` instead of blocking the first paint. `fetchReviewsFromAtproto`
+  // swallows and logs its own errors, so this never rejects.
+  fetchReviewsFromAtproto(placeUuid)
+    .then((atprotoReviews) => onUpdate?.(mergeReviews(localReviews, atprotoReviews, limit)))
+    .catch(() => {});
 
-  // Merge and deduplicate
+  return mergeReviews(localReviews, [], limit);
+}
+
+/**
+ * Merge local and ATProto reviews into one newest-first list, dropping ATProto
+ * rows already cached locally (matched by `atprotoUri`).
+ */
+function mergeReviews(
+  localReviews: readonly Review[],
+  atprotoReviews: readonly Review[],
+  limit: number,
+): Review[] {
   const merged = new Map<string, Review>();
-  for (const r of localReviews) {
-    merged.set(r.id, r);
+  for (const review of localReviews) {
+    merged.set(review.id, review);
   }
 
-  // Build set of locally-cached ATProto URIs for dedup
   const localAtprotoUris = new Set(
-    localReviews.filter((r) => r.atprotoUri).map((r) => r.atprotoUri),
+    localReviews.map((review) => review.atprotoUri).filter((uri): uri is string => Boolean(uri)),
   );
 
-  for (const r of atprotoReviews) {
-    if (r.atprotoUri && localAtprotoUris.has(r.atprotoUri)) continue;
-    if (!merged.has(r.id)) {
-      merged.set(r.id, r);
+  for (const review of atprotoReviews) {
+    if (review.atprotoUri && localAtprotoUris.has(review.atprotoUri)) continue;
+    if (!merged.has(review.id)) {
+      merged.set(review.id, review);
     }
   }
 

@@ -187,6 +187,41 @@ describe('fetchReviewsFromAtproto', () => {
     expect(result).toEqual([]);
     warnSpy.mockRestore();
   });
+
+  it('follows the PDS cursor so reviews beyond the first page are not dropped', async () => {
+    mockAgentRef.agent = createMockAgent();
+    mockSessionRef.session = TEST_SESSION;
+
+    const firstPage = Array.from({ length: 100 }, (_, i) => ({
+      uri: `at://did:plc:testuser/io.polaris.place.review/r${i}`,
+      value: {
+        subject: { poiUuid: `other-place-${i}` },
+        rating: 4,
+        createdAt: '2023-11-14T12:00:00.000Z',
+      },
+    }));
+    const secondPage = [
+      {
+        uri: 'at://did:plc:testuser/io.polaris.place.review/target',
+        value: {
+          subject: { poiUuid: 'test-place' },
+          rating: 5,
+          createdAt: '2023-11-14T12:00:00.000Z',
+        },
+      },
+    ];
+
+    mockListRecords
+      .mockResolvedValueOnce({ data: { records: firstPage, cursor: 'page-2' } })
+      .mockResolvedValueOnce({ data: { records: secondPage } });
+
+    const result = await fetchReviewsFromAtproto('test-place');
+
+    expect(mockListRecords).toHaveBeenCalledTimes(2);
+    expect(mockListRecords).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: 'page-2' }));
+    expect(result).toHaveLength(1);
+    expect(result[0].atprotoUri).toBe('at://did:plc:testuser/io.polaris.place.review/target');
+  });
 });
 
 describe('deleteReviewFromAtproto', () => {

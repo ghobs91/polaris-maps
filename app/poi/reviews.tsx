@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,9 @@ export default function ReviewsScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState('');
+  // Guards a late background ATProto review merge from overwriting the list
+  // after the user has navigated to a different place.
+  const activeIdRef = useRef(id);
 
   const placeContext = useMemo((): PlaceReviewContext | undefined => {
     if (!id) return undefined;
@@ -56,9 +59,12 @@ export default function ReviewsScreen() {
 
   const loadReviews = useCallback(async () => {
     if (!id) return;
+    activeIdRef.current = id;
     setLoading(true);
     try {
-      const data = await getReviewsForPlace(id);
+      const data = await getReviewsForPlace(id, 50, (nextReviews) => {
+        if (activeIdRef.current === id) setReviews(nextReviews);
+      });
       setReviews(data);
     } finally {
       setLoading(false);

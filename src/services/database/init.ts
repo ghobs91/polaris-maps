@@ -214,6 +214,7 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     END;
 
     CREATE TABLE IF NOT EXISTS reviews (${REVIEWS_TABLE_COLUMNS});
+    CREATE INDEX IF NOT EXISTS idx_reviews_poi ON reviews (poi_uuid, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS review_media (
       review_id TEXT NOT NULL,
@@ -367,6 +368,7 @@ async function migrateReviewsForeignKey(database: SQLite.SQLiteDatabase): Promis
         source, atproto_uri, author_handle
       FROM reviews_fk_legacy;
       DROP TABLE reviews_fk_legacy;
+      CREATE INDEX IF NOT EXISTS idx_reviews_poi ON reviews (poi_uuid, created_at DESC);
       COMMIT;
     `);
   } catch (err) {
