@@ -24,8 +24,18 @@ import './src/services/navigation/backgroundLocationTask';
 // phone window, where React effects and timers never run (see `bootCarPlay`).
 import { bootCarPlay } from './src/services/carplay/bootCarPlay';
 
+// Same reason, for a trip started from CarPlay: the headless navigation
+// lifecycle (tracking pipeline, voice, arrival, fix-driven refresh) is otherwise
+// only subscribed by an `app/_layout.tsx` effect that never runs without a phone
+// window, so CarPlay would show the route but never move.
+import { bootNavigation } from './src/services/navigation/bootNavigation';
+
 // Hand off to Expo Router's standard entry point.
 import 'expo-router/entry';
 
 // Subscribe the CarPlay manager now, while the bundle is being evaluated.
 bootCarPlay();
+
+// Start the headless navigation lifecycle too, so a trip started from CarPlay on
+// a cold launch tracks (and speaks/arrives) without the phone app ever opening.
+bootNavigation();

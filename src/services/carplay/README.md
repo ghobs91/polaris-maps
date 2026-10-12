@@ -89,6 +89,15 @@ phone app open (`AppDelegate.startReactNativeIfNeeded`), and subscribes the
 manager at bundle load (`bootCarPlay()` in `index.js`) because React effects and
 timers do not run until the phone window attaches. JS-backed features (search,
 starting navigation, favorites) are therefore live without opening the phone.
+Only the CarPlay _manager_ is booted there, though: the headless navigation
+lifecycle (the shared tracking pipeline from `backgroundSessionCoordinator`, plus
+voice prompts, arrival auto-end and fix-driven refresh) would otherwise be
+subscribed only by the `app/_layout.tsx` effect, so a trip started from CarPlay on
+a cold launch would draw the route but never track — the map stays fitted to the
+whole route instead of following the car — until the phone app is opened and
+navigation is restarted there. `bootNavigation()` boots it from the same bundle
+entry (`index.js`, next to `bootCarPlay()`).
+
 Until JS pushes the resolved style the native template shows its built-in
 default style, and the phone scene adopts the already-started bridge instead
 of starting a second one.
