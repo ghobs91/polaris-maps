@@ -20,6 +20,14 @@ const MAX_SUBPAGES = 3;
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 100;
 
+/**
+ * Identifying User-Agent for scrapes. React Native supplies a default
+ * (`<App>/<ver> CFNetwork/…`), but several venue WAFs (notably Squarespace)
+ * reject requests with no UA outright, so send one explicitly — matching the
+ * other network services in the repo.
+ */
+const USER_AGENT = 'PolarisMaps/1.0';
+
 interface CacheEntry {
   urls: string[];
   expiresAt: number;
@@ -74,6 +82,43 @@ export function normalizeWebsiteUrl(raw: string | null | undefined): string | nu
   } catch {
     return null;
   }
+}
+
+function withHost(url: URL, host: string, protocol: string): string {
+  const next = new URL(url.toString());
+  next.protocol = protocol;
+  next.hostname = host;
+  return next.toString();
+}
+
+/**
+ * Ordered candidate page URLs to try for a website tag value.
+ *
+ * The tagged URL comes first (so its own redirects are followed, which is how
+ * most `http://` apex tags reach the canonical `https://www.` host). Then the
+ * `www.`/apex sibling over https, then the sibling over http. This rescues the
+ * common hosting setup where the apex host serves a mismatched certificate or
+ * one load-balanced node redirects to a dead host, while `www.` works.
+ */
+export function photoPageCandidates(rawUrl: string | null | undefined): string[] {
+  const base = normalizeWebsiteUrl(rawUrl);
+  if (!base) return [];
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return [];
+  }
+  const host = url.hostname.toLowerCase();
+  const siblings = host.startsWith('www.') ? [host.slice(4)] : host ? [`www.${host}`] : [];
+  const out: string[] = [];
+  const push = (candidate: string): void => {
+    if (candidate && !out.includes(candidate)) out.push(candidate);
+  };
+  push(base);
+  for (const h of [host, ...siblings]) push(withHost(url, h, 'https:'));
+  for (const h of siblings) push(withHost(url, h, 'http:'));
+  return out;
 }
 
 /**
@@ -344,7 +389,7 @@ async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | n
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'text/html' },
+      headers: { Accept: 'text/html', 'User-Agent': USER_AGENT },
     });
     if (!res.ok) return null;
     const contentType = res.headers.get('content-type') ?? '';
@@ -363,30 +408,20 @@ export function countRealPhotos(urls: string[]): number {
 }
 
 /**
- * Fetch path: GET the homepage HTML (gallery sections, metadata, and `<img>`
- * tags); follow dedicated gallery/photo subpages when available or when the
- * homepage yields fewer than MIN_REAL_PHOTOS real photos. Returns [] on any
- * failure.
+ * Fetch + parse one candidate page (homepage, then dedicated gallery subpages).
+ * Returns the discovered photo URLs, or `null` when the page itself could not be
+ * fetched (network/TLS/DNS refusal) so the caller can try a sibling host.
  */
-export async function fetchWebsitePhotos(pageUrl: string, timeoutMs = 8000): Promise<string[]> {
-  const cached = getCached(pageUrl);
-  if (cached) return cached;
-
-  const finish = (urls: string[]): string[] => {
-    const final = dedupePhotoUrls(rankPhotoUrls(urls));
-    setCached(pageUrl, final);
-    return final;
-  };
-
+async function fetchSitePhotos(pageUrl: string, timeoutMs: number): Promise<string[] | null> {
   const homeHtml = await fetchPageHtml(pageUrl, timeoutMs);
-  if (!homeHtml) return [];
+  if (!homeHtml) return null;
   const homePhotos = extractPagePhotos(homeHtml, pageUrl);
   const subpages = discoverPhotoPageUrls(homeHtml, pageUrl);
   const hasDedicatedGalleryPage = subpages.some(isDedicatedGalleryPageUrl);
   if (countRealPhotos(homePhotos) >= MIN_REAL_PHOTOS && !hasDedicatedGalleryPage) {
-    return finish(homePhotos);
+    return homePhotos;
   }
-  if (subpages.length === 0) return finish(homePhotos);
+  if (subpages.length === 0) return homePhotos;
 
   const subHtmls = await Promise.all(subpages.map((url) => fetchPageHtml(url, 6000)));
   // Dedicated gallery pages are the strongest signal for actual place photos;
@@ -396,7 +431,66 @@ export async function fetchWebsitePhotos(pageUrl: string, timeoutMs = 8000): Pro
     if (!html) return;
     galleryPhotos.push(...extractPagePhotos(html, subpages[i] as string));
   });
-  return finish([...galleryPhotos, ...homePhotos]);
+  return [...galleryPhotos, ...homePhotos];
+}
+
+export interface WebsitePhotosResult {
+  /** Discovered photo URLs (may be empty when the site genuinely has none). */
+  urls: string[];
+  /**
+   * True when at least one candidate page was fetched successfully. Lets callers
+   * tell "this site has no photos" from "we could not reach the site" and avoid
+   * caching a transient failure as a permanent empty result.
+   */
+  ok: boolean;
+}
+
+/**
+ * Fetch path: try the website tag and its `www.`/apex siblings in turn, parsing
+ * gallery sections, `<img>` tags, and metadata from the homepage plus dedicated
+ * gallery subpages. Returns on the first candidate that yields a real photo; a
+ * candidate that fetches HTML but has no photos is remembered and the next
+ * sibling is tried. `ok` is false only when every candidate failed to fetch.
+ */
+export async function fetchWebsitePhotosResult(
+  pageUrl: string,
+  timeoutMs = 8000,
+): Promise<WebsitePhotosResult> {
+  const cached = getCached(pageUrl);
+  if (cached) return { urls: cached, ok: true };
+
+  const candidates = photoPageCandidates(pageUrl);
+  if (candidates.length === 0) return { urls: [], ok: false };
+
+  let best: string[] | null = null;
+  let fetchedAny = false;
+  for (const candidate of candidates) {
+    const urls = await fetchSitePhotos(candidate, timeoutMs);
+    if (urls === null) continue;
+    fetchedAny = true;
+    if (best === null) best = urls;
+    if (countRealPhotos(urls) > 0) {
+      best = urls;
+      break;
+    }
+  }
+
+  const final = dedupePhotoUrls(rankPhotoUrls(best ?? []));
+  // Negative-cache a successful-but-photoless scrape; never cache a total
+  // failure, so a transient outage retries on the next open.
+  if (fetchedAny) setCached(pageUrl, final);
+  return { urls: final, ok: fetchedAny };
+}
+
+/**
+ * Fetch path: GET the homepage HTML (gallery sections, metadata, and `<img>`
+ * tags); follow dedicated gallery/photo subpages when available or when the
+ * homepage yields fewer than MIN_REAL_PHOTOS real photos. Returns [] on any
+ * failure.
+ */
+export async function fetchWebsitePhotos(pageUrl: string, timeoutMs = 8000): Promise<string[]> {
+  const { urls } = await fetchWebsitePhotosResult(pageUrl, timeoutMs);
+  return urls;
 }
 
 /**

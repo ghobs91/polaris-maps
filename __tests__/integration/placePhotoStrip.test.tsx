@@ -45,15 +45,16 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
   getConnectivity: () => mockGetConnectivity(),
 }));
 
-const mockFetchWebsitePhotos = jest.fn();
+const mockFetchWebsitePhotosResult = jest.fn();
 jest.mock('../../src/services/poi/websitePhotosService', () => ({
-  fetchWebsitePhotos: (...args: unknown[]) => mockFetchWebsitePhotos(...args),
+  fetchWebsitePhotosResult: (...args: unknown[]) => mockFetchWebsitePhotosResult(...args),
   normalizeWebsiteUrl: (url: string | null | undefined) => url ?? null,
 }));
 
 import { PlacePhotoStrip } from '../../src/components/places/PlacePhotoStrip';
 import {
   clearPlacePhotoCache,
+  getCachedPlacePhotos,
   setCachedPlacePhotos,
 } from '../../src/services/places/placePhotoCache';
 
@@ -64,7 +65,7 @@ describe('PlacePhotoStrip', () => {
     clearPlacePhotoCache();
     jest.clearAllMocks();
     mockGetConnectivity.mockReturnValue({ isConnected: true, quality: 'good', type: 'wifi' });
-    mockFetchWebsitePhotos.mockResolvedValue([]);
+    mockFetchWebsitePhotosResult.mockResolvedValue({ urls: [], ok: true });
   });
 
   it('renders cached photos without re-scraping the site', async () => {
@@ -73,16 +74,29 @@ describe('PlacePhotoStrip', () => {
     const screen = render(<PlacePhotoStrip websiteUrl={PAGE} resetKey="p1" />);
 
     await waitFor(() => expect(screen.getByTestId('place-photo-strip')).toBeTruthy());
-    expect(mockFetchWebsitePhotos).not.toHaveBeenCalled();
+    expect(mockFetchWebsitePhotosResult).not.toHaveBeenCalled();
   });
 
   it('fetches and caches photos on a cold cache', async () => {
-    mockFetchWebsitePhotos.mockResolvedValue(['https://cafe.example/a.jpg']);
+    mockFetchWebsitePhotosResult.mockResolvedValue({
+      urls: ['https://cafe.example/a.jpg'],
+      ok: true,
+    });
 
     const screen = render(<PlacePhotoStrip websiteUrl={PAGE} resetKey="p1" />);
 
     await waitFor(() => expect(screen.getByTestId('place-photo-strip')).toBeTruthy());
-    expect(mockFetchWebsitePhotos).toHaveBeenCalledWith(PAGE);
+    expect(mockFetchWebsitePhotosResult).toHaveBeenCalledWith(PAGE);
+  });
+
+  it('does not persist a failed fetch as an empty result', async () => {
+    mockFetchWebsitePhotosResult.mockResolvedValue({ urls: [], ok: false });
+
+    const screen = render(<PlacePhotoStrip websiteUrl={PAGE} resetKey="p1" />);
+
+    await waitFor(() => expect(mockFetchWebsitePhotosResult).toHaveBeenCalledWith(PAGE));
+    expect(screen.queryByTestId('place-photo-strip')).toBeNull();
+    expect(getCachedPlacePhotos(PAGE)).toBeNull();
   });
 
   it('renders nothing when offline with no cache', async () => {
@@ -91,7 +105,7 @@ describe('PlacePhotoStrip', () => {
     const screen = render(<PlacePhotoStrip websiteUrl={PAGE} resetKey="p1" />);
 
     await waitFor(() => expect(screen.queryByTestId('place-photo-strip')).toBeNull());
-    expect(mockFetchWebsitePhotos).not.toHaveBeenCalled();
+    expect(mockFetchWebsitePhotosResult).not.toHaveBeenCalled();
   });
 
   it('renders nothing without a website', () => {

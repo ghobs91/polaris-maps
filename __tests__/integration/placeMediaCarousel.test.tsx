@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Linking } from 'react-native';
 
 jest.mock('expo-image', () => ({
@@ -63,10 +63,27 @@ jest.mock('../../src/services/places/placeDetailCache', () => ({
 }));
 
 const mockFetchWebsitePhotos = jest.fn();
-jest.mock('../../src/services/poi/websitePhotosService', () => ({
-  fetchWebsitePhotos: (...args: unknown[]) => mockFetchWebsitePhotos(...args),
-  normalizeWebsiteUrl: (url: string | null | undefined) => url ?? null,
-}));
+jest.mock('../../src/services/poi/websitePhotosService', () => {
+  const actual = jest.requireActual('../../src/services/poi/websitePhotosService');
+  return {
+    ...actual,
+    fetchWebsitePhotos: (...args: unknown[]) => mockFetchWebsitePhotos(...args),
+    normalizeWebsiteUrl: (url: string | null | undefined) => url ?? null,
+  };
+});
+
+// The hidden photo WebView renders as a bare host component; the last-mounted
+// props are exposed so tests can drive its onMessage payload by hand.
+jest.mock('react-native-webview', () => {
+  const mockReact = jest.requireActual('react') as typeof React;
+  return {
+    WebView: (props: Record<string, unknown>) => {
+      (global as { __lastPhotosWebViewProps?: Record<string, unknown> }).__lastPhotosWebViewProps =
+        props;
+      return mockReact.createElement('WebView', props);
+    },
+  };
+});
 
 import { PlaceMediaCarousel } from '../../src/components/poi/PlaceMediaCarousel';
 
@@ -203,6 +220,45 @@ describe('PlaceMediaCarousel', () => {
     // No per-photo captions in the strip.
     expect(screen.queryByText('From the web · example.com')).toBeNull();
     expect(screen.queryByText('Wikimedia Commons')).toBeNull();
+  });
+
+  it('falls back to the hidden WebView for JS-rendered sites and merges its photos', async () => {
+    mockFetchWebsitePhotos.mockResolvedValue([]);
+    mockDefaultSupplements.mockReturnValue([]);
+
+    const screen = render(
+      <PlaceMediaCarousel
+        lat={48.8584}
+        lng={2.2945}
+        name="Mongo's Coffee"
+        osmId="1"
+        websiteUrl="https://mongoscoffee.com"
+        tags={{}}
+        resetKey={7}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('place-media-webview')).toBeTruthy());
+
+    const props = (global as { __lastPhotosWebViewProps?: { onMessage?: (e: unknown) => void } })
+      .__lastPhotosWebViewProps;
+    act(() => {
+      props?.onMessage?.({
+        nativeEvent: {
+          data: JSON.stringify({
+            type: 'website-photos',
+            urls: [
+              'https://cdn.example/a.jpg',
+              'https://cdn.example/b.jpg',
+              'https://cdn.example/c.jpg',
+            ],
+          }),
+        },
+      });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('place-media-thumb-0')).toBeTruthy());
+    expect(screen.getAllByTestId(/^place-media-thumb-\d+$/)).toHaveLength(3);
   });
 
   it('pages horizontally between photos in the expanded viewer', async () => {

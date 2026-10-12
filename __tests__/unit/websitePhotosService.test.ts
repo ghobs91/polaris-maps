@@ -6,6 +6,7 @@ import {
   extractImgSrcsFromHtml,
   extractPhotosFromWebViewMessage,
   fetchWebsitePhotos,
+  fetchWebsitePhotosResult,
   extractGalleryPhotosFromHtml,
   extractPagePhotos,
   isHttpUrl,
@@ -13,6 +14,7 @@ import {
   normalizeWebsiteUrl,
   parseOpenGraphFromHtml,
   photoDedupeKey,
+  photoPageCandidates,
   rankPhotoUrls,
   resolvePhotoUrl,
   resolveWebViewPhotoUrls,
@@ -41,6 +43,30 @@ describe('normalizeWebsiteUrl', () => {
   it('rejects non-http schemes', () => {
     expect(normalizeWebsiteUrl('ftp://example.com')).toBeNull();
     expect(normalizeWebsiteUrl('javascript:alert(1)')).toBeNull();
+  });
+});
+
+describe('photoPageCandidates', () => {
+  it('keeps the tagged URL first, then www/apex siblings over https then http', () => {
+    expect(photoPageCandidates('http://MongosCoffee.com/')).toEqual([
+      'http://mongoscoffee.com/',
+      'https://mongoscoffee.com/',
+      'https://www.mongoscoffee.com/',
+      'http://www.mongoscoffee.com/',
+    ]);
+  });
+
+  it('adds the apex sibling when the tag already uses www', () => {
+    expect(photoPageCandidates('https://www.example.com/menu')).toEqual([
+      'https://www.example.com/menu',
+      'https://example.com/menu',
+      'http://example.com/menu',
+    ]);
+  });
+
+  it('returns [] for unusable values', () => {
+    expect(photoPageCandidates(null)).toEqual([]);
+    expect(photoPageCandidates('ftp://a.com')).toEqual([]);
   });
 });
 
@@ -256,6 +282,57 @@ describe('fetchWebsitePhotos', () => {
       text: () => Promise.resolve('{}'),
     }) as unknown as typeof fetch;
     await expect(fetchWebsitePhotos('https://a.com/')).resolves.toEqual([]);
+  });
+
+  it('tries the www sibling when the tagged host cannot be fetched', async () => {
+    const fetched: string[] = [];
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      fetched.push(url);
+      if (url === 'https://www.a.com/') {
+        return Promise.resolve({
+          ok: true,
+          headers: { get: () => 'text/html' },
+          text: () => Promise.resolve('<meta property="og:image" content="https://a.com/og.jpg">'),
+        });
+      }
+      return Promise.reject(new Error('unreachable'));
+    }) as unknown as typeof fetch;
+
+    const result = await fetchWebsitePhotosResult('https://a.com/');
+    expect(result).toEqual({ urls: ['https://a.com/og.jpg'], ok: true });
+    expect(fetched[0]).toBe('https://a.com/');
+    expect(fetched).toContain('https://www.a.com/');
+  });
+
+  it('sends an identifying User-Agent (some WAFs reject empty UAs)', async () => {
+    const init = jest.fn();
+    global.fetch = jest.fn().mockImplementation((_url: string, options: RequestInit) => {
+      init(options);
+      return Promise.resolve({
+        ok: true,
+        headers: { get: () => 'text/html' },
+        text: () => Promise.resolve('<img src="https://a.com/food.jpg" width="800" height="600">'),
+      });
+    }) as unknown as typeof fetch;
+
+    await fetchWebsitePhotos('https://a.com/');
+    const headers = init.mock.calls[0][0].headers as Record<string, string>;
+    expect(headers['User-Agent']).toBe('PolarisMaps/1.0');
+  });
+
+  it('does not cache a total fetch failure, so the next open retries', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('down')) as unknown as typeof fetch;
+    await expect(fetchWebsitePhotosResult('https://a.com/')).resolves.toEqual({
+      urls: [],
+      ok: false,
+    });
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/html' },
+      text: () => Promise.resolve('<meta property="og:image" content="https://a.com/og.jpg">'),
+    }) as unknown as typeof fetch;
+    await expect(fetchWebsitePhotos('https://a.com/')).resolves.toEqual(['https://a.com/og.jpg']);
   });
 });
 

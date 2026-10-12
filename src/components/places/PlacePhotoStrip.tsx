@@ -3,7 +3,10 @@ import { FlatList, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { useTheme } from '../../contexts/ThemeContext';
 import { getConnectivity } from '../../services/regions/connectivityService';
-import { fetchWebsitePhotos, normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
+import {
+  fetchWebsitePhotosResult,
+  normalizeWebsiteUrl,
+} from '../../services/poi/websitePhotosService';
 import {
   getCachedPlacePhotos,
   setCachedPlacePhotos,
@@ -80,13 +83,15 @@ export function PlacePhotoStrip({ websiteUrl, resetKey }: PlacePhotoStripProps) 
     (async () => {
       await acquireFetchSlot();
       try {
-        const found = await fetchWebsitePhotos(pageUrl);
+        const { urls: found, ok } = await fetchWebsitePhotosResult(pageUrl);
         if (cancelled) return;
         const capped = found.slice(0, MAX_PLACE_PHOTOS);
         setUrls(capped);
-        // Cache the result even when empty (negative cache) so a site with no
-        // discoverable photos isn't re-scraped on every list open.
-        setCachedPlacePhotos(pageUrl, capped);
+        // Cache a real result even when empty (negative cache) so a site with no
+        // discoverable photos isn't re-scraped on every list open — but never
+        // cache a total fetch failure, which would hide the photos for the
+        // whole TTL.
+        if (ok) setCachedPlacePhotos(pageUrl, capped);
       } catch {
         // Scraping is best-effort — leave the strip hidden.
       } finally {

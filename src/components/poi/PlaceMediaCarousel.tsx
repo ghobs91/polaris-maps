@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Linking,
@@ -29,6 +29,7 @@ import {
 } from '../../services/poi/placeMediaService';
 import { defaultPlaceMediaSupplements } from '../../services/poi/placeMediaProviders';
 import { fetchWebsitePhotos, normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
+import { WebsitePhotosWebView } from './WebsitePhotosWebView';
 
 interface PlaceMediaCarouselProps {
   lat: number;
@@ -42,6 +43,21 @@ interface PlaceMediaCarouselProps {
   resetKey: string | number;
   /** Reactive connectivity; a reconnect re-fetches open media. */
   online?: boolean;
+}
+
+/** Below this many scraped website photos, also try the hidden WebView fallback. */
+const WEBVIEW_FALLBACK_MIN_WEBSITE_PHOTOS = 3;
+
+/** Merge `incoming` ahead of `prev`, de-duplicated by URL. */
+function prependUniquePhotos(prev: PlaceMediaItem[], incoming: PlaceMediaItem[]): PlaceMediaItem[] {
+  const seen = new Set<string>();
+  const out: PlaceMediaItem[] = [];
+  for (const item of [...incoming, ...prev]) {
+    if (!item.url || seen.has(item.url)) continue;
+    seen.add(item.url);
+    out.push(item);
+  }
+  return out;
 }
 
 /**
@@ -68,6 +84,10 @@ export function PlaceMediaCarousel({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const [offline, setOffline] = useState(false);
+  /** Venue page to render in the hidden WebView when the plain scrape is thin. */
+  const [webViewUri, setWebViewUri] = useState<string | null>(null);
+  const itemsRef = useRef<PlaceMediaItem[]>([]);
+  itemsRef.current = items;
 
   const cacheKey = useMemo(
     () => ({
@@ -95,11 +115,33 @@ export function PlaceMediaCarousel({
     }
   }, [pageUrl]);
 
+  const persistMedia = useCallback(
+    async (media: PlaceMediaItem[]) => {
+      if (media.length === 0) return;
+      // Persist attribution metadata (not bytes) for the offline path.
+      const existing = await getPlaceDetail(cacheKey).catch(() => null);
+      await putPlaceDetail({
+        canonicalId: canonicalPlaceKey(cacheKey),
+        placeId: cacheKey.placeId,
+        osmId: cacheKey.osmId,
+        name: name ?? '',
+        lat,
+        lng,
+        snapshot: existing?.snapshot ?? '',
+        media: JSON.stringify(media),
+        reviews: existing?.reviews ?? null,
+        sourceVersion: existing?.sourceVersion ?? 1,
+      }).catch(() => undefined);
+    },
+    [cacheKey, lat, lng, name],
+  );
+
   useEffect(() => {
     let cancelled = false;
     setItems([]);
     setFailed(new Set());
     setViewerIndex(null);
+    setWebViewUri(null);
 
     const connected = online ?? getConnectivity().isConnected;
     setOffline(!connected);
@@ -142,21 +184,13 @@ export function PlaceMediaCarousel({
       .then(async (media) => {
         if (cancelled) return;
         setItems(media);
-        if (media.length === 0) return;
-        // Persist attribution metadata (not bytes) for the offline path.
-        const existing = await getPlaceDetail(cacheKey).catch(() => null);
-        await putPlaceDetail({
-          canonicalId: canonicalPlaceKey(cacheKey),
-          placeId: cacheKey.placeId,
-          osmId: cacheKey.osmId,
-          name: name ?? '',
-          lat,
-          lng,
-          snapshot: existing?.snapshot ?? '',
-          media: JSON.stringify(media),
-          reviews: existing?.reviews ?? null,
-          sourceVersion: existing?.sourceVersion ?? 1,
-        }).catch(() => undefined);
+        void persistMedia(media);
+        // If the plain scrape found few website photos, render the page in a
+        // hidden WebView so JavaScript-built galleries can be extracted too.
+        const websitePhotos = media.filter((item) => item.source === 'website').length;
+        if (pageUrl && websitePhotos < WEBVIEW_FALLBACK_MIN_WEBSITE_PHOTOS) {
+          setWebViewUri(pageUrl);
+        }
       })
       .catch(() => {
         if (!cancelled) setItems([]);
@@ -165,7 +199,7 @@ export function PlaceMediaCarousel({
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, lat, lng, name, tags, resetKey, online, pageUrl, webAttribution]);
+  }, [cacheKey, lat, lng, name, tags, resetKey, online, pageUrl, webAttribution, persistMedia]);
 
   const visible = useMemo(() => items.filter((item) => !failed.has(item.url)), [items, failed]);
   const current = viewerIndex !== null ? visible[viewerIndex] : undefined;
@@ -185,20 +219,52 @@ export function PlaceMediaCarousel({
 
   const closeViewer = useCallback(() => setViewerIndex(null), []);
 
+  const handleWebViewPhotos = useCallback(
+    (urls: string[]) => {
+      if (urls.length === 0) return;
+      const websiteItems: PlaceMediaItem[] = urls.map((url) => ({
+        url,
+        source: 'website',
+        thumbnailUrl: url,
+        attribution: webAttribution,
+      }));
+      setItems((prev) => prependUniquePhotos(prev, websiteItems));
+    },
+    [webAttribution],
+  );
+
+  const handleWebViewSettled = useCallback(() => {
+    setWebViewUri(null);
+    // Fold any WebView-discovered photos into the offline cache too.
+    void persistMedia(itemsRef.current);
+  }, [persistMedia]);
+
+  const hiddenWebView = webViewUri ? (
+    <WebsitePhotosWebView
+      key={`webview:${resetKey}:${webViewUri}`}
+      uri={webViewUri}
+      onPhotos={handleWebViewPhotos}
+      onSettled={handleWebViewSettled}
+    />
+  ) : null;
+
   if (items.length === 0) {
-    if (!offline) return null;
+    if (!offline) return hiddenWebView;
     return (
-      <GlassView
-        material="regular"
-        style={[styles.section, { borderColor: colors.border }]}
-        testID="place-media-empty"
-      >
-        <Text style={styles.title}>Photos</Text>
-        <View style={[styles.emptyState, { borderColor: colors.border }]}>
-          <Ionicons name="cloud-offline-outline" size={18} color={colors.textSecondary} />
-          <Text style={styles.emptyText}>Photos are unavailable offline</Text>
-        </View>
-      </GlassView>
+      <>
+        {hiddenWebView}
+        <GlassView
+          material="regular"
+          style={[styles.section, { borderColor: colors.border }]}
+          testID="place-media-empty"
+        >
+          <Text style={styles.title}>Photos</Text>
+          <View style={[styles.emptyState, { borderColor: colors.border }]}>
+            <Ionicons name="cloud-offline-outline" size={18} color={colors.textSecondary} />
+            <Text style={styles.emptyText}>Photos are unavailable offline</Text>
+          </View>
+        </GlassView>
+      </>
     );
   }
 
@@ -208,6 +274,7 @@ export function PlaceMediaCarousel({
       style={[styles.section, { borderColor: colors.border }]}
       testID="place-media-section"
     >
+      {hiddenWebView}
       <Text style={styles.title}>Photos</Text>
       <FlatList
         data={visible}
