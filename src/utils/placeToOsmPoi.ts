@@ -61,6 +61,22 @@ const CATEGORY_TO_OSM: Record<string, { type: string; subtype: string }> = {
 };
 
 /**
+ * True when a rendered POI carries a real OSM *node* id.
+ *
+ * `fetchOsmPois` yields Overpass nodes and ways with their true OSM ids (ways
+ * are tagged `polaris:osmType=way`), Nominatim POIs are rendered with their
+ * Nominatim `place_id` (a different id space), and Overture/saved places get
+ * synthetic negative ids — only a genuine node id may be handed to the editor.
+ */
+export function isOsmNodePoi(poi: Pick<OsmPoi, 'id' | 'tags'>): boolean {
+  return (
+    poi.id > 0 &&
+    poi.tags['polaris:source'] !== 'nominatim' &&
+    poi.tags['polaris:osmType'] !== 'way'
+  );
+}
+
+/**
  * Convert a Polaris Place (from SQLite, e.g. Overture-sourced) to the
  * OsmPoi format used by the map's POILayer and POIInfoCard.
  *

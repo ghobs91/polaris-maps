@@ -163,14 +163,17 @@ out body center;`;
       const lat: number = el.type === 'node' ? el.lat : el.center?.lat;
       const lng: number = el.type === 'node' ? el.lon : el.center?.lon;
       if (lat == null || lng == null) return null;
+      // Record the element type: a way id is NOT a node id, so the editor
+      // affordance must not hand it to the node editor (see `isOsmNodePoi`).
+      const tags: Record<string, string> = { ...t, 'polaris:osmType': el.type as string };
       return {
         id: el.id as number,
         lat,
         lng,
         name: t.name,
         type,
+        tags,
         subtype,
-        tags: t,
       };
     })
     .filter((p): p is OsmPoi => p !== null);
@@ -401,6 +404,37 @@ function parseOverpassCandidates(elements: unknown[]): OsmCandidate[] {
 }
 
 /**
+ * Overpass name/brand/operator search near a point, scored locally against the
+ * place. Shared by the pre-submission existence check and the edit resolver so
+ * both apply exactly the same matching rules.
+ */
+async function queryOsmMatches(
+  lat: number,
+  lng: number,
+  name: string,
+  tags: Record<string, string>,
+): Promise<OsmCandidate[]> {
+  const regex = buildOverpassNameRegex(name);
+  if (!regex) return [];
+
+  const radius = matchRadiusMeters(tags);
+  const clauses = EXISTS_NAME_QUERY_KEYS.map(
+    (key) => `nwr["${key}"~"${regex}",i](around:${radius},${lat},${lng});`,
+  ).join('\n  ');
+  const query = `[out:json][timeout:15];\n(\n  ${clauses}\n);\nout center tags;`;
+
+  const data = await overpassFetch<{ elements: unknown[] }>({
+    query,
+    timeoutMs: 15_000,
+  });
+
+  const target = { name, lat, lng, tags };
+  return parseOverpassCandidates(data.elements ?? []).filter(
+    (candidate) => classifyOsmMatch(target, candidate).match,
+  );
+}
+
+/**
  * Check whether a place with the given name/tags already exists near the given
  * coordinates in OpenStreetMap.
  *
@@ -432,23 +466,7 @@ export async function checkPoiExistsInOsm(
   const cached = existsCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) return cached.value;
 
-  const regex = buildOverpassNameRegex(trimmed);
-  if (!regex) return false;
-
-  const radius = matchRadiusMeters(tags);
-  const clauses = EXISTS_NAME_QUERY_KEYS.map(
-    (key) => `nwr["${key}"~"${regex}",i](around:${radius},${lat},${lng});`,
-  ).join('\n  ');
-  const query = `[out:json][timeout:15];\n(\n  ${clauses}\n);\nout center tags;`;
-
-  const data = await overpassFetch<{ elements: unknown[] }>({
-    query,
-    timeoutMs: 15_000,
-  });
-  const candidates = parseOverpassCandidates(data.elements ?? []);
-
-  const target = { name: trimmed, lat, lng, tags };
-  const exists = candidates.some((candidate) => classifyOsmMatch(target, candidate).match);
+  const exists = (await queryOsmMatches(lat, lng, trimmed, tags)).length > 0;
 
   // Cache the result (evict oldest when full)
   if (existsCache.size >= EXISTS_CACHE_MAX) {
@@ -463,6 +481,64 @@ export async function checkPoiExistsInOsm(
 /** Clear the existence check cache (exposed for testing). */
 export function clearExistenceCache(): void {
   existsCache.clear();
+}
+
+// ---------------------------------------------------------------------------
+// OSM element resolution for editing (Overture/saved/geocode → OSM node)
+// ---------------------------------------------------------------------------
+
+/** A confident OSM element match for a place, as returned by {@link findOsmPlaceMatch}. */
+export interface OsmPlaceMatch {
+  type: 'node' | 'way' | 'relation';
+  id: number;
+}
+
+const placeMatchCache = new Map<string, { value: OsmPlaceMatch | null; expiresAt: number }>();
+
+/**
+ * Resolve the OSM element a place is already mapped as, so a place rendered from
+ * another source (Overture, saved list, geocode) can be edited in OSM.
+ *
+ * Uses the same query and scoring as {@link checkPoiExistsInOsm}, so "mapped"
+ * means the same thing in both. A matching *node* is preferred, because a node
+ * is the only element type the editor can update; a way/relation match is still
+ * reported so callers can distinguish "already mapped, but not editable here"
+ * from "not mapped at all".
+ *
+ * @returns the matched element, or null when nothing matches confidently.
+ * @throws on Overpass API errors.
+ */
+export async function findOsmPlaceMatch(
+  lat: number,
+  lng: number,
+  name: string,
+  tags: Record<string, string> = {},
+): Promise<OsmPlaceMatch | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  const cacheKey = existsCacheKey(lat, lng, trimmed, tags);
+  const cached = placeMatchCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) return cached.value;
+
+  const matches = await queryOsmMatches(lat, lng, trimmed, tags);
+  const preferred = matches.find((candidate) => candidate.type === 'node') ?? matches[0];
+  const value: OsmPlaceMatch | null = preferred
+    ? { type: preferred.type as OsmPlaceMatch['type'], id: preferred.id }
+    : null;
+
+  if (placeMatchCache.size >= EXISTS_CACHE_MAX) {
+    const oldestKey = placeMatchCache.keys().next().value;
+    if (oldestKey !== undefined) placeMatchCache.delete(oldestKey);
+  }
+  placeMatchCache.set(cacheKey, { value, expiresAt: Date.now() + EXISTS_CACHE_TTL_MS });
+
+  return value;
+}
+
+/** Clear the place-match cache (exposed for testing). */
+export function clearPlaceMatchCache(): void {
+  placeMatchCache.clear();
 }
 
 /**
@@ -535,6 +611,9 @@ export async function fetchNominatimPois(
             tags: {
               [item.class]: item.type,
               name: shortName,
+              // Nominatim's `place_id` is NOT an OSM element id; tag the source
+              // so callers never treat it as one (see `isOsmNodePoi`).
+              'polaris:source': 'nominatim',
               ...(item.address?.road ? { 'addr:street': item.address.road } : {}),
               ...((item.address?.city ?? item.address?.town ?? item.address?.village)
                 ? { 'addr:city': (item.address.city ?? item.address.town ?? item.address.village)! }

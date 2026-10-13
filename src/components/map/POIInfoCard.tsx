@@ -10,6 +10,7 @@ import {
   Image,
   Share,
   Alert,
+  ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,7 +35,9 @@ import {
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
 import { markPlaceHandled, seedPlaceToOsm } from '../../services/osm/placeSeedService';
-import { osmTagsFromPoi, placeToOsmTags } from '../../utils/placeToOsmPoi';
+import { findOsmPlaceMatch } from '../../services/poi/osmFetcher';
+import { isOsmNodePoi, osmTagsFromPoi, placeToOsmTags } from '../../utils/placeToOsmPoi';
+import { resolveOsmEditAction } from '../../utils/osmEditAction';
 import { type MergedRating } from '../../services/poi/reviewRanking';
 import { buildPlaceLink } from '../../services/places/shareService';
 import { normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
@@ -451,6 +454,8 @@ export function POIInfoCard() {
   const [snapIndex, setSnapIndex] = useState(0);
   // EV charging station data from Open Charge Map
   const [chargingData, setChargingData] = useState<ChargingStation | null>(null);
+  // True while "Update Place Info" is resolving a non-OSM place's OSM element.
+  const [resolvingOsm, setResolvingOsm] = useState(false);
 
   // Reset to peek whenever a new POI is selected.
   useEffect(() => {
@@ -822,6 +827,91 @@ export function POIInfoCard() {
       },
     });
   }, [poi, osmAccessToken, osmLogin, router]);
+
+  /**
+   * "Update Place Info" for any selected place.
+   *
+   * A place rendered straight from OSM already knows its node id. Everything
+   * else (Overture, saved list, geocode) has a synthetic id, so the OSM element
+   * is resolved by name + proximity on tap and edited when it exists; an
+   * unmapped Overture place is offered for creation, and a place mapped as a
+   * way/relation is reported as not editable here.
+   */
+  const handleUpdatePlaceInfo = useCallback(async () => {
+    const target = selectedPoi;
+    if (!target) return;
+
+    if (isOsmNodePoi(target)) {
+      router.push({
+        pathname: '/poi/osm-edit',
+        params: { nodeId: String(target.id), name: target.name || '' },
+      });
+      return;
+    }
+
+    if (!osmAccessToken) {
+      try {
+        await osmLogin();
+      } catch (e) {
+        Alert.alert('Sign In Failed', (e as Error).message);
+        return;
+      }
+    }
+
+    setResolvingOsm(true);
+    try {
+      // Prefer the cached Place for richer tags (brand/email/address parts);
+      // fall back to the tags the card already rendered.
+      const uuid = target.tags['polaris:uuid'];
+      const place = uuid ? await getPlaceById(uuid).catch(() => null) : null;
+      const tags = place ? placeToOsmTags(place) : osmTagsFromPoi(target);
+      const match = await findOsmPlaceMatch(target.lat, target.lng, target.name, tags);
+      const action = resolveOsmEditAction(match, target.tags['polaris:source'] === 'overture');
+
+      if (action.kind === 'edit') {
+        router.push({
+          pathname: '/poi/osm-edit',
+          params: { nodeId: String(action.nodeId), name: target.name || '' },
+        });
+        return;
+      }
+      if (action.kind === 'create') {
+        router.push({
+          pathname: '/poi/osm-edit',
+          params: {
+            name: target.name || '',
+            lat: String(target.lat),
+            lng: String(target.lng),
+            initialTags: JSON.stringify(tags),
+          },
+        });
+        return;
+      }
+      if (action.kind === 'mapped-as-other') {
+        Alert.alert(
+          'Already on OpenStreetMap',
+          `This place is mapped as an OSM ${action.type}, which can't be edited here.`,
+          [
+            { text: 'Not Now', style: 'cancel' },
+            {
+              text: 'Open in Browser',
+              onPress: () =>
+                void Linking.openURL(`https://www.openstreetmap.org/${action.type}/${action.id}`),
+            },
+          ],
+        );
+        return;
+      }
+      Alert.alert('Not on OpenStreetMap', "This place isn't mapped in OpenStreetMap yet.");
+    } catch {
+      Alert.alert(
+        'OpenStreetMap Unavailable',
+        'Could not reach OpenStreetMap just now. Try again in a moment.',
+      );
+    } finally {
+      setResolvingOsm(false);
+    }
+  }, [selectedPoi, osmAccessToken, osmLogin, router]);
 
   // Resolve the local place (if any) once per selected POI so the Reviews
   // affordance can show the on-device review count, and surface the community
@@ -1391,24 +1481,26 @@ export function POIInfoCard() {
               </GlassView>
             )}
 
-            {/* ── Update Place Info (OSM edit) ──────────────────────── */}
-            {selectedPoi && selectedPoi.id > 0 && (
+            {/* ── Update Place Info (OSM edit) ────────────────────────
+                Shown for every place: an OSM node edits directly, while an
+                Overture/saved/geocode place has its OSM element resolved on
+                tap (and is offered for creation when it isn't mapped). */}
+            {selectedPoi && (
               <TouchableOpacity
                 activeOpacity={0.7}
+                disabled={resolvingOsm}
                 onPress={() => {
-                  router.push({
-                    pathname: '/poi/osm-edit',
-                    params: {
-                      nodeId: String(selectedPoi.id),
-                      name: selectedPoi.name || '',
-                    },
-                  });
+                  void handleUpdatePlaceInfo();
                 }}
               >
                 <GlassView material="regular" isInteractive style={styles.updatePlaceBtn}>
-                  <Ionicons name="create-outline" size={18} color={primary} />
+                  {resolvingOsm ? (
+                    <ActivityIndicator size="small" color={primary} />
+                  ) : (
+                    <Ionicons name="create-outline" size={18} color={primary} />
+                  )}
                   <Text style={[styles.updatePlaceBtnText, { color: primary }]}>
-                    Update Place Info
+                    {resolvingOsm ? 'Checking OpenStreetMap…' : 'Update Place Info'}
                   </Text>
                 </GlassView>
               </TouchableOpacity>

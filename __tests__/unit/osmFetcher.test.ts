@@ -1,9 +1,13 @@
 import {
   fetchOsmPois,
+  fetchNominatimPois,
   clearOsmCache,
   checkPoiExistsInOsm,
   clearExistenceCache,
+  findOsmPlaceMatch,
+  clearPlaceMatchCache,
 } from '../../src/services/poi/osmFetcher';
+import { isOsmNodePoi } from '../../src/utils/placeToOsmPoi';
 import { __setOverpassMinIntervalMsForTests } from '../../src/services/overpassClient';
 
 // ---------------------------------------------------------------------------
@@ -444,5 +448,139 @@ describe('checkPoiExistsInOsm', () => {
     await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
     // overpassClient fires to 3 Overpass instances in parallel
     expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findOsmPlaceMatch — resolving a non-OSM place to an editable OSM element
+// ---------------------------------------------------------------------------
+
+describe('findOsmPlaceMatch', () => {
+  const LAT = 40.748;
+  const LNG = -73.985;
+
+  function overpass(elements: object[]) {
+    return { ok: true, json: async () => ({ elements }) };
+  }
+
+  function node(id: number, tags: Record<string, string>) {
+    return { type: 'node', id, lat: LAT, lon: LNG, tags };
+  }
+
+  function way(id: number, tags: Record<string, string>) {
+    return { type: 'way', id, center: { lat: LAT, lon: LNG }, tags };
+  }
+
+  beforeEach(() => {
+    clearPlaceMatchCache();
+    clearExistenceCache();
+    mockFetch.mockReset();
+  });
+
+  it('resolves a mapped place to its OSM node', async () => {
+    mockFetch.mockResolvedValue(
+      overpass([node(42, { name: 'Your Mothers House', amenity: 'restaurant' })]),
+    );
+
+    expect(
+      await findOsmPlaceMatch(LAT, LNG, 'Your Mothers House', { amenity: 'restaurant' }),
+    ).toEqual({ type: 'node', id: 42 });
+  });
+
+  it('prefers a node over a way when both match', async () => {
+    mockFetch.mockResolvedValue(
+      overpass([
+        way(99, { name: 'Starbucks', amenity: 'cafe' }),
+        node(7, { name: 'Starbucks', amenity: 'cafe' }),
+      ]),
+    );
+
+    expect(await findOsmPlaceMatch(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toEqual({
+      type: 'node',
+      id: 7,
+    });
+  });
+
+  it('reports a way-only match so callers know it is mapped but not node-editable', async () => {
+    mockFetch.mockResolvedValue(overpass([way(99, { name: 'Starbucks', amenity: 'cafe' })]));
+
+    expect(await findOsmPlaceMatch(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toEqual({
+      type: 'way',
+      id: 99,
+    });
+  });
+
+  it('returns null when nothing matches confidently', async () => {
+    mockFetch.mockResolvedValue(overpass([node(1, { name: 'Subway', amenity: 'fast_food' })]));
+
+    expect(await findOsmPlaceMatch(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toBeNull();
+  });
+
+  it('returns null for an empty name without querying', async () => {
+    expect(await findOsmPlaceMatch(LAT, LNG, '   ')).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('caches the resolved match', async () => {
+    mockFetch.mockResolvedValue(overpass([node(42, { name: 'Starbucks', amenity: 'cafe' })]));
+    await findOsmPlaceMatch(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
+    mockFetch.mockClear();
+
+    expect(await findOsmPlaceMatch(LAT, LNG, 'Starbucks', { amenity: 'cafe' })).toEqual({
+      type: 'node',
+      id: 42,
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Element-type and source tagging (id-space guards)
+// ---------------------------------------------------------------------------
+
+describe('POI id-space tagging', () => {
+  beforeEach(() => {
+    clearOsmCache();
+    mockFetch.mockReset();
+  });
+
+  it('tags Overpass nodes and ways with their element type', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        makeOverpassResponse([
+          makeNode(1, 'IHOP'),
+          {
+            type: 'way',
+            id: 2,
+            center: { lat: 40.0, lon: -74.0 },
+            tags: { name: 'Mall Cafe', amenity: 'cafe' },
+          },
+        ]),
+    });
+
+    const pois = await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
+    expect(pois.find((p) => p.id === 1)?.tags['polaris:osmType']).toBe('node');
+    expect(pois.find((p) => p.id === 2)?.tags['polaris:osmType']).toBe('way');
+  });
+
+  it('tags Nominatim POIs so their place_id is never used as an OSM id', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          place_id: 123456,
+          lat: '40.0',
+          lon: '-74.0',
+          display_name: 'Corner Cafe, Main St, New York',
+          type: 'cafe',
+          class: 'amenity',
+        },
+      ],
+    });
+
+    const pois = await fetchNominatimPois(40.7, -74.0, 40.8, -73.9);
+    expect(pois[0]?.tags['polaris:source']).toBe('nominatim');
+    expect(isOsmNodePoi(pois[0]!)).toBe(false);
   });
 });
