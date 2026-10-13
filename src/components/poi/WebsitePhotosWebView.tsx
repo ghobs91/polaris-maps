@@ -7,6 +7,7 @@ import {
   extractPhotosFromWebViewMessage,
   resolveWebViewPhotoUrls,
 } from '../../services/poi/websitePhotosService';
+import { GEOLOCATION_GUARD_JS } from '../../constants/webViewScripts';
 
 interface WebsitePhotosWebViewProps {
   /** Venue page to render (http/https only). */
@@ -107,6 +108,8 @@ export function WebsitePhotosWebView({
         source={{ uri }}
         style={styles.hidden}
         injectedJavaScript={WEBSITE_PHOTOS_JS}
+        injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
         javaScriptEnabled
         domStorageEnabled
         sharedCookiesEnabled

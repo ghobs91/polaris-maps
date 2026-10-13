@@ -26,6 +26,7 @@ import type {
   ExternalRatingSummary,
 } from '../../services/poi/externalRatings/types';
 import { borderRadius, spacing, typography } from '../../constants/theme';
+import { GEOLOCATION_GUARD_JS } from '../../constants/webViewScripts';
 
 /**
  * External aggregate ratings from TripAdvisor and Yelp, resolved via the
@@ -143,6 +144,8 @@ export function ExternalRatingsSection({
             source={{ uri: mountedWebView.uri }}
             style={styles.hiddenWebView}
             injectedJavaScript={mountedWebView.injectedJavaScript}
+            injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
+            injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
             javaScriptEnabled
             domStorageEnabled
             sharedCookiesEnabled

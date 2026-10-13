@@ -86,6 +86,7 @@ jest.mock('react-native-webview', () => {
 });
 
 import { PlaceMediaCarousel } from '../../src/components/poi/PlaceMediaCarousel';
+import { GEOLOCATION_GUARD_JS } from '../../src/constants/webViewScripts';
 
 function renderCarousel() {
   return render(
@@ -240,8 +241,21 @@ describe('PlaceMediaCarousel', () => {
 
     await waitFor(() => expect(screen.getByTestId('place-media-webview')).toBeTruthy());
 
-    const props = (global as { __lastPhotosWebViewProps?: { onMessage?: (e: unknown) => void } })
-      .__lastPhotosWebViewProps;
+    const props = (
+      global as {
+        __lastPhotosWebViewProps?: {
+          onMessage?: (e: unknown) => void;
+          injectedJavaScriptBeforeContentLoaded?: string;
+          injectedJavaScriptBeforeContentLoadedForMainFrameOnly?: boolean;
+        };
+      }
+    ).__lastPhotosWebViewProps;
+
+    // The hidden WebView neutralizes web geolocation before the venue page's own
+    // scripts run, so no per-origin location prompt is shown on iOS.
+    expect(props?.injectedJavaScriptBeforeContentLoaded).toBe(GEOLOCATION_GUARD_JS);
+    expect(props?.injectedJavaScriptBeforeContentLoadedForMainFrameOnly).toBe(false);
+
     act(() => {
       props?.onMessage?.({
         nativeEvent: {

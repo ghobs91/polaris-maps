@@ -49,6 +49,7 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 });
 
 import { ExternalRatingsSection } from '../../src/components/map/ExternalRatingsSection';
+import { GEOLOCATION_GUARD_JS } from '../../src/constants/webViewScripts';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
 import { clearSessionPlaceRatings } from '../../src/services/places/placeRatingSessionCache';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
@@ -314,6 +315,18 @@ describe('ExternalRatingsSection', () => {
       fireEvent.press(screen.getByTestId('external-ratings-write-review'));
     });
     expect(onWriteReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('neutralizes web geolocation before the provider page loads', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+
+    expect(webViewProps().injectedJavaScriptBeforeContentLoaded).toBe(GEOLOCATION_GUARD_JS);
+    expect(webViewProps().injectedJavaScriptBeforeContentLoadedForMainFrameOnly).toBe(false);
   });
 
   it('rejects navigations that leave the provider host allowlist', async () => {
