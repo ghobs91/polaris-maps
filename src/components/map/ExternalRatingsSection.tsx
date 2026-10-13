@@ -136,7 +136,10 @@ export function ExternalRatingsSection({
       testID="external-ratings-section"
       style={[styles.section, { borderColor: colors.border }]}
     >
-      <Text style={[styles.title, { color: colors.text }]}>Reviews</Text>
+      <View style={styles.titleRow}>
+        <MaterialCommunityIcons name="star-outline" size={16} color={colors.textSecondary} />
+        <Text style={[styles.title, { color: colors.text }]}>Reviews</Text>
+      </View>
 
       {mountedWebView ? (
         <View style={styles.hiddenWebView} pointerEvents="none">
@@ -284,9 +287,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     padding: spacing.md,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   title: {
     ...typography.label,
-    marginBottom: spacing.sm,
   },
   row: {
     flexDirection: 'row',

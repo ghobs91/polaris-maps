@@ -258,7 +258,10 @@ export function PlaceMediaCarousel({
           style={[styles.section, { borderColor: colors.border }]}
           testID="place-media-empty"
         >
-          <Text style={styles.title}>Photos</Text>
+          <View style={styles.titleRow}>
+            <Ionicons name="images-outline" size={16} color={colors.textSecondary} />
+            <Text style={styles.title}>Photos</Text>
+          </View>
           <View style={[styles.emptyState, { borderColor: colors.border }]}>
             <Ionicons name="cloud-offline-outline" size={18} color={colors.textSecondary} />
             <Text style={styles.emptyText}>Photos are unavailable offline</Text>
@@ -275,7 +278,10 @@ export function PlaceMediaCarousel({
       testID="place-media-section"
     >
       {hiddenWebView}
-      <Text style={styles.title}>Photos</Text>
+      <View style={styles.titleRow}>
+        <Ionicons name="images-outline" size={16} color={colors.textSecondary} />
+        <Text style={styles.title}>Photos</Text>
+      </View>
       <FlatList
         data={visible}
         horizontal
@@ -406,7 +412,13 @@ const createStyles = ({ colors }: Theme) =>
       overflow: 'hidden',
       padding: spacing.md,
     },
-    title: { ...typography.label, color: colors.text, marginBottom: spacing.sm },
+    title: { ...typography.label, color: colors.text },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginBottom: spacing.sm,
+    },
     strip: { gap: spacing.sm },
     thumbWrap: { width: 120 },
     thumb: {
