@@ -489,6 +489,18 @@ export function parseSearchMessageFromWebView(
 // ---------------------------------------------------------------------------
 
 /**
+ * Pacing shared by every provider collector.
+ *
+ * The stage clock (`STAGE_TIMEOUT_MS` in `useExternalRatings`) unmounts the
+ * WebView when it fires, so a collector that is still retrying at that point
+ * never posts — its verdict (including the challenge classification) is lost.
+ * `(COLLECTOR_MAX_ATTEMPTS - 1) * COLLECTOR_RETRY_INTERVAL_MS` MUST therefore
+ * stay comfortably under the stage budget; a unit test asserts the invariant.
+ */
+export const COLLECTOR_RETRY_INTERVAL_MS = 500;
+export const COLLECTOR_MAX_ATTEMPTS = 15;
+
+/**
  * Build the standard injected-collector wrapper around a provider's `collect()`
  * body. Replaces the old one-shot `SENT` latch: the collector re-runs on an
  * interval until it has data or time runs out, so a page that is briefly
@@ -514,8 +526,8 @@ export function buildCollectorScript(opts: {
   maxAttempts?: number;
 }): string {
   const initialDelayMs = opts.initialDelayMs ?? 0;
-  const retryIntervalMs = opts.retryIntervalMs ?? 500;
-  const maxAttempts = opts.maxAttempts ?? 20;
+  const retryIntervalMs = opts.retryIntervalMs ?? COLLECTOR_RETRY_INTERVAL_MS;
+  const maxAttempts = opts.maxAttempts ?? COLLECTOR_MAX_ATTEMPTS;
   return `(function () {
   var ATTEMPTS = ${JSON.stringify(maxAttempts)};
   var INTERVAL = ${JSON.stringify(retryIntervalMs)};

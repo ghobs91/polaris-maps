@@ -9,6 +9,8 @@
 
 import {
   buildCollectorScript,
+  COLLECTOR_MAX_ATTEMPTS,
+  COLLECTOR_RETRY_INTERVAL_MS,
   discoverListingFromAnchors,
   extractLdBlocks,
   findAggregateRating,
@@ -213,8 +215,8 @@ export const TRIPADVISOR_RATING_JS = buildCollectorScript({
   payloadType: 'external-rating',
   hasDataJs: 'out.ldRating != null && out.ldCount != null',
   initialDelayMs: 0,
-  retryIntervalMs: 500,
-  maxAttempts: 20,
+  retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
+  maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.ldRating = null;
     out.ldCount = null;
     out.ldName = null;
@@ -269,8 +271,8 @@ export const TRIPADVISOR_SEARCH_JS = buildCollectorScript({
   payloadType: 'rating-search',
   hasDataJs: 'out.candidates.length > 0',
   initialDelayMs: 0,
-  retryIntervalMs: 500,
-  maxAttempts: 20,
+  retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
+  maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.candidates = [];
     var seen = {};
     var anchors = document.querySelectorAll('a[href]');

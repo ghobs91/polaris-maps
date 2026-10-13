@@ -20,6 +20,7 @@ import {
 } from './core';
 import { tripadvisorProvider } from './tripadvisorProvider';
 import { yelpProvider } from './yelpProvider';
+import { matchIdentity } from '../identity';
 import { normalizeWebsiteUrl } from '../websitePhotosService';
 import type { ExternalRatingProvider } from './provider';
 import type { ExternalRatingProviderId, ExternalRatingQuery, ExternalRatingSummary } from './types';
@@ -87,12 +88,17 @@ export function isAllowedExternalRatingUrl(raw: string): boolean {
  * Fetch a listing, parse its aggregate rating, validate it against the place,
  * and cache the result. Returns null on any failure (challenge, no data, or a
  * listing-name mismatch).
+ *
+ * `confirmIdentity` additionally requires the listing's own address/`geo` to
+ * confirm the place. It MUST be set for listings discovered by a provider
+ * search — the place's own tag or website implies provenance, a search hit does
+ * not, and name alone could be a sibling chain branch.
  */
 export async function fetchAndParseRating(
   provider: ExternalRatingProvider,
   listingUrl: string,
   query: ExternalRatingQuery,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; confirmIdentity?: boolean },
 ): Promise<ExternalRatingSummary | null> {
   const cached = getCachedExternalRating(provider.id, listingUrl);
   if (cached) return cached;
@@ -102,6 +108,16 @@ export async function fetchAndParseRating(
 
   const raw = provider.parseRatingFromHtml(html);
   if (!raw) return null;
+
+  if (
+    options?.confirmIdentity &&
+    !matchIdentity(
+      { name: raw.listingName, address: raw.listingAddress ?? null, geo: raw.geo ?? null },
+      query,
+    )
+  ) {
+    return null;
+  }
 
   const summary = validateExternalRating(raw, listingUrl, provider.id, {
     expectedName: query.name,
