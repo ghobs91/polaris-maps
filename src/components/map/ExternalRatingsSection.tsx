@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -18,6 +18,7 @@ import {
   placeRatingKey,
   setSessionPlaceRating,
 } from '../../services/places/placeRatingSessionCache';
+import { openInAppBrowser } from '../../utils/inAppBrowser';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import type {
   ExternalRatingProviderId,
@@ -177,7 +178,7 @@ function CombinedRatingBlock({
   colors: ReturnType<typeof useTheme>['colors'];
 }) {
   const openListing = useCallback((url: string) => {
-    Linking.openURL(url).catch(() => {});
+    void openInAppBrowser(url);
   }, []);
 
   return (

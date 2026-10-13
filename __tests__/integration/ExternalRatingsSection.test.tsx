@@ -9,6 +9,13 @@ jest.mock('react-native-webview', () => ({
   },
 }));
 
+const mockOpenBrowserAsync = jest.fn();
+
+jest.mock('expo-web-browser', () => ({
+  WebBrowserPresentationStyle: { PAGE_SHEET: 'pageSheet' },
+  openBrowserAsync: (...args: unknown[]) => mockOpenBrowserAsync(...args),
+}));
+
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 44, right: 0, bottom: 34, left: 0 }),
 }));
@@ -263,15 +270,13 @@ describe('ExternalRatingsSection', () => {
       expect(screen.getByTestId('external-ratings-pill-tripadvisor')).toBeTruthy(),
     );
 
-    const openURLMock = jest.fn().mockResolvedValue(undefined);
-    jest
-      .spyOn(jest.requireActual('react-native').Linking, 'openURL')
-      .mockImplementation(openURLMock as unknown as typeof import('react-native').Linking.openURL);
+    mockOpenBrowserAsync.mockReset();
+    mockOpenBrowserAsync.mockResolvedValue({ type: 'dismiss' });
 
     act(() => {
       fireEvent.press(screen.getByTestId('external-ratings-pill-tripadvisor'));
     });
-    expect(openURLMock).toHaveBeenCalledWith(TA_LISTING_URL);
+    expect(mockOpenBrowserAsync).toHaveBeenCalledWith(TA_LISTING_URL, expect.anything());
   });
 
   it('shows a loading row while ratings resolve', async () => {

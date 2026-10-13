@@ -44,6 +44,7 @@ import {
   type WebsiteActionKind,
 } from '../../services/poi/websiteActionsService';
 import { findStreetViewPanoramas } from '../../services/imagery/streetViewService';
+import { openInAppBrowser } from '../../utils/inAppBrowser';
 import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
 import { ExternalRatingsSection } from './ExternalRatingsSection';
 import { spacing, typography, borderRadius } from '../../constants/theme';
@@ -691,9 +692,11 @@ export function POIInfoCard() {
   }, [parsed?.website, isOnline]);
 
   const openActionUrl = useCallback((url: string, label: string) => {
-    Linking.openURL(url).catch(() =>
-      Alert.alert(`${label} unavailable`, `We couldn't open that link for this place.`),
-    );
+    void openInAppBrowser(url).then((opened) => {
+      if (!opened) {
+        Alert.alert(`${label} unavailable`, `We couldn't open that link for this place.`);
+      }
+    });
   }, []);
 
   const handlePhone = useCallback(() => {
@@ -703,7 +706,7 @@ export function POIInfoCard() {
   const handleWebsite = useCallback(() => {
     if (parsed?.website) {
       const url = parsed.website.startsWith('http') ? parsed.website : `https://${parsed.website}`;
-      Linking.openURL(url);
+      void openInAppBrowser(url);
     }
   }, [parsed?.website]);
 
@@ -711,9 +714,9 @@ export function POIInfoCard() {
     const menuUrl = parsed?.menuUrl;
     if (!menuUrl) return;
     const url = menuUrl.startsWith('http') ? menuUrl : `https://${menuUrl}`;
-    Linking.openURL(url).catch(() =>
-      Alert.alert('Menu unavailable', "We couldn't open the menu for this place."),
-    );
+    void openInAppBrowser(url).then((opened) => {
+      if (!opened) Alert.alert('Menu unavailable', "We couldn't open the menu for this place.");
+    });
   }, [parsed?.menuUrl]);
 
   const handleEmail = useCallback(() => {
@@ -722,7 +725,7 @@ export function POIInfoCard() {
 
   const handleFacebook = useCallback(() => {
     if (parsed?.facebook)
-      Linking.openURL(
+      void openInAppBrowser(
         parsed.facebook.startsWith('http')
           ? parsed.facebook
           : `https://facebook.com/${parsed.facebook}`,
@@ -879,7 +882,7 @@ export function POIInfoCard() {
 
   const handleInstagram = useCallback(() => {
     if (parsed?.instagram)
-      Linking.openURL(
+      void openInAppBrowser(
         parsed.instagram.startsWith('http')
           ? parsed.instagram
           : `https://instagram.com/${parsed.instagram}`,
@@ -1360,7 +1363,7 @@ export function POIInfoCard() {
                 {parsed.twitter && (
                   <TouchableOpacity
                     onPress={() =>
-                      Linking.openURL(
+                      void openInAppBrowser(
                         parsed.twitter!.startsWith('http')
                           ? parsed.twitter!
                           : `https://twitter.com/${parsed.twitter}`,

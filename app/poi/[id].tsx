@@ -39,13 +39,14 @@ import {
   fetchChargingStations,
   type ChargingStation,
 } from '../../src/services/poi/openChargeMapService';
+import { openInAppBrowser } from '../../src/utils/inAppBrowser';
 
 const SAFE_URL_SCHEMES = ['https:', 'http:'];
 
 function safeOpenURL(raw: string): void {
   try {
     const u = new URL(raw);
-    if (SAFE_URL_SCHEMES.includes(u.protocol)) Linking.openURL(raw);
+    if (SAFE_URL_SCHEMES.includes(u.protocol)) void openInAppBrowser(raw);
   } catch {
     /* malformed — ignore */
   }
