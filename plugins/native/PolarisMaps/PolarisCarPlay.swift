@@ -204,7 +204,8 @@ class PolarisCarPlay: RCTEventEmitter {
     return [
       "carPlayConnected", "carPlayDisconnected", "searchQuery", "searchResultSelected",
       "searchResultAddStop", "carPlayRouteStart", "carPlayContentStyleChanged",
-      "carPlayToggleMute", "carPlayArrivalDismiss", "carPlayDashboardFavorite",
+      "carPlayToggleMute", "carPlayArrivalDismiss", "carPlayFasterRouteAccept",
+      "carPlayFasterRouteDismiss", "carPlayDashboardFavorite",
       "carPlayNavigationCancelled", "carPlayLocateRequest", "carPlayReportIncident",
     ]
   }
