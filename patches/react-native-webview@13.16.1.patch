@@ -1,0 +1,31 @@
+diff --git a/apple/RNCWebViewImpl.m b/apple/RNCWebViewImpl.m
+index 7f5c24d6e2cfb26eddbc513bf17a81c24a7273e2..43566060fb49a5b9f24b5e113c49d9b9d031d8ac 100644
+--- a/apple/RNCWebViewImpl.m
++++ b/apple/RNCWebViewImpl.m
+@@ -1311,6 +1311,26 @@ - (void)                         webView:(WKWebView *)webView
+ }
+ #endif
+ 
++#if defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 270000 /* iOS 27 */
++/**
++ * Geolocation permissions: deny silently.
++ *
++ * WebKit asks the host app to decide before it forwards a page's geolocation
++ * request to the system, and its default answer is the per-origin prompt naming
++ * the website ("…www.tripadvisor.com… would like to use your current
++ * location"). This app's hidden WebViews load third-party pages only to read
++ * data already present in the DOM, so no page needs the device's location.
++ * Denying here is the same decision the user would make by tapping "Don't
++ * Allow", and keeps the scrape silent.
++ */
++- (void)                          webView:(WKWebView *)webView
++  requestGeolocationPermissionForOrigin:(WKSecurityOrigin *)origin
++                      initiatedByFrame:(WKFrameInfo *)frame
++                     decisionHandler:(void (^)(WKPermissionDecision decision))decisionHandler {
++  decisionHandler(WKPermissionDecisionDeny);
++}
++#endif
++
+ #if !TARGET_OS_OSX
+ /**
+  * topViewController
