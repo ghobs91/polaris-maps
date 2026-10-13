@@ -13,6 +13,7 @@
 
 /* global Bare, BareKit */
 
+import './bootstrap-guard.mjs';
 import './process-shim.mjs';
 import RPC from 'bare-rpc';
 import Hyperswarm from 'hyperswarm';
@@ -133,12 +134,14 @@ function handleRequest(req) {
         break;
       }
       case CMD_SUSPEND: {
-        if (swarm) swarm.suspend();
+        // Hyperswarm.suspend() is async; an unhandled rejection here aborts the
+        // whole worklet (Bare kills the process on unhandled rejections).
+        if (swarm) swarm.suspend().catch(() => {});
         req.reply(b4a.from('ok'));
         break;
       }
       case CMD_RESUME: {
-        if (swarm) swarm.resume();
+        if (swarm) swarm.resume().catch(() => {});
         req.reply(b4a.from('ok'));
         break;
       }

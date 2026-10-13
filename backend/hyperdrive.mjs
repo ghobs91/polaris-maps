@@ -14,6 +14,7 @@
 
 /* global Bare, BareKit */
 
+import './bootstrap-guard.mjs';
 import './process-shim.mjs';
 import RPC from 'bare-rpc';
 import Hyperswarm from 'hyperswarm';
@@ -67,7 +68,12 @@ async function closeStore(storePath) {
 
 const { IPC } = BareKit;
 const rpc = new RPC(IPC, (req) => {
-  handleRequest(req);
+  // `handleRequest` is async: never let its rejection escape unhandled — Bare
+  // aborts the whole worklet (and therefore the host app) on an unhandled
+  // rejection, and bare-rpc only guards synchronous handlers.
+  handleRequest(req).catch((err) => {
+    console.error('[hyperdrive] RPC handler failed:', err);
+  });
 });
 
 function reply(req, obj) {
