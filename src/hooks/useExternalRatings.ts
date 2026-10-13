@@ -8,7 +8,9 @@
  *
  * Bounded policy: at most one hidden WebView is mounted at a time (enforced by
  * the section), fetches are paced through the shared browse scheduler, and a
- * detected challenge reports back to it so the host cools down.
+ * detected challenge reports back to it so the host cools down. A whole resolve
+ * pass is additionally bounded by {@link OVERALL_TIMEOUT_MS} so the card always
+ * reaches a settled state (rating or "no ratings yet") quickly.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -37,7 +39,15 @@ import type {
   ExternalRatingSummary,
 } from '../services/poi/externalRatings/types';
 
-export const STAGE_TIMEOUT_MS = 20_000;
+export const STAGE_TIMEOUT_MS = 8_000;
+
+/**
+ * Hard ceiling on a whole resolve pass. Providers run through a single hidden
+ * WebView, so two queued providers can otherwise keep the row "resolving" well
+ * past one stage's clock; once this elapses the remaining providers settle as
+ * misses so the card reaches its "no ratings yet" state promptly.
+ */
+export const OVERALL_TIMEOUT_MS = 15_000;
 
 /** Dev-only stage tracing so on-device runs reveal exactly which step bails. */
 function log(...args: unknown[]): void {
@@ -239,13 +249,26 @@ export function useExternalRatings(
       })();
     });
 
+    const deadline = setTimeout(() => {
+      if (cancelled) return;
+      EXTERNAL_RATING_PROVIDERS.forEach(({ id }) => {
+        const current = statesRef.current.find((s) => s.provider === id);
+        if (current && current.status !== 'loaded' && current.status !== 'failed') {
+          log(id, 'overall deadline — giving up');
+          clearTimer(id);
+          fail(id);
+        }
+      });
+    }, OVERALL_TIMEOUT_MS);
+
     return () => {
       cancelled = true;
+      clearTimeout(deadline);
       Object.values(timerRef.current).forEach((t) => t && clearTimeout(t));
     };
     // Resolution is keyed to the place (`resetKey`), not to every query field,
     // so late enrichment can't reset an already-loaded rating.
-  }, [resetKey, update]);
+  }, [resetKey, update, clearTimer, fail]);
 
   // The section mounts at most one hidden WebView at a time — the first provider
   // (registry order) exposing a stage. A stage's clock must start when its

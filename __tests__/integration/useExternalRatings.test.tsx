@@ -12,7 +12,11 @@ jest.mock('../../src/services/poi/externalRatings', () => {
   };
 });
 
-import { STAGE_TIMEOUT_MS, useExternalRatings } from '../../src/hooks/useExternalRatings';
+import {
+  OVERALL_TIMEOUT_MS,
+  STAGE_TIMEOUT_MS,
+  useExternalRatings,
+} from '../../src/hooks/useExternalRatings';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
 import { clearSessionPlaceRatings } from '../../src/services/places/placeRatingSessionCache';
 import type { ExternalRatingQuery } from '../../src/services/poi/externalRatings/types';
@@ -122,5 +126,52 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     const yelp = result.current.states.find((s) => s.provider === 'yelp');
     expect(yelp?.status).not.toBe('failed');
     expect(yelp?.webView?.uri).toBe(YELP_LISTING);
+  });
+
+  it('settles every provider once the overall deadline elapses', async () => {
+    // No known listing for either provider, so both queue a search-stage
+    // WebView and only the first ever gets the single hidden WebView slot.
+    mockResolveKnownListing.mockResolvedValue(null);
+
+    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
+
+    await act(async () => {
+      await flush();
+    });
+
+    // Before the deadline the row is still resolving.
+    expect(result.current.states.some((s) => s.status === 'idle' || s.status === 'searching')).toBe(
+      true,
+    );
+
+    act(() => {
+      jest.advanceTimersByTime(OVERALL_TIMEOUT_MS + 1_000);
+    });
+
+    // The empty state ("no ratings yet") is reached without waiting out both
+    // providers' stages.
+    expect(result.current.states.every((s) => s.status === 'failed')).toBe(true);
+    expect(result.current.states.every((s) => s.webView === null)).toBe(true);
+  });
+
+  it('does not wipe an already-loaded provider when the deadline elapses', async () => {
+    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
+
+    await act(async () => {
+      await flush();
+    });
+
+    act(() => {
+      result.current.handleMessage('yelp', VALID_PAYLOAD);
+    });
+    expect(result.current.states.find((s) => s.provider === 'yelp')?.status).toBe('loaded');
+
+    act(() => {
+      jest.advanceTimersByTime(OVERALL_TIMEOUT_MS + 1_000);
+    });
+
+    const yelp = result.current.states.find((s) => s.provider === 'yelp');
+    expect(yelp?.status).toBe('loaded');
+    expect(yelp?.summary?.rating).toBe(4.2);
   });
 });
