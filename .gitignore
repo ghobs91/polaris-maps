@@ -120,3 +120,7 @@ expo-env.d.ts
 # Local Netlify folder
 .netlify
 AppStore_*.mobileprovision
+
+# App Store screenshot working dirs (large binaries)
+screenshots/raw/
+screenshots/out/
