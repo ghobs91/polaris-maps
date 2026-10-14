@@ -229,18 +229,14 @@ export default function POIDetailScreen() {
     router.replace('/(tabs)');
   }, [selectedPlace, setPendingDirectionsTarget, router]);
 
-  if (isLoadingPlace || !selectedPlace) {
-    return (
-      <View style={styles.center}>
-        <LoadingSpinner size="large" />
-      </View>
-    );
-  }
-
+  // Defined before the loading/empty early return so the hook order is stable
+  // across renders (an extra hook after the return would violate the rules of
+  // hooks and crash the screen).
   const renderPhotoItem = useCallback(
     ({ item }: { item: StreetImagery }) => (
       <Pressable
-        onPress={() =>
+        onPress={() => {
+          if (!selectedPlace) return;
           router.push({
             pathname: '/imagery/viewer',
             params: {
@@ -248,8 +244,8 @@ export default function POIDetailScreen() {
               lng: String(selectedPlace.lng),
               id: item.id,
             },
-          })
-        }
+          });
+        }}
       >
         <View style={styles.photoThumb}>
           <Text style={styles.photoThumbIcon}>📷</Text>
@@ -259,6 +255,14 @@ export default function POIDetailScreen() {
     ),
     [router, selectedPlace, styles],
   );
+
+  if (isLoadingPlace || !selectedPlace) {
+    return (
+      <View style={styles.center}>
+        <LoadingSpinner size="large" />
+      </View>
+    );
+  }
 
   const categoryLabel = selectedPlace.category.replace(/_/g, ' ');
 
