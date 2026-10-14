@@ -157,6 +157,9 @@ export function POILayer() {
   const setViewport = useMapStore((s) => s.setViewport);
 
   const handlePress = useCallback((poi: OsmPoi) => {
+    // Idempotent: the native annotation selection (`onSelected`) and the
+    // marker's own press can both fire for a single tap.
+    if (useOsmPoiStore.getState().selectedPoi === poi) return;
     useOsmPoiStore.getState().setSelectedPoi(poi);
   }, []);
 
@@ -222,6 +225,7 @@ export function POILayer() {
                 key={`poi-${single.id}`}
                 coordinate={[single.lng, single.lat]}
                 anchor={showLabel ? LABELED_ANCHOR : ICON_ANCHOR}
+                {...({ onSelected: () => handlePress(single) } as any)}
               >
                 <PoiBadge poi={single} showLabel={showLabel} onPress={handlePress} />
               </MapLibreGL.MarkerView>
@@ -232,6 +236,7 @@ export function POILayer() {
               key={`cluster-${cluster.lat.toFixed(4)},${cluster.lng.toFixed(4)}`}
               coordinate={[cluster.lng, cluster.lat]}
               anchor={CLUSTER_ANCHOR}
+              {...({ onSelected: () => handleClusterPress(cluster) } as any)}
             >
               <ClusterBadge cluster={cluster} onPress={handleClusterPress} />
             </MapLibreGL.MarkerView>
@@ -251,6 +256,7 @@ export function POILayer() {
             coordinate={[poi.lng, poi.lat]}
             anchor={showLabel ? LABELED_ANCHOR : ICON_ANCHOR}
             allowOverlap={zoom >= STREET_LEVEL_POI_ZOOM}
+            {...({ onSelected: () => handlePress(poi) } as any)}
           >
             <PoiBadge poi={poi} showLabel={showLabel} onPress={handlePress} />
           </MapLibreGL.MarkerView>
