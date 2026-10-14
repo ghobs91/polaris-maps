@@ -3,14 +3,8 @@
  */
 
 import { SATELLITE_STYLE_JSON } from '../../src/constants/satelliteStyle';
-import {
-  rankedFallbackTileUrls,
-  withFallbackTiles,
-  withGlobalFallback,
-} from '../../src/services/map/tileFallback';
+import { rankedFallbackTileUrls, withFallbackTiles } from '../../src/services/map/tileFallback';
 import { IMAGERY_SOURCES } from '../../src/services/map/imagerySources';
-
-const EOX = 'eox.example/{z}/{y}/{x}.jpg';
 
 describe('withFallbackTiles', () => {
   it('keeps priority order and drops duplicates', () => {
@@ -23,14 +17,6 @@ describe('withFallbackTiles', () => {
 
   it('returns an empty list for empty inputs', () => {
     expect(withFallbackTiles([], [])).toEqual([]);
-  });
-});
-
-describe('withGlobalFallback', () => {
-  it('places the provider first and the global fallback last', () => {
-    const tiles = withGlobalFallback(['provider/{z}/{x}/{y}'], [EOX]);
-    expect(tiles[0]).toContain('provider');
-    expect(tiles[tiles.length - 1]).toContain('eox');
   });
 });
 
@@ -56,15 +42,14 @@ describe('satelliteStyle fallback wiring', () => {
     expect(tiles[1]).toContain('Landsat');
   });
 
-  it('appends the global base as the fallback for every regional provider', () => {
+  it('does not append a coarser global fallback to regional providers', () => {
+    // Resolution priority relies on fall-through, not on a coarse fallback: a
+    // failed fine tile must fall to the layers beneath, not paint 10 m EOx over
+    // 0.3 m NAIP.
     const regional = Object.entries(style.sources).filter(([id]) => id.startsWith('ortho-'));
     expect(regional.length).toBeGreaterThan(0);
     for (const [id, source] of regional as [string, { tiles: string[] }][]) {
-      expect(source.tiles.length).toBeGreaterThanOrEqual(2);
-      const last = source.tiles[source.tiles.length - 1];
-      expect(last).toContain('eox.at');
-      // The provider's own template stays first.
-      expect(source.tiles[0]).not.toContain('eox.at');
+      expect(source.tiles.some((t) => t.includes('eox.at'))).toBe(false);
       expect(id).toMatch(/^ortho-/);
     }
   });

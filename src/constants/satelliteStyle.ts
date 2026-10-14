@@ -4,13 +4,19 @@
  * Uses free/open imagery only, layered from coarse to fine:
  *   - EOx Sentinel-2 cloudless for global coverage (~10 m), always present.
  *   - USGS The National Map orthoimagery over the US (public domain): the
- *     cached basemap (~2.4 m at its ~z16 limit) plus a 0.6 m on-demand
+ *     cached basemap (~2.4 m at its ~z16 limit) plus a ~0.3 m on-demand
  *     ImageServer overlay for z17+.
- *   - Regional European orthophotos (5–60 cm) from `orthophotoSources.ts`,
- *     each bounded to its coverage so tiles are only requested where the
- *     provider has imagery. Tiled (XYZ/WMTS) and WMS/Map sources are both
- *     supported; free-key providers are emitted only when their
- *     `EXPO_PUBLIC_*` credentials are set.
+ *   - Regional orthophotos (5–60 cm) from `orthophotoSources.ts`, each bounded
+ *     to its coverage so tiles are only requested where the provider has
+ *     imagery. Tiled (XYZ/WMTS) and WMS/Map sources are both supported;
+ *     free-key providers are emitted only when their `EXPO_PUBLIC_*`
+ *     credentials are set.
+ *
+ * Every raster source falls through where it has no pixels (404/204, or a
+ * transparent PNG) so the stack behaves as resolution priority: the finest
+ * source that has imagery for an area draws on top, and the coarser sources
+ * beneath it show everywhere else. Coarse layers therefore carry no
+ * global-base fallback — a coarser fallback would paint over finer imagery.
  *
  * Each source declares its data's native `maxzoom` so MapLibre does not
  * over-zoom low-resolution tiles; deeper zooms scale the last available tile.
@@ -19,8 +25,11 @@
  * so road names, places, and boundaries remain readable.
  */
 
-import { withGlobalFallback } from '../services/map/tileFallback';
-import { REGIONAL_ORTHOPHOTO_SOURCES, type RegionalOrthophotoSource } from './orthophotoSources';
+import {
+  REGIONAL_ORTHOPHOTO_SOURCES,
+  orderProvidersForStacking,
+  type RegionalOrthophotoSource,
+} from './orthophotoSources';
 import { LABEL_LAYERS, MAP_GLYPHS_URL, OPENMAPTILES_SOURCE } from './mapLabels';
 
 // Global base templates, best first. MapLibre only requests the next URL when
@@ -80,9 +89,9 @@ function requestTransparent(tile: string): string {
 // One bounded raster source and layer per registered provider. Bounds keep
 // out-of-country tiles from ever being requested; `maxzoom` is each
 // provider's native pyramid maximum and `minzoom` the level below which it
-// paints blank rather than imagery. Each provider falls back to the global
-// base so a missing/failed provider tile degrades to global imagery rather
-// than a gap (MapLibre only tries the fallback when the first URL errors).
+// paints blank rather than imagery. Providers carry no fallback URL: a failed
+// tile falls through to the layers beneath (a coarser global fallback would
+// paint over finer imagery and defeat resolution priority).
 function buildRegionalLayers(providers: RegionalOrthophotoSource[]): {
   sources: Record<string, Record<string, unknown>>;
   layers: Record<string, unknown>[];
@@ -95,10 +104,9 @@ function buildRegionalLayers(providers: RegionalOrthophotoSource[]): {
       : provider.tiles;
     const authed = applyAuth(shaped, provider.auth);
     if (!authed) continue;
-    const tiles = withGlobalFallback(authed, [GLOBAL_BASE_TILES[0]]);
     sources[provider.id] = {
       type: 'raster',
-      tiles,
+      tiles: authed,
       tileSize: provider.tileSize,
       scheme: provider.scheme ?? 'xyz',
       ...(provider.minzoom !== undefined ? { minzoom: provider.minzoom } : {}),
@@ -128,7 +136,9 @@ function buildRegionalLayers(providers: RegionalOrthophotoSource[]): {
  * labels stay identical.
  */
 export function buildSatelliteStyleJson(
-  regionalProviders: RegionalOrthophotoSource[] = REGIONAL_ORTHOPHOTO_SOURCES,
+  regionalProviders: RegionalOrthophotoSource[] = orderProvidersForStacking(
+    REGIONAL_ORTHOPHOTO_SOURCES,
+  ),
 ): string {
   const { sources: regionalSources, layers: regionalLayers } =
     buildRegionalLayers(regionalProviders);
@@ -165,17 +175,21 @@ export function buildSatelliteStyleJson(
         maxzoom: 16,
         bounds: SATELLITE_NAIP_BOUNDS,
       },
-      // 0.6 m US imagery from the USGS NAIP ImageServer, which renders any bbox
-      // on demand rather than serving a fixed pyramid — so it stays sharp where
-      // the cached service stops at z16. It takes over from z17 (at z16 the tile
-      // covers the same ground as the cache, so there is no extra detail to
-      // gain). Bounded to CONUS: outside its coverage the service returns an
-      // opaque black image, which would mask the base rather than fall through.
+      // ~0.3 m US imagery from the USGS NAIP ImageServer (its mosaic cell is
+      // reported at 0.2999 m/px), which renders any bbox on demand rather than
+      // serving a fixed pyramid — so it stays sharp where the cached service
+      // stops at z16. It takes over from z17 (at z16 the tile covers the same
+      // ground as the cache, so there is no extra detail to gain); z19 is its
+      // native floor (~0.3 m/px). Bounded to CONUS: outside its coverage the
+      // service returns an opaque tile. `png32&transparent=true` makes its
+      // no-data (lakes, gaps) fall through to the cached NAIP layer beneath
+      // instead of masking it — resolution priority needs that fall-through.
       'satellite-naip-hires': {
         type: 'raster' as const,
         tiles: [
           'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage' +
-            '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&f=image',
+            '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256' +
+            '&format=png32&transparent=true&f=image',
         ],
         tileSize: 256,
         attribution: SATELLITE_NAIP_ATTRIBUTION,

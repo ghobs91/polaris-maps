@@ -36,15 +36,27 @@ For each registry entry, the satellite style SHALL emit exactly one MapLibre ras
 - **THEN** no raster source or layer is emitted for that entry
 - **AND** the remaining providers still render
 
-### Requirement: Regional imagery layers above the global base and below labels
+### Requirement: Imagery layers are stacked coarse-to-fine above the base
 
-Regional orthophoto raster layers SHALL be ordered after the global base raster layer and after the NAIP raster layer, and before every vector label layer.
+Raster imagery layers SHALL be ordered coarsest-first so the finest source that has pixels for an area draws on top: the global base at the bottom, then the NAIP raster layers, then the regional orthophoto layers, then any OpenAerialMap overlay, always below every vector label layer.
+
+A provider SHALL only be promoted above an overlapping provider when its out-of-coverage tiles fall through (`transparentBlank`); otherwise it SHALL keep the curated registry order, because a provider that paints an opaque no-data tile would mask a neighbour that has real imagery there.
 
 #### Scenario: Regional imagery covers the global base
 
 - **WHEN** the satellite style is rendered over a region with a registered provider
 - **THEN** the provider's raster layer draws above `satellite-global-tiles`
 - **AND** all `type: 'symbol'` label layers draw above the provider's raster layer
+
+#### Scenario: A fall-through provider is promoted above its coarser overlaps
+
+- **WHEN** a `transparentBlank` provider is finer than another provider whose bounds it overlaps
+- **THEN** the finer provider's layer is ordered above the coarser one
+
+#### Scenario: An opaque provider is not promoted above an overlap
+
+- **WHEN** a provider without `transparentBlank` is finer than another provider whose bounds it overlaps
+- **THEN** that pair keeps the curated registry order
 
 ### Requirement: Imagery sources do not over-zoom past native resolution
 
@@ -87,7 +99,7 @@ Each regional raster source SHALL carry its provider's required attribution, and
 
 ### Requirement: Graceful fallback outside provider coverage
 
-Where no regional provider covers the viewport, or a provider request fails, the map SHALL fall back to the global base imagery without error.
+Where no regional provider covers the viewport, or a provider request fails, the map SHALL fall back to the imagery of the layers beneath it without error. A regional raster source SHALL NOT carry a coarser global fallback URL: a failed fine tile falls through to the layers beneath, whereas a coarse fallback URL would paint over finer imagery.
 
 #### Scenario: Ocean or uncovered land falls back to global
 
@@ -95,7 +107,8 @@ Where no regional provider covers the viewport, or a provider request fails, the
 - **THEN** the global EOx base remains visible
 - **AND** no error or empty map is shown
 
-#### Scenario: Provider request failure degrades to global
+#### Scenario: Provider request failure degrades to the layer beneath
 
 - **WHEN** a regional provider's tiles fail to load
-- **THEN** the global base imagery remains visible beneath it
+- **THEN** the imagery of the layer beneath remains visible
+- **AND** no coarser global fallback is painted over finer imagery

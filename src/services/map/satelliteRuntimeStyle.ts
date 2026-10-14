@@ -7,15 +7,19 @@
  * relevant sources/layers are mounted as the camera moves. It is the runtime
  * consumer of `tileRouter.ts` (previously test-only).
  *
- * Rendering order stays the curated registry order (widest providers first,
- * narrowest last) — see the tile-router design's Decision 4 — because
- * resolution-sorting alone would let a finer wide provider mask a coarser
- * narrow one. The router decides *which* providers mount, not their stacking.
+ * Rendering order is resolution-priority: providers are stacked coarsest first
+ * so the finest provider serving the viewport draws on top, and its tiles only
+ * mask the coarser ones where it actually has pixels (no-data falls through).
+ * Providers that paint opaque no-data tiles cannot safely be promoted above a
+ * neighbour, so they keep the curated narrow-on-top order — see
+ * `orderProvidersForStacking`. The router decides *which* providers mount;
+ * the order function decides their stack.
  */
 
 import { LABEL_ATTRIBUTION } from '../../constants/mapLabels';
 import {
   REGIONAL_ORTHOPHOTO_SOURCES,
+  orderProvidersForStacking,
   type RegionalOrthophotoSource,
 } from '../../constants/orthophotoSources';
 import {
@@ -41,7 +45,7 @@ export interface ViewportRegionalOptions {
   /**
    * Maximum regional providers to mount. When more intersect the viewport, the
    * providers covering the most of it are kept (finer resolution breaks ties),
-   * then the survivors are returned in curated registry order.
+   * then the survivors are ordered coarsest-first for stacking.
    */
   maxSources?: number;
 }
@@ -57,9 +61,10 @@ function overlapArea(bounds: BBox, viewport: BBox): number {
 }
 
 /**
- * Regional providers that can serve `bbox` at `zoom`, in curated registry
- * order. Empty when no provider covers the viewport (e.g. open ocean). Capped
- * to `maxSources` (largest viewport overlap first) when many qualify.
+ * Regional providers that can serve `bbox` at `zoom`, ordered coarsest-first so
+ * the finest draws on top. Empty when no provider covers the viewport (e.g.
+ * open ocean). Capped to `maxSources` (largest viewport overlap first) when many
+ * qualify.
  */
 export function selectViewportRegionalSources(
   bbox: BBox,
@@ -80,7 +85,8 @@ export function selectViewportRegionalSources(
           .slice(0, max)
       : eligible;
   const keptIds = new Set(kept.map((source) => source.id));
-  return REGIONAL_ORTHOPHOTO_SOURCES.filter((source) => keptIds.has(source.id));
+  const mounted = REGIONAL_ORTHOPHOTO_SOURCES.filter((source) => keptIds.has(source.id));
+  return orderProvidersForStacking(mounted);
 }
 
 /** Ids of the regional providers serving the viewport (cheap change detection). */
@@ -115,6 +121,8 @@ export function buildViewportSatelliteStyle(
 ): string {
   const regional = selectViewportRegionalSources(bbox, zoom, options);
   const includeOam = options.coverage != null && zoom >= OAM_MIN_ZOOM;
+  // OpenAerialMap is community drone imagery (centimetre-scale), so it is the
+  // finest layer and is appended last to draw on top of every other provider.
   const sources = includeOam ? [...regional, oamOverlaySource(options.coverage as BBox)] : regional;
   const json = buildSatelliteStyleJson(sources);
   return options.language ? applyLabelLanguage(json, options.language) : json;

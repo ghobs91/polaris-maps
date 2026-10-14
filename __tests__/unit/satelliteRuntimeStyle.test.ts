@@ -1,6 +1,6 @@
 /**
  * Tests for the runtime satellite layer manager: viewport eligibility via the
- * tile router, curated ordering, and the built style.
+ * tile router, resolution/fall-through stack ordering, and the built style.
  */
 
 import { SATELLITE_STYLE_JSON, buildSatelliteStyleJson } from '../../src/constants/satelliteStyle';
@@ -43,18 +43,23 @@ describe('selectViewportRegionalSources', () => {
     expect(ids).toContain('ortho-fr');
   });
 
-  it('keeps the curated registry order (wider providers before narrower ones)', () => {
-    const sources = selectViewportRegionalSources(ROME, 16);
-    const ids = sources.map((s) => s.id);
+  it('stacks providers coarsest-first so the finest draws on top', () => {
+    // Both Italian providers fall through (transparentBlank), so they sort by
+    // resolution: national PCN 2012 (0.5 m) below Lazio 2023 (0.2 m).
+    const ids = selectViewportRegionalSources(ROME, 16).map((s) => s.id);
     expect(ids).toContain('ortho-it');
     expect(ids).toContain('ortho-it-lazio');
     expect(ids.indexOf('ortho-it')).toBeLessThan(ids.indexOf('ortho-it-lazio'));
+  });
 
-    // Order matches the registry exactly (a filter, not a re-sort).
-    const registryOrder = REGIONAL_ORTHOPHOTO_SOURCES.map((s) => s.id).filter((id) =>
-      ids.includes(id),
-    );
-    expect(ids).toEqual(registryOrder);
+  it('only promotes fall-through providers above their overlaps', () => {
+    // Spain (0.25 m) is finer than Portugal (0.3 m), but only Spain falls
+    // through, so Spain draws on top of Portugal; an opaque provider is never
+    // promoted above a neighbour it would mask.
+    const ids = selectViewportRegionalSources([-8.7, 41.0, -8.5, 41.2], 14).map((s) => s.id);
+    expect(ids).toContain('ortho-pt');
+    expect(ids).toContain('ortho-es');
+    expect(ids.indexOf('ortho-pt')).toBeLessThan(ids.indexOf('ortho-es'));
   });
 });
 
@@ -135,12 +140,23 @@ describe('provider cap', () => {
     expect(ids.length).toBeLessThanOrEqual(2);
   });
 
-  it('keeps the curated registry order after capping', () => {
-    const ids = viewportRegionalSourceIds(EUROPE_WIDE, 10);
-    const registryOrder = REGIONAL_ORTHOPHOTO_SOURCES.map((s) => s.id).filter((id) =>
-      ids.includes(id),
-    );
-    expect(ids).toEqual(registryOrder);
+  it('never leaves a fall-through provider below a coarser provider it overlaps', () => {
+    const sources = selectViewportRegionalSources(EUROPE_WIDE, 10);
+    expect(sources.length).toBeLessThanOrEqual(DEFAULT_MAX_VIEWPORT_SOURCES);
+    const overlaps = (
+      a: [number, number, number, number],
+      b: [number, number, number, number],
+    ): boolean => a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+    for (let i = 0; i < sources.length; i += 1) {
+      const finer = sources[i];
+      if (finer.transparentBlank !== true) continue;
+      for (let j = i + 1; j < sources.length; j += 1) {
+        const coarser = sources[j];
+        expect(
+          coarser.resolutionM > finer.resolutionM && overlaps(finer.bounds, coarser.bounds),
+        ).toBe(false);
+      }
+    }
   });
 });
 

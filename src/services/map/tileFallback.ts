@@ -3,12 +3,16 @@
  *
  * A MapLibre raster source may list several tile URL templates. MapLibre
  * requests the first and only falls through to the next when a tile errors
- * (404 / network failure), so appending a global fallback costs nothing while
- * the primary succeeds, and prevents black gaps when a provider is missing a
- * tile or briefly down.
+ * (404 / network failure), so an ordered chain is the native-safe way to list
+ * alternative endpoints for one source.
  *
- * This is the native-safe half of the routing engine's "graceful degradation":
- * it needs no custom URL protocol (which MapLibre Native does not support).
+ * The satellite imagery stack does NOT append a coarser global fallback to
+ * finer providers: a failed fine tile should fall through to the layers beneath
+ * (MapLibre leaves it empty), and painting a coarse fallback on top would
+ * defeat resolution priority. The global base keeps its own same-class outage
+ * fallback (EOx → Landsat).
+ *
+ * This needs no custom URL protocol (which MapLibre Native does not support).
  * Timeout-based switching is not expressible in a style and would need a proxy.
  */
 
@@ -45,14 +49,4 @@ export function rankedFallbackTileUrls(
     ranked.flatMap((source) => source.tiles),
     [],
   );
-}
-
-/**
- * Append one or more global fallback templates to a provider's templates.
- *
- * The global fallback (e.g. Sentinel-2) covers everywhere, so a provider tile
- * that 404s inside its own bounds degrades to global imagery instead of a gap.
- */
-export function withGlobalFallback(providerTiles: string[], globalTiles: string[]): string[] {
-  return withFallbackTiles(providerTiles, globalTiles);
 }

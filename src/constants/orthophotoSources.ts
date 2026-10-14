@@ -150,6 +150,12 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     acquiredAt: '2024-06-01',
     attribution: '© IGN/CNIG — PNOA',
     bounds: [-9.5, 35.9, 4.5, 43.9],
+    // IGN PNOA serves the Iberian peninsula, so its rectangular bounds include
+    // Portugal; the out-of-country tiles come back as an opaque no-data fill
+    // (verified) which would otherwise mask the finer PT layer beneath under
+    // resolution-ordering. FORMAT=image/png&TRANSPARENT=TRUE returns a real
+    // alpha tile (verified), so Spain falls through to Portugal.
+    transparentBlank: true,
   },
   {
     id: 'ortho-pt',
@@ -593,3 +599,69 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     minzoom: 9,
   },
 ];
+
+function acquiredTime(source: RegionalOrthophotoSource): number {
+  const parsed = Date.parse(source.acquiredAt);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/** True when two `[west, south, east, north]` boxes overlap. */
+function boundsOverlap(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): boolean {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+}
+
+/**
+ * Order the raster providers for the layer stack, coarsest first so the finest
+ * provider that has pixels for an area draws on top (later layers draw above
+ * earlier ones).
+ *
+ * MapLibre Native cannot switch sources per tile, so "highest resolution wins"
+ * is expressed as layer stacking plus no-data fall-through: a provider only
+ * masks the ones beneath it where it has imagery. That only holds for providers
+ * whose out-of-coverage tiles fall through — `transparentBlank` (a transparent
+ * PNG). A provider that paints an opaque no-data tile (white, black or a fill)
+ * would mask a neighbour that has real imagery there, so it is never promoted.
+ * Concretely, a fall-through provider is moved just above every coarser
+ * provider it overlaps; every other provider keeps the curated registry order
+ * (wider providers before the narrower ones they enclose), which was tuned to
+ * those opaque tiles. Recency breaks exact-resolution ties (the newer provider
+ * ends up higher). This is a no-op unless a provider is a verified fall-through.
+ */
+export function orderProvidersForStacking(
+  providers: readonly RegionalOrthophotoSource[],
+): RegionalOrthophotoSource[] {
+  const curatedIndex = new Map(providers.map((source, index) => [source.id, index] as const));
+  const stackRank = new Map(curatedIndex);
+
+  // Coarsest first, so when a fall-through provider is ranked every provider it
+  // can be promoted above has already reached its final rank.
+  const coarsestFirst = [...providers].sort(
+    (a, b) =>
+      b.resolutionM - a.resolutionM ||
+      acquiredTime(a) - acquiredTime(b) ||
+      a.id.localeCompare(b.id),
+  );
+  for (const provider of coarsestFirst) {
+    if (provider.transparentBlank !== true) continue;
+    let rank = stackRank.get(provider.id) as number;
+    for (const other of providers) {
+      if (
+        other !== provider &&
+        other.resolutionM > provider.resolutionM &&
+        boundsOverlap(provider.bounds, other.bounds)
+      ) {
+        rank = Math.max(rank, (stackRank.get(other.id) as number) + 1);
+      }
+    }
+    stackRank.set(provider.id, rank);
+  }
+
+  return [...providers].sort(
+    (a, b) =>
+      (stackRank.get(a.id) as number) - (stackRank.get(b.id) as number) ||
+      (curatedIndex.get(a.id) as number) - (curatedIndex.get(b.id) as number),
+  );
+}

@@ -6,11 +6,13 @@
  * the routing engine ranks; the MapLibre style consumes the regional subset.
  *
  * Every tile template here was live-verified to return image bytes. OpenAerialMap
- * is served through its dynamic STAC/TiTiler mosaic (`.../openaerialmap/tiles/
- * WebMercatorQuad/{z}/{x}/{y}.png?assets=visual`), which is patchy: it only has
- * imagery where contributors uploaded it. It is therefore in the router registry
- * (so it can be selected where it covers the viewport) but is NOT emitted as a
- * global layer by `satelliteStyle.ts`, which would request it worldwide.
+ * is served through its v2 Global TMS (`https://global.imagery.hotosm.org/
+ * {z}/{x}/{y}.png`): z0–13 renders a density grid of where imagery exists and
+ * z14+ redirects to TiTiler for the real imagery (204 where there is none, so
+ * gaps fall through). It is patchy — imagery only where contributors uploaded
+ * it — so it is in the router registry (selectable where it covers the viewport)
+ * but is NOT emitted as a global layer by `satelliteStyle.ts`, which would
+ * request it worldwide.
  */
 
 import {
@@ -111,17 +113,16 @@ export const GLOBAL_IMAGERY_SOURCES: ImagerySource[] = [
   },
   {
     id: 'oam',
-    label: 'OpenAerialMap (dynamic mosaic; patchy coverage)',
+    label: 'OpenAerialMap (global TMS; patchy coverage)',
     kind: 'ortho',
-    // Dynamic STAC/TiTiler mosaic. Patchy: only tiles where imagery exists.
-    // Kept out of the static global style (would 404 worldwide); selectable by
-    // the router where a viewport intersects OAM coverage.
-    tiles: [
-      'https://api.imagery.hotosm.org/raster/collections/openaerialmap/tiles' +
-        '/WebMercatorQuad/{z}/{x}/{y}.png?assets=visual',
-    ],
+    // OAM v2 Global TMS: one XYZ endpoint. z0–13 is a density grid, z14+ is the
+    // real imagery via a TiTiler redirect (204 where there is none, so gaps fall
+    // through). Kept out of the static global style (the density grid would
+    // paint as if it were imagery); the runtime mounts it only where coverage
+    // exists.
+    tiles: ['https://global.imagery.hotosm.org/{z}/{x}/{y}.png'],
     tileSize: 256,
-    minzoom: 0,
+    minzoom: 14,
     maxzoom: 21,
     resolutionM: 0.15,
     acquiredAt: '2025-06-01',

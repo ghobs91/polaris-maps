@@ -77,7 +77,7 @@ describe('oamOverlaySource', () => {
     const source = oamOverlaySource(coverage);
     expect(source.id).toBe('oam');
     expect(source.bounds).toEqual(coverage);
-    expect(source.tiles[0]).toContain('openaerialmap');
+    expect(source.tiles[0]).toContain('global.imagery.hotosm.org');
     expect(source.attribution).toContain('OpenAerialMap');
   });
 });

@@ -200,6 +200,14 @@ describe('satelliteStyle', () => {
     expect(hiresIdx).toBeGreaterThan(cacheIdx);
   });
 
+  it('makes the NAIP hires overlay fall through where it has no data', () => {
+    // Resolution priority relies on the finer layer not masking the coarser one
+    // beneath it: the ImageServer's no-data (lakes, gaps) must be transparent.
+    const hires = style.sources['satellite-naip-hires'];
+    expect(hires.tiles[0]).toContain('format=png32');
+    expect(hires.tiles[0]).toContain('transparent=true');
+  });
+
   it('should overlay road and place labels on top of satellite', () => {
     const labelLayers = style.layers.filter(
       (l: any) => l.type === 'symbol' && l.source === 'openmaptiles',

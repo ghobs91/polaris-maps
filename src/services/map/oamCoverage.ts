@@ -3,9 +3,10 @@
  *
  * OAM has no fixed footprint — its registry entry is global — so the tile
  * router cannot decide whether to mount it. The static satellite style
- * deliberately omits OAM (a global layer would 404 worldwide). This queries the
- * OAM STAC search for the viewport and returns the union of the footprints it
- * finds, so runtime imagery only layers OAM where HOT has contributed it.
+ * deliberately omits OAM (a global layer would request the density grid
+ * worldwide). This queries the OAM STAC search for the viewport and returns the
+ * union of the footprints it finds, so runtime imagery only layers OAM where
+ * HOT has contributed it.
  */
 
 import type { RegionalOrthophotoSource } from '../../constants/orthophotoSources';
@@ -19,11 +20,12 @@ interface OamFeature {
 const coverageCache = createTileMetadataCache<BBox | null>({ ttlMs: 300_000, max: 200 });
 
 /**
- * Below this zoom the OAM mosaic is too patchy to layer over the global base
- * (its footprints are sparse, so it reads as random sharp patches). The runtime
- * manager only mounts OAM at or above it.
+ * Below this zoom OAM's Global TMS renders a density grid rather than imagery
+ * (the real pixels start at z14), and its footprints are too sparse to layer
+ * over the global base anyway. The runtime manager only mounts OAM at or above
+ * it, matching the registry entry's `minzoom`.
  */
-export const OAM_MIN_ZOOM = 10;
+export const OAM_MIN_ZOOM = 14;
 
 /** Round a coordinate to ~1 km so small pans reuse the same cache entry. */
 function cacheKey(bbox: BBox): string {
@@ -77,7 +79,9 @@ export async function findOamCoverage(
   if (coverageCache.has(key)) return coverageCache.get(key) ?? null;
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const url = `${OAM_STAC_SEARCH_URL}?bbox=${bbox.join(',')}&limit=50`;
+  // Scope to the aerial collection: the STAC API also exposes DEM, Maxar and
+  // NoAA collections whose footprints would otherwise be counted as coverage.
+  const url = `${OAM_STAC_SEARCH_URL}?collections=openaerialmap&bbox=${bbox.join(',')}&limit=50`;
   try {
     const response = await fetchImpl(url);
     if (!response.ok) return null;

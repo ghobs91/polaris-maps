@@ -140,7 +140,7 @@ describe('imagerySources registry integration', () => {
     expect(OAM_STAC_SEARCH_URL).toContain('stac/search');
 
     const oam = IMAGERY_SOURCES.find((s) => s.id === 'oam');
-    expect(oam?.tiles[0]).toContain('openaerialmap');
+    expect(oam?.tiles[0]).toContain('hotosm');
     expect(oam?.tiles[0]).toContain('{z}/{x}/{y}');
   });
 
