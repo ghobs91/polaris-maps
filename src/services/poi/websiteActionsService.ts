@@ -252,7 +252,10 @@ export async function fetchWebsiteActions(
     const contentType = res.headers.get('content-type') ?? '';
     if (contentType && !/html/i.test(contentType)) return [];
     const html = (await res.text()).slice(0, 500_000);
-    const actions = parseWebsiteActionsFromHtml(html, pageUrl);
+    // Resolve links against the post-redirect URL so a site that moved to a new
+    // host still yields its (relative) order/reserve/menu links.
+    const baseUrl = (res as { url?: string }).url || pageUrl;
+    const actions = parseWebsiteActionsFromHtml(html, baseUrl);
     setCached(pageUrl, actions);
     return actions;
   } catch {

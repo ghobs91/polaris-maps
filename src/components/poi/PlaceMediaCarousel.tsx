@@ -28,7 +28,11 @@ import {
   type PlaceMediaProvider,
 } from '../../services/poi/placeMediaService';
 import { defaultPlaceMediaSupplements } from '../../services/poi/placeMediaProviders';
-import { fetchWebsitePhotos, normalizeWebsiteUrl } from '../../services/poi/websitePhotosService';
+import {
+  fetchWebsitePhotosResult,
+  isCrossHostRedirect,
+  normalizeWebsiteUrl,
+} from '../../services/poi/websitePhotosService';
 import { WebsitePhotosWebView } from './WebsitePhotosWebView';
 
 interface PlaceMediaCarouselProps {
@@ -43,6 +47,12 @@ interface PlaceMediaCarouselProps {
   resetKey: string | number;
   /** Reactive connectivity; a reconnect re-fetches open media. */
   online?: boolean;
+  /**
+   * Fired once per load with the URL the venue website finally resolved to
+   * (post-redirect), or null when it wasn't reachable. Lets the place card
+   * reconcile an out-of-date website tag with the site's new home.
+   */
+  onWebsiteResolved?: (finalUrl: string | null) => void;
 }
 
 /** Below this many scraped website photos, also try the hidden WebView fallback. */
@@ -75,6 +85,7 @@ export function PlaceMediaCarousel({
   tags,
   resetKey,
   online,
+  onWebsiteResolved,
 }: PlaceMediaCarouselProps) {
   const styles = useThemedStyles(createStyles);
   const { colors } = useTheme();
@@ -88,6 +99,9 @@ export function PlaceMediaCarousel({
   const [webViewUri, setWebViewUri] = useState<string | null>(null);
   const itemsRef = useRef<PlaceMediaItem[]>([]);
   itemsRef.current = items;
+  // Kept in a ref so an unstable parent callback can't re-run the fetch effect.
+  const onWebsiteResolvedRef = useRef(onWebsiteResolved);
+  onWebsiteResolvedRef.current = onWebsiteResolved;
 
   const cacheKey = useMemo(
     () => ({
@@ -163,12 +177,15 @@ export function PlaceMediaCarousel({
     }
 
     const query = { lat, lng, name, tags };
+    // Filled by the website provider below once the fetch settles.
+    let resolvedFinalUrl: string | null = null;
     const websiteProvider: PlaceMediaProvider | undefined = pageUrl
       ? {
           id: 'website',
           async fetch() {
-            const urls = await fetchWebsitePhotos(pageUrl);
-            return urls.map((url) => ({
+            const result = await fetchWebsitePhotosResult(pageUrl);
+            resolvedFinalUrl = result.finalUrl;
+            return result.urls.map((url) => ({
               url,
               source: 'website',
               thumbnailUrl: url,
@@ -185,11 +202,18 @@ export function PlaceMediaCarousel({
         if (cancelled) return;
         setItems(media);
         void persistMedia(media);
+        onWebsiteResolvedRef.current?.(resolvedFinalUrl);
         // If the plain scrape found few website photos, render the page in a
         // hidden WebView so JavaScript-built galleries can be extracted too.
         const websitePhotos = media.filter((item) => item.source === 'website').length;
         if (pageUrl && websitePhotos < WEBVIEW_FALLBACK_MIN_WEBSITE_PHOTOS) {
-          setWebViewUri(pageUrl);
+          // Follow a cross-host redirect (old domain → venue's new one) so the
+          // allowlisted WebView loads and can scrape the new origin.
+          const redirected =
+            resolvedFinalUrl && isCrossHostRedirect(pageUrl, resolvedFinalUrl)
+              ? resolvedFinalUrl
+              : null;
+          setWebViewUri(redirected ?? pageUrl);
         }
       })
       .catch(() => {

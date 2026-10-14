@@ -9,8 +9,10 @@ import {
   fetchWebsitePhotosResult,
   extractGalleryPhotosFromHtml,
   extractPagePhotos,
+  isCrossHostRedirect,
   isHttpUrl,
   isLogoLikeUrl,
+  isSiteRoot,
   normalizeWebsiteUrl,
   parseOpenGraphFromHtml,
   photoDedupeKey,
@@ -18,6 +20,7 @@ import {
   rankPhotoUrls,
   resolvePhotoUrl,
   resolveWebViewPhotoUrls,
+  siteHost,
 } from '../../src/services/poi/websitePhotosService';
 
 beforeEach(() => {
@@ -299,7 +302,11 @@ describe('fetchWebsitePhotos', () => {
     }) as unknown as typeof fetch;
 
     const result = await fetchWebsitePhotosResult('https://a.com/');
-    expect(result).toEqual({ urls: ['https://a.com/og.jpg'], ok: true });
+    expect(result).toEqual({
+      urls: ['https://a.com/og.jpg'],
+      ok: true,
+      finalUrl: 'https://www.a.com/',
+    });
     expect(fetched[0]).toBe('https://a.com/');
     expect(fetched).toContain('https://www.a.com/');
   });
@@ -325,6 +332,7 @@ describe('fetchWebsitePhotos', () => {
     await expect(fetchWebsitePhotosResult('https://a.com/')).resolves.toEqual({
       urls: [],
       ok: false,
+      finalUrl: null,
     });
 
     global.fetch = jest.fn().mockResolvedValue({
@@ -333,6 +341,38 @@ describe('fetchWebsitePhotos', () => {
       text: () => Promise.resolve('<meta property="og:image" content="https://a.com/og.jpg">'),
     }) as unknown as typeof fetch;
     await expect(fetchWebsitePhotos('https://a.com/')).resolves.toEqual(['https://a.com/og.jpg']);
+  });
+});
+
+describe('redirect handling', () => {
+  it('resolves relative photos against the post-redirect URL', async () => {
+    global.fetch = jest.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        url: 'https://new.example/',
+        headers: { get: () => 'text/html' },
+        text: () => Promise.resolve('<img src="/food-01.jpg" width="800" height="600">'),
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await fetchWebsitePhotosResult('https://old.example/');
+    expect(result.finalUrl).toBe('https://new.example/');
+    expect(result.urls).toEqual(['https://new.example/food-01.jpg']);
+  });
+
+  it('adds the apex over http so a broken-https apex still reaches its redirect', () => {
+    // The Smoked Barn case: https://smokedbarn.com/ fails TLS, but
+    // http://smokedbarn.com/ 302s to the venue's current domain.
+    expect(photoPageCandidates('https://smokedbarn.com/')).toContain('http://smokedbarn.com/');
+  });
+
+  it('classifies site hosts and roots', () => {
+    expect(siteHost('https://WWW.Example.com/x')).toBe('example.com');
+    expect(isCrossHostRedirect('https://a.com/', 'https://www.a.com/')).toBe(false);
+    expect(isCrossHostRedirect('https://a.com/', 'https://b.com/')).toBe(true);
+    expect(isSiteRoot('https://a.com')).toBe(true);
+    expect(isSiteRoot('https://a.com/')).toBe(true);
+    expect(isSiteRoot('https://a.com/menu')).toBe(false);
   });
 });
 

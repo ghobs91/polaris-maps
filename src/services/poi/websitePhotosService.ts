@@ -110,14 +110,18 @@ export function photoPageCandidates(rawUrl: string | null | undefined): string[]
     return [];
   }
   const host = url.hostname.toLowerCase();
-  const siblings = host.startsWith('www.') ? [host.slice(4)] : host ? [`www.${host}`] : [];
+  const apex = host.startsWith('www.') ? host.slice(4) : host;
+  const siblings = host.startsWith('www.') ? [apex] : host ? [`www.${host}`] : [];
   const out: string[] = [];
   const push = (candidate: string): void => {
     if (candidate && !out.includes(candidate)) out.push(candidate);
   };
   push(base);
   for (const h of [host, ...siblings]) push(withHost(url, h, 'https:'));
-  for (const h of siblings) push(withHost(url, h, 'http:'));
+  // The apex over plain http too: an old domain whose https certificate is
+  // broken (or unset) often still answers http with a redirect to the venue's
+  // current site, so this is the only candidate that reaches it.
+  for (const h of [apex, ...siblings]) push(withHost(url, h, 'http:'));
   return out;
 }
 
@@ -383,7 +387,19 @@ export function extractPagePhotos(html: string, baseUrl: string): string[] {
   );
 }
 
-async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | null> {
+interface FetchedPage {
+  html: string;
+  /**
+   * The URL the response finally came from, after any redirects (`res.url`).
+   * Falls back to the requested URL when the runtime omits it. Relative image
+   * paths and same-origin gallery links must resolve against this, not the
+   * tagged URL, so a cross-host redirect (e.g. an old domain pointing at the
+   * venue's new one) still yields the venue's photos.
+   */
+  finalUrl: string;
+}
+
+async function fetchPageHtmlResult(url: string, timeoutMs: number): Promise<FetchedPage | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -395,7 +411,9 @@ async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | n
     const contentType = res.headers.get('content-type') ?? '';
     if (contentType && !/html/i.test(contentType)) return null;
     // Cap parse work on huge pages.
-    return (await res.text()).slice(0, 500_000);
+    const html = (await res.text()).slice(0, 500_000);
+    const finalUrl = normalizeWebsiteUrl((res as { url?: string }).url ?? url) ?? url;
+    return { html, finalUrl };
   } catch {
     return null;
   } finally {
@@ -412,26 +430,32 @@ export function countRealPhotos(urls: string[]): number {
  * Returns the discovered photo URLs, or `null` when the page itself could not be
  * fetched (network/TLS/DNS refusal) so the caller can try a sibling host.
  */
-async function fetchSitePhotos(pageUrl: string, timeoutMs: number): Promise<string[] | null> {
-  const homeHtml = await fetchPageHtml(pageUrl, timeoutMs);
-  if (!homeHtml) return null;
-  const homePhotos = extractPagePhotos(homeHtml, pageUrl);
-  const subpages = discoverPhotoPageUrls(homeHtml, pageUrl);
+async function fetchSitePhotos(
+  pageUrl: string,
+  timeoutMs: number,
+): Promise<{ urls: string[]; finalUrl: string } | null> {
+  const home = await fetchPageHtmlResult(pageUrl, timeoutMs);
+  if (!home) return null;
+  // Resolve against the post-redirect URL so a site that moved to a new host
+  // still contributes its own (relative) images and gallery subpages.
+  const base = home.finalUrl;
+  const homePhotos = extractPagePhotos(home.html, base);
+  const subpages = discoverPhotoPageUrls(home.html, base);
   const hasDedicatedGalleryPage = subpages.some(isDedicatedGalleryPageUrl);
   if (countRealPhotos(homePhotos) >= MIN_REAL_PHOTOS && !hasDedicatedGalleryPage) {
-    return homePhotos;
+    return { urls: homePhotos, finalUrl: base };
   }
-  if (subpages.length === 0) return homePhotos;
+  if (subpages.length === 0) return { urls: homePhotos, finalUrl: base };
 
-  const subHtmls = await Promise.all(subpages.map((url) => fetchPageHtml(url, 6000)));
+  const subPages = await Promise.all(subpages.map((url) => fetchPageHtmlResult(url, 6000)));
   // Dedicated gallery pages are the strongest signal for actual place photos;
   // keep them ahead of homepage metadata such as og:image logos.
   const galleryPhotos: string[] = [];
-  subHtmls.forEach((html, i) => {
-    if (!html) return;
-    galleryPhotos.push(...extractPagePhotos(html, subpages[i] as string));
+  subPages.forEach((page) => {
+    if (!page) return;
+    galleryPhotos.push(...extractPagePhotos(page.html, page.finalUrl));
   });
-  return [...galleryPhotos, ...homePhotos];
+  return { urls: [...galleryPhotos, ...homePhotos], finalUrl: base };
 }
 
 export interface WebsitePhotosResult {
@@ -443,6 +467,48 @@ export interface WebsitePhotosResult {
    * caching a transient failure as a permanent empty result.
    */
   ok: boolean;
+  /**
+   * The URL the fetched page finally resolved to after redirects, when known.
+   * Lets callers follow a website tag that has moved to a new host (and update
+   * the OSM listing / drive the WebView fallback from the new origin).
+   */
+  finalUrl: string | null;
+}
+
+/**
+ * Compare two URLs by "site host": lowercased hostname with a leading `www.`
+ * (and a trailing dot) stripped, so apex and `www` count as the same site.
+ */
+export function siteHost(url: string): string | null {
+  try {
+    return new URL(url).hostname
+      .toLowerCase()
+      .replace(/\.$/, '')
+      .replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `finalUrl` resolved to a different site than `taggedUrl` — i.e. the
+ * tagged URL cross-host redirected to a new domain (apex/`www` moves count as
+ * the same site).
+ */
+export function isCrossHostRedirect(taggedUrl: string, finalUrl: string): boolean {
+  const from = siteHost(taggedUrl);
+  const to = siteHost(finalUrl);
+  return !!from && !!to && from !== to;
+}
+
+/** True when the URL is a bare site root (`/` or empty path). */
+export function isSiteRoot(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return path === '' || path === '/';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -457,20 +523,25 @@ export async function fetchWebsitePhotosResult(
   timeoutMs = 8000,
 ): Promise<WebsitePhotosResult> {
   const cached = getCached(pageUrl);
-  if (cached) return { urls: cached, ok: true };
+  if (cached) return { urls: cached, ok: true, finalUrl: null };
 
   const candidates = photoPageCandidates(pageUrl);
-  if (candidates.length === 0) return { urls: [], ok: false };
+  if (candidates.length === 0) return { urls: [], ok: false, finalUrl: null };
 
   let best: string[] | null = null;
+  let bestFinalUrl: string | null = null;
   let fetchedAny = false;
   for (const candidate of candidates) {
-    const urls = await fetchSitePhotos(candidate, timeoutMs);
-    if (urls === null) continue;
+    const page = await fetchSitePhotos(candidate, timeoutMs);
+    if (page === null) continue;
     fetchedAny = true;
-    if (best === null) best = urls;
-    if (countRealPhotos(urls) > 0) {
-      best = urls;
+    if (best === null) {
+      best = page.urls;
+      bestFinalUrl = page.finalUrl;
+    }
+    if (countRealPhotos(page.urls) > 0) {
+      best = page.urls;
+      bestFinalUrl = page.finalUrl;
       break;
     }
   }
@@ -479,7 +550,7 @@ export async function fetchWebsitePhotosResult(
   // Negative-cache a successful-but-photoless scrape; never cache a total
   // failure, so a transient outage retries on the next open.
   if (fetchedAny) setCached(pageUrl, final);
-  return { urls: final, ok: fetchedAny };
+  return { urls: final, ok: fetchedAny, finalUrl: bestFinalUrl };
 }
 
 /**

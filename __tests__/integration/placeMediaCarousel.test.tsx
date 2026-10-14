@@ -68,6 +68,14 @@ jest.mock('../../src/services/poi/websitePhotosService', () => {
   return {
     ...actual,
     fetchWebsitePhotos: (...args: unknown[]) => mockFetchWebsitePhotos(...args),
+    // The carousel reads the result (so it can follow redirects); derive it from
+    // the same mock so existing array stubs keep working.
+    fetchWebsitePhotosResult: (...args: unknown[]) =>
+      Promise.resolve(mockFetchWebsitePhotos(...args)).then((urls: string[]) => ({
+        urls,
+        ok: true,
+        finalUrl: null,
+      })),
     normalizeWebsiteUrl: (url: string | null | undefined) => url ?? null,
   };
 });

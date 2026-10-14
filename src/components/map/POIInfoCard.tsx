@@ -35,6 +35,7 @@ import {
 import { isMapSelectionPoi } from '../../services/poi/mapSelectionPoi';
 import { findPlaceIdNear, getPlaceById } from '../../services/poi/poiService';
 import { markPlaceHandled, seedPlaceToOsm } from '../../services/osm/placeSeedService';
+import { syncOsmWebsiteFromRedirect } from '../../services/osm/websiteRedirectService';
 import { findOsmPlaceMatch } from '../../services/poi/osmFetcher';
 import { isOsmNodePoi, osmTagsFromPoi, placeToOsmTags } from '../../utils/placeToOsmPoi';
 import { resolveOsmEditAction } from '../../utils/osmEditAction';
@@ -715,6 +716,29 @@ export function POIInfoCard() {
     }
   }, [parsed?.website]);
 
+  /**
+   * When the venue site resolves to a new host (an old domain that now
+   * redirects), reconcile OSM's website tag with the new URL. Only runs for a
+   * signed-in contributor; otherwise it's a silent no-op. Best-effort.
+   */
+  const handleWebsiteResolved = useCallback(
+    (finalUrl: string | null) => {
+      const target = selectedPoi;
+      if (!target || !finalUrl) return;
+      const tagged =
+        target.tags['website'] ?? target.tags['contact:website'] ?? target.tags['url'] ?? null;
+      if (!tagged) return;
+      void syncOsmWebsiteFromRedirect({
+        poi: target,
+        taggedWebsite: tagged,
+        finalUrl,
+        accessToken: osmAccessToken,
+        canEdit: canAutoSeedOsm,
+      });
+    },
+    [selectedPoi, osmAccessToken, canAutoSeedOsm],
+  );
+
   const handleMenu = useCallback(() => {
     const menuUrl = parsed?.menuUrl;
     if (!menuUrl) return;
@@ -1374,6 +1398,7 @@ export function POIInfoCard() {
               tags={poi.tags}
               resetKey={poi.id}
               online={isOnline}
+              onWebsiteResolved={handleWebsiteResolved}
             />
 
             <RNModal
