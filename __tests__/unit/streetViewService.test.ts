@@ -1,6 +1,10 @@
 jest.mock('../../src/constants/config', () => ({
   MAPILLARY_TOKEN: '',
   PANORAMAX_SEARCH_URL: 'https://panoramax.test/search',
+  STREETLEVEL_PANO_SEARCH_URL: 'https://streetlevel.test/SingleImageSearch',
+  STREETLEVEL_TILE_BASE_URL: 'https://streetlevel.test/tile',
+  STREETLEVEL_THUMBNAIL_BASE_URL: 'https://streetlevel.test/thumbnail',
+  STREETLEVEL_USER_AGENT: 'test-agent',
 }));
 
 import {
@@ -22,7 +26,12 @@ beforeEach(() => {
 });
 
 function jsonResponse(payload: unknown, ok = true): Response {
-  return { ok, status: ok ? 200 : 500, json: async () => payload } as Response;
+  return {
+    ok,
+    status: ok ? 200 : 500,
+    json: async () => payload,
+    text: async () => JSON.stringify(payload),
+  } as Response;
 }
 
 const panoramaxPayload = {
@@ -56,6 +65,36 @@ const mapillaryPayload = {
     },
   ],
 };
+
+// Minimal SingleImageSearch response: [status], then the panorama message.
+const googlePayload = [
+  [0],
+  [
+    [1],
+    [2, 'gPANO1'],
+    [
+      2,
+      2,
+      [8192, 16384],
+      [
+        [[[256, 512]], [[512, 1024]], [[1024, 2048]], [[2048, 4096]]],
+        [512, 512],
+      ],
+    ],
+    null,
+    [[[['© 2026 Google']]]],
+    [[[1], [[null, null, 48.8585, 2.2946], [35, null, 70], [12, 89, 0], null, 'FR'], null, []]],
+    [null, null, null, null, null, null, null, [2026, 5]],
+  ],
+];
+
+/** Route each mock request to the payload its source expects. */
+function routeFetch(url: string): Response {
+  const target = String(url);
+  if (target.includes('SingleImageSearch')) return jsonResponse(googlePayload);
+  if (target.includes('mapillary')) return jsonResponse(mapillaryPayload);
+  return jsonResponse(panoramaxPayload);
+}
 
 describe('normalizePanoramax', () => {
   it('maps STAC features to 360 panoramas with attribution', () => {
@@ -106,44 +145,62 @@ describe('normalizeMapillary', () => {
 });
 
 describe('findStreetViewPanoramas', () => {
-  it('only queries Panoramax when Mapillary is not configured', async () => {
-    mockFetch.mockResolvedValue(jsonResponse(panoramaxPayload));
+  it('always queries Google and Panoramax, but not Mapillary without a token', async () => {
+    mockFetch.mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
 
     const result = await findStreetViewPanoramas(48.8584, 2.2945);
 
     expect(isMapillaryConfigured()).toBe(false);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(String(mockFetch.mock.calls[0][0])).toContain('panoramax.test');
-    expect(result).toHaveLength(1);
-    expect(result[0].source).toBe('panoramax');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const targets = mockFetch.mock.calls.map((c) => String(c[0]));
+    expect(targets.some((t) => t.includes('SingleImageSearch'))).toBe(true);
+    expect(targets.some((t) => t.includes('panoramax.test'))).toBe(true);
+    expect(result.map((p) => p.source).sort()).toEqual(['google', 'panoramax']);
   });
 
-  it('merges Mapillary (token-gated) and Panoramax, filtering non-pano images', async () => {
+  it('adds Google Street View with a thumbnail, tiles and Google attribution', async () => {
+    mockFetch.mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
     mockConfig.MAPILLARY_TOKEN = 'test-token';
-    mockFetch.mockImplementation((url: string) =>
-      Promise.resolve(
-        jsonResponse(String(url).includes('mapillary') ? mapillaryPayload : panoramaxPayload),
-      ),
-    );
+
+    const [first] = await findStreetViewPanoramas(48.8584, 2.2945);
+
+    expect(first.id).toBe('google:gPANO1');
+    expect(first.source).toBe('google');
+    expect(first.isPano).toBe(true);
+    expect(first.bearing).toBe(12);
+    expect(first.attribution).toBe('Google Street View (© 2026 Google)');
+    expect(first.imageUrl).toContain('streetlevel.test/thumbnail');
+    // Two stitched levels: zoom 2 (preview) and zoom 3 (full).
+    expect(first.tiles?.map((t) => t.zoom)).toEqual([2, 3]);
+    expect(first.tiles?.[1]).toMatchObject({ cols: 8, rows: 4, tileSize: 512, width: 4096 });
+  });
+
+  it('merges all sources and filters non-pano images', async () => {
+    mockConfig.MAPILLARY_TOKEN = 'test-token';
+    mockFetch.mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
 
     const result = await findStreetViewPanoramas(48.8584, 2.2945);
 
     expect(isMapillaryConfigured()).toBe(true);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
     const mapillaryCall = mockFetch.mock.calls.find((c) => String(c[0]).includes('mapillary'));
     expect(String(mapillaryCall?.[0])).toContain('access_token=test-token');
     expect(String(mapillaryCall?.[0])).toContain('fields=');
     // mly-flat is excluded because is_pano is false.
-    expect(result.map((p) => p.id).sort()).toEqual(['mapillary:mly-1', 'panoramax:pano-1']);
+    expect(result.map((p) => p.id).sort()).toEqual([
+      'google:gPANO1',
+      'mapillary:mly-1',
+      'panoramax:pano-1',
+    ]);
   });
 
   it('sorts by distance and caps the result count', async () => {
-    mockFetch.mockResolvedValue(jsonResponse(panoramaxPayload));
+    mockFetch.mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
     const result = await findStreetViewPanoramas(48.8584, 2.2945, { limit: 1 });
     expect(result).toHaveLength(1);
   });
 
-  it('puts Mapillary first, then Panoramax most-recently-captured first', async () => {
+  it('puts Google first, then Mapillary, then Panoramax most-recently-captured first', async () => {
     mockConfig.MAPILLARY_TOKEN = 'test-token';
     const panoramaxMulti = {
       features: [
@@ -167,20 +224,35 @@ describe('findStreetViewPanoramas', () => {
         },
       ],
     };
-    mockFetch.mockImplementation((url: string) =>
-      Promise.resolve(
-        jsonResponse(String(url).includes('mapillary') ? mapillaryPayload : panoramaxMulti),
-      ),
-    );
+    mockFetch.mockImplementation((url: string) => {
+      const target = String(url);
+      if (target.includes('SingleImageSearch')) return Promise.resolve(jsonResponse(googlePayload));
+      if (target.includes('mapillary')) return Promise.resolve(jsonResponse(mapillaryPayload));
+      return Promise.resolve(jsonResponse(panoramaxMulti));
+    });
 
     const result = await findStreetViewPanoramas(48.8584, 2.2945);
 
     expect(result.map((p) => p.id)).toEqual([
+      'google:gPANO1',
       'mapillary:mly-1',
       'panoramax:new',
       'panoramax:old',
       'panoramax:undated',
     ]);
+  });
+
+  it('degrades to the other sources when Google fails', async () => {
+    mockConfig.MAPILLARY_TOKEN = 'test-token';
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).includes('SingleImageSearch'))
+        return Promise.reject(new Error('google down'));
+      return Promise.resolve(routeFetch(url));
+    });
+
+    const result = await findStreetViewPanoramas(48.8584, 2.2945);
+
+    expect(result.map((p) => p.id).sort()).toEqual(['mapillary:mly-1', 'panoramax:pano-1']);
   });
 
   it('degrades to an empty list when the network fails', async () => {
@@ -192,7 +264,11 @@ describe('findStreetViewPanoramas', () => {
 describe('sortPanoramasByRecency', () => {
   const pano = (id: string, capturedAt?: number): StreetViewPanorama => ({
     id,
-    source: id.startsWith('mapillary') ? 'mapillary' : 'panoramax',
+    source: id.startsWith('mapillary')
+      ? 'mapillary'
+      : id.startsWith('google')
+        ? 'google'
+        : 'panoramax',
     lat: 0,
     lng: 0,
     capturedAt,

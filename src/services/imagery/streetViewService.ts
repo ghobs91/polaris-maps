@@ -2,11 +2,14 @@
  * Unified street-level imagery lookup.
  *
  * Sources, in result precedence order:
- *   1. Mapillary — opt-in exception to the no-corporate-cloud rule: only
+ *   1. Google Street View — default-on exception to the no-corporate-cloud
+ *      rule (no API key needed), online-only, never cached. Leads the lookup
+ *      wherever it has coverage. See `streetlevelService` for the protocol.
+ *   2. Mapillary — opt-in exception to the no-corporate-cloud rule: only
  *      queried when `EXPO_PUBLIC_MAPILLARY_TOKEN` is configured, online-only,
- *      never cached for offline. Leads the carousel where it has coverage.
- *   2. Panoramax — open (CC-BY-SA), no token, always queried; follows
- *      Mapillary, most recently captured panoramas first.
+ *      never cached for offline.
+ *   3. Panoramax — open (CC-BY-SA), no token, always queried; follows the
+ *      others, most recently captured panoramas first.
  *
  * This is separate from the P2P `street_imagery` feed (see `browseService`),
  * which stays the primary, offline-capable source. Results here are online
@@ -15,8 +18,15 @@
 
 import { MAPILLARY_TOKEN, PANORAMAX_SEARCH_URL } from '../../constants/config';
 import { haversineMeters } from '../../utils/routeSnap';
+import {
+  buildTileGrids,
+  findGoogleStreetViewPano,
+  googlePermalink,
+  googleThumbnailUrl,
+  type StreetViewTileGrid,
+} from './streetlevelService';
 
-export type StreetViewSource = 'panoramax' | 'mapillary';
+export type StreetViewSource = 'panoramax' | 'mapillary' | 'google';
 
 export interface StreetViewPanorama {
   id: string;
@@ -32,6 +42,12 @@ export interface StreetViewPanorama {
   /** Full-resolution equirectangular image URL. */
   imageUrl: string;
   thumbnailUrl?: string;
+  /**
+   * Tiled panorama levels (Google Street View), low → high quality. When
+   * present the viewer stitches these instead of loading {@link imageUrl},
+   * which is then only the flat fallback.
+   */
+  tiles?: StreetViewTileGrid[];
   attribution: string;
   license?: string;
   licenseUrl?: string;
@@ -43,14 +59,19 @@ export interface StreetViewQuery {
   limit?: number;
   /** Force-disable Mapillary even when a token is configured (default: enabled). */
   includeMapillary?: boolean;
+  /** Force-disable Google Street View (default: enabled). */
+  includeGoogle?: boolean;
 }
 
 const DEFAULT_RADIUS_DEG = 0.004; // ~450 m
 const DEFAULT_LIMIT = 20;
 const FETCH_TIMEOUT_MS = 12_000;
+/** Metres per degree of latitude, to translate the bbox radius to a search radius. */
+const METERS_PER_DEGREE = 111_320;
 
 export const PANORAMAX_ATTRIBUTION = 'Panoramax (CC-BY-SA)';
 export const MAPILLARY_ATTRIBUTION = 'Mapillary (CC-BY-SA)';
+export const GOOGLE_ATTRIBUTION = 'Google Street View (© Google)';
 
 /** True when a Mapillary client token is configured. */
 export function isMapillaryConfigured(): boolean {
@@ -203,15 +224,49 @@ async function fetchMapillary(
   return normalizeMapillary(payload);
 }
 
+// ── Google Street View (streetlevel protocol) ───────────────────────
+
+async function fetchGoogle(
+  lat: number,
+  lng: number,
+  radiusDeg: number,
+): Promise<StreetViewPanorama[]> {
+  const radiusMeters = Math.max(50, Math.round(radiusDeg * METERS_PER_DEGREE));
+  const pano = await findGoogleStreetViewPano(lat, lng, radiusMeters);
+  if (!pano) return [];
+
+  const tiles = buildTileGrids(pano);
+  const panoid = pano.panoid;
+  return [
+    {
+      id: `google:${panoid}`,
+      source: 'google',
+      lat: pano.lat,
+      lng: pano.lng,
+      capturedAt: pano.capturedAt,
+      // Compass heading of the capture; passed to the viewer as the initial yaw
+      // (same convention as Mapillary's compass_angle).
+      bearing: pano.heading,
+      // Google's official road coverage is always a 360° equirectangular pano.
+      isPano: true,
+      // Flat preview crop: the viewer's fallback, and the POI-card thumbnail.
+      imageUrl: googleThumbnailUrl(panoid),
+      thumbnailUrl: googleThumbnailUrl(panoid, { width: 400, height: 200 }),
+      tiles: tiles.length > 0 ? tiles : undefined,
+      attribution: pano.copyright ? `Google Street View (${pano.copyright})` : GOOGLE_ATTRIBUTION,
+      licenseUrl: googlePermalink(pano),
+    },
+  ];
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
 /**
  * Find nearby 360° panoramas from every configured source, deduped by id,
- * and capped. Mapillary panoramas come first (nearest first) so they are the
- * leading carousel option wherever they have coverage; the open Panoramax
- * panoramas follow, most recently captured first. Best-effort: a failing
- * source contributes nothing. Only panoramas (`isPano`) are returned for the
- * 3D viewer.
+ * and capped. Google Street View panoramas come first (nearest first), then
+ * Mapillary (nearest first), then the open Panoramax panoramas (most recently
+ * captured first). Best-effort: a failing source contributes nothing. Only
+ * panoramas (`isPano`) are returned for the 3D viewer.
  */
 export async function findStreetViewPanoramas(
   lat: number,
@@ -221,15 +276,23 @@ export async function findStreetViewPanoramas(
   const radiusDeg = query.radiusDeg ?? DEFAULT_RADIUS_DEG;
   const limit = query.limit ?? DEFAULT_LIMIT;
   const includeMapillary = query.includeMapillary !== false;
+  const includeGoogle = query.includeGoogle !== false;
 
-  const [panoramax, mapillary] = await Promise.all([
+  const [panoramax, mapillary, google] = await Promise.all([
     fetchPanoramax(lat, lng, radiusDeg),
     includeMapillary ? fetchMapillary(lat, lng, radiusDeg) : Promise.resolve([]),
+    includeGoogle ? fetchGoogle(lat, lng, radiusDeg) : Promise.resolve([]),
   ]);
 
   const seen = new Set<string>();
+  const googlePanes: StreetViewPanorama[] = [];
   const mapillaryPanes: StreetViewPanorama[] = [];
   const panoramaxPanes: StreetViewPanorama[] = [];
+  for (const item of google) {
+    if (!item.isPano || seen.has(item.id)) continue;
+    seen.add(item.id);
+    googlePanes.push(item);
+  }
   for (const item of mapillary) {
     if (!item.isPano || seen.has(item.id)) continue;
     seen.add(item.id);
@@ -243,11 +306,12 @@ export async function findStreetViewPanoramas(
 
   const distanceFromCenter = (p: StreetViewPanorama) => haversineMeters([lng, lat], [p.lng, p.lat]);
 
+  googlePanes.sort((a, b) => distanceFromCenter(a) - distanceFromCenter(b));
   mapillaryPanes.sort((a, b) => distanceFromCenter(a) - distanceFromCenter(b));
   // Most recently captured first; undated panoramas sort last.
   panoramaxPanes.sort((a, b) => (b.capturedAt ?? -Infinity) - (a.capturedAt ?? -Infinity));
 
-  return [...mapillaryPanes, ...panoramaxPanes].slice(0, limit);
+  return [...googlePanes, ...mapillaryPanes, ...panoramaxPanes].slice(0, limit);
 }
 
 /**

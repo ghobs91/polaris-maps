@@ -2,10 +2,16 @@ import React, { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { buildPanoramaHtml, DEFAULT_FOV_DEG } from './panoramaHtml';
+import type { StreetViewTileGrid } from '../../services/imagery/streetlevelService';
 
 export interface PanoramaViewerProps {
   /** Equirectangular (2:1) image URL. */
   imageUrl: string;
+  /**
+   * Tiled panorama levels (Google Street View), low → high quality. When set,
+   * the viewer stitches these and uses `imageUrl` only as the flat fallback.
+   */
+  tiles?: StreetViewTileGrid[];
   /** Initial yaw in degrees (0 = north / image centre). */
   initialYaw?: number;
   /** Initial pitch in degrees. */
@@ -18,6 +24,7 @@ export interface PanoramaViewerProps {
 
 export function PanoramaViewer({
   imageUrl,
+  tiles,
   initialYaw = 0,
   initialPitch = 0,
   initialFov = DEFAULT_FOV_DEG,
@@ -25,8 +32,8 @@ export function PanoramaViewer({
   testID,
 }: PanoramaViewerProps) {
   const html = useMemo(
-    () => buildPanoramaHtml(imageUrl, initialYaw, initialPitch, initialFov),
-    [imageUrl, initialYaw, initialPitch, initialFov],
+    () => buildPanoramaHtml(imageUrl, initialYaw, initialPitch, initialFov, tiles),
+    [imageUrl, tiles, initialYaw, initialPitch, initialFov],
   );
 
   return (

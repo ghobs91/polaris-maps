@@ -29,10 +29,15 @@ jest.mock('../../src/components/imagery/PanoramaViewer', () => {
   const ReactLocal = jest.requireActual('react') as typeof React;
   const { View } = jest.requireActual('react-native') as typeof import('react-native');
   return {
-    PanoramaViewer: (props: { imageUrl: string; initialYaw?: number; testID?: string }) =>
+    PanoramaViewer: (props: {
+      imageUrl: string;
+      tiles?: unknown[];
+      initialYaw?: number;
+      testID?: string;
+    }) =>
       ReactLocal.createElement(View, {
         testID: props.testID ?? 'panorama',
-        accessibilityLabel: `img:${props.imageUrl} yaw:${props.initialYaw}`,
+        accessibilityLabel: `img:${props.imageUrl} yaw:${props.initialYaw} tiles:${props.tiles?.length ?? 0}`,
       }),
   };
 });
@@ -125,5 +130,51 @@ describe('StreetViewScreen capture timeline', () => {
     fireEvent.press(screen.getByTestId('street-view-capture-selector'));
     fireEvent.press(screen.getByTestId('street-view-capture-2'));
     await waitFor(() => expect(viewerLabel(screen)).toContain('https://pano.test/oldest.jpg'));
+  });
+
+  it('renders a Google Street View capture with its tiles and label', async () => {
+    mockFind.mockResolvedValue([
+      {
+        id: 'google:gPANO1',
+        source: 'google',
+        lat: 48.8584,
+        lng: 2.2945,
+        capturedAt: secs('2026-05-01T00:00:00Z'),
+        bearing: 12,
+        isPano: true,
+        imageUrl: 'https://streetviewpixels-pa.googleapis.com/v1/thumbnail?panoid=gPANO1',
+        attribution: 'Google Street View (© 2026 Google)',
+        tiles: [
+          {
+            urlTemplate: 'https://tiles.test/{x}/{y}/{z}',
+            cols: 4,
+            rows: 2,
+            tileSize: 512,
+            zoom: 2,
+            width: 2048,
+            height: 1024,
+          },
+          {
+            urlTemplate: 'https://tiles.test/{x}/{y}/{z}',
+            cols: 8,
+            rows: 4,
+            tileSize: 512,
+            zoom: 3,
+            width: 4096,
+            height: 2048,
+          },
+        ],
+      },
+    ]);
+
+    const screen = render(<StreetViewScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('street-view-panorama')).toBeTruthy());
+    // Both stitched levels reach the viewer.
+    expect(viewerLabel(screen)).toContain('tiles:2');
+    expect(viewerLabel(screen)).toContain('yaw:12');
+    expect(screen.getByTestId('street-view-capture-selector').props.accessibilityLabel).toContain(
+      'Google Street View',
+    );
   });
 });

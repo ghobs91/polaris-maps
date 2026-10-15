@@ -128,6 +128,36 @@ export function mapillaryCoverageTileUrl(token: string): string {
   return `${MAPILLARY_TILES_URL_TEMPLATE}?access_token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * Google Street View — default-on source, no API key required.
+ *
+ * Queried through Google's internal ("streetlevel") endpoints, the same ones
+ * the Map web client uses; the request/response shape was mapped from the
+ * `sk-zk/streetlevel` project (MIT). Like Mapillary this is an explicit
+ * exception to the no-corporate-cloud rule: it is online-only and never cached,
+ * but unlike Mapillary it needs no token, so it is enabled by default and every
+ * result carries the `© Google` copyright line for attribution.
+ *
+ * These internal endpoints are undocumented and can change without notice, so
+ * the lookup is best-effort and falls back to Mapillary/Panoramax on failure.
+ */
+export const STREETLEVEL_PANO_SEARCH_URL =
+  'https://maps.googleapis.com/$rpc/google.internal.maps.mapsjs.v1.MapsJsInternalService/SingleImageSearch';
+
+/** Google Street View equirectangular image tiles (512×512 JPEG). */
+export const STREETLEVEL_TILE_BASE_URL = 'https://streetviewpixels-pa.googleapis.com/v1/tile';
+
+/** Google Street View flat preview crop (used for thumbnails / fallback). */
+export const STREETLEVEL_THUMBNAIL_BASE_URL =
+  'https://streetviewpixels-pa.googleapis.com/v1/thumbnail';
+
+/**
+ * The tile/thumbnail endpoints reject unrecognised user agents (a bare `curl`
+ * UA is denied), so requests send a browser-like UA explicitly.
+ */
+export const STREETLEVEL_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
 /** OTP GraphQL endpoint path. */
 export const OTP_GRAPHQL_PATH = '/otp/gtfs/v1';
 

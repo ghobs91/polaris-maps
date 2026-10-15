@@ -16,6 +16,7 @@ import {
 } from '../../src/services/imagery/streetViewService';
 
 const SOURCE_LABELS: Record<StreetViewPanorama['source'], string> = {
+  google: 'Google Street View',
   mapillary: 'Mapillary',
   panoramax: 'Panoramax',
 };
@@ -128,6 +129,7 @@ export default function StreetViewScreen() {
             <PanoramaViewer
               key={current.id}
               imageUrl={current.imageUrl}
+              tiles={current.tiles}
               initialYaw={current.bearing ?? 0}
               onError={(message) =>
                 setFallbackNotice(message === 'fallback' ? 'Showing a flat preview' : message)

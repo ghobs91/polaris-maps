@@ -42,4 +42,32 @@ describe('buildPanoramaHtml', () => {
     expect(html).toContain('requestAnimationFrame(step)');
     expect(html).toContain('yawVel *= 0.93');
   });
+
+  it('stitches tiles on a canvas when tile levels are provided', () => {
+    const html = buildPanoramaHtml('https://img.test/fallback.jpg', 0, 0, DEFAULT_FOV_DEG, [
+      {
+        urlTemplate: 'https://tiles.test/t?x={x}&y={y}&zoom={z}',
+        cols: 4,
+        rows: 2,
+        tileSize: 512,
+        zoom: 2,
+        width: 2048,
+        height: 1024,
+      },
+    ]);
+    // The tile level is embedded for the client-side stitcher.
+    expect(html).toContain('https://tiles.test/t?x={x}&y={y}&zoom={z}');
+    expect(html).toContain('TILES = [');
+    expect(html).toContain("document.createElement('canvas')");
+    expect(html).toContain("tile.crossOrigin = 'anonymous'");
+    // The flat image stays as the fallback.
+    expect(html).toContain(JSON.stringify('https://img.test/fallback.jpg'));
+    expect(html).toContain('showFlat');
+  });
+
+  it('uses the flat image directly when no tile levels are provided', () => {
+    const html = buildPanoramaHtml('https://img.test/a.jpg', 0, 0, DEFAULT_FOV_DEG);
+    expect(html).toContain('TILES = [];');
+    expect(html).toContain('showFlat();');
+  });
 });

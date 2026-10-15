@@ -1,3 +1,5 @@
+import type { StreetViewTileGrid } from '../../services/imagery/streetlevelService';
+
 /** Default vertical field of view (degrees) for the panorama viewer. */
 export const DEFAULT_FOV_DEG = 75;
 
@@ -7,14 +9,21 @@ export const DEFAULT_FOV_DEG = 75;
  * image) is what makes it a 3D street-view rather than a photo strip. Falls
  * back to a static, draggable image when WebGL or the texture upload is
  * unavailable (e.g. a source that doesn't send CORS headers).
+ *
+ * When `tiles` is given (Google Street View), the viewer stitches each tile
+ * level onto a canvas and uploads it as the texture, lowest quality first, so
+ * the panorama appears quickly and then sharpens. The flat `imageUrl` is the
+ * fallback if stitching fails.
  */
 export function buildPanoramaHtml(
   imageUrl: string,
   yawDeg: number,
   pitchDeg: number,
   fovDeg: number,
+  tiles: StreetViewTileGrid[] = [],
 ): string {
   const img = JSON.stringify(imageUrl);
+  const grids = JSON.stringify(tiles);
   const yaw = (yawDeg * Math.PI) / 180;
   const pitch = (pitchDeg * Math.PI) / 180;
   const fov = (fovDeg * Math.PI) / 180;
@@ -39,6 +48,7 @@ export function buildPanoramaHtml(
 <script>
 (function () {
   var IMG = ${img};
+  var TILES = ${grids};
   var yaw = ${yaw}, pitch = ${pitch}, fov = ${fov};
   var canvas = document.getElementById('c');
   var fb = document.getElementById('fb');
@@ -111,22 +121,89 @@ export function buildPanoramaHtml(
   var uRes = gl.getUniformLocation(prog, 'uRes');
 
   var tex = gl.createTexture();
-  var image = new Image();
-  image.crossOrigin = 'anonymous';
-  image.onload = function () {
-    try {
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      post('ready');
-      render();
-    } catch (e) { fallback('Preview only (image blocked cross-origin)'); }
-  };
-  image.onerror = function () { fallback('Panorama unavailable'); };
-  image.src = IMG;
+  var maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 2048;
+  var textured = false;
+
+  function upload(source) {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    if (!textured) { textured = true; post('ready'); }
+    render();
+  }
+
+  // Flat fallback: a single equirectangular image (the source's thumbnail).
+  function showFlat() {
+    var image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = function () {
+      try { upload(image); } catch (e) { fallback('Preview only (image blocked cross-origin)'); }
+    };
+    image.onerror = function () { fallback('Panorama unavailable'); };
+    image.src = IMG;
+  }
+
+  // Tiled source: stitch each level onto a canvas, lowest quality first.
+  function loadTile(url) {
+    return new Promise(function (resolve, reject) {
+      var tile = new Image();
+      tile.crossOrigin = 'anonymous';
+      tile.onload = function () { resolve(tile); };
+      tile.onerror = function () { reject(new Error('tile failed')); };
+      tile.src = url;
+    });
+  }
+
+  function stitch(grid, images) {
+    var c = document.createElement('canvas');
+    c.width = grid.width;
+    c.height = grid.height;
+    var ctx = c.getContext('2d');
+    for (var i = 0; i < images.length; i++) {
+      var col = i % grid.cols;
+      var row = (i / grid.cols) | 0;
+      ctx.drawImage(images[i], col * grid.tileSize, row * grid.tileSize);
+    }
+    return c;
+  }
+
+  function loadGrid(grid) {
+    if (grid.width > maxTex || grid.height > maxTex) return Promise.resolve(false);
+    var urls = [];
+    for (var row = 0; row < grid.rows; row++) {
+      for (var col = 0; col < grid.cols; col++) {
+        urls.push(
+          grid.urlTemplate
+            .replace('{x}', col)
+            .replace('{y}', row)
+            .replace('{z}', grid.zoom),
+        );
+      }
+    }
+    return Promise.all(urls.map(loadTile)).then(
+      function (images) {
+        try { upload(stitch(grid, images)); return true; }
+        catch (e) { return false; }
+      },
+      function () { return false; }
+    );
+  }
+
+  if (TILES.length) {
+    var anyLevel = false;
+    var chain = Promise.resolve();
+    TILES.forEach(function (grid) {
+      chain = chain.then(function () {
+        return loadGrid(grid).then(function (ok) { if (ok) anyLevel = true; });
+      });
+    });
+    chain.then(function () { if (!anyLevel) showFlat(); });
+  } else {
+    showFlat();
+  }
 
   function resize() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
