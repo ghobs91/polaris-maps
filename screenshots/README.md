@@ -38,11 +38,18 @@ bezel, callout bubble).
    python3 screenshots/contact_sheet.py
    ```
 
-## Current set (iPhone 6.9")
+## Current set (iPhone 6.9", dark mode)
 
-Privacy by design · Download Offline Maps · Peer-to-Peer Network · Explore in 3D
-· Explore the world map · Find any place · Places, not just pins · Everything in
-one place · Welcome to Polaris Maps.
+Live traffic (crowd-sourced) · Every mode, one trip (transit) · Satellite imagery
+· Walk the street before you go (street-level, Panoramax + Mapillary) · The best
+route, right now (navigation) · Rich details, without the clutter (place details)
+· Download offline maps (North America → United States expanded).
+
+**Pending:** CarPlay card (`08-carplay.png`) — needs a CarPlay view capture.
+
+Raw sources live in `screenshots/raw/` (gitignored): `live-traffic.png`,
+`transit.png`, `satellite.png`, `street-level.png`, `navigation.png`,
+`place-details.png`, `regions.png`, `carplay.png`.
 
 Edit the `CARDS` list in `compose.py` to change titles, icons, callouts, or the
 raw screen each card uses.
