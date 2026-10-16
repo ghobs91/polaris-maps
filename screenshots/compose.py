@@ -154,7 +154,6 @@ CARDS = [
         "raw": os.path.join(RAW, "live-traffic.png"),
         "title": "Live traffic,\ncrowd-sourced",
         "icon": "traffic-light",
-        "callout": {"text": "Crowd-sourced from\nnearby devices.", "at": 0.30},
     },
     {
         "out": "02-transit.png",
@@ -173,14 +172,12 @@ CARDS = [
         "raw": os.path.join(RAW, "street-level.png"),
         "title": "Walk the street\nbefore you go",
         "icon": "panorama",
-        "callout": {"text": "Imagery from Panoramax\nand Mapillary.", "at": 0.74},
     },
     {
         "out": "05-best-route.png",
         "raw": os.path.join(RAW, "navigation.png"),
         "title": "The best route,\nright now",
         "icon": "routes",
-        "callout": {"text": "Live traffic built\ninto every ETA.", "at": 0.30},
     },
     {
         "out": "06-place-details.png",
@@ -193,7 +190,6 @@ CARDS = [
         "raw": os.path.join(RAW, "regions.png"),
         "title": "Download\noffline maps",
         "icon": "download",
-        "callout": {"text": "No Internet?\nNo problem.", "at": 0.80},
     },
     {
         "out": "08-carplay.png",
