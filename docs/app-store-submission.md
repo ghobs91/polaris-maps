@@ -19,6 +19,7 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 | Privacy policy + terms + landing page | Live: https://app.polarismaps.app/privacy, `/terms`, `/`              |
 | Support & marketing URLs              | Point at https://app.polarismaps.app (resolve 200)                    |
 | Store listing copy                    | `fastlane/metadata/en-US/`                                            |
+| Review contact fields                 | `fastlane/metadata/review_information/` (name, email, phone)          |
 | App Privacy questionnaire answers     | Drafted in `docs/app-store-privacy-answers.md`                        |
 | Universal links — source + AASA       | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
 | Screenshots — iPhone 6.9" (7 of 8)    | `screenshots/out/01..07` (CarPlay card pending)                       |
@@ -29,12 +30,11 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 | --- | --------------------------------------------------------- | ---------------------------- | -------------- |
 | 1   | CarPlay screenshot + card 8                               | you → me compose             | In progress    |
 | 2   | iPad 13" screenshots (required)                           | you → me compose             | Not started    |
-| 3   | Review contact fields (`review_information/`)             | you                          | Not started    |
-| 4   | Enter App Privacy answers in App Store Connect            | you                          | Drafted        |
-| 5   | Legal review + fill `<DATE>`/`<CONTACT EMAIL>` + redeploy | you                          | Not started    |
-| 6   | Associated Domains capability + profile + entitlement     | you (Apple Developer portal) | Not started    |
-| 7   | Run `fastlane ios release` → submit                       | you                          | Lane unblocked |
-| 8   | Housekeeping: commit working tree                         | you                          | Not started    |
+| 3   | Enter App Privacy answers in App Store Connect            | you                          | Drafted        |
+| 4   | Legal review + fill `<DATE>`/`<CONTACT EMAIL>` + redeploy | you                          | Not started    |
+| 5   | Associated Domains capability + profile + entitlement     | you (Apple Developer portal) | Not started    |
+| 6   | Run `fastlane ios release` → submit                       | you                          | Lane unblocked |
+| 7   | Housekeeping: commit working tree                         | you                          | Not started    |
 
 ---
 
@@ -49,7 +49,7 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
    ```
    The build needs the `com.apple.developer.carplay-maps` entitlement; without a
    CarPlay provisioning profile the script falls back to ad-hoc signing and may
-   strip it (see task 6 for enabling capabilities).
+   strip it (see task 5 for enabling capabilities).
 2. Capture the CarPlay view and save it to `screenshots/raw/carplay.png`
    (any resolution; the compositor scales it into the device frame).
 3. Re-render:
@@ -77,13 +77,7 @@ screenshots (2064×2752 for iPad Pro 13").
 2. Provide the raw captures and I'll add an iPad variant to `compose.py`
    (2064×2752 canvas + iPad frame, same card style).
 
-### 3. Review contact fields
-
-Add these files under `fastlane/metadata/review_information/` (one value each):
-`first_name.txt`, `last_name.txt`, `email_address.txt`, `phone_number.txt`.
-`notes.txt` already explains the P2P/optional-permission model to the reviewer.
-
-### 4. Enter App Privacy answers in App Store Connect
+### 3. Enter App Privacy answers in App Store Connect
 
 1. App Store Connect → your app → **App Privacy** → **Edit**.
 2. Apply the answers from `docs/app-store-privacy-answers.md`:
@@ -92,7 +86,7 @@ Add these files under `fastlane/metadata/review_information/` (one value each):
    - Tracking: **No**.
 3. Point the **Privacy Policy URL** at `https://app.polarismaps.app/privacy`.
 
-### 5. Legal review + placeholders + redeploy
+### 4. Legal review + placeholders + redeploy
 
 1. Fill `<DATE>` and `<CONTACT EMAIL>` in:
    `docs/privacy-policy.md`, `netlify-deploy/privacy/index.html`,
@@ -103,7 +97,7 @@ Add these files under `fastlane/metadata/review_information/` (one value each):
    cd netlify-deploy && netlify deploy --prod --dir .
    ```
 
-### 6. Associated Domains capability + profile + entitlement
+### 5. Associated Domains capability + profile + entitlement
 
 Source and hosting are ready; only the Apple-side steps remain.
 
@@ -126,7 +120,7 @@ Source and hosting are ready; only the Apple-side steps remain.
 > Note: the committed entitlements do **not** yet include associated-domains, so
 > universal links currently fall back to the `polaris-maps://` scheme.
 
-### 7. Build and submit
+### 6. Build and submit
 
 1. Confirm `.env` has `APP_STORE_CONNECT_KEY_ID`, `..._ISSUER_ID`, `..._KEY_PATH`
    (present) and that signing is available (`match` or `SKIP_MATCH=1`).
@@ -141,7 +135,7 @@ Source and hosting are ready; only the Apple-side steps remain.
 4. In App Store Connect: select the build, add release notes, complete App
    Privacy + listing metadata, then **Submit for Review** (manual).
 
-### 8. Housekeeping
+### 7. Housekeeping
 
 The working tree still has pre-existing edits to reconcile/commit:
 `ios/PolarisMaps.xcodeproj/project.pbxproj`, `ios/PolarisMaps/Info.plist`,
