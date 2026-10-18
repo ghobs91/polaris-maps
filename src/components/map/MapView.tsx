@@ -82,6 +82,15 @@ const POI_ZOOM_REUSE_THRESHOLD = 0.35;
 const NAVIGATION_CAMERA_PITCH = 55;
 const NAVIGATION_CAMERA_TOP_PADDING = 0.5;
 
+/**
+ * Gaps before retrying the user's map style while the raster fallback is
+ * latched. Widening, and finite: a transient failure heals on its own, while a
+ * style that is genuinely unreachable stops being retried instead of
+ * repainting the map every few seconds. Changing the map type or the
+ * connection quality restarts the sequence.
+ */
+const FALLBACK_RETRY_DELAYS_MS = [45_000, 120_000, 300_000];
+
 /** ~30 m threshold for considering two POIs as duplicates. */
 const DEDUP_THRESHOLD_DEG = 0.0003;
 
@@ -241,6 +250,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   );
   const styleLoadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const styleLoadedRef = useRef(false);
+  // How many times the raster fallback has been retried since it latched; the
+  // gaps widen so a genuinely broken style isn't reloaded forever.
+  const fallbackRetryAttemptRef = useRef(0);
   // Downloaded region pack serving the basemap while the link is weak, else null.
   const [offlinePack, setOfflinePack] = useState<OfflinePack | null>(null);
   // Rounded center cell driving offline-pack lookups (stable across GPS ticks).
@@ -953,6 +965,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       clearTimeout(styleLoadTimer.current);
       styleLoadTimer.current = null;
     }
+    // MapLibre reports a map-load failure for any resource error, not just a
+    // broken style: a single failed tile or glyph after the style has loaded
+    // must not tear down a working map and pin the raster fallback.
+    if (styleLoadedRef.current) return;
     if (!styleLoadFailed) {
       setStyleLoadFailed(true);
       if (__DEV__) {
@@ -993,6 +1009,32 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     };
   }, [resolvedMapStyle, connectionQuality, useOfflineFallback, offline]);
 
+  // A style-load failure latches the raster compat style so the user is never
+  // stranded on a blank map, but the latch must stay recoverable: a single
+  // transient timeout would otherwise pin the compat style and disable
+  // map-type switching for the rest of the session. Retry whenever the user
+  // changes the map type or the connection quality changes.
+  useEffect(() => {
+    fallbackRetryAttemptRef.current = 0;
+    setStyleLoadFailed(false);
+  }, [mapStylePref, connectionQuality]);
+
+  // …and retry on its own too. While the latch is on, every map-type choice
+  // resolves to the same compatibility raster, so the map reads as "stuck" and
+  // the chips look broken until the user toggles something. Widening gaps keep
+  // the retries from becoming a reload loop when the preferred style really is
+  // unreachable (each attempt repaints the map from scratch).
+  useEffect(() => {
+    if (!styleLoadFailed) return;
+    const delayMs = FALLBACK_RETRY_DELAYS_MS[fallbackRetryAttemptRef.current];
+    if (delayMs == null) return;
+    const timer = setTimeout(() => {
+      fallbackRetryAttemptRef.current += 1;
+      setStyleLoadFailed(false);
+    }, delayMs);
+    return () => clearTimeout(timer);
+  }, [styleLoadFailed]);
+
   // Build the nav puck shapes in map-plane coordinates.  Memoizing avoids
   // re-computing the GeoJSON on every render while still reacting to zoom,
   // bearing and position changes.
@@ -1017,6 +1059,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         attributionEnabled={false}
         onDidFailLoadingMap={handleMapLoadFail}
         onDidFinishLoadingMap={handleMapLoadSuccess}
+        // `onDidFinishLoadingMap` fires once for the initial map load, but the
+        // satellite viewport style is rebuilt on camera settle, so its later
+        // loads would never clear the stall timer and the map would latch to
+        // the compat raster style. The per-style event fires on every load.
+        onDidFinishLoadingStyle={handleMapLoadSuccess}
         onPress={handlePress}
         onLongPress={handleLongPress}
         onRegionIsChanging={handleRegionIsChanging}
