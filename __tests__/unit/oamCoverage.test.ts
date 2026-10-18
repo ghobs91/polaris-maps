@@ -30,6 +30,12 @@ describe('intersectBBox', () => {
   it('returns null when the boxes are disjoint', () => {
     expect(intersectBBox([0, 0, 1, 1], [2, 2, 3, 3])).toBeNull();
   });
+
+  it('returns null for a degenerate (zero-area) intersection', () => {
+    // A point/line footprint would otherwise become an invalid style `bounds`.
+    expect(intersectBBox([0, 0, 5, 5], [5, 0, 10, 5])).toBeNull();
+    expect(intersectBBox([0, 0, 5, 5], [0, 5, 5, 10])).toBeNull();
+  });
 });
 
 describe('findOamCoverage', () => {

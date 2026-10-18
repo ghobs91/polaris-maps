@@ -53,7 +53,10 @@ export function intersectBBox(a: BBox, b: BBox): BBox | null {
   const south = Math.max(as, bs);
   const east = Math.min(ae, be);
   const north = Math.min(an, bn);
-  return west <= east && south <= north ? [west, south, east, north] : null;
+  // Require positive area: a zero-width/height intersection (a point or line
+  // footprint) would produce a degenerate `bounds` in the MapLibre style, which
+  // the style loader rejects outright.
+  return west < east && south < north ? [west, south, east, north] : null;
 }
 
 function unionBBox(a: BBox, b: BBox): BBox {
