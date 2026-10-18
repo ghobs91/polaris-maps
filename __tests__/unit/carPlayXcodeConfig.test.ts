@@ -275,6 +275,16 @@ describe('CarPlay iOS configuration', () => {
       // CarPlay chrome parity: guidance tint, car light/dark, nav-bar buttons.
       expect(nativeModule).toContain('guidanceBackgroundColor');
       expect(nativeModule).toContain('contentStyleChanged');
+      // A Dashboard-only session reports the head unit's content style late (or
+      // as an empty one), so it is re-read after a scene connects, on scene
+      // activation, and on every position push — deduped so the CarPlay map
+      // style isn't reloaded for nothing.
+      expect(nativeModule).toContain('scheduleContentStyleRefresh');
+      expect(nativeModule).toContain('lastEmittedContentStyleDark');
+      expect(nativeModule).toContain('traitCollection.userInterfaceStyle');
+      // The Dashboard placeholder map follows the head unit's light/dark, so a
+      // cold launch isn't a light surface on a dark head unit.
+      expect(mapView).toContain('defaultStyleJSON(dark:');
       expect(nativeModule).toContain('leadingNavigationBarButtons');
       expect(nativeModule).toContain('showPanningInterface');
       // Arrival card, incident warnings, and native lane guidance (17.4+).
