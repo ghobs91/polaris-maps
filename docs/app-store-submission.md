@@ -11,30 +11,31 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 ### Done
 
-| Item                                  | Evidence                                                              |
-| ------------------------------------- | --------------------------------------------------------------------- |
-| Release quality gate (`pnpm check`)   | Jest config fixed; 0 lint warnings; 1,784 tests pass                  |
-| `ios release` lane runs               | Stale MapKit env gate removed; version-drift guard added              |
-| Privacy manifest                      | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false` |
-| Privacy policy + terms + landing page | Live: https://app.polarismaps.app/privacy, `/terms`, `/`              |
-| Support & marketing URLs              | Point at https://app.polarismaps.app (resolve 200)                    |
-| Store listing copy                    | `fastlane/metadata/en-US/`                                            |
-| Review contact fields                 | `fastlane/metadata/review_information/` (name, email, phone)          |
-| App Privacy questionnaire answers     | Drafted in `docs/app-store-privacy-answers.md`                        |
-| Universal links — source + AASA       | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
-| Screenshots — iPhone 6.9" (7 of 8)    | `screenshots/out/01..07` (CarPlay card pending)                       |
+| Item                                    | Evidence                                                              |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| Release quality gate (`pnpm check`)     | Jest config fixed; 0 lint warnings; 1,784 tests pass                  |
+| `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added              |
+| Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false` |
+| Privacy policy + terms + landing page   | Live: https://app.polarismaps.app/privacy, `/terms`, `/`              |
+| Support & marketing URLs                | Point at https://app.polarismaps.app (resolve 200)                    |
+| Store listing copy                      | `fastlane/metadata/en-US/`                                            |
+| Review contact fields                   | `fastlane/metadata/review_information/` (name, email, phone)          |
+| Policy/terms date + contact + copyright | Live: October 18, 2026 · support@polarismaps.app · © Andrew Ghobrial  |
+| App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                        |
+| Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
+| Screenshots — iPhone 6.9" (7 of 8)      | `screenshots/out/01..07` (CarPlay card pending)                       |
 
 ### Remaining
 
-| #   | Item                                                      | Owner                        | Status         |
-| --- | --------------------------------------------------------- | ---------------------------- | -------------- |
-| 1   | CarPlay screenshot + card 8                               | you → me compose             | In progress    |
-| 2   | iPad 13" screenshots (required)                           | you → me compose             | Not started    |
-| 3   | Enter App Privacy answers in App Store Connect            | you                          | Drafted        |
-| 4   | Legal review + fill `<DATE>`/`<CONTACT EMAIL>` + redeploy | you                          | Not started    |
-| 5   | Associated Domains capability + profile + entitlement     | you (Apple Developer portal) | Not started    |
-| 6   | Run `fastlane ios release` → submit                       | you                          | Lane unblocked |
-| 7   | Housekeeping: commit working tree                         | you                          | Not started    |
+| #   | Item                                                  | Owner                        | Status         |
+| --- | ----------------------------------------------------- | ---------------------------- | -------------- |
+| 1   | CarPlay screenshot + card 8                           | you → me compose             | In progress    |
+| 2   | iPad 13" screenshots (required)                       | you → me compose             | Not started    |
+| 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted        |
+| 4   | Legal review of policy + terms                        | you                          | Review pending |
+| 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Not started    |
+| 6   | Run `fastlane ios release` → submit                   | you                          | Lane unblocked |
+| 7   | Housekeeping: commit working tree                     | you                          | Not started    |
 
 ---
 
@@ -86,16 +87,15 @@ screenshots (2064×2752 for iPad Pro 13").
    - Tracking: **No**.
 3. Point the **Privacy Policy URL** at `https://app.polarismaps.app/privacy`.
 
-### 4. Legal review + placeholders + redeploy
+### 4. Legal review of policy + terms
 
-1. Fill `<DATE>` and `<CONTACT EMAIL>` in:
-   `docs/privacy-policy.md`, `netlify-deploy/privacy/index.html`,
-   `netlify-deploy/terms/index.html`, `netlify-deploy/index.html`.
-2. Have the policy/terms reviewed.
-3. Redeploy the static site:
-   ```bash
-   cd netlify-deploy && netlify deploy --prod --dir .
-   ```
+The placeholders are filled and the pages are redeployed: last updated
+**October 18, 2026**, contact **support@polarismaps.app** (rendered as a
+`mailto:` link), copyright **2026 Andrew Ghobrial**.
+
+Remaining: have the privacy policy and terms reviewed. In particular, the
+Terms currently have **no governing-law/jurisdiction clause**, and the policy
+should be checked against actual data practices before launch.
 
 ### 5. Associated Domains capability + profile + entitlement
 
