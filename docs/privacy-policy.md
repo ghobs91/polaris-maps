@@ -2,7 +2,7 @@
 
 **Status: ready to publish at https://app.polarismaps.app/privacy — pending legal review.**
 
-_Last updated: <DATE>_
+_Last updated: October 18, 2026_
 _Canonical URL: https://app.polarismaps.app/privacy_
 
 Polaris Maps is a peer-to-peer mapping app. It is built so that your device can
@@ -91,7 +91,7 @@ Polaris Maps is not directed at children under 13.
 
 ## Contact
 
-Questions or data requests: <CONTACT EMAIL>.
+Questions or data requests: support@polarismaps.app.
 
 ## Changes
 
