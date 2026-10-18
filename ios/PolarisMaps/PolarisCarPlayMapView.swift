@@ -37,34 +37,45 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
   /// cold launch from the CarPlay home screen paints a map without a one-shot
   /// style fetch that iOS can abort while the phone app is suspended. JS
   /// replaces it with the phone's resolved style once the bridge attaches.
-  private static let defaultStyleJSON = """
-    {
-      "version": 8,
-      "name": "Polaris CarPlay Default",
-      "sources": {
-        "osm": {
-          "type": "raster",
-          "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          "tileSize": 256,
-          "attribution": "© OpenStreetMap contributors",
-          "maxzoom": 19
-        }
-      },
-      "layers": [
-        {
-          "id": "background",
-          "type": "background",
-          "paint": { "background-color": "#E8EAED" }
+  ///
+  /// The dark variant matches the phone's compatibility-raster recipe
+  /// (`mapStyleResolver.buildCompatStyle`): OSM has no dark raster, so the tiles
+  /// are dimmed and desaturated. Without it a Dashboard tile on a dark head unit
+  /// paints as a light surface until JS pushes the real style.
+  private static func defaultStyleJSON(dark: Bool) -> String {
+    let rasterPaint = dark
+      ? #"{"raster-opacity": 1, "raster-brightness-max": 0.55, "raster-saturation": -0.25}"#
+      : #"{"raster-opacity": 1}"#
+    let backgroundColor = dark ? "#18262E" : "#E8EAED"
+    return """
+      {
+        "version": 8,
+        "name": "Polaris CarPlay Default",
+        "sources": {
+          "osm": {
+            "type": "raster",
+            "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            "tileSize": 256,
+            "attribution": "© OpenStreetMap contributors",
+            "maxzoom": 19
+          }
         },
-        {
-          "id": "osm-raster",
-          "type": "raster",
-          "source": "osm",
-          "paint": { "raster-opacity": 1 }
-        }
-      ]
-    }
-    """
+        "layers": [
+          {
+            "id": "background",
+            "type": "background",
+            "paint": { "background-color": "\(backgroundColor)" }
+          },
+          {
+            "id": "osm-raster",
+            "type": "raster",
+            "source": "osm",
+            "paint": \(rasterPaint)
+          }
+        ]
+      }
+      """
+  }
 
   /// Phone parity: white casing + cyan core (DEFAULT_ROUTE_COLOR #2FD4F2,
   /// see TrafficRouteLayer).
@@ -250,7 +261,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
   /// Accepts `UIWindow` (not just `CPWindow`) so the same host serves the main
   /// template scene's `CPWindow` and the Dashboard scene's plain `UIWindow`.
-  func activate(in window: UIWindow) {
+  /// `dark` seeds the placeholder style with the head unit's content style so a
+  /// cold launch doesn't paint a light map on a dark head unit.
+  func activate(in window: UIWindow, dark: Bool = false) {
     guard mapView == nil else { return }
     carPlayWindow = window
 
@@ -274,7 +287,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
 
     // Paint immediately with the self-contained style; JS swaps in the phone
     // style when the bridge attaches.
-    applyStyle(json: Self.defaultStyleJSON)
+    applyStyle(json: Self.defaultStyleJSON(dark: dark))
 
     let badge = SpeedLimitBadge()
     badge.isHidden = true

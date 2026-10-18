@@ -78,6 +78,18 @@ class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboard
   ) {
     PolarisCarPlay.dashboardSceneDidDisconnect()
   }
+
+  /// The Dashboard can be the only attached CarPlay scene, and the head unit's
+  /// light/dark style may not be known when it connects. Re-read it on
+  /// (re)activation so the split-view map isn't stuck on the initial light
+  /// style until the full-screen scene presents.
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    PolarisCarPlay.refreshContentStyle()
+  }
+
+  func sceneWillEnterForeground(_ scene: UIScene) {
+    PolarisCarPlay.refreshContentStyle()
+  }
 }
 
 /// CarPlay instrument cluster (iOS 15.4+). The cluster mirrors the active

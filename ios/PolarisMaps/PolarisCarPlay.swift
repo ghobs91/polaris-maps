@@ -32,6 +32,10 @@ class PolarisCarPlay: RCTEventEmitter {
   /// `carPlayConnected` replay.
   private static var pendingSearchQuery: String?
   private static weak var instance: PolarisCarPlay?
+  /// Last content style delivered to JS, so the post-connect re-reads below
+  /// don't re-push (and reload the CarPlay map style) when nothing changed.
+  /// Cleared when a fresh JS runtime attaches and when the session ends.
+  private static var lastEmittedContentStyleDark: Bool?
 
   private static let mapTemplateManager = CarPlayTemplateManager()
 
@@ -118,6 +122,8 @@ class PolarisCarPlay: RCTEventEmitter {
       hasPublishedSceneConnection = false
       emit("carPlayDisconnected", ["connected": false])
     }
+    // The next session re-publishes the content style from scratch.
+    lastEmittedContentStyleDark = nil
   }
 
   /// Attaches the buffered CarPlay Dashboard window to a second map host so
@@ -138,6 +144,7 @@ class PolarisCarPlay: RCTEventEmitter {
       // the dashboard map isn't forced to light.
       Self.mapTemplateManager.ensureSessionConfiguration()
       Self.publishSceneConnectionIfNeeded()
+      Self.scheduleContentStyleRefresh()
     }
   }
 
@@ -168,7 +175,10 @@ class PolarisCarPlay: RCTEventEmitter {
     pendingInterfaceController = interfaceController
     pendingWindow = window
     isSceneConnected = true
-    DispatchQueue.main.async { Self.attachPendingSceneIfNeeded() }
+    DispatchQueue.main.async {
+      Self.attachPendingSceneIfNeeded()
+      Self.scheduleContentStyleRefresh()
+    }
   }
 
   /// The CarPlay scene became active (fires on a cold launch from the CarPlay
@@ -176,7 +186,40 @@ class PolarisCarPlay: RCTEventEmitter {
   /// it never loaded — otherwise a cold launch shows a blank map until the
   /// phone app is opened and pushes the phone style.
   static func sceneDidBecomeActive() {
-    DispatchQueue.main.async { Self.mapTemplateManager.refreshPresentation() }
+    DispatchQueue.main.async {
+      Self.mapTemplateManager.refreshPresentation()
+      Self.refreshContentStyle()
+    }
+  }
+
+  /// Re-reads the head unit's light/dark content style and pushes it to JS.
+  ///
+  /// `CPSessionConfiguration.contentStyle` is not necessarily populated the
+  /// instant the configuration is created, and a steady-state car never fires
+  /// `contentStyleChanged`. A Dashboard-only session (the Dashboard scene is
+  /// the only one attached) would therefore keep the initial "light" value and
+  /// its split-view map stayed light until the full-screen scene presented and
+  /// corrected it. Re-reading on scene activation closes that gap.
+  static func refreshContentStyle() {
+    emitContentStyle(dark: mapTemplateManager.contentStyleIsDark)
+  }
+
+  /// Delays for the post-connect content-style re-reads. Bounded: a session
+  /// whose head unit never reports a style settles on the CarPlay window's
+  /// trait collection (see `contentStyleIsDark`) instead of polling forever.
+  private static let contentStyleRefreshDelays: [TimeInterval] = [0.5, 2, 5, 10, 30]
+
+  /// Re-reads the head unit's content style a few times after a scene attaches,
+  /// in case it resolves late — the Dashboard scene in particular can connect
+  /// long before the full-screen scene that used to correct it. The emit is
+  /// deduped, so a steady value costs nothing.
+  private static func scheduleContentStyleRefresh() {
+    for delay in contentStyleRefreshDelays {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+        guard isAnySceneConnected else { return }
+        refreshContentStyle()
+      }
+    }
   }
 
   static func sceneDidDisconnect(interfaceController: CPInterfaceController) {
@@ -220,8 +263,12 @@ class PolarisCarPlay: RCTEventEmitter {
     if Self.isAnySceneConnected {
       Self.hasPublishedSceneConnection = false
     }
+    // A fresh runtime has not seen the content style yet, so the dedupe must
+    // not suppress the publish below.
+    Self.lastEmittedContentStyleDark = nil
     Self.publishSceneConnectionIfNeeded()
     Self.attachPendingDashboardIfNeeded()
+    Self.scheduleContentStyleRefresh()
   }
 
   // MARK: - JS API (mirrors NativePolarisCarPlay.ts)
@@ -724,7 +771,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     interfaceController.delegate = self
     templateWindow = window
 
-    mapViewHost.activate(in: window)
+    mapViewHost.activate(in: window, dark: contentStyleIsDark)
     mapViewHost.isNavigating = navigationActive
 
     let template = CPMapTemplate()
@@ -918,7 +965,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // Defensive: never render a second map over the main template window.
     guard window !== templateWindow else { return }
     let host = CarPlayMapViewHost(mode: .dashboard)
-    host.activate(in: window)
+    host.activate(in: window, dark: contentStyleIsDark)
     // Match the current trip state. Idle driving is derived by the host from the
     // live speed, so an idle Dashboard renders the moving 3D view too.
     host.isNavigating = navigationActive
@@ -1095,8 +1142,17 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   /// The vehicle's light/dark preference, so JS can resolve the phone map style
   /// to match the head unit instead of the phone's theme.
+  ///
+  /// A Dashboard-only session can report an empty content style until the
+  /// full-screen scene presents, which reads as "light" and keeps the
+  /// split-view map light. The CarPlay window's trait collection already
+  /// reflects the head unit, so fall back to it rather than assuming light.
   var contentStyleIsDark: Bool {
-    sessionConfiguration?.contentStyle.contains(.dark) ?? false
+    if let contentStyle = sessionConfiguration?.contentStyle, !contentStyle.isEmpty {
+      return contentStyle.contains(.dark)
+    }
+    let window = dashboardWindow ?? templateWindow
+    return window?.traitCollection.userInterfaceStyle == .dark
   }
 
   private func configureNavigationBar(_ template: CPMapTemplate) {
@@ -1817,6 +1873,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func updateCamera(lat: Double, lng: Double, heading: Double, speedMps: Double) {
     cameraState = (lat, lng, heading, speedMps)
+    // The head unit's content style can resolve after the session connects, and
+    // a Dashboard-only session may never fire `contentStyleChanged`; the ~1 Hz
+    // position push is a free, reliable place to re-read it (deduped in
+    // `emitContentStyle`).
+    PolarisCarPlay.refreshContentStyle()
     forEachHost { $0.updateCenter(lat: lat, lng: lng, heading: heading, speedMps: speedMps) }
   }
 
@@ -2532,6 +2593,11 @@ extension PolarisCarPlay {
   }
 
   fileprivate static func emitContentStyle(dark: Bool) {
+    // The content style is re-read after a scene connects and on every position
+    // push; only tell JS when it actually changed, so those reads don't reload
+    // the CarPlay map style for nothing.
+    if lastEmittedContentStyleDark == dark { return }
+    lastEmittedContentStyleDark = dark
     emit("carPlayContentStyleChanged", ["dark": dark])
   }
 
