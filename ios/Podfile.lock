@@ -2604,7 +2604,7 @@ DEPENDENCIES:
   - "EXConstants (from `../node_modules/.pnpm/expo-constants@57.0.7_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-native-_3e6863b451b05da693bca8a46d5d2a4d/node_modules/expo-constants/ios`)"
   - "EXJSONUtils (from `../node_modules/.pnpm/expo-json-utils@57.0.1/node_modules/expo-json-utils/ios`)"
   - "EXManifests (from `../node_modules/.pnpm/expo-manifests@57.0.1_expo@57.0.8/node_modules/expo-manifests/ios`)"
-  - "Expo (from `../node_modules/.pnpm/expo@57.0.8_1bb24ffc04e615dae344f9f22facaff4/node_modules/expo`)"
+  - "Expo (from `../node_modules/.pnpm/expo@57.0.8_0c5e8c758c15a097cdb257df98a1eac6/node_modules/expo`)"
   - "expo-dev-client (from `../node_modules/.pnpm/expo-dev-client@57.0.10_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-nativ_95f97a54fb288bcd0acbf66bb54d6b63/node_modules/expo-dev-client/ios`)"
   - "expo-dev-launcher (from `../node_modules/.pnpm/expo-dev-launcher@57.0.10_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-nat_c32e1b4c90f48ce25c8ea61e27a79bbd/node_modules/expo-dev-launcher`)"
   - "expo-dev-menu (from `../node_modules/.pnpm/expo-dev-menu@57.0.10_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-native-_6665b6658e303f53aa3c695ba8fe18ce/node_modules/expo-dev-menu`)"
@@ -2690,7 +2690,7 @@ DEPENDENCIES:
   - "react-native-netinfo (from `../node_modules/.pnpm/@react-native-community+netinfo@12.0.1_react-native@0.86.0_@babel+core@7.29.0_@react-na_2764dbd857a85c95e88816524d39319d/node_modules/@react-native-community/netinfo`)"
   - "react-native-safe-area-context (from `../node_modules/.pnpm/react-native-safe-area-context@5.7.0_react-native@0.86.0_@babel+core@7.29.0_@react-nati_fea83ed49d42319aeaeeac943122b86b/node_modules/react-native-safe-area-context`)"
   - "react-native-slider (from `../node_modules/.pnpm/@react-native-community+slider@5.2.0/node_modules/@react-native-community/slider`)"
-  - "react-native-webview (from `../node_modules/.pnpm/react-native-webview@13.16.1_react-native@0.86.0_@babel+core@7.29.0_@react-native-commu_43b61b5a59133380a9c07cb1e9b43cff/node_modules/react-native-webview`)"
+  - "react-native-webview (from `../node_modules/.pnpm/react-native-webview@13.16.1_patch_hash=b4d7636a289c928600af472c491ee870e807fc384d9f15c_79d1a23651ebd1e63ab407fadef556d9/node_modules/react-native-webview`)"
   - "React-NativeModulesApple (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)"
   - "React-networking (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactCommon/react/networking`)"
   - "React-oscompat (from `../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactCommon/oscompat`)"
@@ -2747,7 +2747,7 @@ EXTERNAL SOURCES:
   EXManifests:
     :path: "../node_modules/.pnpm/expo-manifests@57.0.1_expo@57.0.8/node_modules/expo-manifests/ios"
   Expo:
-    :path: "../node_modules/.pnpm/expo@57.0.8_1bb24ffc04e615dae344f9f22facaff4/node_modules/expo"
+    :path: "../node_modules/.pnpm/expo@57.0.8_0c5e8c758c15a097cdb257df98a1eac6/node_modules/expo"
   expo-dev-client:
     :path: "../node_modules/.pnpm/expo-dev-client@57.0.10_expo@57.0.8_react-native@0.86.0_@babel+core@7.29.0_@react-nativ_95f97a54fb288bcd0acbf66bb54d6b63/node_modules/expo-dev-client/ios"
   expo-dev-launcher:
@@ -2918,7 +2918,7 @@ EXTERNAL SOURCES:
   react-native-slider:
     :path: "../node_modules/.pnpm/@react-native-community+slider@5.2.0/node_modules/@react-native-community/slider"
   react-native-webview:
-    :path: "../node_modules/.pnpm/react-native-webview@13.16.1_react-native@0.86.0_@babel+core@7.29.0_@react-native-commu_43b61b5a59133380a9c07cb1e9b43cff/node_modules/react-native-webview"
+    :path: "../node_modules/.pnpm/react-native-webview@13.16.1_patch_hash=b4d7636a289c928600af472c491ee870e807fc384d9f15c_79d1a23651ebd1e63ab407fadef556d9/node_modules/react-native-webview"
   React-NativeModulesApple:
     :path: "../node_modules/.pnpm/react-native@0.86.0_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._b5817ef602a171b85dcd88244e62c747/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-networking:
@@ -3141,6 +3141,6 @@ SPEC CHECKSUMS:
   UMAppLoader: 173cb90a3039aa9c1b84bace4487e1907a4a5a39
   Yoga: fe50ab299e578f397fef753cf309c6703a4db29b
 
-PODFILE CHECKSUM: 6ca29bb605a20880fc1a4447445751d2eac3b1c5
+PODFILE CHECKSUM: 7f44537a45ee41654b278a192d3f53f907169700
 
 COCOAPODS: 1.16.2
