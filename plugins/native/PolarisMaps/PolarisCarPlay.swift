@@ -697,6 +697,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private static let guidanceBackgroundColor = UIColor(
     red: 26 / 255, green: 47 / 255, blue: 62 / 255, alpha: 1)
   private var searchItems: [CarPlaySearchItem] = []
+  /// The last batch that had rows. An empty intermediate batch (or a Submit
+  /// before the answer for the current text lands) must never blank the list,
+  /// so the rows already on screen are kept here until a final empty answer
+  /// clears them.
+  private var lastNonEmptySearchItems: [CarPlaySearchItem] = []
   /// Pre-search suggestions (Pinned + Recents) shown in the floating map panel.
   private var homeSuggestions: [CarPlaySearchItem] = []
   private var activeSearchText = ""
@@ -708,6 +713,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   /// Bounds a JS search round-trip so the list settles instead of spinning
   /// forever when the bridge never answers.
   private var searchDeadlineTimer: Timer?
+  /// One-shot re-ask when a query produced no answer at all (e.g. the phone's
+  /// display is asleep and iOS froze the JS debounce timer).
+  private var searchReaskTimer: Timer?
   private var appliedStyleHash = 0
   /// The floating Pinned/Recents overlay (iOS 27 `CPMapPanel`). Stored as
   /// `Any?` so the property itself doesn't require the iOS 27 availability.
@@ -841,8 +849,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activeSearchText = ""
     pendingSearchCompletion = nil
     searchResultsTemplate = nil
+    lastNonEmptySearchItems = []
     searchDeadlineTimer?.invalidate()
     searchDeadlineTimer = nil
+    searchReaskTimer?.invalidate()
+    searchReaskTimer = nil
     homePanel = nil
     homePanelVisible = false
   }
@@ -879,8 +890,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     activeSearchText = ""
     pendingSearchCompletion = nil
     searchResultsTemplate = nil
+    lastNonEmptySearchItems = []
     searchDeadlineTimer?.invalidate()
     searchDeadlineTimer = nil
+    searchReaskTimer?.invalidate()
+    searchReaskTimer = nil
   }
 
   /// CarPlay scene activation / cold-launch recovery: re-assert the map window
@@ -1200,8 +1214,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   private func presentSearch() {
     guard let search = searchTemplate else { return }
-    // A fresh search starts from the search field, not a stale results list.
+    // A fresh search starts from the search field: neither a stale pushed
+    // results list nor the previous session's rows may seed it.
     searchResultsTemplate = nil
+    searchItems = []
+    lastNonEmptySearchItems = []
     interfaceController?.pushTemplate(search, animated: true, completion: nil)
   }
 
@@ -1933,7 +1950,18 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       )
       return
     }
-    searchItems = items
+    if !items.isEmpty {
+      searchItems = items
+      lastNonEmptySearchItems = items
+    } else if !isFinal {
+      // An empty intermediate batch says nothing new: keep the rows already on
+      // screen instead of blanking the list mid-query.
+      searchItems = lastNonEmptySearchItems
+    } else {
+      // A final empty answer for this text really is "no results".
+      searchItems = []
+      lastNonEmptySearchItems = []
+    }
     // The driver submitted the search (keyboard dismissed, results pushed):
     // keep the pushed list in step as later batches land. Before the pending
     // completion below, which may already be nil after the final batch.
@@ -1953,6 +1981,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       // force it empty after the driver already has rows.
       searchDeadlineTimer?.invalidate()
       searchDeadlineTimer = nil
+      searchReaskTimer?.invalidate()
+      searchReaskTimer = nil
     }
     if isFinal {
       pendingSearchCompletion = nil
@@ -2193,6 +2223,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private func finishPendingSearch() {
     searchDeadlineTimer?.invalidate()
     searchDeadlineTimer = nil
+    searchReaskTimer?.invalidate()
+    searchReaskTimer = nil
     guard let completion = pendingSearchCompletion else { return }
     pendingSearchCompletion = nil
     completion(makeSearchListItems(from: searchItems))
@@ -2221,6 +2253,19 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       return
     }
     PolarisCarPlay.emitSearchQuery(searchText)
+    // Ask once more when nothing at all answers this text. The local pass is
+    // instant, but the pipeline's debounced network merge cannot run while iOS
+    // has the JS timers frozen (phone display asleep), so the driver would be
+    // left with an empty list. A second ask makes the woken JS run the full
+    // search immediately (see `onSearchQuery`'s repeated-query branch).
+    searchReaskTimer?.invalidate()
+    searchReaskTimer = Timer.scheduledTimer(withTimeInterval: 0.9, repeats: false) {
+      [weak self] _ in
+      guard let self, self.pendingSearchCompletion != nil else { return }
+      self.searchReaskTimer = nil
+      NSLog("[PolarisCarPlay] search '\(self.activeSearchText)' unanswered; asking again")
+      PolarisCarPlay.emitSearchQuery(self.activeSearchText)
+    }
     // Fallback: if the JS bridge never answers (bridge not attached, pipeline
     // error), surface the current (usually empty) list so the driver isn't
     // left on a spinner. The pending completion stays armed, so a late network
@@ -2254,7 +2299,15 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   func searchTemplateSearchButtonPressed(_ searchTemplate: CPSearchTemplate) {
     searchDeadlineTimer?.invalidate()
     searchDeadlineTimer = nil
+    searchReaskTimer?.invalidate()
+    searchReaskTimer = nil
     pendingSearchCompletion = nil
+    // The answer for the submitted text may still be in flight (typing faster
+    // than the pipeline answers). Push the rows already on screen instead of an
+    // empty "No Results" list; later batches still update it in place.
+    if searchItems.isEmpty && !lastNonEmptySearchItems.isEmpty {
+      searchItems = lastNonEmptySearchItems
+    }
     showSearchResultsList()
   }
 

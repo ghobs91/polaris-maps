@@ -176,6 +176,23 @@ describe('CarPlay iOS configuration', () => {
     expect(nativeModule).not.toContain('listItems(for searchText');
   });
 
+  it('never blanks the search list for an unanswered or partially answered query', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      // An empty intermediate batch keeps the rows already on screen instead of
+      // clearing the list mid-query (only a non-empty or final batch replaces it).
+      expect(nativeModule).toContain('private var lastNonEmptySearchItems');
+      expect(nativeModule).toContain('searchItems = lastNonEmptySearchItems');
+      // Submit pushes what is on screen, not an empty "No Results" list, when
+      // the batch for the submitted text has not landed yet.
+      expect(nativeModule).toContain('if searchItems.isEmpty && !lastNonEmptySearchItems.isEmpty');
+      // A query that produced no answer at all is asked again: the debounced
+      // network merge cannot run while iOS has the JS timers frozen.
+      expect(nativeModule).toContain('private var searchReaskTimer');
+      expect(nativeModule).toContain('emitSearchQuery(self.activeSearchText)');
+    }
+  });
+
   it('buffers a search query typed before the RN module attaches', () => {
     // A cold launch from the CarPlay home screen can run the native template
     // with no React Native module, when `emit` is a no-op. A query typed then

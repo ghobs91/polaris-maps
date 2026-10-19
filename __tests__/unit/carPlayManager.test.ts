@@ -1022,14 +1022,18 @@ describe('CarPlayManager', () => {
       },
     ]);
 
+    useNavigationStore
+      .getState()
+      .startNavigation(makeRoute(), [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
     initCarPlay();
     fireEvent('carPlayConnected');
 
     // Locked / screen-off phone with CarPlay attached: `AppState` still reports
-    // `active` (the CarPlay scene keeps the process alive) but the
-    // display-driven loop is stopped, so iOS stalls the event loop and a
-    // debounced network phase would never fire. The heartbeat — not AppState —
-    // must decide to run the full search immediately.
+    // `active` (the CarPlay scene keeps the process alive) but the navigation
+    // screen's display-driven loop is stopped, so iOS stalls the event loop and
+    // a debounced network phase would never fire. With a trip active the
+    // heartbeat — not AppState — must decide to run the full search
+    // immediately.
     mockAppState = 'active';
     jest.useFakeTimers();
     try {
@@ -1049,6 +1053,61 @@ describe('CarPlayManager', () => {
         'coffee',
         true,
       );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps the local-first, debounced search on an awake idle phone', async () => {
+    (unifiedSearch as jest.Mock).mockResolvedValue([]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    // No active trip: the navigation screen's display-driven loop never ticks,
+    // yet the phone is awake and its timers run. Gating on that heartbeat alone
+    // made every keystroke launch a full multi-source network search (aborted
+    // again by the next character) — the phone's search does a local pass and
+    // one debounced merge instead.
+    mockAppState = 'active';
+    fireEvent('searchQuery', { query: 'fast' });
+
+    expect(unifiedSearch).toHaveBeenCalledWith(
+      'fast',
+      expect.objectContaining({ localOnly: true }),
+    );
+    const fullCallsBeforeDebounce = (unifiedSearch as jest.Mock).mock.calls.filter(
+      ([, opts]) => (opts as { localOnly?: boolean }).localOnly !== true,
+    );
+    expect(fullCallsBeforeDebounce).toHaveLength(0);
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    const fullCalls = (unifiedSearch as jest.Mock).mock.calls.filter(
+      ([, opts]) => (opts as { localOnly?: boolean }).localOnly !== true,
+    );
+    expect(fullCalls[0]?.[0]).toBe('fast');
+  });
+
+  it('runs the full search immediately when the template re-asks for a query', async () => {
+    (unifiedSearch as jest.Mock).mockResolvedValue([]);
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+
+    // The native template re-emits the same text when nothing answered it (iOS
+    // froze the debounce timer with the phone display asleep). The repeat must
+    // run the full pipeline on this tick instead of re-arming the debounce.
+    jest.useFakeTimers();
+    try {
+      fireEvent('searchQuery', { query: 'trucks' });
+      fireEvent('searchQuery', { query: 'trucks' });
+
+      const fullCall = (unifiedSearch as jest.Mock).mock.calls.find(
+        ([query, opts]) =>
+          query === 'trucks' && (opts as { localOnly?: boolean }).localOnly !== true,
+      );
+      expect(fullCall?.[0]).toBe('trucks');
     } finally {
       jest.useRealTimers();
     }
@@ -1352,6 +1411,38 @@ describe('CarPlayManager', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(NativeModules.PolarisCarPlay.pushSearchResults).toHaveBeenCalledWith([], 'pizza', true);
+  });
+
+  it('keeps rows already on screen when a later search stage fails', async () => {
+    (unifiedSearch as jest.Mock)
+      .mockResolvedValueOnce([
+        {
+          name: 'Coffee Shop',
+          subtitle: '1 Main St',
+          lat: 40.75,
+          lng: -73.98,
+          score: 80,
+          distanceKm: 0.5,
+          type: 'poi',
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Network error'));
+
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    fireEvent('searchQuery', { query: 'coffee' });
+
+    // The instant local pass lands with a row…
+    await new Promise((r) => setTimeout(r, 20));
+    // …then the network merge fails. The row must stay: blanking the list here
+    // is what made a failed stage look like "no results".
+    await new Promise((r) => setTimeout(r, 350));
+
+    expect(NativeModules.PolarisCarPlay.pushSearchResults).not.toHaveBeenCalledWith(
+      [],
+      'coffee',
+      true,
+    );
   });
 
   it('reports a CarPlay incident from the report grid at the pushed fix', async () => {

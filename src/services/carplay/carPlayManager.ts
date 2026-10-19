@@ -9,7 +9,7 @@
  * - Connecting/disconnecting lifecycle
  */
 
-import { Appearance, Platform } from 'react-native';
+import { AppState, Appearance, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as CarPlay from '../../native/carplay';
 import type { CarPlayStartNavigationData } from '../../native/carplay';
@@ -70,6 +70,9 @@ let fasterRouteAlertShown = false;
 let lastDistanceBucket: number | null = null;
 let lastTrafficSignature = '';
 let searchSession: SearchSession | null = null;
+/** Query of the last batch pushed to CarPlay, and whether it had rows. */
+let lastPushedSearchQuery = '';
+let lastPushedSearchHadRows = false;
 let mapCenterUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingMapCenter: {
   lat: number;
@@ -151,7 +154,14 @@ export function teardownCarPlay(): void {
   lastMapStyleKey = null;
   carPlayDark = null;
   clearMapCenterUpdate();
-  searchSession?.cancel();
+  // Drop the session itself: its generation + last query belong to the
+  // connection that just ended, and a stale last query would make the next
+  // session's first keystroke look like a template re-ask. `dispose()` cancels
+  // any in-flight work.
+  searchSession?.dispose();
+  searchSession = null;
+  lastPushedSearchQuery = '';
+  lastPushedSearchHadRows = false;
   initialized = false;
   connected = false;
   useCarPlayStore.getState().setConnected(false);
@@ -1084,6 +1094,8 @@ function getSearchSession(): SearchSession {
       },
       onResults: (results, meta) => {
         if (!connected) return;
+        lastPushedSearchQuery = meta.query;
+        lastPushedSearchHadRows = results.length > 0;
         CarPlay.pushSearchResults(
           results.slice(0, 12).map(toCarPlaySearchResult),
           meta.query,
@@ -1091,9 +1103,13 @@ function getSearchSession(): SearchSession {
         );
       },
       onError: () => {
-        if (connected) {
-          CarPlay.pushSearchResults([], searchSession?.getLastQuery() ?? '', true);
-        }
+        if (!connected) return;
+        const query = (searchSession?.getLastQuery() ?? '').trim();
+        if (!query) return;
+        // Never blank rows the driver is already looking at: a failure after a
+        // batch that produced rows must not turn the list into "No Results".
+        if (lastPushedSearchQuery === query && lastPushedSearchHadRows) return;
+        CarPlay.pushSearchResults([], query, true);
       },
     });
   }
@@ -1128,20 +1144,37 @@ function onSearchQuery({ query }: { query: string }) {
   }
   ensureSearchUserLocation();
   const session = getSearchSession();
-  // While the phone display sleeps (~the display-driven interpolation loop
-  // stops ticking) iOS stalls the event loop, so the debounced network merge
-  // below would never fire — CarPlay would show only the instant local pass
-  // (usually empty) and look like "no results". Run the full search
-  // immediately then, mirroring the `syncMapCenter` bypass. `AppState` cannot
-  // decide this: with CarPlay attached it stays `active` while the phone
-  // screen is locked, which kept taking the debounced branch.
-  if (isForegroundInterpolationActive()) {
+  const trimmed = query.trim();
+  // The native template asks again for the same text when nothing answered it
+  // (e.g. the debounce timer was frozen because the phone display sleeps), so a
+  // repeat of the current query is a request for the full search right now.
+  const repeated = session.getLastQuery().trim() === trimmed;
+  if (repeated || searchTimersUnreliable()) {
+    // The debounced network merge may never fire: run the full pipeline on this
+    // tick instead, mirroring the `syncMapCenter` bypass.
+    void session.submit(query);
+  } else {
     // Staged, local-first search: the local pass resolves in milliseconds and
     // the debounced network merge follows, exactly like the phone's search.
+    // Running the whole multi-source network pipeline per keystroke (the old
+    // heartbeat-only branch) aborted it again on the next character and could
+    // leave longer queries with no answer at all.
     session.search(query);
-  } else {
-    void session.submit(query);
   }
+}
+
+/**
+ * Whether `setTimeout` may not fire for the debounced search merge: iOS freezes
+ * JS timers while the phone display sleeps. `AppState` cannot decide that on
+ * its own — with CarPlay attached it stays `active` while the phone is locked —
+ * so the navigation screen's display-driven heartbeat breaks the tie. Gate it
+ * on an active trip: that loop is the only JS tick tied to the display, and
+ * with no trip it never runs, even on an awake, foreground phone (which is what
+ * made idle CarPlay search run a full network search on every keystroke).
+ */
+function searchTimersUnreliable(): boolean {
+  if (AppState.currentState !== 'active') return true;
+  return useNavigationStore.getState().isNavigating && !isForegroundInterpolationActive();
 }
 
 /** Lazily caches a GPS fix so search ranking can promote nearby places. */
