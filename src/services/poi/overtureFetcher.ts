@@ -17,9 +17,22 @@ import { canonicalYelpListingUrl } from './externalRatings/yelpProvider';
 
 /** Preferred place-tile zoom; clamped to the archive header's `maxZoom` at runtime. */
 const TILE_ZOOM = 15;
-const MAX_TILE_FEATURE_CACHE_ENTRIES = 256;
+/**
+ * A decoded z14 Overture places tile is ~38 MB and can hold 40k+ features, so
+ * only a small number of tiles are fetched per call. Tiles are chosen
+ * nearest-first from the request centre and fetching stops as soon as enough
+ * in-bounds features have been collected.
+ */
+const MAX_TILES_PER_FETCH = 9;
+/** Concurrent tile fetches — each decoded tile is tens of MB, so keep this low. */
+const TILE_FETCH_CONCURRENCY = 2;
+/** Maximum features materialised from one tile (dense urban tiles hold 40k+). */
+const MAX_FEATURES_PER_TILE = 4_000;
+const MAX_TILE_FEATURE_CACHE_ENTRIES = 16;
 /** Upper bound for a single PMTiles tile request (ms). */
 const TILE_FETCH_TIMEOUT_MS = 8_000;
+/** Overall budget for one fetch (search sources must settle within 8 s). */
+const OVERTURE_FETCH_TIMEOUT_MS = 8_000;
 /** Upper bound for the STAC catalog lookup that resolves the current release. */
 const STAC_FETCH_TIMEOUT_MS = 4_000;
 let pmtilesArchive: PMTiles | null = null;
@@ -132,6 +145,38 @@ function getTileCoordsForBounds(
   return coords;
 }
 
+/** Geographic centre of a tile (degrees). */
+function tileCenter(z: number, x: number, y: number): { lat: number; lng: number } {
+  const n = Math.pow(2, z);
+  const lng = ((x + 0.5) / n) * 360 - 180;
+  const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 0.5)) / n)));
+  return { lat: (latRad * 180) / Math.PI, lng };
+}
+
+/**
+ * Keep the tiles closest to the request centre. A wide viewport can intersect
+ * thousands of z14 tiles; fetching all of them would download gigabytes and
+ * block the JS thread decompressing them.
+ */
+function selectNearestTiles(
+  tiles: Array<{ z: number; x: number; y: number }>,
+  centerLat: number,
+  centerLng: number,
+  max: number,
+): Array<{ z: number; x: number; y: number }> {
+  if (tiles.length <= max) return tiles;
+  return tiles
+    .map((tile) => {
+      const center = tileCenter(tile.z, tile.x, tile.y);
+      const dLat = center.lat - centerLat;
+      const dLng = center.lng - centerLng;
+      return { tile, distance: dLat * dLat + dLng * dLng };
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, max)
+    .map((entry) => entry.tile);
+}
+
 function isFeatureWithinBounds(
   feature: OverturePlace,
   south: number,
@@ -225,11 +270,16 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
     const layer = vectorTile.layers.place;
     if (!layer) return [];
 
+    // Dense urban tiles hold tens of thousands of features. Sample evenly
+    // across the tile instead of materialising every feature, keeping decode
+    // cost and retained cache memory bounded.
+    const step = Math.max(1, Math.ceil(layer.length / MAX_FEATURES_PER_TILE));
     const features: OverturePlace[] = [];
-    for (let index = 0; index < layer.length; index++) {
+    for (let index = 0; index < layer.length; index += step) {
       const geojsonFeature = layer.feature(index).toGeoJSON(x, y, z) as GeoJSON.Feature;
       const overtureFeature = toOvertureFeature(geojsonFeature);
       if (overtureFeature) features.push(overtureFeature);
+      if (features.length >= MAX_FEATURES_PER_TILE) break;
     }
     return features;
   })();
@@ -299,30 +349,48 @@ export async function fetchOverturePlaces(
   const zoom = await resolveTileZoom(archive);
   throwIfAborted(opts?.signal);
 
-  const tiles = getTileCoordsForBounds(south, west, north, east, zoom);
-  if (tiles.length === 0) return [];
-
-  const responses = await Promise.all(
-    tiles.map(({ z, x, y }) => fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[])),
+  const allTiles = getTileCoordsForBounds(south, west, north, east, zoom);
+  if (allTiles.length === 0) return [];
+  const tiles = selectNearestTiles(
+    allTiles,
+    (south + north) / 2,
+    (west + east) / 2,
+    MAX_TILES_PER_FETCH,
   );
-  // A superseded search skips the expensive SQLite upsert + FTS rebuild.
-  throwIfAborted(opts?.signal);
 
   const featureMap = new Map<string, OverturePlace>();
-  for (const features of responses) {
-    if (!features.length) continue;
-    for (const feature of features) {
-      if (!isFeatureWithinBounds(feature, south, west, north, east)) continue;
-      featureMap.set(feature.id, feature);
-    }
+  const { signal: deadline, cleanup } = withTimeout(opts?.signal, OVERTURE_FETCH_TIMEOUT_MS);
+  try {
+    let cursor = 0;
+    const worker = async () => {
+      while (!deadline.aborted && cursor < tiles.length && featureMap.size < limit) {
+        const { z, x, y } = tiles[cursor++];
+        const features = await fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[]);
+        for (const feature of features) {
+          if (featureMap.size >= limit) break;
+          if (!isFeatureWithinBounds(feature, south, west, north, east)) continue;
+          featureMap.set(feature.id, feature);
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(TILE_FETCH_CONCURRENCY, tiles.length) }, () => worker()),
+    );
+  } finally {
+    cleanup();
   }
+
+  // A superseded search skips the expensive SQLite upsert + FTS maintenance.
+  throwIfAborted(opts?.signal);
 
   if (featureMap.size === 0) return [];
 
-  const places = [...featureMap.values()]
-    .map(overtureFeatureToPlace)
-    .filter((p): p is Place => p !== null)
-    .slice(0, limit);
+  const places: Place[] = [];
+  for (const feature of featureMap.values()) {
+    if (places.length >= limit) break;
+    const place = overtureFeatureToPlace(feature);
+    if (place) places.push(place);
+  }
 
   if (places.length > 0) {
     await upsertOverturePlaces(places);
@@ -1281,25 +1349,38 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
         params,
       );
 
+      // Updated rows must remove their old index entries first; the FTS5
+      // 'delete' command needs the previous column values.
       for (const row of written) {
         const previous = existingByUuid.get(row.uuid);
-        if (previous) {
-          await txn.runAsync(
-            `INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
-             VALUES ('delete', ?, ?, ?, ?, ?)`,
-            [
-              previous.rowid,
-              previous.name,
-              previous.brand_name,
-              previous.category,
-              previous.address_city,
-            ],
-          );
-        }
+        if (!previous) continue;
+        await txn.runAsync(
+          `INSERT INTO places_fts(places_fts, rowid, name, brand_name, category, address_city)
+           VALUES ('delete', ?, ?, ?, ?, ?)`,
+          [
+            previous.rowid,
+            previous.name,
+            previous.brand_name,
+            previous.category,
+            previous.address_city,
+          ],
+        );
+      }
+
+      // Insert the new index rows in one statement per chunk instead of one
+      // native round-trip per place.
+      if (written.length > 0) {
+        const values = written.map(() => '(?, ?, ?, ?, ?)').join(', ');
         await txn.runAsync(
           `INSERT INTO places_fts(rowid, name, brand_name, category, address_city)
-           VALUES (?, ?, ?, ?, ?)`,
-          [row.rowid, row.name, row.brand_name, row.category, row.address_city],
+           VALUES ${values}`,
+          written.flatMap((row) => [
+            row.rowid,
+            row.name,
+            row.brand_name,
+            row.category,
+            row.address_city,
+          ]),
         );
       }
     }
