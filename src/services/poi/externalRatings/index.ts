@@ -53,6 +53,11 @@ export async function resolveKnownListing(
 
   const website = normalizeWebsiteUrl(query.website ?? null);
   if (website) {
+    // A place whose own website is the provider host already *is* the listing.
+    // Fetching it would send a headerless bot request to the provider.
+    if (provider.isProviderUrl(website)) {
+      return provider.parseListingUrl(website);
+    }
     // Cached + single-flight: both providers share one homepage fetch.
     const html = await fetchDiscoveryHtml(website, options?.timeoutMs);
     if (html) {
@@ -100,6 +105,10 @@ export async function fetchAndParseRating(
   query: ExternalRatingQuery,
   options?: { timeoutMs?: number; confirmIdentity?: boolean },
 ): Promise<ExternalRatingSummary | null> {
+  // Browser-only providers must never be fetched: the request is guaranteed to
+  // be rejected and only adds a bot signature to the device's IP reputation.
+  if (!provider.supportsPlainFetch) return null;
+
   const cached = getCachedExternalRating(provider.id, listingUrl);
   if (cached) return cached;
 

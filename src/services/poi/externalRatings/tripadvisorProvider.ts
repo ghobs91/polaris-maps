@@ -1,14 +1,17 @@
 /**
  * TripAdvisor provider for on-device aggregate ratings.
  *
- * TripAdvisor listing pages reliably expose JSON-LD `aggregateRating`, so the
- * plain-fetch path is primary and the hidden WebView is the fallback. Only the
- * `tripadvisor.com` / `www.tripadvisor.com` hosts are ever loaded, direct listing
- * references only — no search-engine scraping, no CAPTCHA solving, no stealth.
+ * Resolution is browser-only: TripAdvisor treats headerless app requests as
+ * bot traffic, so a plain fetch is a guaranteed challenge and only adds a bot
+ * signature to the device. The hidden WebView is the single transport. Only the
+ * `tripadvisor.com` / `www.tripadvisor.com` hosts are ever loaded, direct
+ * listing references only — no search-engine scraping, no CAPTCHA solving, no
+ * stealth.
  */
 
 import {
   buildCollectorScript,
+  COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
   discoverListingFromAnchors,
@@ -214,7 +217,7 @@ export const TRIPADVISOR_RATING_JS = buildCollectorScript({
   providerId: 'tripadvisor',
   payloadType: 'external-rating',
   hasDataJs: 'out.ldRating != null && out.ldCount != null',
-  initialDelayMs: 0,
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.ldRating = null;
@@ -270,7 +273,7 @@ export const TRIPADVISOR_SEARCH_JS = buildCollectorScript({
   providerId: 'tripadvisor',
   payloadType: 'rating-search',
   hasDataJs: 'out.candidates.length > 0',
-  initialDelayMs: 0,
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.candidates = [];
@@ -357,6 +360,9 @@ export function buildTripadvisorSearchUrl(name: string, address: string | null):
 export const tripadvisorProvider: ExternalRatingProvider = {
   id: 'tripadvisor',
   allowedHosts: TRIPADVISOR_ALLOWED_HOSTS,
+  // TripAdvisor's edge rejects headerless app fetches; the hidden browser is
+  // the only transport that can return a listing.
+  supportsPlainFetch: false,
   isProviderUrl: isTripadvisorUrl,
   parseListingUrl: canonicalTripadvisorListingUrl,
   discoverFromWebsiteHtml: discoverTripadvisorFromWebsiteHtml,

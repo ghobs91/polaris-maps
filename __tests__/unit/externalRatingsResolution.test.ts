@@ -3,12 +3,16 @@ import {
   fetchAndParseRating,
 } from '../../src/services/poi/externalRatings';
 import {
+  COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
+  isHardBlockPage,
 } from '../../src/services/poi/externalRatings/core';
+import { yelpProvider } from '../../src/services/poi/externalRatings/yelpProvider';
 import {
   TRIPADVISOR_RATING_JS,
   TRIPADVISOR_SEARCH_JS,
+  tripadvisorProvider,
 } from '../../src/services/poi/externalRatings/tripadvisorProvider';
 import {
   YELP_RATING_JS,
@@ -32,6 +36,7 @@ function fakeProvider(overrides: Partial<ExternalRatingProvider> = {}): External
   return {
     id: 'tripadvisor',
     allowedHosts: ['tripadvisor.com'],
+    supportsPlainFetch: true,
     isProviderUrl: () => true,
     parseListingUrl: () => LISTING,
     discoverFromWebsiteHtml: () => null,
@@ -65,7 +70,8 @@ describe('collector pacing budget', () => {
   it('posts its verdict before the stage clock unmounts the WebView', () => {
     // STAGE_TIMEOUT_MS in useExternalRatings is 8_000; the collector's last
     // attempt must land inside that window or the stage never hears its verdict.
-    const lastAttemptAt = (COLLECTOR_MAX_ATTEMPTS - 1) * COLLECTOR_RETRY_INTERVAL_MS;
+    const lastAttemptAt =
+      COLLECTOR_INITIAL_DELAY_MS + (COLLECTOR_MAX_ATTEMPTS - 1) * COLLECTOR_RETRY_INTERVAL_MS;
     expect(lastAttemptAt).toBeLessThan(8_000);
     expect(8_000 - lastAttemptAt).toBeGreaterThanOrEqual(1_000);
   });
@@ -79,7 +85,43 @@ describe('collector pacing budget', () => {
     ]) {
       expect(script).toContain(`var ATTEMPTS = ${COLLECTOR_MAX_ATTEMPTS};`);
       expect(script).toContain(`var INTERVAL = ${COLLECTOR_RETRY_INTERVAL_MS};`);
+      expect(script).toContain(`var FIRST_DELAY = ${COLLECTOR_INITIAL_DELAY_MS};`);
     }
+  });
+});
+
+describe('hard block detection', () => {
+  it('recognizes the terminal Yelp/DataDome block page', () => {
+    expect(
+      isHardBlockPage(
+        '<html><body>You have been blocked. Why? Something about the behaviour of the browser has caught our attention.</body></html>',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not treat a normal listing as blocked', () => {
+    expect(isHardBlockPage('<html><body>4.5 stars · 321 reviews</body></html>')).toBe(false);
+  });
+});
+
+describe('browser-only providers', () => {
+  beforeEach(() => {
+    clearExternalRatingCache();
+    mockFetchHtml();
+  });
+
+  it('never issues a plain fetch to either provider', async () => {
+    const fetchMock = (global as any).fetch as jest.Mock;
+    const yelp = await fetchAndParseRating(yelpProvider, 'https://www.yelp.com/biz/foo-bar', QUERY);
+    const tripadvisor = await fetchAndParseRating(tripadvisorProvider, LISTING, QUERY);
+    expect(yelp).toBeNull();
+    expect(tripadvisor).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('marks both providers browser-only', () => {
+    expect(yelpProvider.supportsPlainFetch).toBe(false);
+    expect(tripadvisorProvider.supportsPlainFetch).toBe(false);
   });
 });
 

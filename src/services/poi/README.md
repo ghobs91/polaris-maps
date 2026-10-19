@@ -81,26 +81,45 @@ count, with a clickable pill per contributing provider that opens its listing.
 
 Bounded browse policy (`externalRatings/antiBot.ts`): one hidden WebView at a
 time, per-host minimum interval + jitter, and a challenge/429 cool-down with
-exponential backoff and silent give-up. Challenge classification is calibrated:
+exponential backoff and silent give-up. Starting a new browsing chain (a fresh
+place) is token-bucketed (burst, then one slot per interval) and capped per
+local day, and the scheduled slot only counts a real page load — search → listing
+is a continuation of the same chain. Cool-downs, hard blocks, token counts, and
+daily counts persist across launches (`antiBot` + `ledgerFile`), so force-quitting
+the app does not reset the budget. Challenge classification is calibrated:
 anti-bot script tags appear inside valid pages too, so markers are fatal only
-when no rating was extracted, and collectors re-read the page on an interval to
-absorb a DataDome interstitial that auto-resolves; when the bounded attempts run
-out the collector posts its final (empty/challenge) state once so the stage
-settles promptly. A search card carrying an inline rating plus a confirmed
-identity (address/geo) is displayed without loading the listing. Explicitly NOT
-done: CAPTCHA solving, proxy/IP rotation, fingerprint spoofing, auth-wall
-bypass, or bulk harvesting. Ratings are transient and never persisted; only the
-aggregate number, exact count, listing identity, and source URL are read — no
-review text.
+when no rating was extracted; collectors wait for the page to settle and then
+re-read it at ~1 s intervals with jitter to absorb a DataDome interstitial that
+auto-resolves; when the bounded attempts run out the collector posts its final
+(empty/challenge/blocked) state once. A terminal block page (`You have been
+blocked`, `captcha-delivery.com`, …) blocks the host for two hours and surfaces
+an honest "temporarily blocking" row instead of "no ratings yet".
+
+**Both providers are browser-only** (`supportsPlainFetch: false`). A plain
+`fetch()` of a Yelp listing is answered by DataDome with a 403 every time, and
+TripAdvisor's bot protection similarly rejects headerless app requests; a fetch
+can never produce a rating and only contributes a bot request to the device's
+reputation. Neither the listing path nor the search-selected path ever fetches
+a provider page. The single provider page load happens in the browser engine,
+with a real window-sized viewport (a 0×0 hidden WebView is a headless
+fingerprint), persistent cookies/storage, and no UA or fingerprint override.
 
 Speed without extra requests: the place website is fetched **once** per URL
 (cached + single-flight in `core.fetchDiscoveryHtml`) and shared by both
-providers' listing discovery; collectors start immediately and poll fast
-in-page (no network cost); a resolved-to-nothing provider is remembered for the
-session (`placeRatingSessionCache`) so re-opening a card skips the pipeline; and
-the hidden WebView stays mounted across stages/providers while the card is open,
-keeping the warmed cookie store. The WebView rejects any navigation that leaves
-the provider allowlist or uses a non-web scheme (`isAllowedExternalRatingUrl`).
+providers' listing discovery; a confirmed place → listing URL is remembered for
+7 days (`listingCache`) so re-opening a place skips the search page; a
+resolved-to-nothing provider is remembered for the session
+(`placeRatingSessionCache`); and the hidden WebView stays mounted across
+stages/providers while the card is open, keeping the warmed cookie store. The
+WebView rejects any navigation that leaves the provider allowlist or uses a
+non-web scheme (`isAllowedExternalRatingUrl`).
+
+A search card carrying an inline rating plus a confirmed identity (address/geo)
+is displayed without loading the listing. Explicitly NOT done: CAPTCHA solving,
+proxy/IP rotation, fingerprint spoofing, auth-wall bypass, or bulk harvesting.
+Ratings themselves stay transient (in-memory TTL); only the aggregate number,
+exact count, listing identity, source URL, and the browse ledger/listing map are
+stored — no review text.
 
 ## Key Constants
 

@@ -2,6 +2,7 @@ import {
   buildCollectorScript,
   clearExternalRatingCache,
   fetchDiscoveryHtml,
+  parsePageVerdict,
 } from '../../src/services/poi/externalRatings/core';
 import { isAllowedExternalRatingUrl } from '../../src/services/poi/externalRatings';
 
@@ -29,6 +30,7 @@ describe('buildCollectorScript', () => {
         payloadType: 'external-rating',
         hasDataJs: 'false',
         collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
         retryIntervalMs: 10,
         maxAttempts: 3,
       }),
@@ -51,6 +53,7 @@ describe('buildCollectorScript', () => {
         payloadType: 'external-rating',
         hasDataJs: 'true',
         collectBodyJs: '    out.ldRating = 4.2;',
+        initialDelayMs: 0,
         retryIntervalMs: 10,
         maxAttempts: 5,
       }),
@@ -70,6 +73,7 @@ describe('buildCollectorScript', () => {
         payloadType: 'external-rating',
         hasDataJs: 'false',
         collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
         retryIntervalMs: 10,
         maxAttempts: 2,
       }),
@@ -80,6 +84,30 @@ describe('buildCollectorScript', () => {
 
     expect(posted).toHaveLength(1);
     expect(JSON.parse(posted[0]!).challenge).toBe(true);
+  });
+});
+
+describe('parsePageVerdict', () => {
+  it('classifies a blocked search payload', () => {
+    expect(
+      parsePageVerdict(
+        JSON.stringify({
+          type: 'rating-search',
+          provider: 'yelp',
+          candidates: [],
+          blocked: true,
+          challenge: false,
+        }),
+      ),
+    ).toEqual({ blocked: true, challenge: false });
+  });
+
+  it('classifies a challenge payload and ignores malformed data', () => {
+    expect(parsePageVerdict(JSON.stringify({ challenge: true }))).toEqual({
+      blocked: false,
+      challenge: true,
+    });
+    expect(parsePageVerdict('not json')).toEqual({ blocked: false, challenge: false });
   });
 });
 

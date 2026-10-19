@@ -10,6 +10,7 @@
 
 import {
   buildCollectorScript,
+  COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
   discoverListingFromAnchors,
@@ -315,7 +316,7 @@ export const YELP_RATING_JS = buildCollectorScript({
   providerId: 'yelp',
   payloadType: 'external-rating',
   hasDataJs: 'out.ldRating != null && out.ldCount != null',
-  initialDelayMs: 0,
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.ldRating = null;
@@ -400,7 +401,7 @@ export const YELP_SEARCH_JS = buildCollectorScript({
   providerId: 'yelp',
   payloadType: 'rating-search',
   hasDataJs: 'out.candidates.length > 0',
-  initialDelayMs: 0,
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.candidates = [];
@@ -472,6 +473,9 @@ export function extractYelpSearchFromWebViewMessage(data: string): RatingSearchC
 export const yelpProvider: ExternalRatingProvider = {
   id: 'yelp',
   allowedHosts: YELP_ALLOWED_HOSTS,
+  // Yelp's DataDome edge rejects plain app fetches with a 403; the hidden
+  // browser is the only transport that can ever return a listing.
+  supportsPlainFetch: false,
   isProviderUrl: isYelpUrl,
   parseListingUrl: canonicalYelpListingUrl,
   discoverFromWebsiteHtml: discoverYelpFromWebsiteHtml,

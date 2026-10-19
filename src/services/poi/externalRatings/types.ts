@@ -40,6 +40,8 @@ export interface RawExternalRating {
   /** Optional listing coordinates, used for identity confirmation. */
   geo?: GeoPoint | null;
   challenge: boolean;
+  /** The provider served a hard block page (not merely a challenge). */
+  blocked?: boolean;
 }
 
 /** The place being looked up. */

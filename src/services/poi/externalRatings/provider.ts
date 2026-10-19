@@ -13,6 +13,16 @@ export interface ExternalRatingProvider {
   /** Exact host allowlist. Only these hosts are ever loaded. */
   allowedHosts: readonly string[];
 
+  /**
+   * Whether a plain `fetch()` of a listing is worth attempting.
+   *
+   * Both current providers are false: Yelp's DataDome edge and TripAdvisor's
+   * bot protection refuse headerless app requests, so a fetch is a guaranteed
+   * bot signal that can only hurt the device's reputation. Provider pages are
+   * read through the browser engine only.
+   */
+  supportsPlainFetch: boolean;
+
   /** True for an http(s) provider URL on an allowed host. */
   isProviderUrl(raw: string): boolean;
 

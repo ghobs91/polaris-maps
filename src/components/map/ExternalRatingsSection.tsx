@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { WebView } from 'react-native-webview';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -61,6 +68,7 @@ export function ExternalRatingsSection({
   onWriteReview?: () => void;
 }) {
   const { colors } = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
   const query = useMemo<ExternalRatingQuery>(
     () => ({
@@ -113,12 +121,45 @@ export function ExternalRatingsSection({
   const resolving = states.some(
     (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
   );
+  const blockedState = states.find((s) => s.status === 'blocked') ?? null;
+
+  // A real browser viewport, not a 0×0 frame: `innerWidth`/`innerHeight` are
+  // part of every bot-detection fingerprint, and a zero-size viewport is an
+  // unambiguous headless signal. The view is positioned outside the card's
+  // clipped bounds so it stays invisible without distorting layout.
+  const hiddenBrowserStyle = useMemo(
+    () => ({
+      position: 'absolute' as const,
+      left: -windowWidth * 2,
+      top: 0,
+      width: windowWidth,
+      height: windowHeight,
+      opacity: 0,
+    }),
+    [windowWidth, windowHeight],
+  );
 
   const handleMessageEvent = useCallback(
     (provider: ExternalRatingProviderId) => (event: { nativeEvent: { data: string } }) => {
       handleMessage(provider, event.nativeEvent.data);
     },
     [handleMessage],
+  );
+
+  // HTTP failures carry the status that distinguishes a block/rate limit from a
+  // transient network error, so the controller can back the host off properly.
+  const handleHttpErrorEvent = useCallback(
+    (event: { nativeEvent: { statusCode: number } }) => {
+      if (!activeWebView) return;
+      const statusCode = event.nativeEvent.statusCode;
+      // A 403 may still carry the block/challenge body; let the collector read
+      // it instead of tearing the stage down. Subresource 4xx responses are
+      // likewise not a verdict about the page.
+      if (statusCode === 429 || statusCode >= 500) {
+        handleError(activeWebView.provider, statusCode);
+      }
+    },
+    [activeWebView, handleError],
   );
 
   // Reject any navigation that leaves the provider host allowlist or uses a
@@ -142,23 +183,26 @@ export function ExternalRatingsSection({
       </View>
 
       {mountedWebView ? (
-        <View style={styles.hiddenWebView} pointerEvents="none">
+        <View style={hiddenBrowserStyle} pointerEvents="none">
           <WebView
             source={{ uri: mountedWebView.uri }}
-            style={styles.hiddenWebView}
+            style={hiddenBrowserStyle}
             injectedJavaScript={mountedWebView.injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
             injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
             javaScriptEnabled
             domStorageEnabled
+            cacheEnabled
             sharedCookiesEnabled
             thirdPartyCookiesEnabled
             mediaPlaybackRequiresUserAction
+            javaScriptCanOpenWindowsAutomatically={false}
+            allowsLinkPreview={false}
             setSupportMultipleWindows={false}
             onShouldStartLoadWithRequest={handleShouldStartLoad}
             onMessage={activeWebView ? handleMessageEvent(activeWebView.provider) : undefined}
             onError={activeWebView ? () => handleError(activeWebView.provider) : undefined}
-            onHttpError={activeWebView ? () => handleError(activeWebView.provider) : undefined}
+            onHttpError={activeWebView ? handleHttpErrorEvent : undefined}
           />
         </View>
       ) : null}
@@ -167,6 +211,13 @@ export function ExternalRatingsSection({
         <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
       ) : resolving ? (
         <LoadingBlock colors={colors} />
+      ) : blockedState ? (
+        <BlockedBlock
+          colors={colors}
+          label={PROVIDER_LABEL[blockedState.provider]}
+          reason={blockedState.blockReason ?? 'blocked'}
+          testID="external-ratings-blocked"
+        />
       ) : (
         <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
       )}
@@ -267,6 +318,29 @@ function EmptyBlock({
   );
 }
 
+function BlockedBlock({
+  colors,
+  label,
+  reason,
+  testID,
+}: {
+  colors: ReturnType<typeof useTheme>['colors'];
+  label: string;
+  reason: 'blocked' | 'paced';
+  testID: string;
+}) {
+  return (
+    <View style={styles.statusRow} testID={testID}>
+      <MaterialCommunityIcons name="shield-alert-outline" size={16} color={colors.textSecondary} />
+      <Text style={[styles.statusText, { color: colors.textSecondary, flexShrink: 1 }]}>
+        {reason === 'blocked'
+          ? `${label} is temporarily blocking review lookups from this network. Try again later.`
+          : `${label} review lookups are paused to stay under its rate limits. Try again in a few minutes.`}
+      </Text>
+    </View>
+  );
+}
+
 function renderStars(rating: number): string {
   const full = Math.round(rating);
   const clamped = Math.max(0, Math.min(5, full));
@@ -274,11 +348,6 @@ function renderStars(rating: number): string {
 }
 
 const styles = StyleSheet.create({
-  hiddenWebView: {
-    width: 0,
-    height: 0,
-    opacity: 0,
-  },
   section: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
