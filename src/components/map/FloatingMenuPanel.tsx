@@ -164,7 +164,7 @@ export function FloatingMenuPanel({
     : '\u2014';
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View style={[StyleSheet.absoluteFill, styles.root]} pointerEvents="box-none">
       {/* Backdrop */}
       <TouchableWithoutFeedback onPress={close}>
         <Animated.View
@@ -363,6 +363,11 @@ export function FloatingMenuPanel({
 }
 
 const styles = StyleSheet.create({
+  /** Above the search panel and the map content overlay, so the backdrop dims them. */
+  root: {
+    zIndex: 40,
+    elevation: 40,
+  },
   backdrop: {
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.35)',

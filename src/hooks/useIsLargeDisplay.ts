@@ -1,6 +1,5 @@
 import { useWindowDimensions } from 'react-native';
-
-const LARGE_DISPLAY_BREAKPOINT = 768;
+import { LARGE_DISPLAY_BREAKPOINT } from '../constants/layout';
 
 export function useIsLargeDisplay(): boolean {
   const { width } = useWindowDimensions();

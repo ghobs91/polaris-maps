@@ -178,6 +178,8 @@ interface MapViewProps {
   onMapLongPress?: (lat: number, lng: number) => void;
   /** Called when a tap lands on a basemap address-number (housenumber) label. */
   onAddressPress?: (lat: number, lng: number) => void;
+  /** Left inset for chrome that normally hugs the screen edge (large-display panel). */
+  overlayLeftInset?: number;
   /** When true, tilts the camera, hides user dot, shows chevron at navPosition */
   navigationMode?: boolean;
   /** Current position of the navigation chevron [lng, lat] */
@@ -199,6 +201,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onMapPress,
     onMapLongPress,
     onAddressPress,
+    overlayLeftInset = 12,
     navigationMode,
     navPosition,
     navBearing = 0,
@@ -1335,6 +1338,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           pitch={camera.pitch}
           zoom={camera.zoom}
           lat={camera.lat}
+          leftInset={overlayLeftInset}
           bottomInset={insets.bottom + 12}
           onReset={() =>
             cameraRef.current?.setCamera({
@@ -1358,7 +1362,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       {!navigationMode && offline && !offlinePack && !styleLoadFailed && (
         <View
-          style={[styles.limitedCoverage, { top: insets.top + 8 }]}
+          style={[styles.limitedCoverage, { top: insets.top + 8, left: overlayLeftInset }]}
           testID="map-offline-coverage"
           accessibilityRole="text"
           accessibilityLabel="Offline. No downloaded map covers this area."
@@ -1370,7 +1374,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       {styleLoadFailed && (
         <View
-          style={[styles.limitedCoverage, { top: insets.top + 8 }]}
+          style={[styles.limitedCoverage, { top: insets.top + 8, left: overlayLeftInset }]}
           testID="map-limited-coverage"
           accessibilityRole="text"
           accessibilityLabel="Limited map detail. Using the offline-compatible map style."
@@ -1770,7 +1774,6 @@ const styles = StyleSheet.create({
   // Visible limited-coverage indicator when imagery/style fails to load.
   limitedCoverage: {
     position: 'absolute',
-    left: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,

@@ -26,11 +26,14 @@ import { resolvePlaceAtAddress } from '@/services/poi/addressPlaceResolver';
 import { ErrorBoundary } from '@/components/common';
 import { useIsLargeDisplay } from '@/hooks/useIsLargeDisplay';
 import { useTheme } from '@/contexts/ThemeContext';
+import {
+  LARGE_FLOATING_PANEL_MARGIN,
+  LARGE_FLOATING_PANEL_WIDTH,
+  LARGE_MAP_CONTENT_LEFT,
+} from '@/constants/layout';
 import { spacing } from '@/constants/theme';
 import { hapticImpact } from '@/utils/haptics';
 
-const LARGE_FLOATING_PANEL_WIDTH = 380;
-const LARGE_FLOATING_PANEL_GAP = spacing.md;
 // Must match the place sheet's first snap point (POIInfoCard POI_SHEET_SNAPS[0])
 // so the floating street-view thumbnail sits just above the collapsed sheet.
 const POI_SHEET_PEEK_FRACTION = 0.55;
@@ -159,6 +162,7 @@ export default function MapScreen() {
             onMapPress={handleMapPress}
             onMapLongPress={handleMapLongPress}
             onAddressPress={handleAddressPress}
+            overlayLeftInset={LARGE_MAP_CONTENT_LEFT}
           />
 
           <View
@@ -168,7 +172,7 @@ export default function MapScreen() {
               {
                 top: insets.top + spacing.md,
                 bottom: insets.bottom + spacing.md,
-                left: spacing.md,
+                left: LARGE_FLOATING_PANEL_MARGIN,
               },
             ]}
           >
@@ -200,25 +204,27 @@ export default function MapScreen() {
               styles.coverageBadgeMount,
               {
                 top: insets.top + spacing.sm,
-                left: spacing.md + LARGE_FLOATING_PANEL_WIDTH + LARGE_FLOATING_PANEL_GAP,
+                left: LARGE_MAP_CONTENT_LEFT,
               },
             ]}
           >
             <TrafficCoverageBadge />
           </View>
 
-          <StreetViewThumbOverlay
-            bottom={streetViewBottom}
-            left={spacing.md + LARGE_FLOATING_PANEL_WIDTH + LARGE_FLOATING_PANEL_GAP}
-          />
+          <StreetViewThumbOverlay bottom={streetViewBottom} left={LARGE_MAP_CONTENT_LEFT} />
 
-          <POIInfoCard />
-          <TransitStopCard />
-          <ParkingSpotCard />
+          {/* Bottom-anchored drawers and cards live in the content area beside
+              the search panel, so they size to the available width instead of
+              sliding underneath it. */}
+          <View pointerEvents="box-none" style={styles.mapContentOverlay}>
+            <POIInfoCard />
+            <TransitStopCard />
+            <ParkingSpotCard />
+          </View>
           <FloatingMenuPanel
             visible={showMenuPanel}
             onClose={() => setShowMenuPanel(false)}
-            leftInset={spacing.md + LARGE_FLOATING_PANEL_WIDTH + LARGE_FLOATING_PANEL_GAP}
+            leftInset={LARGE_MAP_CONTENT_LEFT}
             topInset={insets.top + spacing.md}
             bottomInset={insets.bottom + spacing.md}
           />
@@ -266,6 +272,15 @@ const styles = StyleSheet.create({
     width: LARGE_FLOATING_PANEL_WIDTH,
     zIndex: 25,
     elevation: 25,
+  },
+  /** Content area right of the search panel; bottom sheets and cards size to it. */
+  mapContentOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: LARGE_MAP_CONTENT_LEFT,
+    right: LARGE_FLOATING_PANEL_MARGIN,
+    zIndex: 10,
   },
   mapOverlayRight: {
     position: 'absolute',

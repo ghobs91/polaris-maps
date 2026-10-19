@@ -25,6 +25,7 @@ import { useStreetViewStore } from '../../stores/streetViewStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useMapOverlayInsets } from '../../hooks/useMapOverlayInsets';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { enrichPoi } from '../../services/poi/poiEnricher';
 import {
@@ -1140,9 +1141,13 @@ export function POIInfoCard() {
   const infoRows = rawInfoRows.filter((row): row is InfoRowData => !!row);
 
   const { width: screenWidth } = useWindowDimensions();
-  // Size each pill so exactly VISIBLE_ACTION_PILLS fit; the rest scroll.
+  const overlayInsets = useMapOverlayInsets();
+  // Size each pill so exactly VISIBLE_ACTION_PILLS fit in the space the sheet
+  // actually occupies; on large displays that excludes the floating panel.
+  const availableWidth = screenWidth - overlayInsets.left - overlayInsets.right;
   const actionPillWidth = Math.floor(
-    (screenWidth - spacing.md * 2 - spacing.sm * (VISIBLE_ACTION_PILLS - 1)) / VISIBLE_ACTION_PILLS,
+    (availableWidth - spacing.md * 2 - spacing.sm * (VISIBLE_ACTION_PILLS - 1)) /
+      VISIBLE_ACTION_PILLS,
   );
 
   const actionItems = useMemo(() => {

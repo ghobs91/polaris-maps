@@ -14,6 +14,8 @@ interface MapChromeProps {
   onReset: () => void;
   /** Bottom offset (safe-area aware), supplied by the host. */
   bottomInset?: number;
+  /** Left offset, so chrome clears any panel hugging the left edge. */
+  leftInset?: number;
 }
 
 /**
@@ -29,12 +31,17 @@ export function MapChrome({
   lat,
   onReset,
   bottomInset = 12,
+  leftInset = 12,
 }: MapChromeProps) {
   const showCompass = compassVisible(bearing, pitch);
   const bar = computeScaleBar(zoom, lat);
 
   return (
-    <View style={[styles.container, { bottom: bottomInset }]} pointerEvents="box-none">
+    <View
+      style={[styles.container, { bottom: bottomInset, left: leftInset }]}
+      pointerEvents="box-none"
+      testID="map-chrome"
+    >
       {showCompass && (
         <Pressable
           style={styles.compass}
@@ -68,7 +75,6 @@ export function MapChrome({
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    left: 12,
     alignItems: 'flex-start',
     gap: 8,
   },
