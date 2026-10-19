@@ -5,6 +5,8 @@
  * resolves with whichever responds first (via `Promise.any`).
  */
 
+import { abortError, sleepWithAbort } from './search/abortUtils';
+
 const OVERPASS_INSTANCES = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
@@ -44,7 +46,9 @@ export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Prom
   const now = Date.now();
   const elapsed = Math.max(0, now - _lastOverpassRequestAt);
   if (elapsed < _minIntervalMs) {
-    await new Promise((r) => setTimeout(r, _minIntervalMs - elapsed));
+    // Abort-aware: a superseded keystroke must not sit out the throttle gap
+    // and then fire a request whose results are already stale.
+    await sleepWithAbort(_minIntervalMs - elapsed, opts.signal);
   }
   _lastOverpassRequestAt = Date.now();
 
@@ -71,5 +75,13 @@ export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Prom
     }
   });
 
-  return Promise.any(attempts);
+  try {
+    return await Promise.any(attempts);
+  } catch (err) {
+    // `Promise.any` reports an aborted caller as an AggregateError, which
+    // `isAbortError` cannot recognise — that made a superseded search look like
+    // a failed one, and CarPlay answered it by blanking the driver's list.
+    if (opts.signal?.aborted) throw abortError();
+    throw err;
+  }
 }
