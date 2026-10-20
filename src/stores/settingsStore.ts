@@ -37,6 +37,8 @@ interface PersistedSettings {
   placeSort: PlaceSortMode;
   /** Default "most recently updated" sort for the saved-lists screen. */
   savedListsSort: SavedListsSortMode;
+  /** Developer tool: replay onboarding on the next cold start. */
+  showOnboardingOnLaunch: boolean;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -49,6 +51,7 @@ interface SettingsState extends PersistedSettings {
   setNavigationAutoEnd: (enabled: boolean) => void;
   setPlaceSort: (mode: PlaceSortMode) => void;
   setSavedListsSort: (mode: SavedListsSortMode) => void;
+  setShowOnboardingOnLaunch: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -73,6 +76,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   navigationAutoEnd: true,
   placeSort: 'recent',
   savedListsSort: 'recent',
+  showOnboardingOnLaunch: false,
 };
 
 function loadSettings(): PersistedSettings {
@@ -109,6 +113,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       navigationAutoEnd: state.navigationAutoEnd,
       placeSort: state.placeSort,
       savedListsSort: state.savedListsSort,
+      showOnboardingOnLaunch: state.showOnboardingOnLaunch,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -149,6 +154,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setSavedListsSort: (savedListsSort) => {
       set({ savedListsSort });
+      persist();
+    },
+    setShowOnboardingOnLaunch: (showOnboardingOnLaunch) => {
+      set({ showOnboardingOnLaunch });
       persist();
     },
   };

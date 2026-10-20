@@ -9,6 +9,7 @@ import { OnboardingFlow } from '@/components/onboarding/OnboardingFlow';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { ToastProvider } from '@/contexts/ToastContext';
 import { hasCompletedConsent } from '@/services/identity/consent';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { initCarPlay } from '@/services/carplay/carPlayManager';
 import { initNavigationVoice } from '@/services/tts/navigationVoice';
 import { initNavigationBackgroundSession } from '@/services/navigation/backgroundSessionCoordinator';
@@ -221,7 +222,9 @@ export default function RootLayout() {
  * consent exists. Re-consent after a version change re-enters this gate.
  */
 function ConsentGate() {
-  const [consentComplete, setConsentComplete] = useState(() => hasCompletedConsent());
+  const [consentComplete, setConsentComplete] = useState(
+    () => hasCompletedConsent() && !(__DEV__ && useSettingsStore.getState().showOnboardingOnLaunch),
+  );
 
   if (!consentComplete) {
     return <OnboardingFlow onComplete={() => setConsentComplete(true)} />;
