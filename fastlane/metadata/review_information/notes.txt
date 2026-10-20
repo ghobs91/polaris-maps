@@ -10,7 +10,8 @@ Notes for review:
   single device, the app falls back to open traffic feeds, saved history, and an
   optional TomTom seed. Traffic and transit features degrade gracefully offline.
 - Camera/photo access is used only for community street-level imagery and review
-  photos, which are opt-in in Settings → Privacy.
+  photos. Street imagery is on by default after onboarding and can be turned off
+  in Settings → Privacy; review photo sharing is opt-in.
 - Bluesky (AT Protocol) sign-in is only used to post place reviews; OpenStreetMap
   sign-in is only used to submit map edits. Neither is required for the rest of
   the app.
