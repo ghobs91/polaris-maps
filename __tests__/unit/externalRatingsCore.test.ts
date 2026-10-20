@@ -2,6 +2,7 @@ import {
   buildCollectorScript,
   clearExternalRatingCache,
   fetchDiscoveryHtml,
+  findAggregateRating,
   parsePageVerdict,
 } from '../../src/services/poi/externalRatings/core';
 import { isAllowedExternalRatingUrl } from '../../src/services/poi/externalRatings';
@@ -66,6 +67,50 @@ describe('buildCollectorScript', () => {
     expect(posted).toHaveLength(1);
   });
 
+  it('flags a hard block from the visible block page', () => {
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 1,
+      }),
+      {
+        body: {
+          innerHTML: '',
+          innerText: 'You have been blocked. Why? Something about the behaviour of the browser.',
+        },
+      },
+    );
+
+    expect(JSON.parse(posted[0]!).blocked).toBe(true);
+  });
+
+  it('does not treat block copy inside inline scripts as a hard block', () => {
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 1,
+      }),
+      {
+        body: {
+          innerHTML: '<script>var msg = "you have been blocked"</script>',
+          innerText: '4.5 stars · 1,241 reviews',
+        },
+      },
+    );
+
+    expect(JSON.parse(posted[0]!).blocked).toBe(false);
+  });
+
   it('flags a terminal challenge when markers are present and no data was found', () => {
     const posted = runCollector(
       buildCollectorScript({
@@ -84,6 +129,28 @@ describe('buildCollectorScript', () => {
 
     expect(posted).toHaveLength(1);
     expect(JSON.parse(posted[0]!).challenge).toBe(true);
+  });
+});
+
+describe('findAggregateRating', () => {
+  it('takes the name from the object that owns aggregateRating', () => {
+    const result = findAggregateRating([
+      { '@type': 'ItemList', name: 'Business Photos' },
+      { '@type': 'ItemList', name: 'Popular Dishes' },
+      {
+        '@type': 'Restaurant',
+        name: 'L’industrie Pizzeria',
+        address: { streetAddress: '104 Christopher St' },
+        aggregateRating: { ratingValue: '4.5', reviewCount: '1242' },
+      },
+    ]);
+
+    expect(result).toMatchObject({
+      rating: 4.5,
+      count: 1242,
+      name: 'L’industrie Pizzeria',
+      address: '104 Christopher St',
+    });
   });
 });
 

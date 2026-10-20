@@ -161,6 +161,14 @@ export interface LdRating {
 
 export function findAggregateRating(blocks: unknown[]): LdRating {
   const out: LdRating = { rating: null, count: null, name: null, address: null, geo: null };
+
+  // A page can carry named JSON-LD objects that are not the business (Yelp
+  // now emits "Business Photos" and "Popular Dishes" ItemLists before the
+  // Restaurant block). Only the object that owns the aggregateRating may
+  // supply the listing identity; keep the first named object as a fallback for
+  // pages where the rating and the name live on separate nodes.
+  let fallback: Pick<LdRating, 'name' | 'address' | 'geo'> | null = null;
+
   for (const block of blocks) {
     if (!block || typeof block !== 'object') continue;
     const item = block as Record<string, unknown>;
@@ -171,27 +179,50 @@ export function findAggregateRating(blocks: unknown[]): LdRating {
 
       const ratingAr = o.aggregateRating;
       const ratings = Array.isArray(ratingAr) ? ratingAr : ratingAr ? [ratingAr] : [];
+      let itemRating: number | null = null;
+      let itemCount: number | null = null;
       for (const ar of ratings) {
         if (!ar || typeof ar !== 'object') continue;
         const a = ar as Record<string, unknown>;
-        if (out.rating == null) out.rating = parseLdRating(a.ratingValue);
-        if (out.count == null) out.count = parseLdCount(a.reviewCount);
+        if (itemRating == null) itemRating = parseLdRating(a.ratingValue);
+        if (itemCount == null) itemCount = parseLdCount(a.reviewCount);
       }
 
-      if (out.rating == null && out.count == null) {
-        const topRating = parseLdRating(o.ratingValue);
-        const topCount = parseLdCount(o.reviewCount);
-        if (topRating != null || topCount != null) {
-          out.rating = topRating;
-          out.count = topCount;
+      if (itemRating == null && itemCount == null) {
+        itemRating = parseLdRating(o.ratingValue);
+        itemCount = parseLdCount(o.reviewCount);
+      }
+
+      const carriesRating = ratings.length > 0 || itemRating != null || itemCount != null;
+      if (carriesRating) {
+        if (out.rating == null) out.rating = itemRating;
+        if (out.count == null) out.count = itemCount;
+        if (out.name == null && typeof o.name === 'string') out.name = o.name;
+        if (out.address == null) out.address = normalizeLdAddress(o.address);
+        if (out.geo == null) out.geo = parseLdGeo(o.geo);
+      } else if (!fallback && typeof o.name === 'string') {
+        fallback = {
+          name: o.name,
+          address: normalizeLdAddress(o.address),
+          geo: parseLdGeo(o.geo),
+        };
+      }
+
+      if (out.rating != null && out.count != null) {
+        if (out.name == null && fallback) {
+          out.name = fallback.name;
+          out.address = out.address ?? fallback.address;
+          out.geo = out.geo ?? fallback.geo;
         }
+        return out;
       }
-      if (out.name == null && typeof o.name === 'string') out.name = o.name;
-      if (out.address == null) out.address = normalizeLdAddress(o.address);
-      if (out.geo == null) out.geo = parseLdGeo(o.geo);
-
-      if (out.rating != null && out.count != null) return out;
     }
+  }
+
+  if (out.name == null && fallback) {
+    out.name = fallback.name;
+    out.address = out.address ?? fallback.address;
+    out.geo = out.geo ?? fallback.geo;
   }
   return out;
 }
@@ -542,8 +573,8 @@ export function parseSearchMessageFromWebView(
  * jitter. The previous 500 ms tight loop was as fast as a page-load monitor.
  */
 export const COLLECTOR_INITIAL_DELAY_MS = 700;
-export const COLLECTOR_RETRY_INTERVAL_MS = 1_100;
-export const COLLECTOR_MAX_ATTEMPTS = 5;
+export const COLLECTOR_RETRY_INTERVAL_MS = 1_000;
+export const COLLECTOR_MAX_ATTEMPTS = 6;
 
 /**
  * Build the standard injected-collector wrapper around a provider's `collect()`
@@ -591,13 +622,16 @@ ${opts.collectBodyJs}
     var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot', 'you have been blocked', 'behaviour of the browser'];
     var BLOCK_MARKERS = ['you have been blocked', 'behaviour of the browser has caught our attention'];
     var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
+    // Block copy is checked against *visible* text: page bundles and inline
+    // scripts can contain the same phrases without the page being blocked.
+    var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
     var markerHit = false;
     for (var mi = 0; mi < MARKERS.length; mi++) {
       if (low.indexOf(MARKERS[mi]) !== -1) { markerHit = true; break; }
     }
     var blockHit = false;
     for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
-      if (low.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+      if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
     }
     var hasData = ${opts.hasDataJs};
     out.blocked = blockHit && !hasData;

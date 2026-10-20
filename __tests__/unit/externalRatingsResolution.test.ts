@@ -90,6 +90,49 @@ describe('collector pacing budget', () => {
   });
 });
 
+function runTripadvisorCollector(blocks: unknown[]): Array<Record<string, unknown>> {
+  const posted: string[] = [];
+  const scripts = blocks.map((b) => ({ textContent: JSON.stringify(b) }));
+  const fakeDocument = {
+    title: '',
+    body: { innerHTML: '', innerText: '' },
+    querySelectorAll: (selector: string) =>
+      selector === 'script[type="application/ld+json"]' ? scripts : [],
+  };
+  const fakeWindow = { ReactNativeWebView: { postMessage: (s: string) => posted.push(s) } };
+  const run = new Function('window', 'document', 'setTimeout', TRIPADVISOR_RATING_JS) as (
+    w: unknown,
+    d: unknown,
+    s: (cb: () => void) => unknown,
+  ) => void;
+  run(fakeWindow, fakeDocument, (cb) => cb());
+  return posted.map((p) => JSON.parse(p) as Record<string, unknown>);
+}
+
+describe('Tripadvisor listing collector', () => {
+  it('uses the object with aggregateRating when earlier blocks are named', () => {
+    const posted = runTripadvisorCollector([
+      {},
+      { '@type': 'VideoObject', name: "Antonio's Real New York Pizza" },
+      {
+        '@type': 'FoodEstablishment',
+        name: "Antonio's Real New York Pizza",
+        aggregateRating: { ratingValue: '4.5', reviewCount: '1449' },
+        geo: { latitude: 40.37, longitude: -105.52 },
+        address: { streetAddress: '123 W Elkhorn Ave' },
+      },
+      { '@type': 'LocalBusiness', name: 'Top of the World Tour' },
+    ]);
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      ldRating: 4.5,
+      ldCount: 1449,
+      ldName: "Antonio's Real New York Pizza",
+    });
+  });
+});
+
 describe('hard block detection', () => {
   it('recognizes the terminal Yelp/DataDome block page', () => {
     expect(

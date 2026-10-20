@@ -316,13 +316,10 @@ export function useExternalRatings(
       }
 
       void (async () => {
-        // Wait for the persisted place→listing map before choosing a path: a
-        // cached listing skips the noisiest request (a provider search).
-        try {
-          await hydrateListingCache();
-        } catch {
-          /* persistence is best-effort */
-        }
+        // Hydration runs in the background: a slow or unavailable disk must
+        // never hold the ratings row open. The module already started this at
+        // import time; this call only joins an in-flight load.
+        void hydrateListingCache();
         if (cancelled) return;
 
         const placeKey = placeRatingKey(q);

@@ -41,6 +41,8 @@ export interface BrowseSchedulerOptions {
   maxPageWaitMs?: number;
   /** How long a detected hard block disables the host. */
   blockMs?: number;
+  /** Upper bound on waiting for persisted state before a page load. */
+  hydrateTimeoutMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
@@ -167,6 +169,7 @@ export function createBrowseScheduler(options: BrowseSchedulerOptions = {}): Bro
   const pageDailyCap = options.pageDailyCap ?? DEFAULTS.pageDailyCap;
   const maxPageWaitMs = options.maxPageWaitMs ?? DEFAULTS.maxPageWaitMs;
   const blockMs = options.blockMs ?? DEFAULTS.blockMs;
+  const hydrateTimeoutMs = options.hydrateTimeoutMs ?? 1_500;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? defaultSleep;
   const random = options.random ?? Math.random;
@@ -236,6 +239,28 @@ export function createBrowseScheduler(options: BrowseSchedulerOptions = {}): Bro
     saveTimer = setTimeout(persistNow, 250);
   }
 
+  function withTimeout(promise: Promise<void>, ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      promise.then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+      );
+    });
+  }
+
+  /** Persisted state can improve pacing, but must never stall a page load. */
+  async function hydrateWithin(): Promise<void> {
+    if (!persistence || hydrated) return hydrate();
+    await withTimeout(hydrate(), hydrateTimeoutMs);
+  }
+
   function hydrate(): Promise<void> {
     if (hydrated) return Promise.resolve();
     if (!persistence) {
@@ -300,8 +325,9 @@ export function createBrowseScheduler(options: BrowseSchedulerOptions = {}): Bro
   function schedule<T>(host: string, task: () => Promise<T>): Promise<T> {
     const run = tail.then(async () => {
       // A persisted challenge/block must apply before the first request of a
-      // launch, not one request too late.
-      await hydrate();
+      // launch, not one request too late — but a slow file read must not block
+      // the request forever.
+      await hydrateWithin();
       const wait = Math.max(
         cooldownRemainingMs(host),
         (hostState(host).nextAllowedAt ?? 0) - now(),
@@ -323,7 +349,7 @@ export function createBrowseScheduler(options: BrowseSchedulerOptions = {}): Bro
 
   function acquirePageLoad(host: string): Promise<PageLoadDecision> {
     const run = pageTail.then(async (): Promise<PageLoadDecision> => {
-      await hydrate();
+      await hydrateWithin();
 
       const t = now();
       const state = hostState(host);
