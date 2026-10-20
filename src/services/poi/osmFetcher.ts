@@ -24,38 +24,65 @@ const OVERPASS_TIMEOUT_MS = 5_000;
  * last-resort fallback and must not hold the viewport merge open. */
 const NOMINATIM_TIMEOUT_MS = 3_000;
 
+interface Bounds {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
 interface CacheEntry {
   pois: OsmPoi[];
   expiresAt: number;
+  /** Exact box the results were fetched for. */
+  bounds: Bounds;
 }
 
 const bboxCache = new Map<string, CacheEntry>();
 /** Shared in-flight Overpass requests, keyed by bbox, so a prefetch and the
  * fetch that follows a gesture settle don't serialize on the throttle. */
-const bboxInFlight = new Map<string, Promise<OsmPoi[]>>();
+const bboxInFlight = new Map<string, { bounds: Bounds; promise: Promise<OsmPoi[]> }>();
 
 function bboxKey(south: number, west: number, north: number, east: number): string {
   const r = (n: number) => Math.round(n * 100) / 100;
   return `${r(south)},${r(west)},${r(north)},${r(east)}`;
 }
 
-function cacheGet(key: string): OsmPoi[] | null {
+/** True when results fetched for `cached` also answer a request for `requested`. */
+function covers(cached: Bounds, requested: Bounds): boolean {
+  const epsilon = 1e-6;
+  return (
+    cached.south <= requested.south + epsilon &&
+    cached.north >= requested.north - epsilon &&
+    cached.west <= requested.west + epsilon &&
+    cached.east >= requested.east - epsilon
+  );
+}
+
+/**
+ * Read cached results for a request, but only when the entry was fetched for a
+ * box that *covers* it. The rounded key is shared by every viewport inside a
+ * ~1.1 km cell, and a street-level viewport is a few hundred metres: reusing a
+ * neighbour's smaller result set (e.g. one restaurant) for a bigger view makes
+ * a busy area look empty. A miss refetches instead of under-reporting.
+ */
+function cacheGet(key: string, bounds: Bounds): OsmPoi[] | null {
   const entry = bboxCache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
     bboxCache.delete(key);
     return null;
   }
-  return entry.pois;
+  return covers(entry.bounds, bounds) ? entry.pois : null;
 }
 
-function cacheSet(key: string, pois: OsmPoi[]): void {
+function cacheSet(key: string, pois: OsmPoi[], bounds: Bounds): void {
   // Evict oldest entry when full
   if (bboxCache.size >= CACHE_MAX_ENTRIES) {
     const oldestKey = bboxCache.keys().next().value;
     if (oldestKey !== undefined) bboxCache.delete(oldestKey);
   }
-  bboxCache.set(key, { pois, expiresAt: Date.now() + CACHE_TTL_MS });
+  bboxCache.set(key, { pois, expiresAt: Date.now() + CACHE_TTL_MS, bounds });
 }
 
 /** Exposed for testing only. */
@@ -86,21 +113,23 @@ export function fetchOsmPois(
   north: number,
   east: number,
 ): Promise<OsmPoi[]> {
-  // Return cached results if we've fetched this bbox recently
+  const bounds: Bounds = { south, west, north, east };
+  // Return cached results if we've fetched a box covering this one recently
   const key = bboxKey(south, west, north, east);
-  const cached = cacheGet(key);
+  const cached = cacheGet(key, bounds);
   if (cached) return Promise.resolve(cached);
 
   // Share an in-flight request for the same bbox (e.g. a mid-gesture prefetch
-  // and the fetch that runs once the gesture settles).
+  // and the fetch that runs once the gesture settles) — but only when it
+  // covers this request, so a smaller in-flight fetch can't answer a bigger box.
   const pending = bboxInFlight.get(key);
-  if (pending) return pending;
+  if (pending && covers(pending.bounds, bounds)) return pending.promise;
 
   const promise = fetchOsmPoisUncached(south, west, north, east, key);
-  bboxInFlight.set(key, promise);
+  bboxInFlight.set(key, { bounds, promise });
   void promise
     .finally(() => {
-      if (bboxInFlight.get(key) === promise) bboxInFlight.delete(key);
+      if (bboxInFlight.get(key)?.promise === promise) bboxInFlight.delete(key);
     })
     .catch(() => {});
   return promise;
@@ -178,7 +207,7 @@ out body center;`;
     })
     .filter((p): p is OsmPoi => p !== null);
 
-  cacheSet(key, pois);
+  cacheSet(key, pois, { south, west, north, east });
   return pois;
 }
 
@@ -210,7 +239,7 @@ export async function fetchOsmPoisByTags(
     .join('');
   const nameSuffix = requireName ? '["name"]' : '';
   const key = `tags:${tagPairs.map((t) => t.join('=')).join('|')}${filterSuffix}:rn${requireName ? '1' : '0'}:${bboxKey(south, west, north, east)}`;
-  const cached = cacheGet(key);
+  const cached = cacheGet(key, { south, west, north, east });
   if (cached) return cached;
 
   const bbox = `${south},${west},${north},${east}`;
@@ -259,7 +288,7 @@ export async function fetchOsmPoisByTags(
     })
     .filter((p): p is OsmPoi => p !== null);
 
-  cacheSet(key, pois);
+  cacheSet(key, pois, { south, west, north, east });
   return pois;
 }
 
@@ -292,7 +321,7 @@ export async function fetchOsmPoisByName(
   const safe = namePattern.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
 
   const key = `name:${safe}:${bboxKey(south, west, north, east)}`;
-  const cached = cacheGet(key);
+  const cached = cacheGet(key, { south, west, north, east });
   if (cached) return cached;
 
   const bbox = `${south},${west},${north},${east}`;
@@ -329,7 +358,7 @@ out body center;`;
     })
     .filter((p: any): p is OsmPoi => p !== null);
 
-  cacheSet(key, pois);
+  cacheSet(key, pois, { south, west, north, east });
   return pois;
 }
 
@@ -553,7 +582,7 @@ export async function fetchNominatimPois(
   east: number,
 ): Promise<OsmPoi[]> {
   const key = `nom:${bboxKey(south, west, north, east)}`;
-  const cached = cacheGet(key);
+  const cached = cacheGet(key, { south, west, north, east });
   if (cached) return cached;
 
   // Nominatim bounded search — query for common POI types visible on a map.
@@ -629,6 +658,6 @@ export async function fetchNominatimPois(
     }),
   );
 
-  cacheSet(key, allPois);
+  cacheSet(key, allPois, { south, west, north, east });
   return allPois;
 }

@@ -19,6 +19,11 @@ interface OsmPoiState {
   /** Whether local Overture data was the primary source for the last search */
   categorySearchLocalPrimary: boolean;
   isCategorySearching: boolean;
+  /**
+   * Bumped whenever a category/search override ends. The map uses it to reload
+   * the regular viewport POIs, which the override had replaced.
+   */
+  viewportPoiRefreshToken: number;
   setPois: (pois: OsmPoi[]) => void;
   setSelectedPoi: (poi: OsmPoi | null) => void;
   setIsLoading: (loading: boolean) => void;
@@ -46,6 +51,7 @@ export const useOsmPoiStore = create<OsmPoiState>((set, get) => ({
   categorySearchResults: null,
   categorySearchLocalPrimary: false,
   isCategorySearching: false,
+  viewportPoiRefreshToken: 0,
   setPois: (pois) => {
     const state = get();
     // Skip update if POI IDs haven't changed — avoids re-renders when the
@@ -63,11 +69,18 @@ export const useOsmPoiStore = create<OsmPoiState>((set, get) => ({
   setCategorySearch: (categoryFilter, categorySearchResults, categorySearchLocalPrimary) =>
     set({ categoryFilter, categorySearchResults, categorySearchLocalPrimary }),
   setIsCategorySearching: (isCategorySearching) => set({ isCategorySearching }),
-  clearCategorySearch: () =>
+  clearCategorySearch: () => {
+    // The override replaced the map's viewport POIs, so ending it must put the
+    // regular POIs back. Bumping the token makes the map reload them for the
+    // viewport it is already showing (no pan/zoom needed to recover).
+    const { categorySearchResults, viewportPoiRefreshToken } = get();
     set({
       categoryFilter: null,
       categorySearchResults: null,
       categorySearchLocalPrimary: false,
       isCategorySearching: false,
-    }),
+      viewportPoiRefreshToken:
+        categorySearchResults !== null ? viewportPoiRefreshToken + 1 : viewportPoiRefreshToken,
+    });
+  },
 }));

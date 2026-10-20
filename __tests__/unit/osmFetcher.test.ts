@@ -157,8 +157,7 @@ describe('fetchOsmPois', () => {
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
-  it('cache survives minor bbox variations below the rounding threshold', async () => {
-    // Two bboxes that both round to the same 2-decimal key
+  it('cache serves a viewport that sits inside an already-fetched box', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => makeOverpassResponse([makeNode(1, 'Spot')]),
@@ -167,9 +166,25 @@ describe('fetchOsmPois', () => {
     await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
     mockFetch.mockClear();
 
-    // Tiny panning — rounds to same key
-    await fetchOsmPois(40.703, -74.002, 40.797, -73.904);
+    // Tiny panning that stays inside the fetched box (same rounded key).
+    await fetchOsmPois(40.703, -73.998, 40.797, -73.902);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not answer a larger bbox from a smaller cached one in the same grid cell', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => makeOverpassResponse([makeNode(1, 'Lone Diner')]),
+    });
+
+    // Street-level viewport: a few hundred metres inside one grid cell.
+    await fetchOsmPois(40.746, -73.994, 40.748, -73.992);
+    mockFetch.mockClear();
+
+    // A bigger view in the *same* rounded 2-decimal cell: the cached
+    // street-level result (one restaurant) must not answer it.
+    await fetchOsmPois(40.7451, -73.9949, 40.7549, -73.9851);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it('clearOsmCache forces a fresh network call', async () => {

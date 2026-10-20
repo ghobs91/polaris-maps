@@ -485,96 +485,28 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     [navigationMode, onFollowCameraChange, prefetchViewportPois],
   );
 
-  const handleRegionDidChange = useCallback(
-    (event: any) => {
-      // Reset the zoom-clear guard so the next gesture can clear again.
-      zoomClearedRef.current = false;
-
-      // The gesture settled; the real fetch below supersedes any pending warm-up.
-      if (poiPrefetchTimer.current) {
-        clearTimeout(poiPrefetchTimer.current);
-        poiPrefetchTimer.current = null;
-      }
-
-      // Don't fetch POIs while actively navigating — camera moves constantly and
-      // POI annotations would fight the nav UI.
-      const zoom: number = event?.properties?.zoomLevel ?? 0;
-      if (zoom > 0 && Math.abs(zoom - lastZoomRef.current) >= 0.1) {
-        lastZoomRef.current = zoom;
-        setCurrentZoom(zoom);
-      }
-
-      // Track live camera orientation for the compass / scale-bar chrome.
-      const props = event?.properties ?? {};
-      const center = props.center as [number, number] | undefined;
-      setCamera((prev) => ({
-        bearing: typeof props.heading === 'number' ? props.heading : prev.bearing,
-        pitch: typeof props.pitch === 'number' ? props.pitch : prev.pitch,
-        zoom: zoom > 0 ? zoom : prev.zoom,
-        lat: center ? center[1] : prev.lat,
-      }));
-
-      if (navigationMode) return;
-      const rawBounds: [[number, number], [number, number]] | undefined =
-        event?.properties?.visibleBounds;
-
-      // Always update bounds so POILayer and category search always have them,
-      // even when zoomed out below the fetch threshold.
-      if (rawBounds) {
-        const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
-        useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
-
-        // Fetch viewport traffic data so normalizedSegments are populated for
-        // route-line traffic coloring even before a route is computed.
-        // Skipped while offline so the basemap gets full bandwidth and the
-        // cached map stays readable (P2P sync is cheap, keep it running).
-        const centerLat = (minLat + maxLat) / 2;
-        const centerLng = (minLng + maxLng) / 2;
-        // Rounded cell drives offline-pack lookups while the link is weak.
-        setLookupCell(`${centerLat.toFixed(3)},${centerLng.toFixed(3)}`);
-        const online = getConnectivity().isConnected;
-        if (online) {
-          fetchTrafficDebounced({ lat: centerLat, lng: centerLng, zoom });
-        }
-
-        // Sync the P2P traffic topic subscriptions (geohash4 cells) with the
-        // visible area so probes/conditions flow for where the user is looking.
-        onViewportChange(centerLat, centerLng);
-
-        // Seed traffic raster tiles (disk → P2P → TomTom) for the visible area.
-        if (online && useMapStore.getState().trafficLayerVisible) {
-          const { width, height } = Dimensions.get('window');
-          void seedTrafficTilesForViewport(centerLat, centerLng, zoom, width, height).catch(
-            () => {},
-          );
-        }
-      }
-
-      if (!rawBounds) return;
-      const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
-
-      // Narrow the satellite regional layers to this viewport via the tile
-      // router, and refresh OpenAerialMap coverage in the background.
-      const satelliteBBox: BBox = [minLng, minLat, maxLng, maxLat];
-      lastSatelliteViewportRef.current = { bbox: satelliteBBox, zoom };
-      satelliteUpdateRef.current(satelliteBBox, zoom);
-
-      const visibleBounds = { minLat, minLng, maxLat, maxLng };
-
+  // Loads the regular viewport POIs for a viewport. Extracted from
+  // `handleRegionDidChange` so the same path can restore POIs when a
+  // category/search override ends without moving the camera.
+  const loadViewportPois = useCallback(
+    (
+      visibleBounds: { minLat: number; minLng: number; maxLat: number; maxLng: number },
+      zoom: number,
+    ) => {
       // At high zoom the viewport is very small (z=17.6 ≈ 250 m). Pad the
       // fetch bounds so we always query at least ~800 m in each direction.
       // This ensures POIs in adjacent buildings / across the street are
       // pre-loaded even when the user zooms tightly onto a single structure.
       // The spatial filter in POILayer already clips to the visible viewport.
       const MIN_FETCH_SPAN_DEG = 0.008; // ~890 m latitude
-      const latSpan = maxLat - minLat;
-      const lngSpan = maxLng - minLng;
+      const latSpan = visibleBounds.maxLat - visibleBounds.minLat;
+      const lngSpan = visibleBounds.maxLng - visibleBounds.minLng;
       const latPad = latSpan < MIN_FETCH_SPAN_DEG ? (MIN_FETCH_SPAN_DEG - latSpan) / 2 : 0;
       const lngPad = lngSpan < MIN_FETCH_SPAN_DEG ? (MIN_FETCH_SPAN_DEG - lngSpan) / 2 : 0;
-      const fetchMinLat = minLat - latPad;
-      const fetchMaxLat = maxLat + latPad;
-      const fetchMinLng = minLng - lngPad;
-      const fetchMaxLng = maxLng + lngPad;
+      const fetchMinLat = visibleBounds.minLat - latPad;
+      const fetchMaxLat = visibleBounds.maxLat + latPad;
+      const fetchMinLng = visibleBounds.minLng - lngPad;
+      const fetchMaxLng = visibleBounds.maxLng + lngPad;
       const nextFetchBounds: PoiFetchBounds = {
         minLat: fetchMinLat,
         minLng: fetchMinLng,
@@ -737,7 +669,88 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
       }, OSM_FETCH_DEBOUNCE_MS);
     },
-    [navigationMode],
+    [],
+  );
+
+  const handleRegionDidChange = useCallback(
+    (event: any) => {
+      // Reset the zoom-clear guard so the next gesture can clear again.
+      zoomClearedRef.current = false;
+
+      // The gesture settled; the real fetch below supersedes any pending warm-up.
+      if (poiPrefetchTimer.current) {
+        clearTimeout(poiPrefetchTimer.current);
+        poiPrefetchTimer.current = null;
+      }
+
+      // Don't fetch POIs while actively navigating — camera moves constantly and
+      // POI annotations would fight the nav UI.
+      const zoom: number = event?.properties?.zoomLevel ?? 0;
+      if (zoom > 0 && Math.abs(zoom - lastZoomRef.current) >= 0.1) {
+        lastZoomRef.current = zoom;
+        setCurrentZoom(zoom);
+      }
+
+      // Track live camera orientation for the compass / scale-bar chrome.
+      const props = event?.properties ?? {};
+      const center = props.center as [number, number] | undefined;
+      setCamera((prev) => ({
+        bearing: typeof props.heading === 'number' ? props.heading : prev.bearing,
+        pitch: typeof props.pitch === 'number' ? props.pitch : prev.pitch,
+        zoom: zoom > 0 ? zoom : prev.zoom,
+        lat: center ? center[1] : prev.lat,
+      }));
+
+      if (navigationMode) return;
+      const rawBounds: [[number, number], [number, number]] | undefined =
+        event?.properties?.visibleBounds;
+
+      // Always update bounds so POILayer and category search always have them,
+      // even when zoomed out below the fetch threshold.
+      if (rawBounds) {
+        const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
+        useOsmPoiStore.getState().setZoomAndBounds(zoom, { minLat, minLng, maxLat, maxLng });
+
+        // Fetch viewport traffic data so normalizedSegments are populated for
+        // route-line traffic coloring even before a route is computed.
+        // Skipped while offline so the basemap gets full bandwidth and the
+        // cached map stays readable (P2P sync is cheap, keep it running).
+        const centerLat = (minLat + maxLat) / 2;
+        const centerLng = (minLng + maxLng) / 2;
+        // Rounded cell drives offline-pack lookups while the link is weak.
+        setLookupCell(`${centerLat.toFixed(3)},${centerLng.toFixed(3)}`);
+        const online = getConnectivity().isConnected;
+        if (online) {
+          fetchTrafficDebounced({ lat: centerLat, lng: centerLng, zoom });
+        }
+
+        // Sync the P2P traffic topic subscriptions (geohash4 cells) with the
+        // visible area so probes/conditions flow for where the user is looking.
+        onViewportChange(centerLat, centerLng);
+
+        // Seed traffic raster tiles (disk → P2P → TomTom) for the visible area.
+        if (online && useMapStore.getState().trafficLayerVisible) {
+          const { width, height } = Dimensions.get('window');
+          void seedTrafficTilesForViewport(centerLat, centerLng, zoom, width, height).catch(
+            () => {},
+          );
+        }
+      }
+
+      if (!rawBounds) return;
+      const [[maxLng, maxLat], [minLng, minLat]] = rawBounds;
+
+      // Narrow the satellite regional layers to this viewport via the tile
+      // router, and refresh OpenAerialMap coverage in the background.
+      const satelliteBBox: BBox = [minLng, minLat, maxLng, maxLat];
+      lastSatelliteViewportRef.current = { bbox: satelliteBBox, zoom };
+      satelliteUpdateRef.current(satelliteBBox, zoom);
+
+      const visibleBounds = { minLat, minLng, maxLat, maxLng };
+
+      loadViewportPois(visibleBounds, zoom);
+    },
+    [navigationMode, loadViewportPois],
   );
 
   // A search override replaces the viewport POIs without updating the fetch
@@ -765,6 +778,18 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     lastLoadedFetchBounds.current = null;
     inFlightFetchBounds.current = null;
   }, [categorySearchActive]);
+
+  // Reload the regular viewport POIs when an override ends. The camera does not
+  // move when a category pill is toggled off, so no region event follows to
+  // trigger the fetch on its own — without this the map keeps the (now stale)
+  // search pins instead of returning to normal POIs.
+  const viewportPoiRefreshToken = useOsmPoiStore((s) => s.viewportPoiRefreshToken);
+  useEffect(() => {
+    if (viewportPoiRefreshToken === 0) return;
+    const { viewportBounds, currentZoom } = useOsmPoiStore.getState();
+    if (!viewportBounds) return;
+    loadViewportPois(viewportBounds, currentZoom || lastZoomRef.current);
+  }, [viewportPoiRefreshToken, loadViewportPois]);
 
   // Clear pending POI timers on unmount so a late callback can't touch state.
   useEffect(

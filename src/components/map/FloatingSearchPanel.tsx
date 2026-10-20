@@ -66,15 +66,13 @@ import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
-import { fetchOsmPoisByTags, type OsmPoi } from '../../services/poi/osmFetcher';
+import { type OsmPoi } from '../../services/poi/osmFetcher';
+import { searchByCategory } from '../../services/poi/categorySearchService';
 import {
   fetchChargingStations,
   type ChargingStation,
 } from '../../services/poi/openChargeMapService';
-import {
-  categoryToOverpassTags,
-  resolveSearchCategories,
-} from '../../services/poi/categoryResolver';
+import { resolveSearchCategories } from '../../services/poi/categoryResolver';
 import { searchOtpStops, fetchOtpRoutesAtStop } from '../../services/transit/otpEndpointRegistry';
 import { formatDistance } from '../../utils/units';
 import { shouldOfferParkAndRide, planParkAndRide } from '../../services/routing/parkAndRideService';
@@ -93,6 +91,9 @@ import {
   geocodingResultToSearchResult,
   isSameDestination,
 } from './floatingSearchPanelHelpers';
+
+/** Cap on POIs a quick-category pill returns (list rows + map pins). */
+const CATEGORY_RESULT_LIMIT = 60;
 
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
@@ -760,6 +761,8 @@ export function FloatingSearchPanel({
   const auxAbortRef = useRef<AbortController | null>(null);
   /** Generation counter for the direct Overpass category-pill flow. */
   const categorySearchGenRef = useRef(0);
+  /** Aborts the in-flight category-pill search when it is superseded. */
+  const categoryAbortRef = useRef<AbortController | null>(null);
 
   const applyMergedResults = useCallback((updateMap: boolean) => {
     const unifiedResults = unifiedResultsRef.current.map(unifiedToGeocodingResult);
@@ -1192,6 +1195,13 @@ export function FloatingSearchPanel({
     setActiveCategory(categoryId);
     activeCategoryQueryRef.current = categoryQuery;
     const gen = ++categorySearchGenRef.current;
+    // Supersede any in-flight pill search (switching pills, or toggling off):
+    // the Overpass/Nominatim calls are abort-aware, so the old work stops
+    // instead of finishing late and holding the throttle for the next search.
+    categoryAbortRef.current?.abort();
+    const controller = new AbortController();
+    categoryAbortRef.current = controller;
+
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
 
@@ -1204,74 +1214,67 @@ export function FloatingSearchPanel({
 
     useOsmPoiStore.getState().setIsCategorySearching(true);
 
-    // Resolve category to OSM tags and query Overpass directly
+    // Resolve up front: the EV pill needs the category list for its Open
+    // Charge Map fan-out (`searchByCategory` re-resolves internally).
     const categories = resolveSearchCategories(categoryQuery);
-    if (!categories || categories.length === 0) {
-      useOsmPoiStore.getState().setIsCategorySearching(false);
-      useOsmPoiStore.getState().clearCategorySearch();
-      return;
-    }
 
-    const tagPairs = categories.flatMap(categoryToOverpassTags);
+    void (async () => {
+      try {
+        // Local Overture data first (the same rows the map renders), then
+        // Overpass/Nominatim only when the local index is thin. Querying
+        // Overpass alone made dense areas show a single result.
+        const categoryResult = categories
+          ? await searchByCategory(categoryQuery, south, west, north, east, CATEGORY_RESULT_LIMIT, {
+              signal: controller.signal,
+            })
+          : null;
 
-    // Build promises for all data sources
-    const fetches: Promise<OsmPoi[]>[] = [
-      fetchOsmPoisByTags(south, west, north, east, tagPairs, undefined, {
-        requireName: false,
-      }),
-    ];
+        if (gen !== categorySearchGenRef.current || controller.signal.aborted) return;
 
-    // For EV charging, also query Open Charge Map for richer station data
-    if (categories.includes('ev_charging')) {
-      const centerLat = (south + north) / 2;
-      const centerLng = (west + east) / 2;
-      // Approximate viewport diagonal in km
-      const dlat = (north - south) * 111;
-      const dlng = (east - west) * 111 * Math.cos((centerLat * Math.PI) / 180);
-      const radiusKm = Math.max(Math.sqrt(dlat * dlat + dlng * dlng) / 2, 3);
+        let pois = categoryResult?.pois ?? [];
 
-      fetches.push(
-        fetchChargingStations(centerLat, centerLng, radiusKm, 100)
-          .then((stations) => stations.map(chargingStationToOsmPoi))
-          .catch(() => [] as OsmPoi[]),
-      );
-    }
+        // For EV charging, also query Open Charge Map for richer station data.
+        if (categories?.includes('ev_charging')) {
+          const centerLat = (south + north) / 2;
+          const centerLng = (west + east) / 2;
+          // Approximate viewport diagonal in km
+          const dlat = (north - south) * 111;
+          const dlng = (east - west) * 111 * Math.cos((centerLat * Math.PI) / 180);
+          const radiusKm = Math.max(Math.sqrt(dlat * dlat + dlng * dlng) / 2, 3);
 
-    Promise.all(fetches)
-      .then((results) => {
-        if (categorySearchGenRef.current !== gen) return;
+          const stations = await fetchChargingStations(centerLat, centerLng, radiusKm, 100).catch(
+            () => [] as ChargingStation[],
+          );
+          if (gen !== categorySearchGenRef.current || controller.signal.aborted) return;
+          if (stations.length > 0) {
+            pois = mergeChargingPois(pois, stations.map(chargingStationToOsmPoi));
+          }
+        }
+
         useOsmPoiStore.getState().setIsCategorySearching(false);
 
-        // Merge results from all sources — OCM takes priority
-        let pois = results[0]; // OSM results
-        if (results.length > 1) {
-          pois = mergeChargingPois(pois, results[1]);
+        if (pois.length === 0 || !categories) {
+          useOsmPoiStore.getState().clearCategorySearch();
+          return;
         }
 
-        if (pois.length > 0) {
-          useOsmPoiStore.getState().setCategorySearch(
-            categories,
-            pois,
-            false, // not local primary
-          );
-          const fitPois = selectSearchFitPois(pois);
-          const fb = boundsForPois(fitPois);
-          if (fb && fitPois.length >= 2) {
-            useMapStore
-              .getState()
-              .setFitBounds([fb.minLng, fb.minLat, fb.maxLng, fb.maxLat], 'search');
-          }
-          anchorPendingRef.current = true;
-        } else {
-          useOsmPoiStore.getState().clearCategorySearch();
+        useOsmPoiStore
+          .getState()
+          .setCategorySearch(categories, pois, categoryResult?.localPrimary ?? false);
+        const fitPois = selectSearchFitPois(pois);
+        const fb = boundsForPois(fitPois);
+        if (fb && fitPois.length >= 2) {
+          useMapStore
+            .getState()
+            .setFitBounds([fb.minLng, fb.minLat, fb.maxLng, fb.maxLat], 'search');
         }
-      })
-      .catch(() => {
-        if (categorySearchGenRef.current === gen) {
-          useOsmPoiStore.getState().setIsCategorySearching(false);
-          useOsmPoiStore.getState().clearCategorySearch();
-        }
-      });
+        anchorPendingRef.current = true;
+      } catch {
+        if (gen !== categorySearchGenRef.current || controller.signal.aborted) return;
+        useOsmPoiStore.getState().setIsCategorySearching(false);
+        useOsmPoiStore.getState().clearCategorySearch();
+      }
+    })();
   }, []);
 
   const handleSearchThisArea = useCallback(() => {
@@ -2619,6 +2622,10 @@ export function FloatingSearchPanel({
                 setActiveCategory(null);
                 activeCategoryQueryRef.current = '';
                 ++categorySearchGenRef.current;
+                // Stop an in-flight pill search: its late result must not
+                // re-pin the category the user just dismissed.
+                categoryAbortRef.current?.abort();
+                categoryAbortRef.current = null;
                 useOsmPoiStore.getState().setIsCategorySearching(false);
                 useOsmPoiStore.getState().clearCategorySearch();
                 setResults([]);

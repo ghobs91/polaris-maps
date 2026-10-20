@@ -3,8 +3,14 @@
  * https://openchargemap.org/site/develop/api
  */
 
+import { withTimeout } from '../search/abortUtils';
+
 const API_BASE = 'https://api.openchargemap.io/v3/poi';
 const API_KEY = process.env.OPEN_CHARGE_MAP_API_KEY ?? '';
+
+/** Upper bound for a station list request (ms). The EV pill waits on this, so
+ * a stalled request must fail fast instead of leaving the search spinning. */
+const OCM_LIST_TIMEOUT_MS = 8_000;
 
 export interface ChargingConnection {
   type: string;
@@ -126,18 +132,24 @@ export async function fetchChargingStations(
     params.set('key', API_KEY);
   }
 
-  const response = await fetch(`${API_BASE}?${params.toString()}`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const { signal, cleanup } = withTimeout(undefined, OCM_LIST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}?${params.toString()}`, {
+      headers: {
+        Accept: 'application/json',
+      },
+      signal,
+    });
 
-  if (!response.ok) {
-    throw new Error(`Open Charge Map API error: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Open Charge Map API error: ${response.status}`);
+    }
+
+    const data: OCMPoi[] = await response.json();
+    return data.map(parseOCMStation);
+  } finally {
+    cleanup();
   }
-
-  const data: OCMPoi[] = await response.json();
-  return data.map(parseOCMStation);
 }
 
 /**
