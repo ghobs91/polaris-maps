@@ -76,6 +76,27 @@ export function normalizeBm25(bm25: number): number {
   return Math.max(0, Math.min(1, 0.5 + -bm25 / 40));
 }
 
+/**
+ * Weighted FTS query used by {@link searchPlacesFts}.
+ *
+ * `CROSS JOIN` is load-bearing, not stylistic: it pins the FTS virtual table as
+ * the outer loop. With a plain `JOIN`, SQLite instead drives from `places`
+ * through `idx_places_bounds (status, lat, lng)` and probes `places_fts` by
+ * rowid for every row in the bbox — milliseconds become multiple seconds per
+ * keystroke, growing with the prefix length (queries longer than the 4-char
+ * prefix indexes can no longer use them). `pnpm search:bench` measures
+ * ~2.5 s vs ~4 ms for the same query. Keep `CROSS JOIN`.
+ */
+export const PLACES_FTS_SEARCH_SQL = `SELECT p.*, bm25(places_fts, 10.0, 6.0, 2.0, 1.0) AS fts_rank
+   FROM places_fts
+   CROSS JOIN places p ON p.rowid = places_fts.rowid
+   WHERE places_fts MATCH ?
+     AND p.lat BETWEEN ? AND ?
+     AND p.lng BETWEEN ? AND ?
+     AND p.status = 'open'
+   ORDER BY fts_rank
+   LIMIT ?`;
+
 export async function searchPlacesFts(
   query: string,
   south: number,
@@ -98,18 +119,14 @@ export async function searchPlacesFts(
   if (!ftsQuery) return [];
 
   try {
-    const rows = await db.getAllAsync<PlaceRow & { fts_rank: number }>(
-      `SELECT p.*, bm25(places_fts, 10.0, 6.0, 2.0, 1.0) AS fts_rank
-       FROM places p
-       JOIN places_fts ON places_fts.rowid = p.rowid
-       WHERE places_fts MATCH ?
-         AND p.lat BETWEEN ? AND ?
-         AND p.lng BETWEEN ? AND ?
-         AND p.status = 'open'
-       ORDER BY fts_rank
-       LIMIT ?`,
-      [ftsQuery, south, north, west, east, limit],
-    );
+    const rows = await db.getAllAsync<PlaceRow & { fts_rank: number }>(PLACES_FTS_SEARCH_SQL, [
+      ftsQuery,
+      south,
+      north,
+      west,
+      east,
+      limit,
+    ]);
     if (rows.length > 0) {
       return rows.map((row) => ({
         ...rowToPlace(row),

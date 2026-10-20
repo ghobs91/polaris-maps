@@ -23,7 +23,7 @@ import {
   classifyAddressQuery,
   sortRowsByDistance,
 } from '../../src/services/geocoding/geocodingService';
-import { normalizeBm25 } from '../../src/services/poi/poiService';
+import { normalizeBm25, PLACES_FTS_SEARCH_SQL } from '../../src/services/poi/poiService';
 
 function createDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -35,8 +35,10 @@ function createDb(): DatabaseSync {
       lat REAL NOT NULL,
       lng REAL NOT NULL,
       brand_name TEXT,
-      address_city TEXT
+      address_city TEXT,
+      status TEXT NOT NULL DEFAULT 'open'
     );
+    CREATE INDEX idx_places_bounds ON places (status, lat, lng);
     CREATE VIRTUAL TABLE places_fts USING fts5(
       name, brand_name, category, address_city,
       content='places', content_rowid='rowid',
@@ -129,6 +131,27 @@ describe('local search index', () => {
       .all('"co"*') as Array<{ name: string }>;
 
     expect(rows.map((r) => r.name)).toContain('Coffee Grind');
+  });
+
+  it('drives the places search from the FTS index, not the bounds index', () => {
+    // `idx_places_bounds` must not become the outer loop: probing places_fts
+    // per bbox row turns keystroke searches into multi-second queries (and is
+    // far worse once the prefix is longer than the 4-char prefix indexes).
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${PLACES_FTS_SEARCH_SQL}`)
+      .all('"coffee"*', 40.0, 41.0, -75.0, -73.0, 30) as Array<{ detail: string }>;
+    const details = plan.map((row) => row.detail);
+
+    expect(details.some((detail) => detail.includes('SCAN places_fts'))).toBe(true);
+    expect(details.some((detail) => detail.includes('idx_places_bounds'))).toBe(false);
+  });
+
+  it('returns prefix matches through the places search query', () => {
+    const rows = db
+      .prepare(PLACES_FTS_SEARCH_SQL)
+      .all('"coffe"*', 40.0, 41.0, -75.0, -73.0, 30) as Array<{ name: string }>;
+
+    expect(rows.map((row) => row.name)).toContain('Coffee Grind');
   });
 
   it('matches structured address column filters', () => {
