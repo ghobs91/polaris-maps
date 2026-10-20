@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     locationEnabled: true,
     trafficTelemetryEnabled: true,
     poiContributionsEnabled: true,
-    imagerySharingEnabled: false,
+    imagerySharingEnabled: true,
     reviewPhotoSharingEnabled: false,
   },
   routePreferences: {
