@@ -58,6 +58,7 @@ import { useParkingStore } from '../../stores/parkingStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { useStreetViewStore } from '../../stores/streetViewStore';
 import { computeRoute } from '../../services/routing/routingService';
+import { preferTurnManagedRoute } from '../../services/routing/hassleTurns';
 import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRouting';
 import { buildRouteAlternatives } from '../../services/routing/routeAlternatives';
 import type { ValhallaRoute } from '../../models/route';
@@ -1469,12 +1470,17 @@ export function FloatingSearchPanel({
           return;
         }
 
-        setRoutePreview(routes[0], routes.slice(1), dest, costing, currentWaypoints);
-        if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
+        // Prefer a candidate whose turns are managed by a signal or stop sign
+        // where Mapillary has coverage. Returns the input order unchanged when
+        // nothing safer is available.
+        const rankedRoutes = await preferTurnManagedRoute(routes, costing);
+
+        setRoutePreview(rankedRoutes[0], rankedRoutes.slice(1), dest, costing, currentWaypoints);
+        if (rankedRoutes[0].boundingBox) setFitBounds(rankedRoutes[0].boundingBox);
         setMode('route-preview');
 
         // Fetch traffic data along the route for color-coded segments
-        const routeCoords = decodePolyline(routes[0].geometry);
+        const routeCoords = decodePolyline(rankedRoutes[0].geometry);
         fetchRouteTrafficImmediate(routeCoords);
 
         // Check if park-and-ride should be offered (runs in background)
@@ -1485,7 +1491,7 @@ export function FloatingSearchPanel({
         // Fetch the traffic-adjusted ETA in the background — car only, since
         // TomTom traffic is meaningless for walking/cycling.
         if (costing === 'auto') {
-          fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+          fetchRouteTrafficEta(rankedRoutes[0].geometry).then((result) => {
             if (result) {
               useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
             }
@@ -1703,11 +1709,14 @@ export function FloatingSearchPanel({
           setRouteError('No route found');
           return;
         }
-        setRoutePreview(routes[0], routes.slice(1), dest, costing, waypoints);
-        if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
+
+        const rankedRoutes = await preferTurnManagedRoute(routes, costing);
+
+        setRoutePreview(rankedRoutes[0], rankedRoutes.slice(1), dest, costing, waypoints);
+        if (rankedRoutes[0].boundingBox) setFitBounds(rankedRoutes[0].boundingBox);
 
         // Fetch traffic data along the rerouted path
-        const routeCoords = decodePolyline(routes[0].geometry);
+        const routeCoords = decodePolyline(rankedRoutes[0].geometry);
         fetchRouteTrafficImmediate(routeCoords);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

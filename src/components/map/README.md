@@ -67,6 +67,7 @@ POILayer.tsx → MarkerView per POI → PoiBadge (pill)
 - [`src/services/map/tileService.ts`](../../services/map/tileService.ts) — Local tile server management and style URL generation
 - [`src/services/map/navFocusStyle.ts`](../../services/map/navFocusStyle.ts) — Derives the navigation-focus variant of a resolved style (hidden context labels, heavier and lighter carriageways, brighter dark-mode water)
 - [`src/components/map/routeRibbon.ts`](../../components/map/routeRibbon.ts) — Route ribbon band widths, including the navigation widening that keeps the ribbon over its own carriageway
+- [`src/components/map/TrafficControlLayer.tsx`](../../components/map/TrafficControlLayer.tsx) — Stop-sign / traffic-light markers along the driven route, fed by Mapillary detections
 - [`src/constants/darkMapStyle.ts`](../../constants/darkMapStyle.ts) — Custom Apple Maps–inspired dark style JSON
 - [`src/constants/theme.ts`](../../constants/theme.ts) — Theme colors
 - [`src/stores/mapStore.ts`](../../stores/mapStore.ts) — Viewport, layer toggles, camera control
