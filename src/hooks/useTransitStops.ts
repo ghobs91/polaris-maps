@@ -12,6 +12,8 @@ import { isOnline } from '../services/regions/connectivityService';
 import { TRANSIT_FETCH_DEBOUNCE_MS } from '../constants/config';
 
 const MIN_ZOOM = 8;
+/** Spinner auto-dismiss window so a slow/stuck feed can't pin it forever. */
+const TRANSIT_LOADING_TIMEOUT_MS = 15_000;
 
 /**
  * Fetches transit route lines from Overpass for the visible viewport.
@@ -94,20 +96,32 @@ export function useTransitStops() {
   }, [transitLayerVisible]);
 }
 
+/** Monotonic token so a stale viewport fetch cannot clear a newer one's spinner. */
+let fetchGeneration = 0;
+
 async function fetchAndMergeLines(bounds: {
   minLat: number;
   minLng: number;
   maxLat: number;
   maxLng: number;
 }) {
+  const generation = ++fetchGeneration;
   const store = useTransitStore.getState();
   store.setIsLoadingLines(true);
 
-  // Hide loading spinner as soon as we have any lines (via onProgress).
-  // fetchTransitLines races Overpass vs OTP/GTFS and returns early when
-  // either source produces results.  The slower source continues in
-  // background and pushes its results via onProgress.
+  // Clear the spinner once real data arrives (via onProgress) or when both
+  // sources settle.  `fetchTransitLines` returns cached lines immediately,
+  // so the awaited result is not a reliable "fetch finished" signal.
+  // A timeout keeps a slow feed from pinning the spinner forever.
   let loadingCleared = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const clearLoading = () => {
+    if (loadingCleared || generation !== fetchGeneration) return;
+    loadingCleared = true;
+    if (timer) clearTimeout(timer);
+    useTransitStore.getState().setIsLoadingLines(false);
+  };
+  timer = setTimeout(clearLoading, TRANSIT_LOADING_TIMEOUT_MS);
 
   try {
     const lines = await fetchTransitLines(
@@ -117,19 +131,14 @@ async function fetchAndMergeLines(bounds: {
       bounds.maxLng,
       (partial) => {
         useTransitStore.getState().setRouteLines(partial);
-        if (!loadingCleared && partial.length > 0) {
-          loadingCleared = true;
-          useTransitStore.getState().setIsLoadingLines(false);
-        }
+        if (partial.length > 0) clearLoading();
       },
+      clearLoading,
     );
-    useTransitStore.getState().setRouteLines(lines);
+    if (generation === fetchGeneration) useTransitStore.getState().setRouteLines(lines);
   } catch (err) {
     console.error('[transit] fetchTransitLines failed:', err);
-  } finally {
-    if (!loadingCleared) {
-      useTransitStore.getState().setIsLoadingLines(false);
-    }
+    clearLoading();
   }
 }
 

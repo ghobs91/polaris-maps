@@ -1159,6 +1159,8 @@ export async function fetchTransitLines(
   maxLat: number,
   maxLng: number,
   onProgress?: (lines: TransitRouteLine[]) => void,
+  /** Called once both sources (Overpass and OTP/GTFS) have settled. */
+  onSettled?: () => void,
 ): Promise<TransitRouteLine[]> {
   // ── Early-return mechanism ────────────────────────────────────────
   // We race Overpass vs OTP/GTFS and return as soon as either produces
@@ -1226,6 +1228,13 @@ export async function fetchTransitLines(
   })();
 
   // ── Return cached data immediately if available ───────────────────
+  // Note: the fetch pipeline started above keeps running, so the caller's
+  // loading state must not be cleared on this early return — `onSettled`
+  // fires when both sources are actually done.
+  if (onSettled) {
+    void Promise.allSettled([overpassPromise, otpPromise]).then(() => onSettled());
+  }
+
   hydratePersistentCache();
   const cached = getAllCachedLines();
   if (cached.length > 0) return cached;
