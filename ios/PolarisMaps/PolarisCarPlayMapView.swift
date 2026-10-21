@@ -77,9 +77,9 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
       """
   }
 
-  /// Phone parity: white casing + cyan core (DEFAULT_ROUTE_COLOR #2FD4F2,
+  /// Phone parity: white casing + blue core (DEFAULT_ROUTE_COLOR #0B6ED6,
   /// see TrafficRouteLayer).
-  private static let routeCoreColor = UIColor(red: 0x2F / 255, green: 0xD4 / 255, blue: 0xF2 / 255, alpha: 1)
+  private static let routeCoreColor = UIColor(red: 0x0B / 255, green: 0x6E / 255, blue: 0xD6 / 255, alpha: 1)
   /// Route line widths interpolated by zoom, matching the phone's
   /// `TrafficRouteLayer` / `MapView` stops so the line thins out in the route
   /// overview instead of staying at nav-zoom thickness.
