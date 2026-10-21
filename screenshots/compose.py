@@ -148,6 +148,62 @@ def compose(card):
     print("wrote", card["out"])
 
 
+def compose_ipad(card):
+    """Render a 2064x2752 iPad card (same style, larger canvas)."""
+    w, h = 2064, 2752
+    img = Image.new("RGB", (w, h), PURPLE)
+    d = ImageDraw.Draw(img)
+
+    grad = Image.new("L", (w, h), 0)
+    gd = ImageDraw.Draw(grad)
+    span = int(h * 0.5)
+    for yy in range(span):
+        a = int(34 * (1 - yy / span) ** 1.5)
+        gd.line([(0, yy), (w, yy)], fill=a)
+    img.paste(Image.new("RGB", (w, h), WHITE), (0, 0), grad)
+
+    tf = font(132, "Heavy")
+    lines = card["title"].split("\n")
+    asc, desc = tf.getmetrics()
+    line_h = asc + desc + 8
+    total = line_h * len(lines)
+    cy = 250 - total / 2
+    for line in lines:
+        tw = d.textlength(line, font=tf)
+        d.text(((w - tw) / 2, cy), line, font=tf, fill=WHITE)
+        cy += line_h
+
+    glyph = GLYPHS.get(card.get("icon"))
+    if glyph:
+        f = icon_font(156)
+        ch = chr(glyph)
+        tw = d.textlength(ch, font=f)
+        d.text(((w - tw) / 2, 430), ch, font=f, fill=WHITE)
+
+    sw = 1500
+    sh = round(sw * h / w)
+    x = (w - sw) // 2
+    y = 660
+    bez = 26
+    d.rounded_rectangle([x - bez, y - bez, x + sw + bez, y + sh + bez], radius=96, fill=(10, 10, 12))
+    d.rounded_rectangle(
+        [x - bez, y - bez, x + sw + bez, y + sh + bez], radius=96, outline=(46, 46, 54), width=3
+    )
+    raw = Image.open(card["raw"]).convert("RGB").resize((sw, sh), Image.LANCZOS)
+    img.paste(raw, (x, y), rounded_mask((sw, sh), 74))
+    img.save(os.path.join(OUT, card["out"]))
+    print("wrote", card["out"])
+
+
+IPAD_CARDS = [
+    {
+        "out": "ipad-01-explore.png",
+        "raw": os.path.join(RAW, "ipad-map.png"),
+        "title": "Explore\nin 3D",
+        "icon": "cube-outline",
+    },
+]
+
 CARDS = [
     {
         "out": "01-live-traffic.png",
@@ -203,5 +259,10 @@ if __name__ == "__main__":
     for c in CARDS:
         if os.path.exists(c["raw"]):
             compose(c)
+        else:
+            print("MISSING", c["raw"])
+    for c in IPAD_CARDS:
+        if os.path.exists(c["raw"]):
+            compose_ipad(c)
         else:
             print("MISSING", c["raw"])

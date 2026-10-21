@@ -54,8 +54,8 @@ Raw sources live in `screenshots/raw/` (gitignored): `live-traffic.png`,
 Edit the `CARDS` list in `compose.py` to change titles, icons, callouts, or the
 raw screen each card uses.
 
-## Still required
+## iPad (2064×2752)
 
-- **iPad 13" (2064×2752)** — `ios.supportsTablet` is `true`, so App Store Connect
-  needs iPad screenshots too. Capture on an iPad simulator and add a
-  `compose_ipad` variant (same card style, larger canvas).
+`ios.supportsTablet` is `true`, so an iPad set is required. `compose_ipad()`
+renders the same card style on a 2064×2752 canvas; `IPAD_CARDS` currently has one
+card (`ipad-01-explore.png`) from `raw/ipad-map.png`. Add more entries as needed.

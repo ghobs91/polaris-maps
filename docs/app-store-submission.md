@@ -24,13 +24,14 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 | App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                        |
 | Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
 | Screenshots — iPhone 6.9" (7 of 8)      | `screenshots/out/01..07` (CarPlay card pending)                       |
+| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752)                     |
 
 ### Remaining
 
 | #   | Item                                                  | Owner                        | Status         |
 | --- | ----------------------------------------------------- | ---------------------------- | -------------- |
 | 1   | CarPlay screenshot + card 8                           | you → me compose             | In progress    |
-| 2   | iPad 13" screenshots (required)                       | you → me compose             | Not started    |
+| 2   | iPad 13" screenshots (required)                       | you → me compose             | 1 card done    |
 | 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted        |
 | 4   | Legal review of policy + terms                        | you                          | Review pending |
 | 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Not started    |
@@ -117,8 +118,10 @@ Source and hosting are ready; only the Apple-side steps remain.
    `https://app.polarismaps.app/.well-known/apple-app-site-association` → 200
    `application/json` (already verified).
 
-> Note: the committed entitlements do **not** yet include associated-domains, so
-> universal links currently fall back to the `polaris-maps://` scheme.
+> The entitlement is now applied to `PolarisMaps.entitlements` and
+> `PolarisMaps.Debug.entitlements`. The profile on this Mac still predates the
+> capability, so regenerate/install it (or let Xcode auto-provision with
+> `-allowProvisioningUpdates`) before the release build; otherwise signing fails.
 
 ### 6. Build and submit
 
