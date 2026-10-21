@@ -1393,9 +1393,12 @@ out body;`;
       }
 
       const lines: TransitRouteLine[] = [];
-      for (const rel of relations) {
-        const line = relationToLine(rel, stopNodes);
+      for (let i = 0; i < relations.length; i++) {
+        const line = relationToLine(relations[i], stopNodes);
         if (line) lines.push(line);
+        // Yield every 2 relations — prewarm runs at startup, and simplifying
+        // large route geometries synchronously freezes the UI.
+        if ((i + 1) % 2 === 0 && i < relations.length - 1) await yieldToUI();
       }
 
       // Store deduplicated results under the prewarm key

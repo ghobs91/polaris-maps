@@ -579,11 +579,16 @@ export async function convertFeedToLines(
     return [];
   }
 
-  // Build route_id → shape_id via the longest trip
+  // Build route_id → shape_id / trip_id in one pass over trips
   const filteredRouteIds = new Set(filteredRoutes.map((r) => r.route_id));
   const routeToShapes = new Map<string, string[]>();
+  const tripIdsByRoute = new Map<string, string[]>();
   for (let i = 0; i < feed.trips.length; i++) {
     const trip = feed.trips[i];
+    const tripIds = tripIdsByRoute.get(trip.route_id) ?? [];
+    tripIds.push(trip.trip_id);
+    tripIdsByRoute.set(trip.route_id, tripIds);
+
     if (trip.shape_id && filteredRouteIds.has(trip.route_id)) {
       const arr = routeToShapes.get(trip.route_id) ?? [];
       if (!arr.includes(trip.shape_id)) arr.push(trip.shape_id);
@@ -612,8 +617,8 @@ export async function convertFeedToLines(
 
     if (geometry.length === 0) {
       // Fallback: build geometry from stop coordinates
-      const routeTrips = feed.trips.filter((t) => t.route_id === route.route_id);
-      const repTrip = routeTrips[0];
+      const repTripId = tripIdsByRoute.get(route.route_id)?.[0];
+      const repTrip = repTripId ? feed.tripIndex.get(repTripId) : undefined;
       if (repTrip) {
         const ordered = feed.stopTimes
           .filter((st) => st.trip_id === repTrip.trip_id)
@@ -636,12 +641,13 @@ export async function convertFeedToLines(
 
     if (feed.stopTimes.length > 0) {
       const seen = new Set<string>();
-      const routeTripIds = feed.trips
-        .filter((t) => t.route_id === route.route_id)
-        .map((t) => t.trip_id);
+      const routeTripIds = tripIdsByRoute.get(route.route_id) ?? [];
       const routeTripIdSet = new Set(routeTripIds);
 
+      let scanned = 0;
       for (const st of feed.stopTimes) {
+        // Large offline feeds have huge stop_times tables; keep the UI alive.
+        if (++scanned % 5000 === 0) await yieldToUI();
         if (!routeTripIdSet.has(st.trip_id)) continue;
         const stop = feed.stopIndex.get(st.stop_id);
         if (!stop) continue;
@@ -660,8 +666,12 @@ export async function convertFeedToLines(
       // This filters out bus stops while keeping rail stations that sit on the line.
       const seen = new Set<string>();
       const MAX_DIST_DEG = 0.0015; // ~150m at Chicago latitude
+      let scanned = 0;
 
       for (const stop of feed.stopIndex.values()) {
+        // Large country feeds have many stops per route; keep the UI alive.
+        if (++scanned % 5000 === 0) await yieldToUI();
+
         // Quick bounding-box rejection
         let minDist = Infinity;
         for (const [lon, lat] of geometry) {
