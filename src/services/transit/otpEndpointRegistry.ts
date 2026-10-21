@@ -88,7 +88,7 @@ export const OTP_ENDPOINTS: OtpEndpoint[] = [
   {
     label: 'WMATA Washington DC Metro',
     bbox: [38.75, -77.5, 39.2, -76.8],
-    url: 'https://api.wmata.com/gtfs/rail-gtfs.zip',
+    url: 'https://api.wmata.com/gtfs/rail-gtfs-static.zip',
     apiStyle: 'wmata-gtfs-v1',
   },
   {
