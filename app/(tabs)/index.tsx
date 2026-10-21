@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Dimensions, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -28,8 +28,8 @@ import { useIsLargeDisplay } from '@/hooks/useIsLargeDisplay';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   LARGE_FLOATING_PANEL_MARGIN,
-  LARGE_FLOATING_PANEL_WIDTH,
-  LARGE_MAP_CONTENT_LEFT,
+  largeFloatingPanelWidth,
+  largeMapContentLeft,
 } from '@/constants/layout';
 import { spacing } from '@/constants/theme';
 import { hapticImpact } from '@/utils/haptics';
@@ -42,6 +42,11 @@ export default function MapScreen() {
   const { isDark, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const isLarge = useIsLargeDisplay();
+  // Sidebar scales with the window (like Apple Maps on macOS) instead of using
+  // a fixed width that is too wide on tablets and too narrow on desktops.
+  const windowWidth = useWindowDimensions().width;
+  const panelWidth = largeFloatingPanelWidth(windowWidth);
+  const contentLeft = largeMapContentLeft(windowWidth);
   const screenHeight = Dimensions.get('window').height;
   const streetViewBottom = Math.round(screenHeight * POI_SHEET_PEEK_FRACTION) + spacing.md;
   const setViewport = useMapStore((s) => s.setViewport);
@@ -162,7 +167,7 @@ export default function MapScreen() {
             onMapPress={handleMapPress}
             onMapLongPress={handleMapLongPress}
             onAddressPress={handleAddressPress}
-            overlayLeftInset={LARGE_MAP_CONTENT_LEFT}
+            overlayLeftInset={contentLeft}
           />
 
           <View
@@ -173,6 +178,7 @@ export default function MapScreen() {
                 top: insets.top + spacing.md,
                 bottom: insets.bottom + spacing.md,
                 left: LARGE_FLOATING_PANEL_MARGIN,
+                width: panelWidth,
               },
             ]}
           >
@@ -204,19 +210,19 @@ export default function MapScreen() {
               styles.coverageBadgeMount,
               {
                 top: insets.top + spacing.sm,
-                left: LARGE_MAP_CONTENT_LEFT,
+                left: contentLeft,
               },
             ]}
           >
             <TrafficCoverageBadge />
           </View>
 
-          <StreetViewThumbOverlay bottom={streetViewBottom} left={LARGE_MAP_CONTENT_LEFT} />
+          <StreetViewThumbOverlay bottom={streetViewBottom} left={contentLeft} />
 
           {/* Bottom-anchored drawers and cards live in the content area beside
               the search panel, so they size to the available width instead of
               sliding underneath it. */}
-          <View pointerEvents="box-none" style={styles.mapContentOverlay}>
+          <View pointerEvents="box-none" style={[styles.mapContentOverlay, { left: contentLeft }]}>
             <POIInfoCard />
             <TransitStopCard />
             <ParkingSpotCard />
@@ -224,7 +230,7 @@ export default function MapScreen() {
           <FloatingMenuPanel
             visible={showMenuPanel}
             onClose={() => setShowMenuPanel(false)}
-            leftInset={LARGE_MAP_CONTENT_LEFT}
+            leftInset={contentLeft}
             topInset={insets.top + spacing.md}
             bottomInset={insets.bottom + spacing.md}
           />
@@ -269,7 +275,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   searchOverlay: {
     position: 'absolute',
-    width: LARGE_FLOATING_PANEL_WIDTH,
     zIndex: 25,
     elevation: 25,
   },
@@ -278,7 +283,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    left: LARGE_MAP_CONTENT_LEFT,
     right: LARGE_FLOATING_PANEL_MARGIN,
     zIndex: 10,
   },
