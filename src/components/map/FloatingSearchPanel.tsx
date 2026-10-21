@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Switch,
   InteractionManager,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   runOnJS,
@@ -28,6 +29,7 @@ import * as Location from 'expo-location';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import { spacing, typography, borderRadius, sheet as sheetTokens } from '../../constants/theme';
+import { largeFloatingPanelWidth } from '../../constants/layout';
 import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
@@ -621,6 +623,8 @@ interface FavChipProps {
   onLongPress?: () => void;
   unset?: boolean;
   isDark: boolean;
+  /** Sidebar chips share the row instead of scrolling at a fixed width. */
+  embedded?: boolean;
 }
 
 function FavChip({
@@ -632,6 +636,7 @@ function FavChip({
   onLongPress,
   unset,
   isDark,
+  embedded,
 }: FavChipProps) {
   const { colors } = useTheme();
   const textColor = isDark ? '#F2F2F7' : colors.text;
@@ -642,7 +647,7 @@ function FavChip({
       onPress={onPress}
       onLongPress={onLongPress}
       activeOpacity={0.7}
-      style={styles.favChip}
+      style={embedded ? styles.favChipEmbedded : styles.favChip}
     >
       <View style={[styles.favIconCircle, { backgroundColor: iconBg, opacity: unset ? 0.55 : 1 }]}>
         <Ionicons name={icon as any} size={22} color="#fff" />
@@ -676,6 +681,7 @@ export function FloatingSearchPanel({
   const { colors, isDark } = useTheme();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const router = useRouter();
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
@@ -714,7 +720,7 @@ export function FloatingSearchPanel({
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [isTransitRouting, setIsTransitRouting] = useState(false);
-  const [recentsExpanded, setRecentsExpanded] = useState(false);
+  const [recentsExpanded, setRecentsExpanded] = useState(embedded);
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
   const [showParkAndRide, setShowParkAndRide] = useState(false);
   const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
@@ -1987,6 +1993,8 @@ export function FloatingSearchPanel({
 
   const textColor = isDark ? '#F2F2F7' : colors.text;
   const subColor = isDark ? '#8E8E93' : colors.textSecondary;
+  /** Fill behind the search field, sitting on top of the panel's glass. */
+  const searchFieldBg = isDark ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.12)';
 
   // ── Render results list (search or history) ──
   const showResults =
@@ -2580,6 +2588,101 @@ export function FloatingSearchPanel({
     );
   }
 
+  // The sidebar lays its shortcuts out as a fixed row (like Apple Maps on
+  // macOS) instead of a clipped horizontal scroller. Wider windows get one
+  // more pinned place.
+  const favoriteSlots = largeFloatingPanelWidth(windowWidth) >= 420 ? 5 : 4;
+  const visiblePinnedEntries = embedded
+    ? pinnedEntries.slice(0, Math.max(0, favoriteSlots - 3))
+    : pinnedEntries;
+
+  /** Sidebar shows a short recents list; phones show one row until expanded. */
+  const visibleRecents = recentsExpanded
+    ? embedded
+      ? history.slice(0, 5)
+      : history
+    : history.slice(0, 1);
+
+  const favoriteChips = (
+    <>
+      <FavChip
+        icon="home"
+        label="Home"
+        iconBg="#30C7E0"
+        subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
+        onPress={handleHomeTap}
+        onLongPress={handleHomeHold}
+        unset={!homeEntry}
+        isDark={isDark}
+        embedded={embedded}
+      />
+      <FavChip
+        icon="briefcase"
+        label="Work"
+        iconBg="#A47455"
+        subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
+        onPress={handleWorkTap}
+        onLongPress={handleWorkHold}
+        unset={!workEntry}
+        isDark={isDark}
+        embedded={embedded}
+      />
+      {visiblePinnedEntries.map((fav) => (
+        <FavChip
+          key={fav.id}
+          icon="bookmark"
+          label={fav.label}
+          iconBg="#6246EA"
+          subtitle={shorten(fav.entry.text, 12)}
+          onPress={() => {
+            navigateToResult({ entry: fav.entry, rank: 0 });
+            setSelectedResult({ entry: fav.entry, rank: 0 });
+            setRouteError(null);
+            clearRoutePreview();
+            setMode('location');
+          }}
+          onLongPress={() => {
+            Alert.alert('Remove Place', `Remove "${fav.label}"?`, [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Remove',
+                style: 'destructive',
+                onPress: () => {
+                  removeFavorite(fav.id);
+                  setFavorites(getFavorites());
+                  showToast({
+                    message: `Removed "${fav.label}"`,
+                    actionLabel: 'Undo',
+                    onAction: () => {
+                      setFavorite(fav);
+                      setFavorites(getFavorites());
+                    },
+                  });
+                },
+              },
+            ]);
+          }}
+          isDark={isDark}
+          embedded={embedded}
+        />
+      ))}
+      <FavChip
+        icon="add"
+        label="Add Place"
+        iconBg="#8E8E93"
+        onPress={() => {
+          setMode('setting-pin');
+          clearSearch();
+          setResults([]);
+          Keyboard.dismiss();
+          setTimeout(() => inputRef.current?.focus(), 150);
+        }}
+        isDark={isDark}
+        embedded={embedded}
+      />
+    </>
+  );
+
   return (
     <>
       {!embedded && showSearchThisArea && (
@@ -2648,37 +2751,41 @@ export function FloatingSearchPanel({
 
           {/* ── Search row ── */}
           <View style={styles.searchRow}>
-            <Ionicons name="search" size={18} color={subColor} style={styles.searchIcon} />
-            <TextInput
-              ref={inputRef}
-              style={[styles.searchInput, { color: textColor }]}
-              value={query}
-              onChangeText={handleQueryChange}
-              onFocus={handleFocusExpanding}
-              onSubmitEditing={handleSearchSubmit}
-              placeholder={placeholder}
-              placeholderTextColor={subColor}
-              autoCorrect={false}
-              returnKeyType="search"
-              clearButtonMode="while-editing"
-            />
-            {isAvailable && (mode === 'idle' || mode === 'searching') && (
-              <TouchableOpacity
-                onPress={handleMicPress}
-                hitSlop={10}
-                style={[styles.micBtn, isListening && styles.micBtnActive]}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
-                accessibilityHint="Tap to search by voice"
-              >
-                <Ionicons
-                  name={isListening ? 'mic' : 'mic-outline'}
-                  size={18}
-                  color={isListening ? colors.error : subColor}
-                />
-              </TouchableOpacity>
-            )}
+            {/* Filled field, like Apple Maps: the glass panel is the surface,
+                the field is the control. */}
+            <View style={[styles.searchField, { backgroundColor: searchFieldBg }]}>
+              <Ionicons name="search" size={18} color={subColor} style={styles.searchIcon} />
+              <TextInput
+                ref={inputRef}
+                style={[styles.searchInput, { color: textColor }]}
+                value={query}
+                onChangeText={handleQueryChange}
+                onFocus={handleFocusExpanding}
+                onSubmitEditing={handleSearchSubmit}
+                placeholder={placeholder}
+                placeholderTextColor={subColor}
+                autoCorrect={false}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+              />
+              {isAvailable && (mode === 'idle' || mode === 'searching') && (
+                <TouchableOpacity
+                  onPress={handleMicPress}
+                  hitSlop={10}
+                  style={[styles.micBtn, isListening && styles.micBtnActive]}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
+                  accessibilityHint="Tap to search by voice"
+                >
+                  <Ionicons
+                    name={isListening ? 'mic' : 'mic-outline'}
+                    size={18}
+                    color={isListening ? colors.error : subColor}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
             {mode !== 'idle' ? (
               <TouchableOpacity onPress={dismissSearch} hitSlop={10} style={styles.cancelBtn}>
                 <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
@@ -2711,7 +2818,7 @@ export function FloatingSearchPanel({
           <>
             {/* ── Results / history ── */}
             {(showResults || showHistory) && (
-              <Animated.View style={fadeStyle}>
+              <Animated.View style={embedded ? [fadeStyle, st.resultsFill] : fadeStyle}>
                 <View style={st.divider} />
                 <FlatList
                   data={
@@ -2752,7 +2859,7 @@ export function FloatingSearchPanel({
                       />
                     ) : null
                   }
-                  style={st.resultList}
+                  style={embedded ? st.resultListEmbedded : st.resultList}
                   ListHeaderComponent={
                     showHistory ? (
                       <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
@@ -2822,91 +2929,36 @@ export function FloatingSearchPanel({
 
             {/* ── Idle: Favorites + Recents ── */}
             {mode === 'idle' && (
-              <>
+              // The sidebar body scrolls; the search field above stays pinned.
+              // Without this, a long Recents list ran past the window and the
+              // empty tail of the panel read as a layout bug.
+              <ScrollView
+                style={embedded ? st.sidebarScroll : undefined}
+                contentContainerStyle={st.sidebarScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
                 {/* Favorites row */}
                 <View style={st.divider} />
-                <View style={st.sectionHeaderRow}>
+                <TouchableOpacity
+                  style={st.sectionHeaderRow}
+                  onPress={() => router.push('/(tabs)/places')}
+                  activeOpacity={0.7}
+                >
                   <Text style={[st.sectionTitle, { color: textColor }]}>Places</Text>
                   <Ionicons name="chevron-forward" size={15} color={subColor} />
-                </View>
+                </TouchableOpacity>
 
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.favRow}
-                >
-                  <FavChip
-                    icon="home"
-                    label="Home"
-                    iconBg="#30C7E0"
-                    subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
-                    onPress={handleHomeTap}
-                    onLongPress={handleHomeHold}
-                    unset={!homeEntry}
-                    isDark={isDark}
-                  />
-                  <FavChip
-                    icon="briefcase"
-                    label="Work"
-                    iconBg="#A47455"
-                    subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
-                    onPress={handleWorkTap}
-                    onLongPress={handleWorkHold}
-                    unset={!workEntry}
-                    isDark={isDark}
-                  />
-                  {pinnedEntries.map((fav) => (
-                    <FavChip
-                      key={fav.id}
-                      icon="bookmark"
-                      label={fav.label}
-                      iconBg="#6246EA"
-                      subtitle={shorten(fav.entry.text, 12)}
-                      onPress={() => {
-                        navigateToResult({ entry: fav.entry, rank: 0 });
-                        setSelectedResult({ entry: fav.entry, rank: 0 });
-                        setRouteError(null);
-                        clearRoutePreview();
-                        setMode('location');
-                      }}
-                      onLongPress={() => {
-                        Alert.alert('Remove Place', `Remove "${fav.label}"?`, [
-                          { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Remove',
-                            style: 'destructive',
-                            onPress: () => {
-                              removeFavorite(fav.id);
-                              setFavorites(getFavorites());
-                              showToast({
-                                message: `Removed "${fav.label}"`,
-                                actionLabel: 'Undo',
-                                onAction: () => {
-                                  setFavorite(fav);
-                                  setFavorites(getFavorites());
-                                },
-                              });
-                            },
-                          },
-                        ]);
-                      }}
-                      isDark={isDark}
-                    />
-                  ))}
-                  <FavChip
-                    icon="add"
-                    label="Add Place"
-                    iconBg="#8E8E93"
-                    onPress={() => {
-                      setMode('setting-pin');
-                      clearSearch();
-                      setResults([]);
-                      Keyboard.dismiss();
-                      setTimeout(() => inputRef.current?.focus(), 150);
-                    }}
-                    isDark={isDark}
-                  />
-                </ScrollView>
+                {embedded ? (
+                  <View style={styles.favRowEmbedded}>{favoriteChips}</View>
+                ) : (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.favRow}
+                  >
+                    {favoriteChips}
+                  </ScrollView>
+                )}
 
                 {/* ── Saved Places link (embedded/sidebar mode only) ── */}
                 {embedded && (
@@ -2928,7 +2980,8 @@ export function FloatingSearchPanel({
                   </TouchableOpacity>
                 )}
 
-                {/* Recents — collapsed to 1 item by default */}
+                {/* Recents — expanded by default in the sidebar, collapsed to
+                    one row on phones. */}
                 {history.length > 0 && (
                   <>
                     <View style={st.divider} />
@@ -2944,7 +2997,7 @@ export function FloatingSearchPanel({
                         color={subColor}
                       />
                     </TouchableOpacity>
-                    {(recentsExpanded ? history : history.slice(0, 1)).map((item) => (
+                    {visibleRecents.map((item) => (
                       <TouchableOpacity
                         key={item.entry.id}
                         style={st.recentRow}
@@ -2966,7 +3019,7 @@ export function FloatingSearchPanel({
                     ))}
                   </>
                 )}
-              </>
+              </ScrollView>
             )}
 
             {/* Setting-home/work/pin header when no results yet */}
@@ -3013,6 +3066,13 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     embeddedPanel: {
       flex: 1,
     },
+    /** Scrolling body under the pinned search field in the sidebar. */
+    sidebarScroll: {
+      flex: 1,
+    },
+    sidebarScrollContent: {
+      paddingBottom: spacing.md,
+    },
     divider: {
       height: StyleSheet.hairlineWidth,
       backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)',
@@ -3024,10 +3084,12 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
       paddingBottom: 2,
+      gap: 4,
     },
     sectionTitle: {
-      ...typography.subtitle,
-      flex: 1,
+      fontSize: 17,
+      fontWeight: '600',
+      lineHeight: 22,
     },
     sectionHeader: {
       ...typography.label,
@@ -3039,6 +3101,14 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     resultList: {
       maxHeight: 300,
+    },
+    /** Sidebar results fill the panel instead of floating in a short list. */
+    resultListEmbedded: {
+      flex: 1,
+    },
+    resultsFill: {
+      flex: 1,
+      minHeight: 0,
     },
     resultRow: {
       flexDirection: 'row',
@@ -3330,8 +3400,18 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+  },
+  searchField: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 40,
+    borderRadius: 12,
+    borderCurve: 'continuous',
+    paddingLeft: spacing.sm + 2,
+    paddingRight: spacing.xs,
   },
   searchIcon: {
     marginRight: 6,
@@ -3340,18 +3420,17 @@ const styles = StyleSheet.create({
     ...typography.body,
     flex: 1,
     fontSize: 17,
-    paddingVertical: 4,
+    paddingVertical: 0,
   },
   cancelBtn: {
     paddingLeft: spacing.sm,
   },
   micBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: spacing.xs,
   },
   micBtnActive: {
     backgroundColor: 'rgba(239,68,68,0.12)',
@@ -3396,10 +3475,23 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     gap: 6,
   },
+  /** Sidebar shortcuts share the row five-across instead of clipping. */
+  favRowEmbedded: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm + 2,
+    gap: spacing.xs,
+  },
   favChip: {
     alignItems: 'center',
     width: 72,
     marginHorizontal: 4,
+  },
+  favChipEmbedded: {
+    flex: 1,
+    alignItems: 'center',
+    maxWidth: 84,
   },
   favIconCircle: {
     width: 56,
@@ -3424,12 +3516,12 @@ const styles = StyleSheet.create({
   },
   favLabel: {
     ...typography.caption,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '500',
     textAlign: 'center',
   },
   favSub: {
-    fontSize: 10,
+    fontSize: 11,
     textAlign: 'center',
     marginTop: 1,
   },
