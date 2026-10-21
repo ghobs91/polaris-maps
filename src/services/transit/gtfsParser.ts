@@ -10,7 +10,19 @@
  */
 
 import type { TransitMode, TransitRouteLine, TransitRouteLineStop } from '../../models/transit';
-import { inflateRaw } from 'pako';
+import { Inflate } from 'pako';
+
+/** Yield to the JS thread so React Native can process UI events. */
+function yieldToUI(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Characters parsed per synchronous CSV slice (~128 KB). */
+const CSV_SLICE_CHARS = 128 * 1024;
+/** Compressed bytes pushed to pako per synchronous inflate slice. */
+const INFLATE_SLICE_BYTES = 32 * 1024;
+/** Bytes decoded to UTF-8 per synchronous decode slice. */
+const DECODE_SLICE_BYTES = 1 << 20;
 
 // ── GTFS parsed types ───────────────────────────────────────────────
 
@@ -134,31 +146,52 @@ export function parseCsv(text: string): Record<string, string>[] {
 
 /**
  * Chunked, cooperative CSV parser. Large GTFS files (shapes.txt especially)
- * can be tens of MB; parsing them in one synchronous pass freezes the JS
- * thread and makes the map unresponsive. This yields to the UI every
- * `chunkLines` rows while producing the same result as `parseCsv`.
+ * can be tens of MB; splitting and parsing them in one synchronous pass
+ * freezes the JS thread and makes the map unresponsive. This walks the text
+ * in bounded slices and yields to the UI every `chunkLines` rows while
+ * producing the same result as `parseCsv`.
  */
 export async function parseCsvAsync(
   text: string,
   chunkLines = 2000,
 ): Promise<Record<string, string>[]> {
-  const lines = text.split('\n').filter((l) => l.trim());
-  if (lines.length < 2) return [];
-
-  const headers = parseCsvLine(lines[0]);
   const rows: Record<string, string>[] = [];
+  let headers: string[] | null = null;
+  let pos = 0;
+  let rowsSinceYield = 0;
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCsvLine(lines[i]);
-    if (values.length >= headers.length) {
-      const row: Record<string, string> = {};
-      for (let j = 0; j < headers.length; j++) {
-        row[headers[j]] = values[j];
-      }
-      rows.push(row);
+  while (pos < text.length) {
+    // Cut on a newline so a record is never split across slices.
+    let end = Math.min(pos + CSV_SLICE_CHARS, text.length);
+    if (end < text.length) {
+      const newline = text.indexOf('\n', end);
+      end = newline === -1 ? text.length : newline + 1;
     }
-    if (i % chunkLines === 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const block = text.slice(pos, end);
+    pos = end;
+
+    for (const rawLine of block.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      if (headers === null) {
+        headers = parseCsvLine(line);
+        continue;
+      }
+
+      const values = parseCsvLine(line);
+      if (values.length >= headers.length) {
+        const row: Record<string, string> = {};
+        for (let j = 0; j < headers.length; j++) {
+          row[headers[j]] = values[j];
+        }
+        rows.push(row);
+      }
+
+      if (++rowsSinceYield >= chunkLines) {
+        rowsSinceYield = 0;
+        await yieldToUI();
+      }
     }
   }
 
@@ -191,6 +224,50 @@ export function parseCsvLine(line: string): string[] {
 }
 
 // ── Zip extraction (minimal, for GTFS) ──────────────────────────────
+
+/**
+ * Inflate a raw DEFLATE payload in bounded slices, yielding to the UI
+ * between them.  `pako.inflateRaw` does the whole file in one synchronous
+ * pass, which locks the JS thread for seconds on large feeds under Hermes.
+ */
+async function inflateRawCooperative(data: Uint8Array): Promise<Uint8Array> {
+  const inflate = new Inflate({ raw: true });
+  const parts: Uint8Array[] = [];
+  inflate.onData = (chunk: Uint8Array) => {
+    parts.push(chunk);
+  };
+
+  for (let offset = 0; offset < data.length; offset += INFLATE_SLICE_BYTES) {
+    const end = Math.min(offset + INFLATE_SLICE_BYTES, data.length);
+    inflate.push(data.subarray(offset, end), end === data.length);
+    if (inflate.err) {
+      throw new Error(`inflate error ${inflate.err}`);
+    }
+    if (end < data.length) await yieldToUI();
+  }
+
+  let total = 0;
+  for (const part of parts) total += part.length;
+  const merged = new Uint8Array(total);
+  let pos = 0;
+  for (const part of parts) {
+    merged.set(part, pos);
+    pos += part.length;
+  }
+  return merged;
+}
+
+/** Decode UTF-8 in bounded slices so big shapes.txt files don't block the UI. */
+async function decodeUtf8Cooperative(bytes: Uint8Array): Promise<string> {
+  const decoder = new TextDecoder();
+  let text = '';
+  for (let offset = 0; offset < bytes.length; offset += DECODE_SLICE_BYTES) {
+    const end = Math.min(offset + DECODE_SLICE_BYTES, bytes.length);
+    text += decoder.decode(bytes.subarray(offset, end), { stream: end < bytes.length });
+    if (end < bytes.length) await yieldToUI();
+  }
+  return text;
+}
 
 /**
  * Extract text files from a ZIP ArrayBuffer using the ZIP local file
@@ -226,7 +303,7 @@ export async function extractZipTexts(
 
       if (compressionMethod === 0) {
         // STORE — no compression
-        result.set(baseName, decoder.decode(rawData));
+        result.set(baseName, await decodeUtf8Cooperative(rawData));
       } else if (compressionMethod === 8) {
         // DEFLATE — try DecompressionStream, fall back to pako
         let decompressed: string | null = null;
@@ -252,15 +329,16 @@ export async function extractZipTexts(
             merged.set(c, pos);
             pos += c.length;
           }
-          decompressed = decoder.decode(merged);
+          decompressed = await decodeUtf8Cooperative(merged);
         } catch {
           // DecompressionStream not available — try pako
         }
 
-        // Fall back to pako (pure-JS inflate, works everywhere)
+        // Fall back to pako (pure-JS inflate, works everywhere).
+        // Chunked so the UI thread keeps breathing on large feeds.
         if (decompressed === null) {
           try {
-            decompressed = decoder.decode(inflateRaw(rawData));
+            decompressed = await decodeUtf8Cooperative(await inflateRawCooperative(rawData));
           } catch {
             // Both methods failed — skip this file
           }
@@ -269,7 +347,7 @@ export async function extractZipTexts(
         if (decompressed !== null) {
           result.set(baseName, decompressed);
           // Yield to UI thread after each file, especially large ones (CTAs shapes.txt = 28MB)
-          await new Promise<void>((r) => setTimeout(r, 0));
+          await yieldToUI();
         }
       }
     }
@@ -347,29 +425,42 @@ export async function parseGtfsFeed(
   // This excludes bus stops (location_type=0) and platform-level entries.
   // Agencies that don't use location_type will get no stops — acceptable trade-off
   // since we skip the 100MB+ stop_times.txt for performance.
-  const stops: GtfsStop[] = (await parseCsvAsync(files.get('stops.txt') ?? ''))
-    .map((s) => ({
-      stop_id: s.stop_id,
-      stop_name: s.stop_name,
-      stop_lat: parseFloat(s.stop_lat),
-      stop_lon: parseFloat(s.stop_lon),
-      stop_code: s.stop_code,
-      parent_station: s.parent_station,
-      location_type: s.location_type ? parseInt(s.location_type, 10) || 0 : undefined,
-    }))
-    .filter((s) => s.location_type === 1);
+  const stopRows = await parseCsvAsync(files.get('stops.txt') ?? '');
+  const stops: GtfsStop[] = [];
+  for (let i = 0; i < stopRows.length; i++) {
+    const s = stopRows[i];
+    const locationType = s.location_type ? parseInt(s.location_type, 10) || 0 : undefined;
+    if (locationType === 1) {
+      stops.push({
+        stop_id: s.stop_id,
+        stop_name: s.stop_name,
+        stop_lat: parseFloat(s.stop_lat),
+        stop_lon: parseFloat(s.stop_lon),
+        stop_code: s.stop_code,
+        parent_station: s.parent_station,
+        location_type: locationType,
+      });
+    }
+    if (i > 0 && i % 5000 === 0) await yieldToUI();
+  }
 
   // Parse trips — only keep trips for routes we care about
-  const allTrips: GtfsTrip[] = (await parseCsvAsync(files.get('trips.txt') ?? ''))
-    .filter((t) => routeIds.has(t.route_id))
-    .map((t) => ({
-      trip_id: t.trip_id,
-      route_id: t.route_id,
-      service_id: t.service_id,
-      trip_headsign: t.trip_headsign,
-      direction_id: t.direction_id ? parseInt(t.direction_id, 10) : undefined,
-      shape_id: t.shape_id,
-    }));
+  const tripRows = await parseCsvAsync(files.get('trips.txt') ?? '');
+  const allTrips: GtfsTrip[] = [];
+  for (let i = 0; i < tripRows.length; i++) {
+    const t = tripRows[i];
+    if (routeIds.has(t.route_id)) {
+      allTrips.push({
+        trip_id: t.trip_id,
+        route_id: t.route_id,
+        service_id: t.service_id,
+        trip_headsign: t.trip_headsign,
+        direction_id: t.direction_id ? parseInt(t.direction_id, 10) : undefined,
+        shape_id: t.shape_id,
+      });
+    }
+    if (i > 0 && i % 5000 === 0) await yieldToUI();
+  }
 
   const tripIds = new Set(allTrips.map((t) => t.trip_id));
 
@@ -377,25 +468,35 @@ export async function parseGtfsFeed(
   const stopTimesRaw = files.get('stop_times.txt');
   let stopTimes: GtfsStopTime[] = [];
   if (stopTimesRaw) {
-    stopTimes = (await parseCsvAsync(stopTimesRaw))
-      .filter((st) => tripIds.has(st.trip_id))
-      .map((st) => ({
-        trip_id: st.trip_id,
-        arrival_time: st.arrival_time,
-        departure_time: st.departure_time,
-        stop_id: st.stop_id,
-        stop_sequence: parseInt(st.stop_sequence, 10),
-      }));
+    const stopTimeRows = await parseCsvAsync(stopTimesRaw);
+    for (let i = 0; i < stopTimeRows.length; i++) {
+      const st = stopTimeRows[i];
+      if (tripIds.has(st.trip_id)) {
+        stopTimes.push({
+          trip_id: st.trip_id,
+          arrival_time: st.arrival_time,
+          departure_time: st.departure_time,
+          stop_id: st.stop_id,
+          stop_sequence: parseInt(st.stop_sequence, 10),
+        });
+      }
+      if (i > 0 && i % 5000 === 0) await yieldToUI();
+    }
   }
 
   // Parse shapes
   const shapeIds = new Set(allTrips.map((t) => t.shape_id).filter(Boolean));
-  const shapePointRows = (await parseCsvAsync(files.get('shapes.txt') ?? '')).filter((sp) =>
-    shapeIds.has(sp.shape_id),
-  );
+  const shapeRows = await parseCsvAsync(files.get('shapes.txt') ?? '');
+  const shapePointRows: Record<string, string>[] = [];
+  for (let i = 0; i < shapeRows.length; i++) {
+    const sp = shapeRows[i];
+    if (shapeIds.has(sp.shape_id)) shapePointRows.push(sp);
+    if (i > 0 && i % 5000 === 0) await yieldToUI();
+  }
 
   const shapesRaw = new Map<string, { lat: number; lon: number; seq: number }[]>();
-  for (const sp of shapePointRows) {
+  for (let i = 0; i < shapePointRows.length; i++) {
+    const sp = shapePointRows[i];
     const arr = shapesRaw.get(sp.shape_id) ?? [];
     arr.push({
       lat: parseFloat(sp.shape_pt_lat),
@@ -403,15 +504,18 @@ export async function parseGtfsFeed(
       seq: parseInt(sp.shape_pt_sequence, 10),
     });
     shapesRaw.set(sp.shape_id, arr);
+    if (i > 0 && i % 5000 === 0) await yieldToUI();
   }
 
   const shapes = new Map<string, [number, number][]>();
+  let shapeCount = 0;
   for (const [id, pts] of shapesRaw) {
     pts.sort((a, b) => a.seq - b.seq);
     shapes.set(
       id,
       pts.map((p) => [p.lon, p.lat]),
     );
+    if (++shapeCount % 25 === 0) await yieldToUI();
   }
 
   // Build indexes
@@ -462,11 +566,11 @@ export async function convertFeedToLines(
   feed: GtfsFeedData,
   config: GtfsFetcherConfig,
 ): Promise<TransitRouteLine[]> {
-  const yieldToUI = () => new Promise<void>((r) => setTimeout(r, 0));
   const modeMap = config.modeMap;
   const filterByType = config.filterByRouteType !== false; // default true
+  const allowedTypes = new Set(config.routeTypeFilter);
   const filteredRoutes = filterByType
-    ? feed.routes.filter((r) => new Set(config.routeTypeFilter).has(r.route_type))
+    ? feed.routes.filter((r) => allowedTypes.has(r.route_type))
     : feed.routes;
   if (filteredRoutes.length === 0) {
     console.warn(
@@ -476,13 +580,16 @@ export async function convertFeedToLines(
   }
 
   // Build route_id → shape_id via the longest trip
+  const filteredRouteIds = new Set(filteredRoutes.map((r) => r.route_id));
   const routeToShapes = new Map<string, string[]>();
-  for (const trip of feed.trips) {
-    if (!trip.shape_id) continue;
-    if (!filteredRoutes.some((r) => r.route_id === trip.route_id)) continue;
-    const arr = routeToShapes.get(trip.route_id) ?? [];
-    if (!arr.includes(trip.shape_id)) arr.push(trip.shape_id);
-    routeToShapes.set(trip.route_id, arr);
+  for (let i = 0; i < feed.trips.length; i++) {
+    const trip = feed.trips[i];
+    if (trip.shape_id && filteredRouteIds.has(trip.route_id)) {
+      const arr = routeToShapes.get(trip.route_id) ?? [];
+      if (!arr.includes(trip.shape_id)) arr.push(trip.shape_id);
+      routeToShapes.set(trip.route_id, arr);
+    }
+    if (i > 0 && i % 5000 === 0) await yieldToUI();
   }
 
   const lines: TransitRouteLine[] = [];

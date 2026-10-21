@@ -1,5 +1,6 @@
 import {
   parseCsv,
+  parseCsvAsync,
   parseCsvLine,
   parseGtfsColor,
   routeTypeToMode,
@@ -63,6 +64,28 @@ describe('parseCsvLine', () => {
 
   it('trims whitespace', () => {
     expect(parseCsvLine(' a , b , c ')).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('parseCsvAsync', () => {
+  it('returns the same rows as parseCsv', async () => {
+    const text = 'a,b\n1,2\n3,4\n';
+    const rows = await parseCsvAsync(text);
+    expect(rows).toEqual(parseCsv(text));
+  });
+
+  it('parses input larger than one slice without losing rows', async () => {
+    const header = 'id,name';
+    const lines = Array.from({ length: 20_000 }, (_, i) => `${i},"Station, ${i}"`);
+    const rows = await parseCsvAsync(`${header}\n${lines.join('\n')}\n`);
+
+    expect(rows).toHaveLength(20_000);
+    expect(rows[0]).toEqual({ id: '0', name: 'Station, 0' });
+    expect(rows[19_999]).toEqual({ id: '19999', name: 'Station, 19999' });
+  });
+
+  it('returns empty array for header-only input', async () => {
+    expect(await parseCsvAsync('a,b,c')).toEqual([]);
   });
 });
 
@@ -409,6 +432,26 @@ describe('extractZipTexts', () => {
 
     const result = await extractZipTexts(zipBuffer, ['routes.txt']);
     expect(result.get('routes.txt')).toBe(routesContent);
+  });
+
+  it('extracts large payloads that span multiple inflate slices', async () => {
+    const header = 'shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n';
+    const rows = Array.from(
+      { length: 60_000 },
+      (_, i) => `S1,${(38 + i * 0.00001).toFixed(6)},${(-77 + i * 0.00001).toFixed(6)},${i + 1}`,
+    ).join('\n');
+    const content = `${header}${rows}\n`;
+
+    // Force the pure-JS pako path (React Native has no DecompressionStream).
+    const original = (globalThis as any).DecompressionStream;
+    (globalThis as any).DecompressionStream = undefined;
+    try {
+      const entry = buildZipEntry('shapes.txt', content, true);
+      const result = await extractZipTexts(entry.buffer, ['shapes.txt']);
+      expect(result.get('shapes.txt')).toBe(content);
+    } finally {
+      (globalThis as any).DecompressionStream = original;
+    }
   });
 
   it('extracts multiple files from a ZIP', async () => {
