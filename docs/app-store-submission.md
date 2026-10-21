@@ -13,7 +13,7 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 | Item                                    | Evidence                                                              |
 | --------------------------------------- | --------------------------------------------------------------------- |
-| Release quality gate (`pnpm check`)     | Jest config fixed; 0 lint warnings; 1,784 tests pass                  |
+| Release quality gate (`pnpm check`)     | Jest config fixed; 0 lint warnings; 2,045 tests pass                  |
 | `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added              |
 | Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false` |
 | Privacy policy + terms + landing page   | Live: https://app.polarismaps.app/privacy, `/terms`, `/`              |
@@ -137,7 +137,6 @@ Source and hosting are ready; only the Apple-side steps remain.
 
 ### 7. Housekeeping
 
-The working tree still has pre-existing edits to reconcile/commit:
-`ios/PolarisMaps.xcodeproj/project.pbxproj`, `ios/PolarisMaps/Info.plist`,
-`src/services/atproto/atprotoAuthService.ts`, `src/polyfills/`, `index.js`, and a
-staged `app/poi/[id].tsx`.
+The working tree has two uncommitted files: `ios/PolarisMaps.xcodeproj/project.pbxproj`
+and `ios/PolarisMaps/Info.plist` (build-number/version edits). Reconcile or
+commit them before the release build.
