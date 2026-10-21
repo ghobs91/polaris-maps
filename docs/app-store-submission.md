@@ -28,15 +28,19 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 ### Remaining
 
-| #   | Item                                                  | Owner                        | Status         |
-| --- | ----------------------------------------------------- | ---------------------------- | -------------- |
-| 1   | CarPlay screenshot + card 8                           | you → me compose             | In progress    |
-| 2   | iPad 13" screenshots (required)                       | you → me compose             | 1 card done    |
-| 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted        |
-| 4   | Legal review of policy + terms                        | you                          | Review pending |
-| 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Not started    |
-| 6   | Run `fastlane ios release` → submit                   | you                          | Lane unblocked |
-| 7   | Housekeeping: commit working tree                     | you                          | Not started    |
+| #   | Item                                                  | Owner                        | Status                               |
+| --- | ----------------------------------------------------- | ---------------------------- | ------------------------------------ |
+| 1   | CarPlay screenshot + card 8                           | you → me compose             | Paused (UI work)                     |
+| 2   | iPad 13" screenshots (required)                       | you → me compose             | Paused (UI work)                     |
+| 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted                              |
+| 4   | Legal review of policy + terms                        | you                          | Review pending                       |
+| 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Entitlement applied; profile pending |
+| 6   | Run `fastlane ios release` → submit                   | you                          | Lane unblocked                       |
+| 7   | Housekeeping: commit working tree                     | you                          | Not started                          |
+
+> Screenshots are **paused** while iPad/macOS layout improvements land in a
+> separate worktree. Re-capture iPhone + iPad and re-render the cards after that
+> work merges; the existing iPad card reflects the old layout.
 
 ---
 
