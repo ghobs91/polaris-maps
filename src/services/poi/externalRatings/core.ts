@@ -267,17 +267,44 @@ export function validateExternalRating(
 }
 
 // ---------------------------------------------------------------------------
+// User agent
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixed mobile Safari user agent for the external-ratings surface.
+ *
+ * The collectors parse the providers' mobile pages. On iOS the platform WebView
+ * already presents mobile Safari, but an iPad app running on macOS gets
+ * WebKit's desktop Macintosh UA — and TripAdvisor answers that with a DataDome
+ * 403 instead of results. Pinning one real mobile Safari UA keeps both
+ * platforms on the same provider markup.
+ *
+ * This is the only browser-facing override: TLS/WebGL/canvas fingerprints,
+ * `navigator.webdriver`, and permission state are untouched. Bump the OS and
+ * Safari tokens when the providers start rejecting this UA.
+ */
+export const EXTERNAL_RATINGS_USER_AGENT =
+  'Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 ' +
+  '(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
+
+// ---------------------------------------------------------------------------
 // Fetch helper
 // ---------------------------------------------------------------------------
 
-/** Fetch HTML with an abort timeout, capped at 500 KB of parse work. */
+/**
+ * Fetch HTML with the external-ratings UA, an abort timeout, and a 500 KB cap
+ * on parse work.
+ */
 export async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'text/html' },
+      headers: {
+        Accept: 'text/html',
+        'User-Agent': EXTERNAL_RATINGS_USER_AGENT,
+      },
     });
     if (!res.ok) return null;
     const contentType = res.headers?.get?.('content-type') ?? '';

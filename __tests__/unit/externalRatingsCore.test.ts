@@ -1,6 +1,7 @@
 import {
   buildCollectorScript,
   clearExternalRatingCache,
+  EXTERNAL_RATINGS_USER_AGENT,
   fetchDiscoveryHtml,
 } from '../../src/services/poi/externalRatings/core';
 import { isAllowedExternalRatingUrl } from '../../src/services/poi/externalRatings';
@@ -83,6 +84,15 @@ describe('buildCollectorScript', () => {
   });
 });
 
+describe('EXTERNAL_RATINGS_USER_AGENT', () => {
+  it('is a real mobile Safari UA so providers serve mobile markup on every platform', () => {
+    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('iPad');
+    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Mobile/');
+    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Safari/');
+    expect(EXTERNAL_RATINGS_USER_AGENT).not.toContain('Macintosh');
+  });
+});
+
 describe('fetchDiscoveryHtml', () => {
   beforeEach(() => clearExternalRatingCache());
 
@@ -107,6 +117,9 @@ describe('fetchDiscoveryHtml', () => {
     expect(a).toBe('<html></html>');
     expect(b).toBe(a);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(init?.headers).toMatchObject({ 'User-Agent': EXTERNAL_RATINGS_USER_AGENT });
   });
 
   it('serves a cached result and refetches after the cache is cleared', async () => {

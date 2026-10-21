@@ -9,7 +9,10 @@ import {
   type ExternalRatingWebViewStage,
 } from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
-import { isAllowedExternalRatingUrl } from '../../services/poi/externalRatings';
+import {
+  EXTERNAL_RATINGS_USER_AGENT,
+  isAllowedExternalRatingUrl,
+} from '../../services/poi/externalRatings';
 import {
   combineExternalRatings,
   type CombinedRating,
@@ -37,9 +40,11 @@ import { GEOLOCATION_GUARD_JS } from '../../constants/webViewScripts';
  * displayed, and nothing is persisted.
  *
  * Bounded policy: only one hidden WebView is mounted at a time; the WebView uses
- * the native user agent with a persistent (non-incognito) cookie store. The app
- * behaves like a single user and gives up silently when challenged — no CAPTCHA
- * solving, proxy/IP rotation, fingerprint spoofing, or auth-wall bypass.
+ * the app's fixed mobile Safari user agent with a persistent (non-incognito)
+ * cookie store so providers serve the mobile markup on every platform (macOS
+ * WebKit otherwise reports a desktop UA). The app behaves like a single user and
+ * gives up silently when challenged — no CAPTCHA solving, proxy/IP rotation,
+ * fingerprint spoofing, or auth-wall bypass.
  */
 
 const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
@@ -146,6 +151,7 @@ export function ExternalRatingsSection({
           <WebView
             source={{ uri: mountedWebView.uri }}
             style={styles.hiddenWebView}
+            userAgent={EXTERNAL_RATINGS_USER_AGENT}
             injectedJavaScript={mountedWebView.injectedJavaScript}
             injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
             injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}

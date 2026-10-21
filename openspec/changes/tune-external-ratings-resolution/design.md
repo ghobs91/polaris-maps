@@ -21,8 +21,8 @@ second provider queued behind the first through the single mounted WebView.
 **Non-Goals**
 
 - Changing how a listing's rating is parsed, or the identity rules themselves.
-- Adding a second concurrent WebView, a proxy, a UA/fingerprint override, or any CAPTCHA
-  handling.
+- Adding a second concurrent WebView, a proxy, a non-mobile UA/fingerprint override, or any
+  CAPTCHA handling.
 - Persisting ratings, listing URLs, or misses beyond the existing session-scoped memory.
 
 ## Decisions
