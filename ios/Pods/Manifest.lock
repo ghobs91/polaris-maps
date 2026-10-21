@@ -3033,7 +3033,7 @@ SPEC CHECKSUMS:
   ExpoLinking: 5a796f9284535c0349537a844dd40680229b7fcb
   ExpoLocation: 187949911b868f72e34a8a6f8f487207ba86388a
   ExpoLogBox: 8a3cfa2897e088083cd49fc1ff7fdb2de4385547
-  ExpoModulesCore: b0aee6af9a6707b891d46990273692aa9dd58025
+  ExpoModulesCore: 4f29525db4519be1a2039833d03eeb836c872b14
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: b21b8f233b5fd71ca74327217601fa4ead9ddaaf
   ExpoModulesWorkletsAdapter: 9becfcd827e56eef7b72ac74cc7020154a4a944e
@@ -3050,7 +3050,7 @@ SPEC CHECKSUMS:
   ExpoWebBrowser: 9b98d939d5f1c5dd8f523f0a0683056fb1204434
   EXUpdatesInterface: 92d2aa5194b6fb93ca8ab749db75665cb28b2e60
   FBLazyVector: b3e7ad108f0d882e30445c5527d774e3fd432f3d
-  hermes-engine: d5568580e12d7d1ba058738ef065375bcab47112
+  hermes-engine: ba64e96b236b2e5c637128645d8e59ad256fbb9a
   JOSESwift: 7ff178bb9173ff42c6e990929a9f2fa702a34f69
   maplibre-react-native: 37d86b5b7b04dedaceebc577644e67acd7b5f437
   RCTDeprecation: 2a74a2c57675e64419bd89078efde81f7c1de90b
