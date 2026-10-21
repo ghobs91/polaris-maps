@@ -27,6 +27,50 @@ function tflModeToTransitMode(modeName: string): TransitMode {
 
 const RAIL_MODES = ['tube', 'dlr', 'overground', 'elizabeth-line', 'tram'];
 
+/** `[lon, lat]` pair as returned by TfL (GeoJSON order). */
+function isLngLat(value: unknown): value is [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number' &&
+    Number.isFinite(value[0]) &&
+    Number.isFinite(value[1])
+  );
+}
+
+function toSegment(points: unknown): [number, number][] {
+  if (!Array.isArray(points)) return [];
+  return points.filter(isLngLat).map(([lon, lat]) => [lon, lat] as [number, number]);
+}
+
+/**
+ * Parse one TfL `lineStrings` entry.
+ *
+ * TfL serialises these as a JSON string whose shape is either
+ * `[[lon, lat], ...]` (a single polyline) or `[[[lon, lat], ...], ...]`
+ * (one polyline per branch).  Both are normalised to a list of segments
+ * so branches never get joined by a spurious straight line.
+ *
+ * Exported for testing.
+ */
+export function parseTflLineString(raw: string): [number, number][][] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return [];
+  if (isLngLat(parsed[0])) {
+    const segment = toSegment(parsed);
+    return segment.length >= 2 ? [segment] : [];
+  }
+  return parsed
+    .map(toSegment)
+    .filter((segment): segment is [number, number][] => segment.length >= 2);
+}
+
 let cachedLines: TransitRouteLine[] | null = null;
 let fetchInFlight: Promise<TransitRouteLine[]> | null = null;
 
@@ -53,36 +97,26 @@ async function fetchOneTflLine(
     fetch(`${TFL_BASE}/Line/${encodeURIComponent(line.id)}/StopPoints`, { signal }),
   ]);
 
-  let geometry: [number, number][] = [];
+  let geometry: [number, number][][] = [];
   if (routeRes.ok) {
     const routeData = (await routeRes.json()) as {
       lineStrings?: string[];
       stations?: Array<{ lat: number; lon: number }>;
     };
     if (routeData.lineStrings && routeData.lineStrings.length > 0) {
+      // Each entry is a JSON string describing one or more branch
+      // polylines.  Keep them as separate segments — concatenating them
+      // would draw a straight line between the end of one branch and the
+      // start of the next.
       for (const ls of routeData.lineStrings) {
-        try {
-          const parsed: [number, number][] = JSON.parse(ls);
-          for (const [lat, lon] of parsed) {
-            if (!isNaN(lat) && !isNaN(lon)) geometry.push([lon, lat]);
-          }
-        } catch {
-          // fallback: strip outer brackets and split manually
-          const stripped = ls.slice(1, -1);
-          const pairs = stripped.split('],[');
-          for (const pair of pairs) {
-            const cleaned = pair.replace(/^\[|\]$/g, '');
-            const [lat, lon] = cleaned.split(',').map(Number);
-            if (!isNaN(lon) && !isNaN(lat)) geometry.push([lon, lat]);
-          }
-        }
+        geometry.push(...parseTflLineString(ls));
       }
     } else if (routeData.stations && routeData.stations.length >= 2) {
-      geometry = routeData.stations.map((s) => [s.lon, s.lat] as [number, number]);
+      geometry = [routeData.stations.map((s) => [s.lon, s.lat] as [number, number])];
     }
   }
 
-  if (geometry.length < 2) return null;
+  if (geometry.length === 0) return null;
 
   const stops: TransitRouteLineStop[] = [];
   if (stopsRes.ok) {
@@ -104,7 +138,7 @@ async function fetchOneTflLine(
     operator: 'TfL',
     color: undefined,
     mode: tflModeToTransitMode(line.modeName),
-    geometry: [geometry],
+    geometry,
     stops,
   };
 }

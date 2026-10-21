@@ -1,4 +1,53 @@
-import { fetchTflLines, clearTflCache } from '../../src/services/transit/tflFetcher';
+import {
+  fetchTflLines,
+  clearTflCache,
+  parseTflLineString,
+} from '../../src/services/transit/tflFetcher';
+
+describe('parseTflLineString', () => {
+  it('keeps branch polylines as separate segments', () => {
+    const raw = JSON.stringify([
+      [
+        [-0.19, 51.4],
+        [-0.18, 51.42],
+      ],
+      [
+        [-0.14, 51.48],
+        [-0.13, 51.5],
+      ],
+    ]);
+
+    expect(parseTflLineString(raw)).toEqual([
+      [
+        [-0.19, 51.4],
+        [-0.18, 51.42],
+      ],
+      [
+        [-0.14, 51.48],
+        [-0.13, 51.5],
+      ],
+    ]);
+  });
+
+  it('parses a single flat polyline without swapping coordinates', () => {
+    const raw = JSON.stringify([
+      [-0.114888, 51.462618],
+      [-0.122644, 51.472184],
+    ]);
+
+    expect(parseTflLineString(raw)).toEqual([
+      [
+        [-0.114888, 51.462618],
+        [-0.122644, 51.472184],
+      ],
+    ]);
+  });
+
+  it('returns no segments for malformed input', () => {
+    expect(parseTflLineString('not json')).toEqual([]);
+    expect(parseTflLineString('[]')).toEqual([]);
+  });
+});
 
 describe('tflFetcher', () => {
   const mockFetch = jest.fn();
