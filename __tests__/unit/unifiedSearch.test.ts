@@ -204,6 +204,25 @@ describe('unifiedSearch', () => {
     expect(results.some((r) => r.name === '350 Fifth Avenue')).toBe(true);
   });
 
+  it('skips the network address pass for a plain name query', async () => {
+    await unifiedSearch('michaels', defaultOpts);
+
+    const networkAddressCalls = (geocodingService.searchAddress as jest.Mock).mock.calls.filter(
+      ([, , , , opts]) => !(opts as { localOnly?: boolean } | undefined)?.localOnly,
+    );
+    // Photon/Overpass/Overture cover names; Nominatim is throttled to 1 req/s.
+    expect(networkAddressCalls).toHaveLength(0);
+  });
+
+  it('runs the network address pass for address-like text', async () => {
+    await unifiedSearch('350 Fifth Avenue', defaultOpts);
+
+    const networkAddressCalls = (geocodingService.searchAddress as jest.Mock).mock.calls.filter(
+      ([, , , , opts]) => !(opts as { localOnly?: boolean } | undefined)?.localOnly,
+    );
+    expect(networkAddressCalls).toHaveLength(1);
+  });
+
   it('deduplicates results from multiple sources', async () => {
     const localPlace = makePlace({
       name: 'Starbucks',

@@ -186,4 +186,50 @@ describe('createSearchSession', () => {
       final: true,
     });
   });
+
+  it('emits a final result when the full search fails, so loading state clears', async () => {
+    const onResults = jest.fn();
+    const onError = jest.fn();
+    mockSearch.mockImplementation(async (query, opts) => {
+      if (opts?.localOnly) return [makeResult(`local:${query}`)];
+      throw new Error('photon exploded');
+    });
+
+    const session = createSearchSession({
+      getContext: () => context,
+      onResults,
+      onError,
+      debounceMs: 50,
+    });
+
+    session.search('coffee');
+    await jest.advanceTimersByTimeAsync(50);
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    // The last emitted partial is repeated as the terminal emission.
+    expect(onResults).toHaveBeenLastCalledWith([makeResult('local:coffee')], {
+      query: 'coffee',
+      source: 'full',
+      final: true,
+    });
+  });
+
+  it('emits a final empty result when the full search fails before any emission', async () => {
+    const onResults = jest.fn();
+    mockSearch.mockImplementation(async (_query, opts) => {
+      if (opts?.localOnly) return [];
+      throw new Error('local db unavailable');
+    });
+
+    const session = createSearchSession({ getContext: () => context, onResults, debounceMs: 50 });
+
+    session.search('coffee');
+    await jest.advanceTimersByTimeAsync(50);
+
+    expect(onResults).toHaveBeenLastCalledWith([], {
+      query: 'coffee',
+      source: 'full',
+      final: true,
+    });
+  });
 });

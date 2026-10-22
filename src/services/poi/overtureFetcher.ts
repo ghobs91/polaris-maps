@@ -22,11 +22,37 @@ const MAX_TILE_FEATURE_CACHE_ENTRIES = 256;
 const TILE_FETCH_TIMEOUT_MS = 8_000;
 /** Upper bound for the STAC catalog lookup that resolves the current release. */
 const STAC_FETCH_TIMEOUT_MS = 4_000;
+
+/**
+ * Hard cap on PMTiles range requests per Overture fetch.
+ *
+ * A street-level name search used to span 0.08° (~9 km) and request ~99 tiles
+ * at z14, and the user-location box added ~130 more — 200+ range requests for
+ * one keystroke. Queued against the platform's per-host connection limit, that
+ * dominated time-to-first-result on a cold start and starved Photon/Overpass.
+ * When a box needs more tiles than this, only the ones nearest its centre are
+ * fetched: the wide search radius still applies to local FTS, Photon and
+ * Overpass, while this source contributes nearby place freshness.
+ */
+const MAX_TILES_PER_FETCH = 16;
+
+/** Tiles fetched in parallel; keeps a search from saturating the connection pool. */
+const TILE_FETCH_CONCURRENCY = 6;
+
+/**
+ * Overall wall-clock budget for the tile phase of one Overture fetch (ms).
+ * Individual tiles are already bounded; this caps the *source* so a run of
+ * slow batches cannot hold the final (non-loading) search emission open.
+ */
+const TILE_FETCH_BUDGET_MS = 8_000;
+
 let pmtilesArchive: PMTiles | null = null;
 let pmtilesArchiveUrl: string | null = null;
 /** PMTiles URL resolved this session (STAC latest, override, or pinned fallback). */
 let resolvedPmtilesUrl: string | null = null;
 let resolvingPmtilesUrl: Promise<string | null> | null = null;
+/** Tile zoom resolved from the archive header, memoised per archive URL. */
+let resolvedTileZoom: number | null = null;
 const tileFeatureCache = new Map<string, Promise<OverturePlace[]>>();
 
 /** `yyyy-mm-dd.x` release tag, e.g. `2026-09-23.1`. */
@@ -81,7 +107,9 @@ async function getPmtilesArchive(): Promise<PMTiles | null> {
   if (!pmtilesArchive || pmtilesArchiveUrl !== url) {
     pmtilesArchive = new PMTiles(url);
     pmtilesArchiveUrl = url;
-    // Cached decoded tiles belong to the previous archive URL.
+    // Cached decoded tiles and the header-derived zoom belong to the previous
+    // archive URL.
+    resolvedTileZoom = null;
     tileFeatureCache.clear();
   }
   return pmtilesArchive;
@@ -130,6 +158,51 @@ function getTileCoordsForBounds(
   }
 
   return coords;
+}
+
+/** Squared tile-distance from a coordinate, used to order tiles centre-first. */
+function tileDistanceSq(
+  tile: { x: number; y: number },
+  lat: number,
+  lng: number,
+  zoom: number,
+): number {
+  const span = 360 / Math.pow(2, zoom);
+  const centerLng = (tile.x + 0.5) * span - 180;
+  const centerLat =
+    (Math.atan(Math.sinh(Math.PI * (1 - (2 * (tile.y + 0.5)) / Math.pow(2, zoom)))) * 180) /
+    Math.PI;
+  const dLng = (centerLng - lng) * Math.cos((lat * Math.PI) / 180);
+  return dLng * dLng + (centerLat - lat) * (centerLat - lat);
+}
+
+/**
+ * Pick the tiles to fetch for a box, capped at `maxTiles`.
+ *
+ * Tiles are requested at the archive's best zoom (smallest payload per tile).
+ * When the box overflows the cap, the tiles nearest its centre are kept, so a
+ * search never fans out unbounded and always covers the places closest to the
+ * user rather than an arbitrary corner of the box.
+ */
+export function selectTilesForBounds(
+  south: number,
+  west: number,
+  north: number,
+  east: number,
+  zoom: number,
+  maxTiles: number = MAX_TILES_PER_FETCH,
+): { zoom: number; tiles: Array<{ z: number; x: number; y: number }> } {
+  const tiles = getTileCoordsForBounds(south, west, north, east, zoom);
+  if (tiles.length <= maxTiles) return { zoom, tiles };
+
+  const lat = (south + north) / 2;
+  const lng = (west + east) / 2;
+  return {
+    zoom,
+    tiles: tiles
+      .sort((a, b) => tileDistanceSq(a, lat, lng, zoom) - tileDistanceSq(b, lat, lng, zoom))
+      .slice(0, maxTiles),
+  };
 }
 
 function isFeatureWithinBounds(
@@ -218,7 +291,14 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
     // PMTiles fetches have no built-in timeout; bound them so a single slow
     // tile cannot hold the whole search open.
     const tile = await withSourceTimeout(archive.getZxy(z, x, y), TILE_FETCH_TIMEOUT_MS);
-    if (!tile?.data) return [];
+    if (!tile) {
+      // Timed out (or no tile at this zoom) — do not remember this as "no
+      // places", or a transient network stall would poison the tile for the
+      // rest of the session.
+      tileFeatureCache.delete(cacheKey);
+      return [];
+    }
+    if (!tile.data) return [];
 
     const bytes = tile.data instanceof Uint8Array ? tile.data : new Uint8Array(tile.data);
     const vectorTile = new VectorTile(new Pbf(bytes));
@@ -249,6 +329,7 @@ export function resetOverturePmtilesStateForTests(): void {
   pmtilesArchiveUrl = null;
   resolvedPmtilesUrl = null;
   resolvingPmtilesUrl = null;
+  resolvedTileZoom = null;
   tileFeatureCache.clear();
 }
 
@@ -266,10 +347,12 @@ export function overtureFeatureFromVectorTileGeoJSON(
  * because features are filtered to the requested bbox after decoding.
  */
 async function resolveTileZoom(archive: PMTiles): Promise<number> {
+  if (resolvedTileZoom !== null) return resolvedTileZoom;
   try {
     const header = await withSourceTimeout(archive.getHeader(), TILE_FETCH_TIMEOUT_MS);
     if (typeof header?.maxZoom === 'number' && header.maxZoom >= 0) {
-      return Math.min(TILE_ZOOM, header.maxZoom);
+      resolvedTileZoom = Math.min(TILE_ZOOM, header.maxZoom);
+      return resolvedTileZoom;
     }
   } catch {
     // Header unavailable — fall back to the preferred zoom. Per-tile fetches
@@ -299,12 +382,23 @@ export async function fetchOverturePlaces(
   const zoom = await resolveTileZoom(archive);
   throwIfAborted(opts?.signal);
 
-  const tiles = getTileCoordsForBounds(south, west, north, east, zoom);
+  const { tiles } = selectTilesForBounds(south, west, north, east, zoom);
   if (tiles.length === 0) return [];
 
-  const responses = await Promise.all(
-    tiles.map(({ z, x, y }) => fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[])),
-  );
+  // Fetch in bounded batches so a search never opens one request per tile, and
+  // stop starting new batches as soon as it is superseded or over budget. Tiles
+  // already in flight still land in the tile cache for the next search.
+  const deadline = Date.now() + TILE_FETCH_BUDGET_MS;
+  const responses: OverturePlace[][] = [];
+  for (let i = 0; i < tiles.length; i += TILE_FETCH_CONCURRENCY) {
+    throwIfAborted(opts?.signal);
+    if (Date.now() >= deadline) break;
+    const batch = tiles.slice(i, i + TILE_FETCH_CONCURRENCY);
+    const settled = await Promise.all(
+      batch.map(({ z, x, y }) => fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[])),
+    );
+    responses.push(...settled);
+  }
   // A superseded search skips the expensive SQLite upsert + FTS rebuild.
   throwIfAborted(opts?.signal);
 
@@ -319,13 +413,28 @@ export async function fetchOverturePlaces(
 
   if (featureMap.size === 0) return [];
 
+  // Truncating in tile order biases the result set toward whichever corner was
+  // iterated first; keep the places nearest the box centre instead so the
+  // ranker sees the actual nearby candidates.
+  const centerLat = (south + north) / 2;
+  const centerLng = (west + east) / 2;
+  const lngScale = Math.cos((centerLat * Math.PI) / 180);
   const places = [...featureMap.values()]
     .map(overtureFeatureToPlace)
     .filter((p): p is Place => p !== null)
+    .sort((a, b) => {
+      const aLat = a.lat - centerLat;
+      const aLng = (a.lng - centerLng) * lngScale;
+      const bLat = b.lat - centerLat;
+      const bLng = (b.lng - centerLng) * lngScale;
+      return aLat * aLat + aLng * aLng - (bLat * bLat + bLng * bLng);
+    })
     .slice(0, limit);
 
   if (places.length > 0) {
-    await upsertOverturePlaces(places);
+    // The search-path upsert must not invalidate the cache entry the current
+    // search is about to store (see upsertOverturePlaces).
+    await upsertOverturePlaces(places, { invalidateSearchCache: false });
   }
 
   return places;
@@ -1217,7 +1326,10 @@ export function overtureFeatureToPlace(feature: OverturePlace): Place | null {
 // SQLite upsert
 // ---------------------------------------------------------------------------
 
-async function upsertOverturePlaces(places: Place[]): Promise<void> {
+async function upsertOverturePlaces(
+  places: Place[],
+  opts?: { invalidateSearchCache?: boolean },
+): Promise<void> {
   const db = await getDatabase();
 
   // SQLite variable limit is 999. With 26 columns per row, max ~38 rows per statement.
@@ -1329,8 +1441,12 @@ async function upsertOverturePlaces(places: Place[]): Promise<void> {
     await db.execAsync(`INSERT INTO places_fts(places_fts) VALUES('rebuild')`);
   }
 
-  // New local data invalidates cached network results for the same area.
-  if (places.length > 0) {
+  // Region imports invalidate overlapping network caches so the next search
+  // sees the freshly imported data. The search path opts out: it runs while a
+  // search is in flight, and this bbox overlaps the very cache entries that
+  // search is about to store — including Photon/Overpass results — which made
+  // every keystroke refetch the network.
+  if ((opts?.invalidateSearchCache ?? true) && places.length > 0) {
     let south = places[0].lat;
     let north = places[0].lat;
     let west = places[0].lng;
