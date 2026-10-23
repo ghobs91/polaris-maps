@@ -10,6 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.polarismaps.app",
+      "icon": "./assets/AppIcon.icon",
       "infoPlist": {
         "UIBackgroundModes": ["location", "audio"],
         "NSLocationWhenInUseUsageDescription": "Polaris Maps needs your location to show your position on the map and provide turn-by-turn navigation directions.",

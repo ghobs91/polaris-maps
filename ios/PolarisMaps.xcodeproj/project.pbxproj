@@ -16,6 +16,7 @@
 		798B29C6D800420097AEC665 /* PolarisCloudStore.m in Sources */ = {isa = PBXBuildFile; fileRef = F9AAF86F5164452D9C019405 /* PolarisCloudStore.m */; };
 		7A1B2C3D4E5F60718293A4B5 /* PolarisTileServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B6 /* PolarisTileServer.swift */; };
 		7A1B2C3D4E5F60718293A4B7 /* PolarisTileServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 9B2C3D4E5F60718293A4B8 /* PolarisTileServer.m */; };
+		7EA1AA519E894A2DB548AECF /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C150EED025F748F8992F5872 /* AppIcon.icon */; };
 		89DE569169794743B4107EDC /* PolarisCarPlay-Bridging.m in Sources */ = {isa = PBXBuildFile; fileRef = AA6FC0D57BA542408502D402 /* PolarisCarPlay-Bridging.m */; };
 		A8738780907C4ACBA0B11839 /* PolarisCarPlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DA763B5FDB8454DABC656F3 /* PolarisCarPlay.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
@@ -49,6 +50,7 @@
 		AA6FC0D57BA542408502D402 /* PolarisCarPlay-Bridging.m */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.objc; name = "PolarisCarPlay-Bridging.m"; path = "PolarisMaps/PolarisCarPlay-Bridging.m"; sourceTree = "<group>"; };
 		B2695298DCC18139FAC9BC29 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PolarisMaps/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
+		C150EED025F748F8992F5872 /* AppIcon.icon */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = undefined; includeInIndex = 0; lastKnownFileType = unknown; name = AppIcon.icon; path = PolarisMaps/AppIcon.icon; sourceTree = "<group>"; };
 		CD204D124A01011F5E3A87AB /* libPods-PolarisMaps.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PolarisMaps.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = PolarisMaps/AppDelegate.swift; sourceTree = "<group>"; };
@@ -93,6 +95,7 @@
 				7DA763B5FDB8454DABC656F3 /* PolarisCarPlay.swift */,
 				20C1F7F547D543FCAFB897F2 /* PolarisCarPlayMapView.swift */,
 				81BC51C5C667473C94D28910 /* CarPlaySceneDelegate.swift */,
+				C150EED025F748F8992F5872 /* AppIcon.icon */,
 				AA6FC0D57BA542408502D402 /* PolarisCarPlay-Bridging.m */,
 			);
 			name = PolarisMaps;
@@ -244,6 +247,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
+				7EA1AA519E894A2DB548AECF /* AppIcon.icon in Resources */,
 				EABDB6B50692C76B52E3C947 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
