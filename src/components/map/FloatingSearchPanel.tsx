@@ -87,9 +87,13 @@ import {
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 import {
+  boundsForPois,
   destinationToGeocodingResult,
   geocodingResultToSearchResult,
+  isGenericNearbyQuery,
   isSameDestination,
+  selectSearchPins,
+  shouldFrameResults,
 } from './floatingSearchPanelHelpers';
 
 /** Cap on POIs a quick-category pill returns (list rows + map pins). */
@@ -98,7 +102,9 @@ const CATEGORY_RESULT_LIMIT = 60;
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
-    id: r.poi?.id ?? Math.floor(Math.random() * 1e9),
+    // Deterministic id: a random one per emission breaks list identity and the
+    // surface that lets rows show distance/rating from the ranked result.
+    id: r.poi?.id ?? Math.round(r.lat * 1e6 + r.lng * 1e3),
     text: r.name,
     type: r.type === 'address' ? 'address' : 'place',
     housenumber: r.poi?.tags['addr:housenumber'] ?? null,
@@ -207,65 +213,6 @@ function formatDuration(seconds: number): string {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-function selectSearchFitPois(mapPois: OsmPoi[]): OsmPoi[] {
-  if (mapPois.length <= 5) return mapPois;
-
-  const fitPois = mapPois.slice(0, 5);
-  const anchor = fitPois[0];
-  let maxDistanceKm = 0;
-
-  for (const poi of fitPois.slice(1)) {
-    const latKm = Math.abs(poi.lat - anchor.lat) * 111;
-    const lngKm =
-      Math.abs(poi.lng - anchor.lng) * 111 * Math.cos(((poi.lat + anchor.lat) * Math.PI) / 360);
-    maxDistanceKm = Math.max(maxDistanceKm, Math.hypot(latKm, lngKm));
-  }
-
-  // If one of the first results is still much farther out than the local cluster,
-  // keep the map centered on the tighter group the user is likely scanning.
-  if (maxDistanceKm > 18) {
-    return fitPois.filter((poi) => {
-      const latKm = Math.abs(poi.lat - anchor.lat) * 111;
-      const lngKm =
-        Math.abs(poi.lng - anchor.lng) * 111 * Math.cos(((poi.lat + anchor.lat) * Math.PI) / 360);
-      return Math.hypot(latKm, lngKm) <= 12;
-    });
-  }
-
-  return fitPois;
-}
-
-function boundsForPois(mapPois: OsmPoi[]): {
-  minLat: number;
-  minLng: number;
-  maxLat: number;
-  maxLng: number;
-} | null {
-  if (mapPois.length === 0) return null;
-
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  let minLng = Infinity;
-  let maxLng = -Infinity;
-
-  for (const p of mapPois) {
-    if (p.lat < minLat) minLat = p.lat;
-    if (p.lat > maxLat) maxLat = p.lat;
-    if (p.lng < minLng) minLng = p.lng;
-    if (p.lng > maxLng) maxLng = p.lng;
-  }
-
-  const latPad = (maxLat - minLat) * 0.1 || 0.005;
-  const lngPad = (maxLng - minLng) * 0.1 || 0.005;
-
-  return {
-    minLat: minLat - latPad,
-    minLng: minLng - lngPad,
-    maxLat: maxLat + latPad,
-    maxLng: maxLng + lngPad,
-  };
 }
 
 // ─────────────────────────────────────────────
@@ -738,6 +685,10 @@ export function FloatingSearchPanel({
   // Whether the next result emission should move the camera. Only an explicit
   // submit sets this; live autosuggest typing must leave the map where it is.
   const fitResultsOnEmitRef = useRef(false);
+  // Where the user was when they submitted, and how far the camera may travel:
+  // a "nearby" query (bagels, coffee…) must never fly to a far cluster.
+  const fitAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
+  const fitAllowsFarRef = useRef(false);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const isCategorySearching = useOsmPoiStore((s) => s.isCategorySearching);
   const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
@@ -754,6 +705,8 @@ export function FloatingSearchPanel({
   // ── Unified search (shared session hook) ────────────────────────────────
   /** Latest staged unified results (local first, then the full merge). */
   const unifiedResultsRef = useRef<UnifiedSearchResult[]>([]);
+  /** Ranked result per row id, so rows keep distance/rating/open-now. */
+  const searchMetaRef = useRef<Map<string, UnifiedSearchResult>>(new Map());
   const stationResultsRef = useRef<GeocodingResult[]>([]);
   const appleResultsRef = useRef<GeocodingResult[]>([]);
   /** Query whose auxiliary (OTP + MapKit) search is active. */
@@ -766,6 +719,13 @@ export function FloatingSearchPanel({
 
   const applyMergedResults = useCallback((updateMap: boolean) => {
     const unifiedResults = unifiedResultsRef.current.map(unifiedToGeocodingResult);
+    // Ranked payload per row id, so rows keep distance/rating/open-now.
+    searchMetaRef.current = new Map(
+      unifiedResults.map((converted, i) => [
+        String(converted.entry.id),
+        unifiedResultsRef.current[i],
+      ]),
+    );
     const stationResults = stationResultsRef.current;
     const appleGeoResults = appleResultsRef.current;
     const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
@@ -811,11 +771,20 @@ export function FloatingSearchPanel({
       // Always refresh the suggestion pins so the list and map stay in sync.
       // The camera only moves when the search was explicitly committed
       // (`updateMap`); live autosuggest typing must never pan the map.
-      const fitPois = selectSearchFitPois(mapPois);
+      // On submit, pins are ordered nearest to where the user searched from so
+      // a dense far-away cluster can't take over the map.
+      const pinAnchor = updateMap ? fitAnchorRef.current : null;
+      const fitPois = selectSearchPins(mapPois, pinAnchor);
       useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
 
       const fitBounds = boundsForPois(fitPois);
-      if (updateMap && fitBounds) {
+      // A nearby-intent query (category/cuisine) is answered by the places
+      // around the user: if every match is a long way off, keep the camera
+      // where it is instead of yanking the map to another city. Place/brand/
+      // address searches may still frame a distant result (that is the intent).
+      const mayFrame = shouldFrameResults(fitPois, fitAnchorRef.current, fitAllowsFarRef.current);
+
+      if (updateMap && fitBounds && mayFrame) {
         const vp = useMapStore.getState().viewport;
         useOsmPoiStore.getState().setZoomAndBounds(vp.zoom, fitBounds);
         useMapStore
@@ -828,6 +797,7 @@ export function FloatingSearchPanel({
       } else {
         // No camera move: anchor "Search this area" to the current viewport so
         // panning after an autosuggest search still offers a re-search.
+        anchorPendingRef.current = false;
         const bounds = useOsmPoiStore.getState().viewportBounds;
         if (bounds) {
           searchAnchorRef.current = {
@@ -924,12 +894,20 @@ export function FloatingSearchPanel({
       }
 
       if (!meta.final) {
+        // Keep the ranked payload for the staged rows too, so distance/rating
+        // don't disappear until the final emission.
+        searchMetaRef.current = new Map(
+          emitted.map((result) => [String(unifiedToGeocodingResult(result).entry.id), result]),
+        );
         setResults(emitted.map(unifiedToGeocodingResult));
         useOsmPoiStore.getState().setIsCategorySearching(true);
         return;
       }
 
       applyMergedResults(fitResultsOnEmitRef.current);
+      // A submit frames the results once; later emissions (aux transit/MapKit
+      // results, refetches) must not move the camera again.
+      fitResultsOnEmitRef.current = false;
       useOsmPoiStore.getState().setIsCategorySearching(false);
     },
     [applyMergedResults, startAuxiliarySearch],
@@ -1167,6 +1145,11 @@ export function FloatingSearchPanel({
     ensureUserLocation();
     // An explicit submit may frame the results on the map (unlike typing).
     fitResultsOnEmitRef.current = true;
+    // Only a place/brand/address lookup may move the camera to a distant
+    // match; "bagels"/"coffee near me" are answered where the user is.
+    fitAllowsFarRef.current = !isGenericNearbyQuery(text);
+    const vp = useMapStore.getState().viewport;
+    fitAnchorRef.current = userLocationRef.current ?? { lat: vp.lat, lng: vp.lng };
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
     useOsmPoiStore.getState().setIsCategorySearching(true);
@@ -1261,7 +1244,7 @@ export function FloatingSearchPanel({
         useOsmPoiStore
           .getState()
           .setCategorySearch(categories, pois, categoryResult?.localPrimary ?? false);
-        const fitPois = selectSearchFitPois(pois);
+        const fitPois = selectSearchPins(pois);
         const fb = boundsForPois(fitPois);
         if (fb && fitPois.length >= 2) {
           useMapStore
@@ -1995,12 +1978,17 @@ export function FloatingSearchPanel({
   const showHistory = mode === 'searching' && query.length < 2 && history.length > 0;
 
   const renderResultItem = useCallback(
-    ({ item }: { item: GeocodingResult }) => (
-      <SearchResultRow
-        result={geocodingResultToSearchResult(item)}
-        onPress={() => handleSelectResult(item)}
-      />
-    ),
+    ({ item }: { item: GeocodingResult }) => {
+      // Prefer the ranked result so the row can show distance, rating and
+      // open-now exactly as the search engine scored them.
+      const ranked = searchMetaRef.current.get(String(item.entry.id));
+      return (
+        <SearchResultRow
+          result={ranked ?? geocodingResultToSearchResult(item)}
+          onPress={() => handleSelectResult(item)}
+        />
+      );
+    },
     [handleSelectResult],
   );
 
