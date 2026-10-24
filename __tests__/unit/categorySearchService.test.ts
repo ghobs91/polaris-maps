@@ -127,6 +127,29 @@ describe('searchByCategory', () => {
     expect(osmFetcher.fetchOsmPoisByTags).toHaveBeenCalled();
   });
 
+  it('keeps the nearest results when the limit truncates a merged category set', async () => {
+    jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
+    const overpassPois = [
+      makeOsmPoi(1, 'Far Bagels', 40.79, -73.94),
+      makeOsmPoi(2, 'Near Bagels', 40.751, -73.985),
+      makeOsmPoi(3, 'Mid Bagels', 40.76, -73.97),
+    ];
+    jest.spyOn(osmFetcher, 'fetchOsmPoisByTags').mockResolvedValue(overpassPois);
+
+    const result = await searchByCategory(
+      'bagels',
+      bbox.south,
+      bbox.west,
+      bbox.north,
+      bbox.east,
+      2,
+      { anchor: { lat: 40.748, lng: -73.986 } },
+    );
+
+    // Overpass order is arbitrary; the limit must drop the far tail instead.
+    expect(result!.pois.map((poi) => poi.name)).toEqual(['Near Bagels', 'Mid Bagels']);
+  });
+
   it('deduplicates POIs by name + proximity across sources', async () => {
     const places = [makePlace({ uuid: 'place-1', name: 'Starbucks', lat: 40.75, lng: -73.98 })];
     // Same name + very close location

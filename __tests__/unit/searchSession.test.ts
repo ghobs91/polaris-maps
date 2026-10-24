@@ -232,4 +232,33 @@ describe('createSearchSession', () => {
       final: true,
     });
   });
+
+  it('still terminates when the current search is aborted (no stuck spinner)', async () => {
+    const onResults = jest.fn();
+    const onError = jest.fn();
+    mockSearch.mockImplementation(async (_query, opts) => {
+      if (opts?.localOnly) return [makeResult('local:bagels')];
+      // A shared in-flight source can reject with an AbortError that belongs to
+      // an already-superseded search, even though this search is current.
+      throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    });
+
+    const session = createSearchSession({
+      getContext: () => context,
+      onResults,
+      onError,
+      debounceMs: 50,
+    });
+
+    session.search('bagels');
+    await jest.advanceTimersByTimeAsync(50);
+
+    // Aborts are not reported as errors, but the loading state must clear.
+    expect(onError).not.toHaveBeenCalled();
+    expect(onResults).toHaveBeenLastCalledWith([makeResult('local:bagels')], {
+      query: 'bagels',
+      source: 'full',
+      final: true,
+    });
+  });
 });

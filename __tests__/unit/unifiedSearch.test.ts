@@ -483,6 +483,29 @@ describe('unifiedSearch progressive + cancellation', () => {
     expect(photonGeocoder.searchPhoton).not.toHaveBeenCalled();
   });
 
+  it('keeps a category search box local and anchored to the user', async () => {
+    (categorySearchService.searchByCategory as jest.Mock).mockResolvedValue({
+      categories: ['deli', 'bakery'],
+      pois: [],
+      localPrimary: false,
+    });
+    const userLocation = { lat: 40.75, lng: -73.6 };
+
+    await unifiedSearch('bagels', { lat: 40.75, lng: -73.6, zoom: 8, limit: 20, userLocation });
+
+    const networkCall = (categorySearchService.searchByCategory as jest.Mock).mock.calls.find(
+      (call) => !call[6]?.localOnly,
+    );
+    expect(networkCall).toBeDefined();
+    const [, south, , north, , limit, opts] = networkCall!;
+
+    // Uncapped, zoom 8 asks for a ~2° box (the next city included).
+    expect(north - south).toBeLessThanOrEqual(0.51);
+    // Deeper candidate pool than the display limit, anchored at the user.
+    expect(limit).toBeGreaterThan(20);
+    expect(opts.anchor).toEqual(userLocation);
+  });
+
   it('onPartial emits local results before the network phase completes', async () => {
     (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
       makePlace({ name: 'Starbucks', uuid: 'p-starbucks' }),

@@ -87,6 +87,30 @@ describe('searchCache', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
+  it('does not share an in-flight fetch from a superseded (aborted) search', async () => {
+    const stale = new AbortController();
+    let rejectStale!: (err: Error) => void;
+    const staleFn = jest.fn(
+      () =>
+        new Promise<string[]>((_res, rej) => {
+          rejectStale = rej;
+        }),
+    );
+    const stalePromise = cachedFetch('key', staleFn, { signal: stale.signal });
+
+    // The keystroke is superseded: its signal aborts while the request is open.
+    stale.abort();
+
+    const freshFn = jest.fn().mockResolvedValue(['fresh']);
+    const fresh = await cachedFetch('key', freshFn, { signal: new AbortController().signal });
+
+    expect(fresh).toEqual(['fresh']);
+    expect(freshFn).toHaveBeenCalledTimes(1);
+
+    rejectStale(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    await expect(stalePromise).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('evicts the least-recently-used entry beyond the limit', () => {
     for (let i = 0; i < 101; i++) {
       cacheSet(`k${i}`, i);

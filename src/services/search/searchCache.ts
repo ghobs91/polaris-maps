@@ -37,7 +37,8 @@ interface CacheEntry {
 }
 
 const entries = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<unknown>>();
+/** In-flight requests, tagged with the signal that started them. */
+const inFlight = new Map<string, { promise: Promise<unknown>; signal?: AbortSignal }>();
 
 /** Snap bounds to bucket boundaries so near-identical viewports share a key. */
 export function quantizeBounds(bounds: CacheBounds): CacheBounds {
@@ -98,18 +99,25 @@ export function cacheSet<T>(
 
 /**
  * Return a cached value, or run `fn` once and cache its result. Concurrent
- * callers for the same key await the same in-flight promise.
+ * callers for the same key await the same in-flight promise — unless that
+ * promise belongs to a superseded search (its signal is already aborted), in
+ * which case it can only reject as "aborted" and a fresh request is started.
  */
 export function cachedFetch<T>(
   key: string,
   fn: () => Promise<T>,
-  opts?: { bounds?: CacheBounds; ttlMs?: number },
+  opts?: { bounds?: CacheBounds; ttlMs?: number; signal?: AbortSignal },
 ): Promise<T> {
   const cached = getEntry<T>(key);
   if (cached !== undefined) return Promise.resolve(cached);
 
   const pending = inFlight.get(key);
-  if (pending) return pending as Promise<T>;
+  if (pending) {
+    if (!pending.signal?.aborted) return pending.promise as Promise<T>;
+    // Stale in-flight request from a superseded search: don't hand its dead
+    // signal to this search.
+    inFlight.delete(key);
+  }
 
   const promise = fn()
     .then((value) => {
@@ -121,10 +129,11 @@ export function cachedFetch<T>(
       return value;
     })
     .finally(() => {
-      inFlight.delete(key);
+      // Only clear our own entry — a newer request may have replaced it.
+      if (inFlight.get(key)?.promise === promise) inFlight.delete(key);
     });
 
-  inFlight.set(key, promise);
+  inFlight.set(key, { promise, signal: opts?.signal });
   return promise;
 }
 

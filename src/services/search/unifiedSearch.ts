@@ -295,9 +295,10 @@ export async function unifiedSearch(
 
     // Source 2 (local part): Category search restricted to the local DB
     parsed.categories
-      ? searchByCategory(parsed.originalQuery, south, west, north, east, limit, {
+      ? searchByCategory(parsed.originalQuery, south, west, north, east, Math.max(limit * 4, 120), {
           signal,
           localOnly: true,
+          anchor: options.userLocation ?? { lat, lng },
         })
       : Promise.resolve(null),
 
@@ -571,11 +572,20 @@ export async function unifiedSearch(
         searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
           signal,
         }),
-      { bounds: viewportBounds },
+      { bounds: viewportBounds, signal },
     );
   })();
 
   // Source 2 (full): Category search (local + Overpass + Nominatim bounded)
+  //
+  // Ask for a deeper candidate pool than the display limit: category sources
+  // (Overpass especially) return features in arbitrary geographic order, so
+  // truncating to `limit` before ranking lets one dense far-away cluster crowd
+  // out the places actually near the user. Candidates are anchored so the
+  // nearest features survive the cut; the final list is still scored/limited
+  // by `assembleResults`.
+  const categoryAnchor = options.userLocation ?? { lat, lng };
+  const categoryCandidateLimit = Math.max(limit * 4, 120);
   const categoryPromise: Promise<CategorySearchResult | null> = !parsed.categories
     ? Promise.resolve(null)
     : skipCategoryFallback
@@ -586,10 +596,22 @@ export async function unifiedSearch(
             'category',
             parsed.originalQuery,
             boundsKey({ south, north, west, east }),
-            limit,
+            categoryCandidateLimit,
           ]),
-          () => searchByCategory(parsed.originalQuery, south, west, north, east, limit, { signal }),
-          { bounds: { south, north, west, east } },
+          () =>
+            searchByCategory(
+              parsed.originalQuery,
+              south,
+              west,
+              north,
+              east,
+              categoryCandidateLimit,
+              {
+                signal,
+                anchor: categoryAnchor,
+              },
+            ),
+          { bounds: { south, north, west, east }, signal },
         );
 
   // Source 4 (full): Address geocoding (local FTS + Nominatim)
@@ -619,7 +641,7 @@ export async function unifiedSearch(
         lng.toFixed(2),
       ]),
       () => searchAddress(addressQueryText, 10, lat, lng, { signal }),
-      { bounds: viewportBounds },
+      { bounds: viewportBounds, signal },
     );
   })();
 
@@ -641,7 +663,7 @@ export async function unifiedSearch(
             fetchOverturePlaces(south, west, north, east, queryContext.viewportFetchLimit, {
               signal,
             }),
-          { bounds: { south, north, west, east } },
+          { bounds: { south, north, west, east }, signal },
         );
       })();
 
@@ -665,7 +687,10 @@ export async function unifiedSearch(
               queryContext.userFetchLimit,
               { signal },
             ),
-          { bounds: { south: userSouth, north: userNorth, west: userWest, east: userEast } },
+          {
+            bounds: { south: userSouth, north: userNorth, west: userWest, east: userEast },
+            signal,
+          },
         );
 
   // Source 6: Overpass name search — finds POIs with the search term in their name
@@ -676,7 +701,7 @@ export async function unifiedSearch(
       : cachedFetch(
           cacheKey(['osm-name', parsed.coreQuery, boundsKey({ south, north, west, east }), limit]),
           () => fetchOsmPoisByName(south, west, north, east, parsed.coreQuery, { signal }),
-          { bounds: { south, north, west, east } },
+          { bounds: { south, north, west, east }, signal },
         );
 
   const sources: Promise<unknown>[] = [
@@ -977,7 +1002,10 @@ function deriveQueryContext(
 
   if (parsed.categories || parsed.cuisineHint) {
     return {
-      viewportRadiusDeg: Math.max(zoomRadiusDeg, 0.09),
+      // Cap the category box. Uncapped, a zoomed-out map turns "bagels" into a
+      // continental Overpass query that pulls every bakery in the next city
+      // and buries the ones around the user. ~0.25° ≈ 28 km.
+      viewportRadiusDeg: Math.min(Math.max(zoomRadiusDeg, 0.09), 0.25),
       userRadiusDeg: parsed.wantsNearMe ? 0.1 : 0.08,
       viewportFetchLimit: 420,
       userFetchLimit: 180,

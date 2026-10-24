@@ -162,14 +162,16 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
       onResults(results, { query, source: 'full', final: true });
       return results;
     } catch (err) {
-      if (!isAbortError(err) && gen === generation && !disposed) {
-        onError?.(err);
-        // A failed search must still terminate: without a final emission the
-        // consumer keeps its loading state (and spinner) forever. Keep the best
-        // results already shown for this query instead of blanking the list.
-        const fallback = lastEmitted.generation === gen ? lastEmitted.results : [];
-        onResults(fallback, { query, source: 'full', final: true });
-      }
+      if (gen !== generation || disposed) return [];
+      if (!isAbortError(err)) onError?.(err);
+      // A failed search must still terminate: without a final emission the
+      // consumer keeps its loading state (and spinner) forever. That includes
+      // aborts: a source shared through the result cache can carry the signal
+      // of a search that was already superseded, so an AbortError can surface
+      // on the *current* generation. Keep the best results already shown for
+      // this query instead of blanking the list.
+      const fallback = lastEmitted.generation === gen ? lastEmitted.results : [];
+      onResults(fallback, { query, source: 'full', final: true });
       return [];
     } finally {
       if (networkController === controller) networkController = null;
