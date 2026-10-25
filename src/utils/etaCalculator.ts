@@ -10,6 +10,22 @@ const DEG_TO_RAD = Math.PI / 180;
 const DEFAULT_FREE_FLOW_MPH = ROAD_CLASS_SPEEDS.secondary; // 30
 
 /**
+ * Lowest plausible live speed, as a fraction of the segment's free-flow speed.
+ * A matched reading below this is almost always bad data (a zero "no data"
+ * sentinel leaking into a cell average, a cell-wide average applied to one
+ * point, a stale ratio) rather than real traffic, and would otherwise multiply
+ * that segment's travel time by 20× or more.
+ */
+const MIN_LIVE_SPEED_FRACTION = 0.05;
+
+/**
+ * Hard ceiling on how much live traffic may inflate the free-flow ETA.
+ * A handful of implausible readings must never turn a one-hour trip into a
+ * multi-hour one; anything beyond this is untrustworthy input, not a road.
+ */
+const MAX_ETA_INFLATION = 4;
+
+/**
  * Infer the most-likely road class from a Valhalla maneuver type.
  * Uses heuristics: highway entrances/exits → motorway, roundabouts → secondary,
  * ferries → service. All other maneuvers default to secondary (moderate road).
@@ -179,6 +195,10 @@ export function formatETA(seconds: number): string {
  * When a traffic segment is matched, its freeFlowSpeedMph is also used for
  * the free-flow baseline calculation (more accurate than road-class defaults).
  * Single O(n) pass over route segments.
+ *
+ * Live readings are bounded for safety: a matched speed never falls below
+ * {@link MIN_LIVE_SPEED_FRACTION} of the segment's free flow, and the route
+ * total never exceeds {@link MAX_ETA_INFLATION}× its free-flow total.
  */
 export function calculateTrafficETA(
   routeSegments: ETARouteSegment[],
@@ -226,6 +246,11 @@ export function calculateTrafficETA(
     }
 
     if (currentSpeedMph > 0) {
+      // Floor implausible live speeds against the segment's own free flow so a
+      // single bad reading cannot multiply this segment's time without bound.
+      const freeFlowMph = seg.freeFlowSpeedMph > 0 ? seg.freeFlowSpeedMph : DEFAULT_FREE_FLOW_MPH;
+      currentSpeedMph = Math.max(currentSpeedMph, freeFlowMph * MIN_LIVE_SPEED_FRACTION);
+
       totalSeconds += seg.distanceMeters / (currentSpeedMph * 0.44704);
       freeFlowTotalSeconds += seg.distanceMeters / (baselineFreeFlow * 0.44704);
       matchedCount++;
@@ -234,6 +259,13 @@ export function calculateTrafficETA(
       totalSeconds += freeFlowSeconds;
       freeFlowTotalSeconds += freeFlowSeconds;
     }
+  }
+
+  // Cap route-wide inflation: free flow is the reference the live readings were
+  // measured against, so a traffic ETA more than MAX_ETA_INFLATION times it is
+  // a data problem rather than a traffic problem.
+  if (freeFlowTotalSeconds > 0) {
+    totalSeconds = Math.min(totalSeconds, freeFlowTotalSeconds * MAX_ETA_INFLATION);
   }
 
   return {

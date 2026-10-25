@@ -90,19 +90,27 @@ export function observationsFromSegments(
   const out = new Map<string, ConditionObservation>();
   for (const [cell, cellSegments] of byCell) {
     let speedSum = 0;
+    let speedWeight = 0;
     let ratioSum = 0;
     let confidenceSum = 0;
     let freeFlowMax = 0;
     for (const s of cellSegments) {
       const w = Math.max(0.05, s.confidence);
-      speedSum += s.currentSpeedMph * w;
+      // `currentSpeedMph: 0` is a "no speed, ratio only" sentinel (tile
+      // sampler), not a stopped car. Averaging it as a real speed dilutes a
+      // genuine measurement toward zero, and the diluted value is later
+      // applied to every route point in the cell.
+      if (s.currentSpeedMph > 0) {
+        speedSum += s.currentSpeedMph * w;
+        speedWeight += w;
+      }
       ratioSum += s.congestionRatio * w;
       confidenceSum += w;
       freeFlowMax = Math.max(freeFlowMax, s.freeFlowSpeedMph);
     }
     out.set(cell, {
       geohash5: cell,
-      avgSpeedMph: confidenceSum > 0 ? speedSum / confidenceSum : 0,
+      avgSpeedMph: speedWeight > 0 ? speedSum / speedWeight : 0,
       avgCongestionRatio: confidenceSum > 0 ? ratioSum / confidenceSum : 1,
       freeFlowSpeedMph: freeFlowMax,
     });
@@ -123,12 +131,24 @@ export function segmentsFromConditions(
   for (const pt of points) {
     const cond = conditions.get(pt.cell);
     if (!cond) continue;
+    // A condition is a ~5 km cell average, not a measurement at this point, so
+    // it must never be forwarded as `currentSpeedMph` — that would apply a
+    // single jam (or a diluted cell average) to every route segment in the
+    // cell. The ratio carries the same information and is resolved against the
+    // route segment's own free-flow speed by the ETA calculator.
+    const ratio =
+      cond.avgCongestionRatio > 0
+        ? cond.avgCongestionRatio
+        : cond.freeFlowSpeedMph > 0
+          ? Math.min(1, Math.max(0, cond.avgSpeedMph / cond.freeFlowSpeedMph))
+          : 0;
+
     segments.push({
       id: `hist:${pt.cell}:${bucket.dayOfWeek}:${bucket.halfHour}:${pt.lat.toFixed(4)},${pt.lng.toFixed(4)}`,
       coordinates: [[pt.lng, pt.lat]],
-      currentSpeedMph: cond.avgSpeedMph,
+      currentSpeedMph: 0,
       freeFlowSpeedMph: cond.freeFlowSpeedMph,
-      congestionRatio: cond.avgCongestionRatio,
+      congestionRatio: ratio,
       confidence,
       source: 'history',
       timestamp: cond.lastUpdated,

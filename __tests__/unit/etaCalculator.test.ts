@@ -177,7 +177,10 @@ describe('calculateTrafficETA', () => {
     expect(result.totalSeconds).toBeGreaterThan(result.freeFlowTotalSeconds);
   });
 
-  it('handles all-stopped traffic (very low speed)', () => {
+  it('bounds a stopped-traffic reading instead of multiplying the ETA unbounded', () => {
+    // A single 1 mph reading on a 60 mph road is 60× free flow. That is the
+    // failure mode that produced multi-hour ETAs from one bad cell-average
+    // reading, so the total is now capped at 4× free flow.
     const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60)];
     const trafficSegments: NormalizedTrafficSegment[] = [
       makeTrafficSegment('t:1', [[4.845, 52.415]], 1, 60),
@@ -185,8 +188,30 @@ describe('calculateTrafficETA', () => {
 
     const result = calculateTrafficETA(routeSegments, trafficSegments);
 
-    // 1 mile at 1 mph ≈ 3600s
-    expect(result.totalSeconds).toBeCloseTo(3600, -1);
+    expect(result.freeFlowTotalSeconds).toBeCloseTo(60, 0);
+    expect(result.totalSeconds).toBeCloseTo(result.freeFlowTotalSeconds * 4, 0);
+  });
+
+  it('floors an implausible live speed so it cannot consume the whole inflation cap', () => {
+    // One segment with a near-zero reading, nine clean segments. Without the
+    // per-segment floor the bad segment alone would exhaust the 4× cap and
+    // hide the rest of the route.
+    const routeSegments: ETARouteSegment[] = [
+      makeRouteSegment(4.84, 52.41, 4.8401, 52.41, 1609, 60),
+    ];
+    for (let i = 0; i < 9; i++) {
+      routeSegments.push(makeRouteSegment(5 + i * 0.01, 52.41, 5.01 + i * 0.01, 52.41, 1609, 60));
+    }
+    const trafficSegments: NormalizedTrafficSegment[] = [
+      makeTrafficSegment('t:bad', [[4.84005, 52.41]], 0.1, 60),
+    ];
+
+    const result = calculateTrafficETA(routeSegments, trafficSegments);
+
+    // 5% of 60 mph = 3 mph → 1200s for the bad segment, 60s for each clean one.
+    expect(result.freeFlowTotalSeconds).toBeCloseTo(600, 0);
+    expect(result.totalSeconds).toBeCloseTo(1200 + 9 * 60, -1);
+    expect(result.totalSeconds).toBeLessThan(result.freeFlowTotalSeconds * 4);
   });
 
   it('uses traffic segment free-flow speed as baseline when matched', () => {

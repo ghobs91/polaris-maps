@@ -1,7 +1,6 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 import type { TrafficAreaCondition } from '../../models/trafficHistory';
-import type { ConditionObservation } from './trafficHistoryService';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { fetchTomTomTraffic, sampleRoutePoints, type ViewportBounds } from './tomtomFetcher';
@@ -30,7 +29,11 @@ import {
 } from '../../constants/config';
 import { getTrafficHistory, geohash5For, geohash5CellsForBounds } from './trafficHistoryIndex';
 import { currentTimeBucket, bucketLabel } from './trafficTimeBuckets';
-import { resolveTrafficConditions, type CascadePoint } from './trafficCascade';
+import {
+  resolveTrafficConditions,
+  observationsFromSegments,
+  type CascadePoint,
+} from './trafficCascade';
 import {
   initP2pConditionQuery,
   onPeerConditionRequest,
@@ -60,60 +63,35 @@ let lastRouteRefreshAt = 0;
 async function indexSegmentsIntoHistory(segments: NormalizedTrafficSegment[]): Promise<void> {
   if (segments.length === 0) return;
   const bucket = currentTimeBucket();
-  const observations: ConditionObservation[] = [];
-
-  const byCell = new Map<string, NormalizedTrafficSegment[]>();
-  for (const seg of segments) {
-    const first = seg.coordinates[0];
-    if (!first) continue;
-    const cell = geohash5For(first[1], first[0]);
-    const list = byCell.get(cell);
-    if (list) {
-      list.push(seg);
-    } else {
-      byCell.set(cell, [seg]);
-    }
-  }
-
-  for (const [cell, segs] of byCell) {
-    let speedSum = 0;
-    let ratioSum = 0;
-    let wSum = 0;
-    let freeFlowMax = 0;
-    for (const s of segs) {
-      const w = Math.max(0.05, s.confidence);
-      speedSum += s.currentSpeedMph * w;
-      ratioSum += s.congestionRatio * w;
-      wSum += w;
-      freeFlowMax = Math.max(freeFlowMax, s.freeFlowSpeedMph);
-    }
-    observations.push({
-      geohash5: cell,
-      avgSpeedMph: wSum > 0 ? speedSum / wSum : 0,
-      avgCongestionRatio: wSum > 0 ? ratioSum / wSum : 1,
-      freeFlowSpeedMph: freeFlowMax,
-    });
-  }
+  // Shares the cascade's aggregation so a zero "no speed" sentinel never
+  // dilutes a real speed (and the two write paths cannot drift apart).
+  const observations = Array.from(
+    observationsFromSegments(segments, (lng, lat) => geohash5For(lat, lng)).values(),
+  );
 
   await getTrafficHistory().recordObservations(bucket, observations);
   useTrafficStore.getState().setHistoryEntryCount(await getTrafficHistory().count());
 }
 
-/** Publish the resolved conditions to the traffic store as segments. */
-function publishResolvedSegments(
+/**
+ * Publish the latest resolution to the traffic store.
+ *
+ * The cascade has already chosen which tiers are usable for this area (fresh
+ * observations, historical averages, seeds), so the resolved set is the
+ * complete answer and replaces the store wholesale. Publishing even an empty
+ * set is intentional: a successful resolution with no data must clear segments
+ * from a previous route or area, otherwise stale (or bad) segments linger and
+ * keep skewing the ETA. Failed fetches never reach here, so transient errors
+ * still keep the previous data.
+ */
+export function publishResolvedSegments(
   segments: NormalizedTrafficSegment[],
   source: string,
   p2pSegments: NormalizedTrafficSegment[],
 ): void {
-  const allSegments = [...segments, ...p2pSegments];
-  if (allSegments.length === 0) return;
-
-  const previousTimestamp = useTrafficStore.getState().lastExternalFetchAt ?? undefined;
-  const merged = mergeTrafficSources(allSegments, previousTimestamp);
-  if (merged.length > 0) {
-    useTrafficStore.getState().setNormalizedSegments(merged);
-    useTrafficStore.getState().setLastResolveSource(source);
-  }
+  const merged = mergeTrafficSources([...segments, ...p2pSegments]);
+  useTrafficStore.getState().setNormalizedSegments(merged);
+  useTrafficStore.getState().setLastResolveSource(source);
 }
 
 /** Fetch traffic from all sources, merge, and update the store. */

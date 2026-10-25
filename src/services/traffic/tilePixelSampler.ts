@@ -1,5 +1,7 @@
 import { inflate as pakoInflate } from 'pako';
 import type { NormalizedTrafficSegment } from '../../models/traffic';
+import { TILE_MAX_AGE_SEC } from '../../models/trafficTile';
+import { TtlCache } from '../../utils/ttlCache';
 import { tomtomApiKey, TOMTOM_FLOW_TILES_BASE_URL } from '../../constants/config';
 
 // ── TomTom traffic tile color centroids ────────────────────────────
@@ -231,8 +233,12 @@ function readPixel(tile: DecodedTile, px: number, py: number): [number, number, 
 
 // ── Tile fetching with caching ─────────────────────────────────────
 
-/** In-memory cache of decoded tiles keyed by "z/x/y". */
-const tileCache = new Map<string, DecodedTile>();
+/**
+ * Decoded tiles keyed by "z/x/y". They are ~256 KB each, so the cache is
+ * bounded by both age and count: a decoded tile older than the disk cache's
+ * freshness window must not keep feeding the ETA for the whole session.
+ */
+const tileCache = new TtlCache<string, DecodedTile>(TILE_MAX_AGE_SEC * 1000, 32);
 
 async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<DecodedTile | null> {
   const key = `${z}/${x}/${y}`;

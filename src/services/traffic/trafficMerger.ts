@@ -92,19 +92,32 @@ export function mergeTrafficSources(
     } else {
       // Confidence-weighted averaging
       let weightedSpeed = 0;
+      let speedWeight = 0;
+      let weightedRatio = 0;
       let totalConfidence = 0;
       let maxFreeFlow = 0;
       let latestTimestamp = 0;
 
       for (const seg of group) {
-        weightedSpeed += seg.currentSpeedMph * seg.confidence;
         totalConfidence += seg.confidence;
+        // `currentSpeedMph: 0` means "ratio only", not "stopped". Averaging it
+        // as a speed would drag a real measurement toward zero.
+        if (seg.currentSpeedMph > 0) {
+          weightedSpeed += seg.currentSpeedMph * seg.confidence;
+          speedWeight += seg.confidence;
+        }
+        weightedRatio += seg.congestionRatio * seg.confidence;
         maxFreeFlow = Math.max(maxFreeFlow, seg.freeFlowSpeedMph);
         latestTimestamp = Math.max(latestTimestamp, seg.timestamp);
       }
 
-      const avgSpeed = totalConfidence > 0 ? weightedSpeed / totalConfidence : 0;
-      const ratio = maxFreeFlow > 0 ? Math.min(1, Math.max(0, avgSpeed / maxFreeFlow)) : 0;
+      const avgSpeed = speedWeight > 0 ? weightedSpeed / speedWeight : 0;
+      const ratio =
+        maxFreeFlow > 0 && speedWeight > 0
+          ? Math.min(1, Math.max(0, avgSpeed / maxFreeFlow))
+          : totalConfidence > 0
+            ? Math.min(1, Math.max(0, weightedRatio / totalConfidence))
+            : 0;
       merged.push({
         id: `merged:${group.map((s) => s.id).join('|')}`,
         coordinates: group[0].coordinates, // Use coordinates from highest-confidence source

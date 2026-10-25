@@ -101,6 +101,40 @@ describe('mergeTrafficSources', () => {
     expect(merged.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('does not let a zero-speed ratio-only segment dilute a measured speed', () => {
+    const ratioOnly = makeSegment({
+      id: 'tomtom:tile',
+      coordinates: [
+        [-74.006, 40.7128],
+        [-74.005, 40.7138],
+      ],
+      currentSpeedMph: 0,
+      freeFlowSpeedMph: 0,
+      congestionRatio: 0.2,
+      confidence: 0.8,
+      source: 'tomtom',
+    });
+    const measured = makeSegment({
+      id: 'open_feed:measured',
+      coordinates: [
+        [-74.006, 40.7128],
+        [-74.005, 40.7138],
+      ],
+      currentSpeedMph: 20,
+      freeFlowSpeedMph: 40,
+      congestionRatio: 0.5,
+      confidence: 0.5,
+      source: 'open_feed',
+    });
+
+    const merged = mergeTrafficSources([ratioOnly, measured]);
+    const overlapping = merged.find((s) => s.id.includes('merged'));
+
+    expect(overlapping).toBeDefined();
+    expect(overlapping!.currentSpeedMph).toBeCloseTo(20, 5);
+    expect(overlapping!.congestionRatio).toBeCloseTo(0.5, 5);
+  });
+
   it('merges three sources (TomTom + open feed + P2P)', () => {
     const tomtom = makeSegment({
       id: 'tomtom:seg1',

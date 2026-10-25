@@ -286,6 +286,47 @@ describe('observationsFromSegments', () => {
     expect(o!.avgCongestionRatio).toBeCloseTo(0.7, 5);
     expect(o!.freeFlowSpeedMph).toBe(50);
   });
+
+  it('ignores ratio-only zero-speed segments when averaging speed', () => {
+    const ratioOnly: NormalizedTrafficSegment = {
+      ...makeTomTomSegment(CELLS[0], 0.2),
+      currentSpeedMph: 0,
+      freeFlowSpeedMph: 0,
+      confidence: 0.8,
+    };
+    const measured: NormalizedTrafficSegment = {
+      ...makeTomTomSegment(CELLS[0], 0.5),
+      currentSpeedMph: 20,
+      freeFlowSpeedMph: 40,
+      confidence: 0.5,
+      source: 'open_feed',
+    };
+
+    const o = observationsFromSegments([ratioOnly, measured], (lng, lat) =>
+      geohashEncode(lat, lng, 5),
+    ).get(CELLS[0]);
+
+    // The 20 mph measurement must survive; averaging the 0 sentinel in would
+    // have produced 20 * 0.5 / 1.3 ≈ 7.7 mph and a multi-hour ETA.
+    expect(o!.avgSpeedMph).toBeCloseTo(20, 5);
+    expect(o!.avgCongestionRatio).toBeCloseTo((0.2 * 0.8 + 0.5 * 0.5) / 1.3, 5);
+    expect(o!.freeFlowSpeedMph).toBe(40);
+  });
+
+  it('reports zero speed when a cell only has ratio-only data', () => {
+    const ratioOnly: NormalizedTrafficSegment = {
+      ...makeTomTomSegment(CELLS[0], 0.4),
+      currentSpeedMph: 0,
+      freeFlowSpeedMph: 0,
+    };
+
+    const o = observationsFromSegments([ratioOnly], (lng, lat) => geohashEncode(lat, lng, 5)).get(
+      CELLS[0],
+    );
+
+    expect(o!.avgSpeedMph).toBe(0);
+    expect(o!.avgCongestionRatio).toBe(0.4);
+  });
 });
 
 describe('segmentsFromConditions', () => {
@@ -296,6 +337,38 @@ describe('segmentsFromConditions', () => {
     expect(segments[0].source).toBe('history');
     expect(segments[0].congestionRatio).toBe(0.8);
     expect(segments[0].coordinates[0]).toEqual([-74.0, 40.7]);
+  });
+
+  it('emits the cell ratio instead of a cell-average speed', () => {
+    const conditions = new Map([
+      [CELLS[0], makeCondition(CELLS[0], { avgSpeedMph: 12, freeFlowSpeedMph: 40 })],
+    ]);
+
+    const segments = segmentsFromConditions([POINTS[0]], conditions, BUCKET, 'local-fresh');
+
+    // A ~5 km cell average must never be forwarded as a point speed: doing so
+    // applies one jam to the entire cell's route segments.
+    expect(segments[0].currentSpeedMph).toBe(0);
+    expect(segments[0].congestionRatio).toBeCloseTo(0.8);
+    expect(segments[0].freeFlowSpeedMph).toBe(40);
+  });
+
+  it('derives the ratio from speed and free flow when the cell has none', () => {
+    const conditions = new Map([
+      [
+        CELLS[0],
+        makeCondition(CELLS[0], {
+          avgSpeedMph: 10,
+          freeFlowSpeedMph: 40,
+          avgCongestionRatio: 0,
+        }),
+      ],
+    ]);
+
+    const segments = segmentsFromConditions([POINTS[0]], conditions, BUCKET, 'p2p');
+
+    expect(segments[0].currentSpeedMph).toBe(0);
+    expect(segments[0].congestionRatio).toBeCloseTo(0.25);
   });
 
   it('skips points whose cell has no condition', () => {
