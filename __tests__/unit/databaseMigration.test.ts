@@ -66,4 +66,15 @@ describe('reviews foreign-key migration', () => {
       expect.objectContaining({ finalizeUnusedStatementsBeforeClosing: false }),
     );
   });
+
+  it('creates the street-imagery contribution tables alongside the P2P feed', async () => {
+    await getDatabase();
+    const joined = execCalls.join('\n');
+
+    expect(joined).toContain('CREATE TABLE IF NOT EXISTS streetview_drives');
+    expect(joined).toContain('CREATE TABLE IF NOT EXISTS streetview_captures');
+    expect(joined).toContain('CREATE TABLE IF NOT EXISTS streetview_uploads');
+    expect(joined).toContain('CREATE TABLE IF NOT EXISTS street_imagery');
+    expect(joined).toContain('idx_streetview_captures_drive');
+  });
 });

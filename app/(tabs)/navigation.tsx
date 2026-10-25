@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -44,6 +44,8 @@ import {
 } from '@/services/navigation/trackingService';
 import { markForegroundInterpolationTick } from '@/services/navigation/foregroundActivity';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
+import { useStreetViewCaptureStore } from '@/stores/streetViewCaptureStore';
+import { endStreetViewSession, requestStreetViewStart } from '@/services/imagery/streetViewSession';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
@@ -79,6 +81,7 @@ export default function NavigationScreen() {
   const muted = useNavigationStore((s) => s.muted);
   const setMuted = useNavigationStore((s) => s.setMuted);
   const hasArrived = useNavigationStore((s) => s.hasArrived);
+  const streetViewSession = useStreetViewCaptureStore((s) => s.session);
   // While CarPlay is attached the car screen drives the map; the phone becomes
   // the companion (step list + add-stop search), like Apple Maps.
   const carPlayConnected = useCarPlayStore((s) => s.connected);
@@ -752,6 +755,43 @@ export default function NavigationScreen() {
           style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
           pointerEvents="box-none"
         >
+          <Pressable
+            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => {
+              if (streetViewSession) {
+                void endStreetViewSession().catch((error) =>
+                  Alert.alert(
+                    'Could not stop capture',
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                );
+              } else {
+                void requestStreetViewStart('manual').catch((error) =>
+                  Alert.alert(
+                    'Could not start capture',
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                );
+              }
+            }}
+            accessibilityLabel={
+              streetViewSession ? 'Stop street imagery capture' : 'Capture street imagery'
+            }
+            accessibilityHint={
+              streetViewSession
+                ? 'Stops capture and opens the upload summary'
+                : 'Captures street-level photos while you navigate'
+            }
+            accessibilityRole="button"
+          >
+            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+              <Ionicons
+                name={streetViewSession ? 'stop-circle' : 'camera-outline'}
+                size={22}
+                color={streetViewSession ? '#FF453A' : '#fff'}
+              />
+            </GlassView>
+          </Pressable>
           <Pressable
             style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
             onPress={() => setMuted(!muted)}

@@ -57,8 +57,22 @@ jest.mock('../../src/stores/settingsStore', () => ({
       useMetric: false,
       voiceGuidanceEnabled: false,
       routePreferences: { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+      streetView: {
+        enabled: false,
+        consentAccepted: false,
+        autoStart: false,
+        autoStartPromptAnswered: false,
+        mode: 'standard',
+        wifiOnly: true,
+        autoUpload: false,
+        maxStorageBytes: 2 * 1024 * 1024 * 1024,
+        panoramaxInstanceUrl: null,
+        panoramaxUsername: null,
+        mapillaryUsername: null,
+      },
       setPermissions: jest.fn(),
       setRoutePreferences: jest.fn(),
+      setStreetView: jest.fn(),
       setThemeMode: jest.fn(),
       setUseMetric: jest.fn(),
       setVoiceGuidanceEnabled: jest.fn(),
@@ -88,6 +102,8 @@ jest.mock('../../src/components/common', () => {
     SettingsRow: () => null,
     SFSymbol: () => null,
     SegmentedControl: () => null,
+    Modal: ({ children }: { children: React.ReactNode }) =>
+      mockReact.createElement(View, null, children),
   };
 });
 

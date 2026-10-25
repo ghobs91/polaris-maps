@@ -106,6 +106,26 @@ export const TRANSITOUS_BASE_URL: string =
  */
 export const MAPILLARY_TOKEN: string = process.env.EXPO_PUBLIC_MAPILLARY_TOKEN ?? '';
 
+/**
+ * Dedicated Mapillary app registration for uploads. Kept separate from the
+ * read token above so the upload scope is not attached to the read credential.
+ * The secret is embedded at build time (public-client limitation); treat it as
+ * extractable and rotate it if abused.
+ */
+export const MAPILLARY_UPLOAD_CLIENT_ID: string = process.env.EXPO_PUBLIC_MAPILLARY_CLIENT_ID ?? '';
+export const MAPILLARY_UPLOAD_CLIENT_SECRET: string =
+  process.env.EXPO_PUBLIC_MAPILLARY_CLIENT_SECRET ?? '';
+export const MAPILLARY_UPLOAD_REDIRECT_URI = 'polaris-maps://mapillary-callback';
+export const MAPILLARY_UPLOAD_SCOPE = 'upload';
+export const MAPILLARY_GRAPH_URL = 'https://graph.mapillary.com';
+export const MAPILLARY_UPLOAD_URL = 'https://rupload.facebook.com/mapillary_public_uploads';
+
+export function isMapillaryUploadConfigured(): boolean {
+  return (
+    MAPILLARY_UPLOAD_CLIENT_ID.trim().length > 0 && MAPILLARY_UPLOAD_CLIENT_SECRET.trim().length > 0
+  );
+}
+
 /** Panoramax STAC search endpoint (open street-level imagery, CC-BY-SA). */
 export const PANORAMAX_SEARCH_URL = 'https://api.panoramax.xyz/api/search';
 

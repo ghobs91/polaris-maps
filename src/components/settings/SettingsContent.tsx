@@ -11,6 +11,7 @@ import {
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { Button, SettingsGroup, SettingsRow, SFSymbol, SegmentedControl } from '../common';
+import { StreetViewSettings } from './StreetViewSettings';
 import { spacing, typography, iosListGroup } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -151,6 +152,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           }
         />
       </SettingsGroup>
+
+      <StreetViewSettings />
 
       <SettingsGroup
         header="Accounts"
