@@ -504,9 +504,11 @@ async function computeRouteOnline(
             verbalPreTransition: (m['verbal_pre_transition_instruction'] as string) ?? '',
             verbalPostTransition: m['verbal_post_transition_instruction'] as string | undefined,
             ...parseExitSign(m['sign'] as Record<string, unknown> | undefined),
+            // Not rounded: see routeMapping.ts — rounding to whole mph here
+            // corrupts the km/h value the sign shows metric users.
             speedLimitMph:
               typeof m['speed_limit'] === 'number'
-                ? Math.round((m['speed_limit'] as number) * 0.621371) // km/h → mph
+                ? (m['speed_limit'] as number) * 0.621371 // km/h → mph
                 : undefined,
             laneGuidance: parseLaneGuidance(
               m['lanes'] as Array<Record<string, unknown>> | undefined,

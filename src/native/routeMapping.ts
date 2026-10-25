@@ -56,8 +56,10 @@ export function mapNativeManeuver(m: NativeManeuverFields): ValhallaManeuver {
     streetNames: m.street_names,
     verbalPreTransition: m.verbal_pre_transition,
     verbalPostTransition: m.verbal_post_transition,
-    speedLimitMph:
-      typeof m.speed_limit === 'number' ? Math.round(m.speed_limit * 0.621371) : undefined,
+    // Deliberately not rounded. The sign converts back to km/h for metric
+    // users, and rounding to whole mph here turns a 30 km/h zone into 31 and
+    // a 70 zone into 69 — a wrong number on a speed limit sign.
+    speedLimitMph: typeof m.speed_limit === 'number' ? m.speed_limit * 0.621371 : undefined,
     laneGuidance: laneGuidanceFor(m.lanes, type),
   };
 }
