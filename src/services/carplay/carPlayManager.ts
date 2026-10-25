@@ -828,9 +828,12 @@ export function syncMapStyle(): void {
   if (!connected) return;
   const themeMode = useSettingsStore.getState().themeMode;
   const systemDark = Appearance.getColorScheme() === 'dark';
-  // The head unit's content style wins while CarPlay is attached, so the map
-  // matches the car rather than the phone's theme.
-  const isDark = carPlayDark ?? (themeMode === 'dark' || (themeMode === 'system' && systemDark));
+  // An explicit phone theme is authoritative — the driver picked Dark/Light for
+  // the app, so CarPlay must match it. Only `system` defers to the head unit's
+  // content style (the car's own appearance), which can resolve late or report
+  // light on a Dashboard-only session; letting it override an explicit Dark
+  // left the Dashboard map light until the full-screen template presented.
+  const isDark = themeMode === 'system' ? (carPlayDark ?? systemDark) : themeMode === 'dark';
   const mapStylePref = useMapStore.getState().mapStyle;
   const isNavigating = useNavigationStore.getState().isNavigating;
   const language = getDeviceLanguage();
