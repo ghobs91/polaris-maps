@@ -28,7 +28,9 @@ import { CurrentRoadPill } from '@/components/navigation/CurrentRoadPill';
 import { NavigationStepsList } from '@/components/navigation/NavigationStepsList';
 import { CarPlayNavigationCompanion } from '@/components/navigation/CarPlayNavigationCompanion';
 import { useCarPlayStore } from '@/stores/carPlayStore';
-import { OverSpeedMonitor } from '@/services/navigation/speedAlerts';
+import { OverSpeedMonitor, resolveSpeedLimitMph } from '@/services/navigation/speedAlerts';
+import { useSpeedLimitSignFallback } from '@/hooks/useSpeedLimitSignFallback';
+import { MAPILLARY_SPEED_LIMIT_ATTRIBUTION } from '@/services/speedLimits/mapillarySpeedSigns';
 import { formatDuration } from '@/utils/units';
 import {
   processFix,
@@ -146,6 +148,16 @@ export default function NavigationScreen() {
   // false (or until it starts) the screen runs its own foreground watcher.
   const backgroundSessionActive = useNavigationTrackingStore((s) => s.backgroundSessionActive);
 
+  // Mapillary sign detections, for roads the routing engine has no `maxspeed`
+  // for. Silent unless a token and a downloaded region can supply a unit.
+  const signLimitMph = useSpeedLimitSignFallback(isNavigating && modeCapabilities.speedLimit);
+  // The over-speed sampler runs on a timer outside render, so it reads the
+  // fallback through a ref rather than recomputing the whole route each second.
+  const signLimitRef = useRef<number | null>(null);
+  useEffect(() => {
+    signLimitRef.current = signLimitMph;
+  }, [signLimitMph]);
+
   // Voice guidance (start, advance-distance ladder, off-route/reroute, arrival)
   // is owned by the global navigationVoice service, which also covers trips
   // started from CarPlay while this screen is never mounted.
@@ -188,7 +200,10 @@ export default function NavigationScreen() {
       const mps = getGpsSpeed();
       const mph = Number.isFinite(mps) ? mps * 2.23694 : 0;
       setCurrentSpeedMph(mph >= 1 ? mph : null);
-      const limit = useNavigationStore.getState().currentManeuver?.speedLimitMph ?? null;
+      const navState = useNavigationStore.getState();
+      const maneuvers = navState.activeRoute?.legs.flatMap((l) => l.maneuvers) ?? [];
+      const limit =
+        resolveSpeedLimitMph(maneuvers, navState.currentStepIndex) ?? signLimitRef.current;
       const over = overSpeedRef.current.update(mph, limit);
       if (over && !wasOverSpeedRef.current) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -582,6 +597,20 @@ export default function NavigationScreen() {
   // Conversely the segment already reached is the road under the car, which is
   // what the map pill names — the banner is already announcing the next one.
   const currentRoad = currentRoadName(currentStepIndex, allManeuvers);
+  // The posted limit belongs to the road under the car too, not the one being
+  // announced. It holds forward across maneuvers that carry no `maxspeed`, so
+  // the sign stays up for the whole trip instead of blinking out between zones.
+  // When the route has no limit at all, a Mapillary detection nearby stands in.
+  const routeSpeedLimitMph = modeCapabilities.speedLimit
+    ? resolveSpeedLimitMph(allManeuvers, currentStepIndex)
+    : null;
+  const speedLimitMph = routeSpeedLimitMph ?? signLimitMph;
+  // Credit is owed only when the rendered number is Mapillary's, not the
+  // routing engine's (CC-BY-SA detections).
+  const speedLimitAttribution =
+    routeSpeedLimitMph == null && signLimitMph != null
+      ? MAPILLARY_SPEED_LIMIT_ATTRIBUTION
+      : undefined;
 
   // CarPlay companion: the car shows the map, so the phone shows the step list
   // and an add-stop search bar instead of duplicating the map HUD.
@@ -715,11 +744,10 @@ export default function NavigationScreen() {
               posts a limit without a speedometer. */}
           {(modeCapabilities.speedometer || modeCapabilities.speedLimit) && (
             <SpeedCluster
-              speedLimitMph={
-                modeCapabilities.speedLimit ? (currentManeuver?.speedLimitMph ?? null) : null
-              }
+              speedLimitMph={speedLimitMph}
               speedMph={modeCapabilities.speedometer ? currentSpeedMph : null}
               over={isOverSpeed}
+              attribution={speedLimitAttribution}
             />
           )}
           <View style={styles.roadPillSlot} pointerEvents="none">

@@ -23,6 +23,7 @@ import { createSearchSession, type SearchSession } from '../search/searchSession
 import { computeRoute } from '../routing/routingService';
 import { ensureOfflineRoutingForPoints } from '../routing/offlineRouting';
 import { isForegroundInterpolationActive } from '../navigation/foregroundActivity';
+import { resolveSpeedLimitMph } from '../navigation/speedAlerts';
 import { formatDistance } from '../../utils/units';
 import { resolveMapStyle } from '../../components/map/mapStyleResolver';
 import { applyNavigationFocus } from '../map/navFocusStyle';
@@ -420,7 +421,9 @@ function syncNavigationState(state: ReturnType<typeof useNavigationStore.getStat
     nextDistanceMeters: nextManeuver?.distanceMeters,
     nextDurationSeconds: nextManeuver?.durationSeconds,
     nextStreetNames: nextManeuver?.streetNames,
-    ...toCarPlaySpeedLimit(maneuver.speedLimitMph),
+    // The limit for the road under the car, resolved the same way as the
+    // phone's sign so both screens hold the same value across untagged gaps.
+    ...toCarPlaySpeedLimit(resolveSpeedLimitMph(allManeuvers, state.currentStepIndex) ?? undefined),
     laneGuidance: maneuver.laneGuidance
       ? {
           laneCount: maneuver.laneGuidance.laneCount,

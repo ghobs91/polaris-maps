@@ -524,10 +524,12 @@ describe('CarPlayManager', () => {
     const route = makeRoute();
     // Enrich the guidance (next) maneuver the way the routing pipeline does:
     // guidance is the maneuver the live countdown points at, not the segment
-    // already reached.
+    // already reached. Lane guidance belongs to that upcoming maneuver, while
+    // the speed limit belongs to the road already under the car (maneuver 0),
+    // exactly like the phone's SpeedCluster.
+    route.legs[0].maneuvers[0] = { ...route.legs[0].maneuvers[0], speedLimitMph: 25 };
     route.legs[0].maneuvers[1] = {
       ...route.legs[0].maneuvers[1],
-      speedLimitMph: 25,
       laneGuidance: {
         laneCount: 3,
         activeLanes: [1, 2],
@@ -863,8 +865,9 @@ describe('CarPlayManager', () => {
     initCarPlay();
     fireEvent('carPlayConnected');
     const route = makeRoute();
-    // Guidance maneuver (the one shown on the card) carries the limit.
-    route.legs[0].maneuvers[1] = { ...route.legs[0].maneuvers[1], speedLimitMph: 25 };
+    // The sign shows the limit of the road under the car (maneuver 0), not the
+    // one being announced — the same value the phone's SpeedCluster reads.
+    route.legs[0].maneuvers[0] = { ...route.legs[0].maneuvers[0], speedLimitMph: 25 };
     useNavigationStore
       .getState()
       .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
@@ -872,6 +875,20 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateNavigation).toHaveBeenCalledWith(
       expect.objectContaining({ speedLimitValue: 40, speedLimitUnit: 'km/h' }),
     );
+  });
+
+  it('does not post the next road limit before the car reaches it', () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    const route = makeRoute();
+    // Only the upcoming maneuver carries a limit; the current road has none.
+    route.legs[0].maneuvers[1] = { ...route.legs[0].maneuvers[1], speedLimitMph: 25 };
+    useNavigationStore
+      .getState()
+      .startNavigation(route, [], { lat: 40.76, lng: -73.97, name: 'Dest' }, 'auto');
+
+    const calls = (NativeModules.PolarisCarPlay.updateNavigation as jest.Mock).mock.calls;
+    expect(calls[calls.length - 1]?.[0]).not.toHaveProperty('speedLimitValue');
   });
 
   function makeTrafficSegment(): NormalizedTrafficSegment {

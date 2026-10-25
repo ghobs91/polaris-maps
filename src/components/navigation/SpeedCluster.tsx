@@ -12,6 +12,12 @@ interface SpeedClusterProps {
   speedMph: number | null;
   /** Highlights the current speed once the driver is over the limit. */
   over: boolean;
+  /**
+   * Visible credit for a limit that came from third-party detections rather
+   * than the routing engine. Only rendered beside a limit, because a credit for
+   * data that isn't on screen is noise.
+   */
+  attribution?: string;
 }
 
 /**
@@ -30,7 +36,7 @@ interface SpeedClusterProps {
  * The full 52×68 stacked plate stays in `SpeedLimitSign` for surfaces that
  * want the literal sign (CarPlay mirrors it).
  */
-export function SpeedCluster({ speedLimitMph, speedMph, over }: SpeedClusterProps) {
+export function SpeedCluster({ speedLimitMph, speedMph, over, attribution }: SpeedClusterProps) {
   const useMetric = useSettingsStore((s) => s.useMetric);
 
   const hasLimit = speedLimitMph != null;
@@ -49,36 +55,50 @@ export function SpeedCluster({ speedLimitMph, speedMph, over }: SpeedClusterProp
   ].filter(Boolean);
 
   return (
-    <View style={styles.container} accessibilityRole="text" accessibilityLabel={parts.join(', ')}>
-      {hasLimit && (
-        <>
-          <View style={styles.limitCell}>
-            <Text style={styles.limitValue} maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}>
-              {limitValue}
+    <View style={styles.stack}>
+      <View style={styles.container} accessibilityRole="text" accessibilityLabel={parts.join(', ')}>
+        {hasLimit && (
+          <>
+            <View style={styles.limitCell}>
+              <Text style={styles.limitValue} maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}>
+                {limitValue}
+              </Text>
+            </View>
+            {hasSpeed && <View style={styles.divider} />}
+          </>
+        )}
+
+        {hasSpeed && (
+          <View style={styles.speedCell}>
+            <Text
+              style={[styles.speedValue, over && styles.speedValueOver]}
+              maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}
+            >
+              {speedValue}
+            </Text>
+            <Text style={styles.speedUnit} maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}>
+              {unit}
             </Text>
           </View>
-          {hasSpeed && <View style={styles.divider} />}
-        </>
-      )}
+        )}
+      </View>
 
-      {hasSpeed && (
-        <View style={styles.speedCell}>
-          <Text
-            style={[styles.speedValue, over && styles.speedValueOver]}
-            maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}
-          >
-            {speedValue}
-          </Text>
-          <Text style={styles.speedUnit} maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}>
-            {unit}
-          </Text>
-        </View>
-      )}
+      {/* Opaque backing: the plate sits over map imagery, and licence credit is
+          only useful if it stays legible against whatever is underneath. */}
+      {hasLimit && attribution ? (
+        <Text style={styles.attribution} maxFontSizeMultiplier={MAX_FONT_SCALE_DENSE}>
+          {attribution}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  stack: {
+    alignItems: 'flex-start',
+    gap: 3,
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -135,5 +155,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#5F6368',
     marginTop: -1,
+  },
+  attribution: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '600',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(28,28,30,0.72)',
+    overflow: 'hidden',
   },
 });

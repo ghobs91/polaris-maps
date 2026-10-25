@@ -1,4 +1,7 @@
-/** Over-speed detection with hysteresis, and speed-limit change detection. */
+/** Over-speed detection with hysteresis, speed-limit change detection, and
+ * limit resolution along an active route. */
+
+import type { ValhallaManeuver } from '../../models/route';
 
 export interface SpeedAlertOptions {
   /** Speeds at least this far above the limit raise the alert. */
@@ -59,4 +62,53 @@ export function speedLimitChanged(
   nextMph: number | null | undefined,
 ): boolean {
   return previousMph !== nextMph;
+}
+
+/**
+ * Upper bound for a believable posted limit. Anything above this is a parse
+ * artifact (a metric value misread as mph, a sentinel) rather than a sign.
+ */
+export const MAX_PLAUSIBLE_SPEED_LIMIT_MPH = 200;
+
+/** A posted limit worth showing: finite, positive, and within the bound above. */
+export function isPlausibleSpeedLimitMph(limitMph: number | null | undefined): limitMph is number {
+  return (
+    limitMph != null &&
+    Number.isFinite(limitMph) &&
+    limitMph > 0 &&
+    limitMph <= MAX_PLAUSIBLE_SPEED_LIMIT_MPH
+  );
+}
+
+type SpeedLimitManeuver = Pick<ValhallaManeuver, 'type' | 'speedLimitMph'>;
+
+/**
+ * Posted limit for the road the driver is currently on.
+ *
+ * Routing engines only attach `speed_limit` at a maneuver's first edge, and
+ * only where the source data has `maxspeed` there. Reading just the current
+ * maneuver therefore blanks the sign for long stretches of an otherwise
+ * well-tagged route — the sign flickers off mid-drive, which is exactly the
+ * behaviour a driver reads as "no limit data here".
+ *
+ * So the last known limit holds forward until a maneuver supplies a new one,
+ * the way a posted sign stays in force until the next one. The carry stops at
+ * a ferry: the limit before boarding says nothing about the crossing, and a
+ * stale road limit on open water is worse than no sign at all.
+ */
+export function resolveSpeedLimitMph(
+  maneuvers: ReadonlyArray<SpeedLimitManeuver>,
+  stepIndex: number,
+): number | null {
+  if (maneuvers.length === 0) return null;
+  const start = Math.min(stepIndex, maneuvers.length - 1);
+  if (start < 0) return null;
+
+  for (let i = start; i >= 0; i -= 1) {
+    const maneuver = maneuvers[i];
+    if (maneuver.type === 'ferry') return null;
+    if (isPlausibleSpeedLimitMph(maneuver.speedLimitMph)) return maneuver.speedLimitMph;
+  }
+
+  return null;
 }
