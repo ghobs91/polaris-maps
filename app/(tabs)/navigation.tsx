@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { MapView } from '@/components/map/MapView';
+import { MapView, NAVIGATION_PUCK_SCREEN_FRACTION } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
 import { NextTurnBanner, NavigationHud, FasterRouteBanner } from '@/components/navigation';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
@@ -647,7 +647,20 @@ export default function NavigationScreen() {
         followCamera={followCamera}
         onFollowCameraChange={handleFollowCameraChange}
         destination={destination}
+        remainingDistanceMeters={remainingDistanceMeters}
       />
+
+      {/* The road under the car, floating just below the vehicle puck like
+          Google/Apple Maps. Anchored to the camera's own puck fraction so it
+          tracks the arrow instead of drifting when the padding changes. */}
+      {!hudExpanded && (
+        <View
+          style={[styles.roadPillOverlay, { top: `${NAVIGATION_PUCK_SCREEN_FRACTION * 100}%` }]}
+          pointerEvents="none"
+        >
+          <CurrentRoadPill roadName={currentRoad} />
+        </View>
+      )}
 
       {/* Turn banner + speed limit + lane guidance overlaid at top */}
       <View style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}>
@@ -705,10 +718,8 @@ export default function NavigationScreen() {
         </View>
       </View>
 
-      {/* Speed limit + current speed + the road being travelled, on the band
-          above the ETA bar: sign on the left, road centred in what's left,
-          and the action rail on the right. Hidden with the rail while the
-          stops sheet is expanded. */}
+      {/* Speed limit + current speed, on the band above the ETA bar. Hidden
+          with the action rail while the stops sheet is expanded. */}
       {!hudExpanded && (
         <View style={[styles.bottomBand, { bottom: insets.bottom + spacing.md + 110 }]}>
           {/* Gated on either capability so the sign survives if a future mode
@@ -722,9 +733,6 @@ export default function NavigationScreen() {
               over={isOverSpeed}
             />
           )}
-          <View style={styles.roadPillSlot} pointerEvents="none">
-            <CurrentRoadPill roadName={currentRoad} />
-          </View>
         </View>
       )}
 
@@ -895,9 +903,13 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       alignItems: 'center',
       gap: spacing.sm,
     },
-    roadPillSlot: {
-      flex: 1,
+    roadPillOverlay: {
+      position: 'absolute',
+      left: spacing.md,
+      right: spacing.md,
       alignItems: 'center',
+      // Clears the puck arrow so the pill hangs under it rather than across it.
+      paddingTop: 30,
     },
     etaContainer: {
       position: 'absolute',

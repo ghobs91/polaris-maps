@@ -80,7 +80,21 @@ const OSM_FETCH_DEBOUNCE_MS = 300;
 const POI_PREFETCH_DEBOUNCE_MS = 500;
 const POI_ZOOM_REUSE_THRESHOLD = 0.35;
 const NAVIGATION_CAMERA_PITCH = 55;
-const NAVIGATION_CAMERA_TOP_PADDING = 0.5;
+/**
+ * Fraction of the screen height kept clear *above* the map centre. MapLibre
+ * centres the camera in the unpadded rectangle, so the vehicle puck ends up at
+ * `0.5 + TOP_PADDING / 2` of the screen height. 0.32 pins it around 66%, which
+ * keeps the route ahead readable while leaving room between the puck, its road
+ * pill and the floating ETA card at the bottom.
+ */
+const NAVIGATION_CAMERA_TOP_PADDING = 0.32;
+
+/**
+ * Screen-height fraction where the navigation puck is pinned. Screens that
+ * anchor chrome to the puck (the current-road pill) must use this rather than
+ * guessing, or the pill drifts off the arrow when the padding changes.
+ */
+export const NAVIGATION_PUCK_SCREEN_FRACTION = 0.5 + NAVIGATION_CAMERA_TOP_PADDING / 2;
 
 /**
  * Gaps before retrying the user's map style while the raster fallback is
@@ -192,6 +206,11 @@ interface MapViewProps {
   followCamera?: boolean;
   /** Destination of the shown route; renders a flag marker (parity with CarPlay). */
   destination?: { lat: number; lng: number } | null;
+  /**
+   * Live distance left on the active route. The stretch already driven is
+   * drawn dimmed so progress reads at a glance (Google/Apple Maps parity).
+   */
+  remainingDistanceMeters?: number | null;
 }
 
 export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
@@ -208,6 +227,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onFollowCameraChange,
     followCamera = true,
     destination,
+    remainingDistanceMeters,
   },
   ref,
 ) {
@@ -1152,7 +1172,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         )}
 
         {routeGeometry && (
-          <TrafficRouteLayer geometry={routeGeometry} navigationMode={navigationMode} />
+          <TrafficRouteLayer
+            geometry={routeGeometry}
+            navigationMode={navigationMode}
+            remainingDistanceMeters={remainingDistanceMeters}
+          />
         )}
 
         {/* Destination flag — parity with the CarPlay map's checkered flag. */}

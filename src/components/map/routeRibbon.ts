@@ -8,6 +8,8 @@
  * and that invariant spans two modules that would otherwise drift apart.
  */
 
+import { haversineMeters } from '../../utils/routeSnap';
+
 export interface RibbonBand {
   id: string;
   color: unknown;
@@ -80,9 +82,73 @@ export const NAV_RIBBON_SCALE = {
 const UNSCALED = { casing: 1, glow: 1, line: 1, core: 1 } as const;
 
 /**
+ * Opacity of the stretch already driven. Low enough that the live-ahead route
+ * stays the only high-chroma object on screen, high enough that the driven
+ * ribbon still reads as "the way you came" rather than disappearing.
+ */
+export const COMPLETED_ROUTE_OPACITY = 0.35;
+
+export interface SplitRoute {
+  /** Route from the start to the vehicle, ending at the seam point. */
+  completed: [number, number][];
+  /** Route from the seam point to the destination. */
+  remaining: [number, number][];
+  /** Length of the completed half, in meters. */
+  completedMeters: number;
+}
+
+/**
+ * Split a decoded route at the vehicle, `remainingMeters` from its end.
+ *
+ * Returns `null` when there is nothing worth splitting: no live distance yet,
+ * nothing driven, or the whole route still ahead. Callers then keep a single
+ * ribbon, so no seam is drawn at the very start of a trip.
+ */
+export function splitRouteAtRemaining(
+  coords: [number, number][],
+  remainingMeters: number | null | undefined,
+): SplitRoute | null {
+  if (coords.length < 2) return null;
+  if (remainingMeters == null || !Number.isFinite(remainingMeters)) return null;
+  if (remainingMeters <= 0) return null;
+
+  let totalMeters = 0;
+  for (let i = 1; i < coords.length; i++) totalMeters += haversineMeters(coords[i - 1], coords[i]);
+  if (remainingMeters >= totalMeters) return null;
+
+  const completedMeters = totalMeters - remainingMeters;
+
+  let acc = 0;
+  for (let i = 1; i < coords.length; i++) {
+    const segmentMeters = haversineMeters(coords[i - 1], coords[i]);
+    if (acc + segmentMeters >= completedMeters) {
+      const t = segmentMeters > 0 ? (completedMeters - acc) / segmentMeters : 0;
+      const seam: [number, number] = [
+        coords[i - 1][0] + (coords[i][0] - coords[i - 1][0]) * t,
+        coords[i - 1][1] + (coords[i][1] - coords[i - 1][1]) * t,
+      ];
+      const completed = [...coords.slice(0, i), seam];
+      const remaining = [seam, ...coords.slice(i)];
+      // A seam landing exactly on a vertex must not leave a duplicated point
+      // (a zero-length segment) at the end of either half.
+      if (t <= 0) completed.pop();
+      if (t >= 1) remaining.shift();
+      if (completed.length < 2 || remaining.length < 2) return null;
+      return { completed, remaining, completedMeters };
+    }
+    acc += segmentMeters;
+  }
+
+  return null;
+}
+
+/**
  * Build the ribbon band stack for one route source. `lineColor` is what the
  * line band paints with — the plain route colour for the fallback source, or
  * the per-feature traffic colour for the traffic source.
+ *
+ * `opacityScale` fades the whole stack, which is how the already-driven part of
+ * the route recedes behind the vehicle.
  */
 export function buildRibbon(
   prefix: string,
@@ -90,8 +156,9 @@ export function buildRibbon(
   isDark: boolean,
   visible: boolean,
   navigation: boolean,
+  opacityScale = 1,
 ): RibbonBand[] {
-  const opacity = visible ? 1 : 0;
+  const opacity = visible ? opacityScale : 0;
   const scale = navigation ? NAV_RIBBON_SCALE : UNSCALED;
   const bands: RibbonBand[] = [
     {

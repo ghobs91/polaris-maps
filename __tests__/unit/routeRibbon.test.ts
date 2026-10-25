@@ -1,6 +1,13 @@
 import { DARK_MAP_STYLE_JSON } from '../../src/constants/darkMapStyle';
 import { applyNavigationFocus } from '../../src/services/map/navFocusStyle';
-import { buildRibbon, zoomWidth, type RibbonBand } from '../../src/components/map/routeRibbon';
+import {
+  buildRibbon,
+  zoomWidth,
+  COMPLETED_ROUTE_OPACITY,
+  splitRouteAtRemaining,
+  type RibbonBand,
+} from '../../src/components/map/routeRibbon';
+import { haversineMeters } from '../../src/utils/routeSnap';
 
 /** Evaluate a MapLibre zoom `interpolate` (or a `*` wrap of one) at a zoom. */
 function evalWidth(expr: unknown, zoom: number): number | null {
@@ -106,6 +113,65 @@ describe('routeRibbon', () => {
     it('paints the line band with the per-feature traffic colour', () => {
       const bands = buildRibbon('r', ['get', 'color'], true, true, false);
       expect(band(bands, '-line').color).toEqual(['get', 'color']);
+    });
+
+    it('fades every band by the requested scale', () => {
+      const bands = buildRibbon('r', '#fff', true, true, true, COMPLETED_ROUTE_OPACITY);
+      expect(bands.every((b) => b.opacity === COMPLETED_ROUTE_OPACITY)).toBe(true);
+      // A hidden source still paints nothing, whatever the scale.
+      const hidden = buildRibbon('r', '#fff', true, false, true, COMPLETED_ROUTE_OPACITY);
+      expect(hidden.every((b) => b.opacity === 0)).toBe(true);
+    });
+  });
+
+  describe('splitRouteAtRemaining', () => {
+    // Two ~1.1 km north-south legs from the equator: [0,0] -> [0,0.01] -> [0,0.02].
+    const coords: [number, number][] = [
+      [0, 0],
+      [0, 0.01],
+      [0, 0.02],
+    ];
+    const legMeters = haversineMeters(coords[0], coords[1]);
+
+    it('needs a live distance to split', () => {
+      expect(splitRouteAtRemaining(coords, null)).toBeNull();
+      expect(splitRouteAtRemaining(coords, undefined)).toBeNull();
+      expect(splitRouteAtRemaining(coords, Number.NaN)).toBeNull();
+    });
+
+    it('leaves a single ribbon while nothing has been driven', () => {
+      expect(splitRouteAtRemaining(coords, legMeters * 2)).toBeNull();
+      expect(splitRouteAtRemaining(coords, legMeters * 3)).toBeNull();
+      expect(splitRouteAtRemaining(coords, 0)).toBeNull();
+    });
+
+    it('splits at the seam and shares it between both halves', () => {
+      const split = splitRouteAtRemaining(coords, legMeters)!;
+      expect(split).not.toBeNull();
+      const { completed, remaining } = split;
+      expect(completed.length).toBeGreaterThanOrEqual(2);
+      expect(remaining.length).toBeGreaterThanOrEqual(2);
+      // The seam is one shared point, not a duplicated gap.
+      expect(completed[completed.length - 1]).toEqual(remaining[0]);
+      // The driven half keeps the route start; the live half keeps the end.
+      expect(completed[0]).toEqual(coords[0]);
+      expect(remaining[remaining.length - 1]).toEqual(coords[2]);
+      // Split mid-route: the seam is the interpolated middle, not an endpoint.
+      expect(completed[completed.length - 1][1]).toBeCloseTo(0.01, 5);
+    });
+
+    it('interpolates the seam inside a long leg', () => {
+      const split = splitRouteAtRemaining(coords, legMeters * 1.5)!;
+      const seam = split.completed[split.completed.length - 1];
+      // 1.5 legs still ahead => 0.5 leg driven, i.e. halfway down the first leg.
+      expect(seam[1]).toBeCloseTo(0.005, 3);
+    });
+
+    it('keeps the seam at a vertex when the split lands exactly on it', () => {
+      const split = splitRouteAtRemaining(coords, legMeters)!;
+      // Split exactly at the middle vertex: no duplicated point in either half.
+      expect(split.completed).toEqual([coords[0], coords[1]]);
+      expect(split.remaining).toEqual([coords[1], coords[2]]);
     });
   });
 
