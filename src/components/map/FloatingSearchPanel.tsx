@@ -782,7 +782,12 @@ export function FloatingSearchPanel({
       );
     });
 
-    const displayedResults = [...stationResults, ...filteredApple, ...filteredUnified];
+    // Ranked order, best first: transit stations are a deliberate boost, then
+    // the unified pipeline (which carries real POI categories, so those rows
+    // get their coloured category icon and a distance), then MapKit's nearby
+    // results as a fill. MapKit rows have no category metadata and render as
+    // grey pins, so letting them lead demoted the better-typed results.
+    const displayedResults = [...stationResults, ...filteredUnified, ...filteredApple];
     setResults(displayedResults);
 
     const mapPois: OsmPoi[] = displayedResults
