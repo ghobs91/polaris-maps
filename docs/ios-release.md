@@ -247,10 +247,13 @@ Releasing to the App Store is **always a manual process** — no automation will
 ### Version Numbers
 
 - **Marketing version** (`0.1.0`): Managed in `app.json` → `expo.version`. Bump manually when cutting a release. This is what ships in `CFBundleShortVersionString`; the Xcode `MARKETING_VERSION` build setting is overridden by the embedded Expo config.
-- **Build number** (`CFBundleVersion`): For this Expo project, `xcodebuild -exportArchive` **auto-manages** it — `ExportOptions.plist` omits `manageAppVersionAndBuildNumber`, which defaults to `true`, so Xcode sets the next available build number for that marketing version on App Store Connect (it can differ from the archive's local value, and from any `agvtool bump`).
-  - `xcrun agvtool bump -all` only changes the local project/Info.plist and is **cosmetic** here; it is reverted/overridden at export. Don't rely on it for the shipped number.
-  - To pin a deterministic build number, set `manageAppVersionAndBuildNumber` to `false` in `ExportOptions.plist` and choose an explicit unused number (or set `ios.buildNumber` in `app.json` and let `expo prebuild` propagate it).
-  - The Fastlane `beta` lane is the reliable path: its `bump_build` lane sets the number to `latest_testflight_build_number + 1` (see `fastlane/Fastfile`), so the shipped build is always unique.
+- **Build number** (`CFBundleVersion`): App Store Connect is the single source of truth. Resolve it before archiving and let export keep it:
+  - `node scripts/next-build-number.mjs --set` queries ASC for the highest build on `com.polarismaps.app`, takes the project's current value as a floor, applies `max(asc, local) + 1` via `agvtool`, and prints the number. Run it **before** archiving.
+  - `ExportOptions.plist` sets `manageAppVersionAndBuildNumber` to `false`, so `-exportArchive` no longer rewrites the number. The project, the archive, and the shipped IPA all carry the same value — what the archive says is what ships.
+  - Do **not** use a bare `xcrun agvtool bump -all`. It counts locally, and this repo runs several worktrees at once: a local counter collides with builds uploaded from another worktree or machine, and with export auto-management it silently produced a different shipped number than the archive carried.
+  - The Fastlane `beta` lane resolves the number the same way (`latest_testflight_build_number + 1` in `bump_build`) and passes `manageAppVersionAndBuildNumber: false` to `build_app`, so both paths agree.
+  - If ASC cannot be reached, the script exits non-zero rather than guessing: a wrong number only fails at upload, after a full build.
+  - Marketing version `0.1.0` is separate — see above.
 
 ## GitHub Actions (Optional CI)
 

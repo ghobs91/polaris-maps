@@ -14,6 +14,7 @@ jest.mock('../../src/services/routing/routingService', () => ({
 import NativePolarisValhalla from '../../src/native/valhalla/NativePolarisValhalla';
 import { computeRoute } from '../../src/native/valhalla';
 import type { NativeValhallaRoute } from '../../src/native/valhalla/NativePolarisValhalla';
+import { mphToKmh } from '../../src/utils/units';
 
 function payload(maneuver: Record<string, unknown>): NativeValhallaRoute {
   return {
@@ -57,11 +58,24 @@ describe('native maneuver mapping', () => {
     const routes = await computeRoute([{ lat: 0, lng: 0 }], 'auto');
     const maneuver = routes[0].legs[0].maneuvers[0];
 
-    expect(maneuver.speedLimitMph).toBe(25); // 40 km/h → mph
+    expect(maneuver.speedLimitMph).toBeCloseTo(24.855, 3); // 40 km/h, deliberately unrounded
     expect(maneuver.streetNames).toEqual(['Main St']);
     expect(maneuver.verbalPostTransition).toBe('then turn left');
     expect(maneuver.laneGuidance).toBeDefined();
     expect(maneuver.laneGuidance?.laneCount).toBe(1);
+  });
+
+  it('round-trips metric limits back to the posted km/h value', async () => {
+    // The sign converts mph back to km/h for metric users. Rounding at ingest
+    // used to turn a 30 km/h zone into 31 and a 70 zone into 69.
+    for (const kph of [30, 70, 110, 120]) {
+      (NativePolarisValhalla!.computeRoute as jest.Mock).mockResolvedValue([
+        payload({ speed_limit: kph }),
+      ]);
+      const routes = await computeRoute([{ lat: 0, lng: 0 }], 'auto');
+      const shown = Math.round(mphToKmh(routes[0].legs[0].maneuvers[0].speedLimitMph!));
+      expect(shown).toBe(kph);
+    }
   });
 
   it('omits the fields when the native payload lacks them', async () => {

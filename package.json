@@ -9,6 +9,7 @@
     "ios:device": "expo run:ios --device",
     "ios:open": "xed ios",
     "ios:pods": "pnpm bare:link && cd ios && bundle exec pod install",
+    "ios:build-number": "node scripts/next-build-number.mjs --set",
     "ios:beta": "bundle exec fastlane ios beta",
     "ios:release": "bundle exec fastlane ios release",
     "ios:validate": "bundle exec fastlane ios validate",

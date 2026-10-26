@@ -108,6 +108,39 @@ describe('SpeedCluster', () => {
     const under = render(<SpeedCluster speedLimitMph={55} speedMph={48} over={false} />);
     expect(under.queryByLabelText(/over the speed limit/i)).toBeNull();
   });
+
+  it('credits Mapillary when the limit came from sign detections', () => {
+    const screen = render(
+      <SpeedCluster
+        speedLimitMph={31}
+        speedMph={30}
+        over={false}
+        attribution="Limits © Mapillary"
+      />,
+    );
+
+    expect(screen.getByText('Limits © Mapillary')).toBeTruthy();
+    // The reading itself is unchanged by the credit.
+    expect(screen.getByText('31')).toBeTruthy();
+  });
+
+  it('shows no credit when the routing engine supplied the limit', () => {
+    const screen = render(<SpeedCluster speedLimitMph={55} speedMph={48} over={false} />);
+    expect(screen.queryByText(/Mapillary/)).toBeNull();
+  });
+
+  it('hides the credit when there is no limit on screen to credit', () => {
+    const screen = render(
+      <SpeedCluster
+        speedLimitMph={null}
+        speedMph={48}
+        over={false}
+        attribution="Limits © Mapillary"
+      />,
+    );
+
+    expect(screen.queryByText(/Mapillary/)).toBeNull();
+  });
 });
 
 describe('CurrentRoadPill', () => {

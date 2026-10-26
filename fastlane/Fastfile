@@ -156,12 +156,14 @@ platform :ios do
     # When match is skipped there is no auto-detected profile mapping, so the
     # installed App Store profile that carries the app's CarPlay + iCloud
     # entitlements must be named explicitly for the export step.
-    export_options = {}
+    #
+    # manageAppVersionAndBuildNumber: false keeps the build number resolved in
+    # `bump_build` — otherwise export rewrites CFBundleVersion from ASC and the
+    # archive, the IPA and the project all end up disagreeing.
+    export_options = { manageAppVersionAndBuildNumber: false }
     if skip_match
-      export_options = {
-        provisioningProfiles: {
-          "com.polarismaps.app" => "Polaris AppStore Manual"
-        }
+      export_options[:provisioningProfiles] = {
+        "com.polarismaps.app" => "Polaris AppStore Manual"
       }
     end
     build_app(
