@@ -114,7 +114,12 @@ iOS local build/release workflow (Fastlane lanes, signing, TestFlight): see `doc
 ## Git / PR Rules
 
 - Default branch: `main`.
-- husky `pre-commit` → `pnpm lint && pnpm format:check`; husky `commit-msg` → commitlint.
+- husky `pre-commit` → detached-HEAD guard, then `pnpm lint && pnpm format:check`; husky `commit-msg` → commitlint.
+- **Worktrees start detached.** OpenCode checks worktrees out with a detached
+  HEAD, so a commit made before branching is reachable from no ref and can be
+  garbage-collected. Run `git switch -c <type>/<slug>` as the first action in a
+  worktree, before committing. `scripts/guard-detached-head.mjs` blocks such a
+  commit (bypass: `POLARIS_ALLOW_DETACHED_COMMIT=1`).
 - Conventional Commits format for messages.
 - No PR template or branch-naming policy was found in the repository (see Known Unknowns).
 
