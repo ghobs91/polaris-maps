@@ -97,11 +97,27 @@ platform :ios do
     end
 
     dirty = `git -C #{repo_root} status --porcelain`.strip
-    unless dirty.empty? || ENV["POLARIS_ALLOW_DIRTY"] == "1"
+    # The release lane mutates these itself (build-number bump, pod install,
+    # fastlane's regenerated README). They must not block a re-run; anything
+    # else does.
+    lane_owned = [
+      "ios/PolarisMaps/Info.plist",
+      "ios/PolarisMaps.xcodeproj/project.pbxproj",
+      "ios/Podfile.lock",
+      "ios/Pods/",
+      "fastlane/README.md",
+    ]
+    blocking = dirty.split("\n").reject do |line|
+      path = line[3..].to_s.sub(/\A"/, "").sub(/"\z/, "")
+      lane_owned.any? { |owned| path == owned || path.start_with?(owned) }
+    end
+    if !blocking.empty? && ENV["POLARIS_ALLOW_DIRTY"] != "1"
       UI.user_error!(
-        "Working tree is dirty — commit or stash before archiving:\n#{dirty}"
+        "Working tree has uncommitted changes — commit or stash before archiving:\n" \
+          "#{blocking.join("\n")}"
       )
     end
+    UI.important("Ignoring #{dirty.split("\n").length - blocking.length} build-generated change(s)") unless blocking.length == dirty.split("\n").length
 
     behind = `git -C #{repo_root} rev-list --count HEAD..origin/main 2>/dev/null`.strip
     UI.important("main is #{behind} commit(s) behind origin/main — fetch/pull first") if behind.to_i.positive?
@@ -236,19 +252,25 @@ platform :ios do
 
     # Build the archive
     UI.header("Step 6/7: Building archive (this takes a few minutes)")
-    # When match is skipped there is no auto-detected profile mapping, so the
-    # installed App Store profile that carries the app's CarPlay + iCloud
-    # entitlements must be named explicitly for the export step.
+    # Skip match: let Xcode manage the App Store profile through the API key.
+    # A hardcoded profile name goes stale the moment a capability is added —
+    # "Polaris AppStore Manual" predates the associated-domains entitlement
+    # (bc5231f), which broke build 341's export with "doesn't include the
+    # Associated Domains capability". Automatic signing asks the portal for a
+    # profile that matches the project's current entitlements instead.
     #
     # manageAppVersionAndBuildNumber: false keeps the build number resolved in
     # `bump_build` — otherwise export rewrites CFBundleVersion from ASC and the
     # archive, the IPA and the project all end up disagreeing.
+    auth_xcargs = [
+      "-allowProvisioningUpdates",
+      "-authenticationKeyPath '#{ENV["APP_STORE_CONNECT_KEY_PATH"]}'",
+      "-authenticationKeyID #{ENV["APP_STORE_CONNECT_KEY_ID"]}",
+      "-authenticationKeyIssuerID #{ENV["APP_STORE_CONNECT_ISSUER_ID"]}",
+    ].join(" ")
+
     export_options = { manageAppVersionAndBuildNumber: false }
-    if skip_match
-      export_options[:provisioningProfiles] = {
-        "com.polarismaps.app" => "Polaris AppStore Manual"
-      }
-    end
+    export_options[:signingStyle] = "automatic" if skip_match
     build_app(
       workspace: "ios/PolarisMaps.xcworkspace",
       scheme: "PolarisMaps",
@@ -256,14 +278,14 @@ platform :ios do
       export_method: "app-store",
       output_directory: "build_derived_data",
       output_name: "PolarisMaps.ipa",
-      skip_profile_detection: skip_match,
+      skip_profile_detection: false,
       skip_codesigning: false,
       export_options: export_options,
       # Force the correct development team
       export_team_id: "XTXZ3CYRPX",
       # Xcode automatic signing — no manual cert/profile management
-      xcargs: "-allowProvisioningUpdates",
-      export_xcargs: "-allowProvisioningUpdates",
+      xcargs: auth_xcargs,
+      export_xcargs: auth_xcargs,
       silent: false,
     )
 

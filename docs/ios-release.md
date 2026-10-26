@@ -82,16 +82,33 @@ Builds 318–328 shipped this way: they were archived from feature worktrees tha
 had no `.env`. The `beta` and `release` lanes now refuse to proceed unless all
 of these hold:
 
-| Check                                      | Lane step                       | Override                     |
-| ------------------------------------------ | ------------------------------- | ---------------------------- |
-| `.env` exists at the repo root             | `ensure_app_env`                | none — copy the file         |
-| `EXPO_PUBLIC_TOMTOM_API_KEY` is non-blank  | `ensure_app_env`                | none — set the key           |
-| `HEAD` is `main`                           | `ensure_release_source`         | `POLARIS_ALLOW_NON_MAIN=1`   |
-| working tree is clean                      | `ensure_release_source`         | `POLARIS_ALLOW_DIRTY=1`      |
-| the key is in the exported `main.jsbundle` | `verify_bundle_has_traffic_key` | none — fix the bundling step |
+| Check                                          | Lane step                       | Override                     |
+| ---------------------------------------------- | ------------------------------- | ---------------------------- |
+| `.env` exists at the repo root                 | `ensure_app_env`                | none — copy the file         |
+| `EXPO_PUBLIC_TOMTOM_API_KEY` is non-blank      | `ensure_app_env`                | none — set the key           |
+| `HEAD` is `main`                               | `ensure_release_source`         | `POLARIS_ALLOW_NON_MAIN=1`   |
+| working tree has no uncommitted source changes | `ensure_release_source`         | `POLARIS_ALLOW_DIRTY=1`      |
+| the key is in the exported `main.jsbundle`     | `verify_bundle_has_traffic_key` | none — fix the bundling step |
 
 Merge work into `main` before archiving. A release built from an unmerged
 branch is a binary nobody can reproduce from `main`.
+
+Build-generated changes (`ios/PolarisMaps/Info.plist`,
+`ios/PolarisMaps.xcodeproj/project.pbxproj`, `ios/Podfile.lock`, `ios/Pods/`,
+`fastlane/README.md`) are ignored by the dirty check because the lane mutates
+them itself. The version/build bump it leaves behind is expected — commit it
+when convenient, it will not block the next run.
+
+### Signing when `match` is unavailable
+
+With `SKIP_MATCH=1` (or no `MATCH_PASSWORD`) the export uses **automatic**
+signing with the App Store Connect API key passed on the `xcodebuild` command
+line. Xcode asks the portal for a profile that matches the project's _current_
+entitlements, so adding a capability (universal links, CarPlay, iCloud) does not
+strand the build on a stale profile. Do not hard-code a profile name here:
+`"Polaris AppStore Manual"` was created before `bc5231f` added
+`applinks:app.polarismaps.app` and broke build 341's export with
+`Provisioning profile ... doesn't include the Associated Domains capability`.
 
 ## Development Workflow
 
