@@ -10,6 +10,32 @@ import type {
 
 const TRANSIT_LAYER_KEY = 'transitLayerVisible';
 
+/**
+ * True when two line arrays describe the same rendered geometry.
+ * Store updates fire several times per fetch (partial sources), so skipping
+ * identical snapshots avoids rebuilding both MapLibre sources.
+ */
+function sameLineSet(a: TransitRouteLine[], b: TransitRouteLine[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.id !== y.id ||
+      x.ref !== y.ref ||
+      x.name !== y.name ||
+      x.color !== y.color ||
+      x.mode !== y.mode ||
+      x.geometry.length !== y.geometry.length ||
+      x.stops.length !== y.stops.length
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 interface TransitState {
   // Transit layer visibility
   transitLayerVisible: boolean;
@@ -94,7 +120,10 @@ export const useTransitStore = create<TransitState>()((set, get) => ({
     storage.set(TRANSIT_LAYER_KEY, visible);
   },
   setGtfsLoadingAgency: (agency) => set({ gtfsLoadingAgency: agency }),
-  setRouteLines: (lines) => set({ routeLines: lines }),
+  setRouteLines: (lines) => {
+    if (sameLineSet(get().routeLines, lines)) return;
+    set({ routeLines: lines });
+  },
   setIsLoadingLines: (loading) => set({ isLoadingLines: loading }),
   setStops: (stops) => set({ stops }),
   setIsLoadingStops: (loading) => set({ isLoadingStops: loading }),

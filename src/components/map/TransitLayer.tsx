@@ -1,7 +1,9 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { InteractionManager } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { useTransitStore } from '../../stores/transitStore';
 import { hasAuthoritativeStops } from '../../services/transit/transitLineFetcher';
+import { transitLineBounds } from '../../utils/transitViewport';
 import { TransitousTileLayer } from './TransitousTileLayer';
 
 import type { TransitRouteLine, OtpItinerary, SelectedTransitStop } from '../../models/transit';
@@ -169,6 +171,9 @@ interface RouteGridIndex {
 function buildRouteGrid(lines: TransitRouteLine[]): RouteGridIndex {
   const grid = new Map<string, Set<number>>();
   for (let li = 0; li < lines.length; li++) {
+    // Schedule-derived lines have exact stop lists; they never need
+    // geometry-proximity attribution, so keep them out of the index.
+    if (hasAuthoritativeStops(lines[li])) continue;
     for (const seg of lines[li].geometry) {
       for (const [pLon, pLat] of seg) {
         const key = `${Math.floor(pLat / GRID_SIZE)},${Math.floor(pLon / GRID_SIZE)}`;
@@ -203,6 +208,18 @@ function getNearbyLineIndices(index: RouteGridIndex, lat: number, lon: number): 
 
 /** Fine-grained check: does any point in line's geometry fall within PROXIMITY_DEG? */
 function routePassesNear(line: TransitRouteLine, lat: number, lon: number): boolean {
+  // Reject lines whose bounding box cannot contain the stop before
+  // scanning their points.
+  const bounds = transitLineBounds(line);
+  if (!bounds) return false;
+  if (
+    lat < bounds.minLat - PROXIMITY_DEG ||
+    lat > bounds.maxLat + PROXIMITY_DEG ||
+    lon < bounds.minLng - PROXIMITY_DEG ||
+    lon > bounds.maxLng + PROXIMITY_DEG
+  ) {
+    return false;
+  }
   for (const seg of line.geometry) {
     for (const [pLon, pLat] of seg) {
       if (Math.abs(pLat - lat) < PROXIMITY_DEG && Math.abs(pLon - lon) < PROXIMITY_DEG) {
@@ -213,71 +230,74 @@ function routePassesNear(line: TransitRouteLine, lat: number, lon: number): bool
   return false;
 }
 
-function RouteStopsLayer({
-  lines,
-  visible,
-  onStopPress,
-}: {
-  lines: TransitRouteLine[];
-  visible: boolean;
-  onStopPress: (stop: SelectedTransitStop) => void;
-}) {
-  const { geoJson, stopMap } = useMemo(() => {
-    if (lines.length === 0) {
-      return { geoJson: EMPTY_POINT_COLLECTION, stopMap: new Map<string, any>() };
-    }
+interface StopGroup {
+  name: string;
+  lat: number;
+  lon: number;
+  routes: SelectedTransitStop['routes'];
+  routeSet: Set<string>;
+}
 
-    const seen = new Map<
-      string,
-      {
-        name: string;
-        lat: number;
-        lon: number;
-        routes: SelectedTransitStop['routes'];
-        routeSet: Set<string>;
+interface StopCollection {
+  geoJson: GeoJSON.FeatureCollection;
+  stopMap: Map<string, StopGroup>;
+}
+
+/**
+ * Build the stop dots for the given lines.
+ *
+ * `enrich` adds geometry-proximity route attribution for OSM-sourced lines
+ * (schedule-derived lines have exact stop lists).  That pass is the expensive
+ * one, so the layer renders without it first and upgrades after interactions
+ * settle.
+ */
+function buildStopCollection(lines: TransitRouteLine[], enrich: boolean): StopCollection {
+  if (lines.length === 0) {
+    return { geoJson: EMPTY_POINT_COLLECTION, stopMap: new Map<string, StopGroup>() };
+  }
+
+  const seen = new Map<string, StopGroup>();
+
+  for (const line of lines) {
+    for (const s of line.stops) {
+      const key = `${s.name}:${(s.lat * 200).toFixed(0)},${(s.lon * 200).toFixed(0)}`;
+      let existing = seen.get(key);
+      if (!existing) {
+        existing = {
+          name: s.name,
+          lat: s.lat,
+          lon: s.lon,
+          routes: [],
+          routeSet: new Set<string>(),
+        };
+        seen.set(key, existing);
       }
-    >();
-
-    for (const line of lines) {
-      for (const s of line.stops) {
-        const key = `${s.name}:${(s.lat * 200).toFixed(0)},${(s.lon * 200).toFixed(0)}`;
-        let existing = seen.get(key);
-        if (!existing) {
-          existing = {
-            name: s.name,
-            lat: s.lat,
-            lon: s.lon,
-            routes: [],
-            routeSet: new Set<string>(),
-          };
-          seen.set(key, existing);
-        }
-        const routeKey = `${line.ref}\0${line.name}`;
-        if (!existing.routeSet.has(routeKey)) {
-          existing.routeSet.add(routeKey);
-          existing.routes.push({
-            ref: line.ref,
-            name: line.name,
-            color: line.color,
-            mode: line.mode,
-          });
-        }
+      const routeKey = `${line.ref}\0${line.name}`;
+      if (!existing.routeSet.has(routeKey)) {
+        existing.routeSet.add(routeKey);
+        existing.routes.push({
+          ref: line.ref,
+          name: line.name,
+          color: line.color,
+          mode: line.mode,
+        });
       }
     }
+  }
 
-    // ── Geometry-proximity enrichment (spatial-indexed) ─────────────
-    // For each stop, check only lines whose geometry passes nearby
-    // using the grid index, then confirm with fine-grained check.
-    // Skipped for schedule-derived lines (OTP/GTFS): their stop lists are
-    // exact, and geometry guessing merges distinct stations in dense metros
-    // (e.g. NYC City Hall N/R/W vs Brooklyn Bridge-City Hall 4/5/6/J/Z).
-    // Only OSM-sourced lines (known-incomplete membership) are enriched.
+  // ── Geometry-proximity enrichment (spatial-indexed) ─────────────
+  // For each stop, check only lines whose geometry passes nearby
+  // using the grid index, then confirm with fine-grained check.
+  // Skipped for schedule-derived lines (OTP/GTFS): their stop lists are
+  // exact, and geometry guessing merges distinct stations in dense metros
+  // (e.g. NYC City Hall N/R/W vs Brooklyn Bridge-City Hall 4/5/6/J/Z).
+  // Only OSM-sourced lines (known-incomplete membership) are enriched.
+  if (enrich) {
     const grid = buildRouteGrid(lines);
     for (const stop of seen.values()) {
       const candidateIndices = getNearbyLineIndices(grid, stop.lat, stop.lon);
       for (const li of candidateIndices) {
         const line = lines[li];
-        if (hasAuthoritativeStops(line)) continue;
         const routeKey = `${line.ref}\0${line.name}`;
         if (stop.routeSet.has(routeKey)) continue;
         if (routePassesNear(line, stop.lat, stop.lon)) {
@@ -291,25 +311,55 @@ function RouteStopsLayer({
         }
       }
     }
+  }
 
-    const features = [...seen.entries()].map(([key, stop]) => ({
-      type: 'Feature' as const,
-      properties: {
-        key,
-        name: stop.name,
-        routeCount: stop.routes.length,
-      },
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [stop.lon, stop.lat],
-      },
-    }));
+  const features = [...seen.entries()].map(([key, stop]) => ({
+    type: 'Feature' as const,
+    properties: {
+      key,
+      name: stop.name,
+      routeCount: stop.routes.length,
+    },
+    geometry: {
+      type: 'Point' as const,
+      coordinates: [stop.lon, stop.lat],
+    },
+  }));
 
-    return {
-      geoJson: { type: 'FeatureCollection' as const, features },
-      stopMap: seen,
+  return {
+    geoJson: { type: 'FeatureCollection' as const, features },
+    stopMap: seen,
+  };
+}
+
+function RouteStopsLayer({
+  lines,
+  visible,
+  onStopPress,
+}: {
+  lines: TransitRouteLine[];
+  visible: boolean;
+  onStopPress: (stop: SelectedTransitStop) => void;
+}) {
+  // Cheap pass first (line-declared stops only) so dots paint immediately.
+  const base = useMemo(() => buildStopCollection(lines, false), [lines]);
+  const [collection, setCollection] = useState<StopCollection>(base);
+
+  // Proximity enrichment is O(lines × points) and only feeds the stop card,
+  // so run it after the map goes idle instead of blocking the first paint.
+  useEffect(() => {
+    setCollection(base);
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) setCollection(buildStopCollection(lines, true));
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
     };
-  }, [lines]);
+  }, [base, lines]);
+
+  const { geoJson, stopMap } = collection;
 
   const handlePress = useCallback(
     (event: any) => {
