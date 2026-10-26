@@ -24,6 +24,7 @@ import { colors } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TrafficOverlay } from './TrafficOverlay';
 import { TrafficRouteLayer } from './TrafficRouteLayer';
+import { TrafficControlLayer } from './TrafficControlLayer';
 import {
   fetchTrafficDebounced,
   seedTrafficTilesForViewport,
@@ -1155,6 +1156,15 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           <TrafficRouteLayer geometry={routeGeometry} navigationMode={navigationMode} />
         )}
 
+        {/* Stop signs / traffic lights from Mapillary detections, navigation only. */}
+        {routeGeometry && (
+          <TrafficControlLayer
+            geometry={routeGeometry}
+            position={navPosition}
+            enabled={!!navigationMode}
+          />
+        )}
+
         {/* Destination flag — parity with the CarPlay map's checkered flag. */}
         {destination && (
           <MapLibreGL.MarkerView
@@ -1818,7 +1828,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
-  // Destination flag: cyan flag with a soft shadow so it reads on light maps.
+  // Destination flag: route-blue flag with a soft shadow so it reads on light maps.
   destinationFlag: {
     textShadowColor: 'rgba(0, 0, 0, 0.45)',
     textShadowRadius: 2,

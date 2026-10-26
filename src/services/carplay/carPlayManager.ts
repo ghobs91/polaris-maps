@@ -21,6 +21,7 @@ import { useMapStore } from '../../stores/mapStore';
 import { buildCarPlayTrafficRanges, trafficRangesSignature } from './carPlayTrafficRanges';
 import { createSearchSession, type SearchSession } from '../search/searchSession';
 import { computeRoute } from '../routing/routingService';
+import { preferTurnManagedRoute } from '../routing/hassleTurns';
 import { ensureOfflineRoutingForPoints } from '../routing/offlineRouting';
 import { isForegroundInterpolationActive } from '../navigation/foregroundActivity';
 import { resolveSpeedLimitMph } from '../navigation/speedAlerts';
@@ -685,13 +686,14 @@ async function onDashboardFavorite({ id, kind }: { id?: string; kind?: string })
         alternates: 2,
       },
     );
-    const route = routes[0];
+    const rankedRoutes = await preferTurnManagedRoute(routes, 'auto');
+    const route = rankedRoutes[0];
     if (!route) return;
     useNavigationStore
       .getState()
       .startNavigation(
         route,
-        routes.slice(1),
+        rankedRoutes.slice(1),
         { lat: favorite.entry.lat, lng: favorite.entry.lng, name: favorite.label },
         'auto',
       );
@@ -1343,14 +1345,15 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
       alternates: 2,
     });
 
-    const route = routes[0];
+    const rankedRoutes = await preferTurnManagedRoute(routes, 'auto');
+    const route = rankedRoutes[0];
     if (!route) return;
 
     // Show the phone's route preview; the driver compares options and taps Go,
     // which native reports back via `carPlayRouteStart`.
     useNavigationStore
       .getState()
-      .setRoutePreview(route, routes.slice(1), { lat, lng, name }, 'auto');
+      .setRoutePreview(route, rankedRoutes.slice(1), { lat, lng, name }, 'auto');
   } catch {
     // Route computation failed — silently ignore on CarPlay
   }

@@ -15,10 +15,11 @@ Traffic-aware ETA and automatic rerouting are handled by the [traffic service](.
 
 ## Files
 
-| File                    | Description                                                                                                                                                                               |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `routingService.ts`     | Valhalla API client — computes routes with maneuver-level turn instructions, encoded polyline geometry, and time/distance summaries. Error responses are truncated and API keys redacted. |
-| `parkAndRideService.ts` | Determines if user is >20 min walk from a rail/subway station. Computes combined drive-to-station + transit trip as a park-and-ride suggestion.                                           |
+| File                    | Description                                                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `routingService.ts`     | Valhalla API client — computes routes with maneuver-level turn instructions, encoded polyline geometry, and time/distance summaries. Error responses are truncated and API keys redacted.               |
+| `hassleTurns.ts`        | Prefers route candidates whose turns are managed by a stop sign or traffic light, using Mapillary detections only where imagery coverage exists. Never trades more than 5 min / 25% for a calmer route. |
+| `parkAndRideService.ts` | Determines if user is >20 min walk from a rail/subway station. Computes combined drive-to-station + transit trip as a park-and-ride suggestion.                                                         |
 
 ## Navigation Flow
 

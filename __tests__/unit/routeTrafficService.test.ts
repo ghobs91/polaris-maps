@@ -13,9 +13,9 @@ import type { NormalizedTrafficSegment } from '../../src/models/traffic';
 // congestionColor
 // ---------------------------------------------------------------------------
 describe('congestionColor', () => {
-  it('returns cyan for free-flow (ratio >= 0.75)', () => {
-    expect(congestionColor(0.75)).toBe('#2FD4F2');
-    expect(congestionColor(1.0)).toBe('#2FD4F2');
+  it('returns the free-flow blue (ratio >= 0.75)', () => {
+    expect(congestionColor(0.75)).toBe('#0B6ED6');
+    expect(congestionColor(1.0)).toBe('#0B6ED6');
   });
 
   it('returns yellow for slow traffic (0.50 – 0.74)', () => {
@@ -84,7 +84,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     expect(result.features.length).toBeGreaterThanOrEqual(1);
 
     const colors = result.features.map((f) => f.properties.color);
-    expect(colors).toContain('#2FD4F2'); // cyan
+    expect(colors).toContain('#0B6ED6'); // free-flow blue
   });
 
   it('colors a route chunk red when stopped traffic is nearby', () => {
@@ -183,9 +183,9 @@ describe('buildRouteTrafficGeoJSON', () => {
     });
 
     const result = buildRouteTrafficGeoJSON(route, [seg]);
-    // All pairs should be cyan/free-flow → merged into 1 feature
+    // All pairs should be free-flow blue → merged into 1 feature
     expect(result.features).toHaveLength(1);
-    expect(result.features[0].properties.color).toBe('#2FD4F2');
+    expect(result.features[0].properties.color).toBe('#0B6ED6');
     // Merged feature should contain all 5 coordinates
     expect(result.features[0].geometry.coordinates).toHaveLength(5);
   });
@@ -251,7 +251,7 @@ describe('buildRouteTrafficGeoJSON', () => {
     const uniqueColors = new Set(colors);
     expect(uniqueColors.size).toBeGreaterThan(1);
     // Should contain traffic colors from the matched segments
-    expect(colors).toContain('#2FD4F2'); // cyan from seg-1
+    expect(colors).toContain('#0B6ED6'); // free-flow blue from seg-1
     expect(colors).toContain('#D50000'); // red from seg-2
   });
 

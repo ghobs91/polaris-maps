@@ -50,11 +50,11 @@ const STOPS_CORE = [0.9, 2, 3.2] as const;
 
 /** Rim under the ribbon on the dark basemap — a white halo would out-shine it. */
 export const DARK_CASING_COLOR = '#0A2E3A';
-/** Bleed of the route colour outside the line: DEFAULT_ROUTE_COLOR at 22%. */
-export const DARK_GLOW_COLOR = 'rgba(47,212,242,0.22)';
+/** Bleed of the route colour outside the line: DEFAULT_ROUTE_COLOR at 30%. */
+export const DARK_GLOW_COLOR = 'rgba(11,110,214,0.3)';
 /**
  * Specular highlight along the ribbon's centre. Neutral white rather than a
- * lighter cyan so congested amber/red segments read as lit too, instead of
+ * lighter tint so congested amber/red segments read as lit too, instead of
  * turning pink.
  */
 export const DARK_CORE_COLOR = 'rgba(255,255,255,0.3)';

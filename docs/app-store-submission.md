@@ -13,7 +13,7 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 | Item                                    | Evidence                                                              |
 | --------------------------------------- | --------------------------------------------------------------------- |
-| Release quality gate (`pnpm check`)     | Jest config fixed; 0 lint warnings; 1,784 tests pass                  |
+| Release quality gate (`pnpm check`)     | Jest config fixed; 0 lint warnings; 2,045 tests pass                  |
 | `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added              |
 | Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false` |
 | Privacy policy + terms + landing page   | Live: https://app.polarismaps.app/privacy, `/terms`, `/`              |
@@ -24,18 +24,23 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 | App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                        |
 | Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
 | Screenshots — iPhone 6.9" (7 of 8)      | `screenshots/out/01..07` (CarPlay card pending)                       |
+| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752)                     |
 
 ### Remaining
 
-| #   | Item                                                  | Owner                        | Status         |
-| --- | ----------------------------------------------------- | ---------------------------- | -------------- |
-| 1   | CarPlay screenshot + card 8                           | you → me compose             | In progress    |
-| 2   | iPad 13" screenshots (required)                       | you → me compose             | Not started    |
-| 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted        |
-| 4   | Legal review of policy + terms                        | you                          | Review pending |
-| 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Not started    |
-| 6   | Run `fastlane ios release` → submit                   | you                          | Lane unblocked |
-| 7   | Housekeeping: commit working tree                     | you                          | Not started    |
+| #   | Item                                                  | Owner                        | Status                               |
+| --- | ----------------------------------------------------- | ---------------------------- | ------------------------------------ |
+| 1   | CarPlay screenshot + card 8                           | you → me compose             | Paused (UI work)                     |
+| 2   | iPad 13" screenshots (required)                       | you → me compose             | Paused (UI work)                     |
+| 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted                              |
+| 4   | Legal review of policy + terms                        | you                          | Review pending                       |
+| 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Entitlement applied; profile pending |
+| 6   | Run `fastlane ios release` → submit                   | you                          | Lane unblocked                       |
+| 7   | Housekeeping: commit working tree                     | you                          | Not started                          |
+
+> Screenshots are **paused** while iPad/macOS layout improvements land in a
+> separate worktree. Re-capture iPhone + iPad and re-render the cards after that
+> work merges; the existing iPad card reflects the old layout.
 
 ---
 
@@ -117,8 +122,10 @@ Source and hosting are ready; only the Apple-side steps remain.
    `https://app.polarismaps.app/.well-known/apple-app-site-association` → 200
    `application/json` (already verified).
 
-> Note: the committed entitlements do **not** yet include associated-domains, so
-> universal links currently fall back to the `polaris-maps://` scheme.
+> The entitlement is now applied to `PolarisMaps.entitlements` and
+> `PolarisMaps.Debug.entitlements`. The profile on this Mac still predates the
+> capability, so regenerate/install it (or let Xcode auto-provision with
+> `-allowProvisioningUpdates`) before the release build; otherwise signing fails.
 
 ### 6. Build and submit
 
@@ -137,7 +144,6 @@ Source and hosting are ready; only the Apple-side steps remain.
 
 ### 7. Housekeeping
 
-The working tree still has pre-existing edits to reconcile/commit:
-`ios/PolarisMaps.xcodeproj/project.pbxproj`, `ios/PolarisMaps/Info.plist`,
-`src/services/atproto/atprotoAuthService.ts`, `src/polyfills/`, `index.js`, and a
-staged `app/poi/[id].tsx`.
+The working tree has two uncommitted files: `ios/PolarisMaps.xcodeproj/project.pbxproj`
+and `ios/PolarisMaps/Info.plist` (build-number/version edits). Reconcile or
+commit them before the release build.
