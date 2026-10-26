@@ -20,7 +20,7 @@ import type { GeocodingResult } from '../geocoding/geocodingService';
 import { searchPlacesFts } from '../poi/poiService';
 import { searchByCategory, type CategorySearchResult } from '../poi/categorySearchService';
 import { searchAddress } from '../geocoding/geocodingService';
-import { throwIfAborted } from './abortUtils';
+import { throwIfAborted, withSourceTimeout } from './abortUtils';
 import { searchPhoton, type PhotonResult } from './photonGeocoder';
 import {
   parseSearchQuery,
@@ -53,6 +53,8 @@ const SUFFICIENT_LOCAL_MATCHES = 8;
 const LOCAL_MATCH_RADIUS_KM = 15;
 /** Text-match score above which a local result counts as "strong". */
 const STRONG_MATCH_THRESHOLD = 0.72;
+/** Every network source must settle within this budget (spec: time-bounded sources). */
+const SOURCE_TIMEOUT_MS = 8_000;
 
 /** Filter-sheet keys that differ from the canonical `PlaceCategory` value. */
 const FILTER_CATEGORY_ALIASES: Partial<Record<string, PlaceCategory>> = {
@@ -649,49 +651,55 @@ export async function unifiedSearch(
   // Skip for address queries — same name-matching pollution as Source 1
   const overturePromise: Promise<Place[]> = addressQuery
     ? Promise.resolve([])
-    : (async () => {
-        // With enough strong local matches and a downloaded region covering
-        // the point, local data is authoritative — skip the network fetch.
-        if (gateOvertureFetch && (await hasOfflineRegionCoverage(lat, lng))) return [];
-        return cachedFetch(
-          cacheKey([
-            'overture',
-            boundsKey({ south, north, west, east }),
-            queryContext.viewportFetchLimit,
-          ]),
-          () =>
-            fetchOverturePlaces(south, west, north, east, queryContext.viewportFetchLimit, {
-              signal,
-            }),
-          { bounds: { south, north, west, east }, signal },
-        );
-      })();
+    : withSourceTimeout(
+        (async () => {
+          // With enough strong local matches and a downloaded region covering
+          // the point, local data is authoritative — skip the network fetch.
+          if (gateOvertureFetch && (await hasOfflineRegionCoverage(lat, lng))) return [];
+          return cachedFetch(
+            cacheKey([
+              'overture',
+              boundsKey({ south, north, west, east }),
+              queryContext.viewportFetchLimit,
+            ]),
+            () =>
+              fetchOverturePlaces(south, west, north, east, queryContext.viewportFetchLimit, {
+                signal,
+              }),
+            { bounds: { south, north, west, east }, signal },
+          );
+        })(),
+        SOURCE_TIMEOUT_MS,
+      ).then((value) => value ?? []);
 
   // Source 5b: User-location-centered Overture fetch (~10 km radius)
   // Ensures nearby places surface even when the map has been panned away.
   const overtureUserPromise: Promise<Place[]> =
     !hasUserLocation || addressQuery
       ? Promise.resolve([])
-      : cachedFetch(
-          cacheKey([
-            'overture-user',
-            boundsKey({ south: userSouth, north: userNorth, west: userWest, east: userEast }),
-            queryContext.userFetchLimit,
-          ]),
-          () =>
-            fetchOverturePlaces(
-              userSouth,
-              userWest,
-              userNorth,
-              userEast,
+      : withSourceTimeout(
+          cachedFetch(
+            cacheKey([
+              'overture-user',
+              boundsKey({ south: userSouth, north: userNorth, west: userWest, east: userEast }),
               queryContext.userFetchLimit,
-              { signal },
-            ),
-          {
-            bounds: { south: userSouth, north: userNorth, west: userWest, east: userEast },
-            signal,
-          },
-        );
+            ]),
+            () =>
+              fetchOverturePlaces(
+                userSouth,
+                userWest,
+                userNorth,
+                userEast,
+                queryContext.userFetchLimit,
+                { signal },
+              ),
+            {
+              bounds: { south: userSouth, north: userNorth, west: userWest, east: userEast },
+              signal,
+            },
+          ),
+          SOURCE_TIMEOUT_MS,
+        ).then((value) => value ?? []);
 
   // Source 6: Overpass name search — finds POIs with the search term in their name
   // Skip for address queries — catches "Knights of Columbus" for "columbus pkwy"

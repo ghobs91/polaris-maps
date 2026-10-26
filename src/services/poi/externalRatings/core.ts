@@ -38,12 +38,31 @@ const CHALLENGE_MARKERS = [
   'attention required',
   'verify you are human',
   'are you a robot',
+  'you have been blocked',
+  'behaviour of the browser',
+];
+
+/**
+ * Markers Yelp/DataDome emits only on the terminal "blocked" page (as opposed
+ * to the interstitial challenge it also injects into valid pages). A block is
+ * not a verdict about this place — it says the whole host is refusing this
+ * device for now — so the caller must stop browsing the host, not retry it.
+ */
+const HARD_BLOCK_MARKERS = [
+  'you have been blocked',
+  'behaviour of the browser has caught our attention',
 ];
 
 /** True when the raw HTML carries anti-bot markers at all. */
 export function hasChallengeMarkers(html: string): boolean {
   const lower = html.toLowerCase();
   return CHALLENGE_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/** True when the page is a terminal block page rather than an interstitial. */
+export function isHardBlockPage(html: string): boolean {
+  const lower = html.toLowerCase();
+  return HARD_BLOCK_MARKERS.some((marker) => lower.includes(marker));
 }
 
 /**
@@ -142,6 +161,14 @@ export interface LdRating {
 
 export function findAggregateRating(blocks: unknown[]): LdRating {
   const out: LdRating = { rating: null, count: null, name: null, address: null, geo: null };
+
+  // A page can carry named JSON-LD objects that are not the business (Yelp
+  // now emits "Business Photos" and "Popular Dishes" ItemLists before the
+  // Restaurant block). Only the object that owns the aggregateRating may
+  // supply the listing identity; keep the first named object as a fallback for
+  // pages where the rating and the name live on separate nodes.
+  let fallback: Pick<LdRating, 'name' | 'address' | 'geo'> | null = null;
+
   for (const block of blocks) {
     if (!block || typeof block !== 'object') continue;
     const item = block as Record<string, unknown>;
@@ -152,27 +179,50 @@ export function findAggregateRating(blocks: unknown[]): LdRating {
 
       const ratingAr = o.aggregateRating;
       const ratings = Array.isArray(ratingAr) ? ratingAr : ratingAr ? [ratingAr] : [];
+      let itemRating: number | null = null;
+      let itemCount: number | null = null;
       for (const ar of ratings) {
         if (!ar || typeof ar !== 'object') continue;
         const a = ar as Record<string, unknown>;
-        if (out.rating == null) out.rating = parseLdRating(a.ratingValue);
-        if (out.count == null) out.count = parseLdCount(a.reviewCount);
+        if (itemRating == null) itemRating = parseLdRating(a.ratingValue);
+        if (itemCount == null) itemCount = parseLdCount(a.reviewCount);
       }
 
-      if (out.rating == null && out.count == null) {
-        const topRating = parseLdRating(o.ratingValue);
-        const topCount = parseLdCount(o.reviewCount);
-        if (topRating != null || topCount != null) {
-          out.rating = topRating;
-          out.count = topCount;
+      if (itemRating == null && itemCount == null) {
+        itemRating = parseLdRating(o.ratingValue);
+        itemCount = parseLdCount(o.reviewCount);
+      }
+
+      const carriesRating = ratings.length > 0 || itemRating != null || itemCount != null;
+      if (carriesRating) {
+        if (out.rating == null) out.rating = itemRating;
+        if (out.count == null) out.count = itemCount;
+        if (out.name == null && typeof o.name === 'string') out.name = o.name;
+        if (out.address == null) out.address = normalizeLdAddress(o.address);
+        if (out.geo == null) out.geo = parseLdGeo(o.geo);
+      } else if (!fallback && typeof o.name === 'string') {
+        fallback = {
+          name: o.name,
+          address: normalizeLdAddress(o.address),
+          geo: parseLdGeo(o.geo),
+        };
+      }
+
+      if (out.rating != null && out.count != null) {
+        if (out.name == null && fallback) {
+          out.name = fallback.name;
+          out.address = out.address ?? fallback.address;
+          out.geo = out.geo ?? fallback.geo;
         }
+        return out;
       }
-      if (out.name == null && typeof o.name === 'string') out.name = o.name;
-      if (out.address == null) out.address = normalizeLdAddress(o.address);
-      if (out.geo == null) out.geo = parseLdGeo(o.geo);
-
-      if (out.rating != null && out.count != null) return out;
     }
+  }
+
+  if (out.name == null && fallback) {
+    out.name = fallback.name;
+    out.address = out.address ?? fallback.address;
+    out.geo = out.geo ?? fallback.geo;
   }
   return out;
 }
@@ -247,7 +297,7 @@ export function validateExternalRating(
   provider: ExternalRatingProviderId,
   options?: { expectedName?: string | null },
 ): ExternalRatingSummary | null {
-  if (raw.challenge) return null;
+  if (raw.challenge || raw.blocked) return null;
   const { rating, reviewCount, listingName, listingAddress } = raw;
   if (rating == null || reviewCount == null || !listingName) return null;
   if (!Number.isFinite(rating) || rating < 0 || rating > 5) return null;
@@ -267,7 +317,7 @@ export function validateExternalRating(
 }
 
 // ---------------------------------------------------------------------------
-// User agent
+// Fetch helper
 // ---------------------------------------------------------------------------
 
 /**
@@ -287,14 +337,7 @@ export const EXTERNAL_RATINGS_USER_AGENT =
   'Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 ' +
   '(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
 
-// ---------------------------------------------------------------------------
-// Fetch helper
-// ---------------------------------------------------------------------------
-
-/**
- * Fetch HTML with the external-ratings UA, an abort timeout, and a 500 KB cap
- * on parse work.
- */
+/** Fetch HTML with an abort timeout, capped at 500 KB of parse work. */
 export async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -423,6 +466,7 @@ interface WebViewRatingMessage {
   geo?: unknown;
   automation?: unknown;
   challenge?: unknown;
+  blocked?: unknown;
 }
 
 function parseWebViewGeo(value: unknown): GeoPoint | null {
@@ -471,7 +515,21 @@ export function parseRatingMessageFromWebView(
     listingAddress: typeof msg.ldAddress === 'string' ? msg.ldAddress : null,
     geo: parseWebViewGeo(msg.geo),
     challenge: msg.challenge === true,
+    blocked: msg.blocked === true,
   };
+}
+
+/**
+ * Read the block/challenge verdict from any collector payload. Search pages
+ * can be blocked too, and their payload has no rating fields to classify.
+ */
+export function parsePageVerdict(data: string): { blocked: boolean; challenge: boolean } {
+  try {
+    const msg = JSON.parse(data) as { blocked?: unknown; challenge?: unknown };
+    return { blocked: msg.blocked === true, challenge: msg.challenge === true };
+  } catch {
+    return { blocked: false, challenge: false };
+  }
 }
 
 /**
@@ -521,11 +579,17 @@ export function parseSearchMessageFromWebView(
  * The stage clock (`STAGE_TIMEOUT_MS` in `useExternalRatings`) unmounts the
  * WebView when it fires, so a collector that is still retrying at that point
  * never posts — its verdict (including the challenge classification) is lost.
- * `(COLLECTOR_MAX_ATTEMPTS - 1) * COLLECTOR_RETRY_INTERVAL_MS` MUST therefore
- * stay comfortably under the stage budget; a unit test asserts the invariant.
+ * `COLLECTOR_INITIAL_DELAY_MS + (COLLECTOR_MAX_ATTEMPTS - 1) *
+ * COLLECTOR_RETRY_INTERVAL_MS` MUST therefore stay comfortably under the stage
+ * budget; a unit test asserts the invariant.
+ *
+ * The pacing is deliberately human: no DOM reads at document-start, a settle
+ * pause before the first read, and roughly one read per second afterwards with
+ * jitter. The previous 500 ms tight loop was as fast as a page-load monitor.
  */
-export const COLLECTOR_RETRY_INTERVAL_MS = 500;
-export const COLLECTOR_MAX_ATTEMPTS = 15;
+export const COLLECTOR_INITIAL_DELAY_MS = 700;
+export const COLLECTOR_RETRY_INTERVAL_MS = 1_000;
+export const COLLECTOR_MAX_ATTEMPTS = 6;
 
 /**
  * Build the standard injected-collector wrapper around a provider's `collect()`
@@ -552,7 +616,7 @@ export function buildCollectorScript(opts: {
   retryIntervalMs?: number;
   maxAttempts?: number;
 }): string {
-  const initialDelayMs = opts.initialDelayMs ?? 0;
+  const initialDelayMs = opts.initialDelayMs ?? COLLECTOR_INITIAL_DELAY_MS;
   const retryIntervalMs = opts.retryIntervalMs ?? COLLECTOR_RETRY_INTERVAL_MS;
   const maxAttempts = opts.maxAttempts ?? COLLECTOR_MAX_ATTEMPTS;
   return `(function () {
@@ -570,17 +634,32 @@ export function buildCollectorScript(opts: {
   function collect() {
     var out = { type: TYPE, provider: PROVIDER };
 ${opts.collectBodyJs}
-    var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot'];
+    var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot', 'you have been blocked', 'behaviour of the browser'];
+    var BLOCK_MARKERS = ['you have been blocked', 'behaviour of the browser has caught our attention'];
     var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
+    // Block copy is checked against *visible* text: page bundles and inline
+    // scripts can contain the same phrases without the page being blocked.
+    var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
     var markerHit = false;
     for (var mi = 0; mi < MARKERS.length; mi++) {
       if (low.indexOf(MARKERS[mi]) !== -1) { markerHit = true; break; }
     }
+    var blockHit = false;
+    for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
+      if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+    }
     var hasData = ${opts.hasDataJs};
-    out.challenge = markerHit && !hasData;
+    out.blocked = blockHit && !hasData;
+    out.challenge = markerHit && !hasData && !out.blocked;
     if (hasData) { post(out); return; }
     ATTEMPTS -= 1;
-    if (ATTEMPTS > 0) { setTimeout(collect, INTERVAL); return; }
+    if (ATTEMPTS > 0) {
+      var delay = INTERVAL;
+      // Human-ish jitter: never read the page on a metronomic schedule.
+      try { delay += Math.floor(Math.random() * (INTERVAL > 300 ? 300 : INTERVAL)); } catch (e) {}
+      setTimeout(collect, delay);
+      return;
+    }
     // Attempts exhausted: post the final (possibly challenge/empty) state once
     // so the stage settles promptly instead of waiting out the controller
     // timeout — a collector SHALL post exactly once per page.

@@ -1421,7 +1421,7 @@ export async function fetchTransitLines(
     void Promise.allSettled([overpassPromise, otpPromise]).then(() => onSettled());
   }
 
-  hydratePersistentCache();
+  hydratePersistentCacheForBounds(minLat, minLng, maxLat, maxLng);
   const cached = getAllCachedLines();
   if (cached.length > 0) return cached;
 
