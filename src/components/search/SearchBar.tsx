@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { TextInput, View, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { spacing, typography } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
 import { useVoiceSearch } from '../../hooks/useVoiceSearch';
@@ -81,7 +81,7 @@ const createStyles = ({ colors }: Theme) =>
     inputContainer: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderRadius: 999,
+      borderRadius: borderRadius.md,
       overflow: 'hidden',
       borderCurve: 'continuous',
       paddingHorizontal: spacing.sm,
@@ -99,7 +99,7 @@ const createStyles = ({ colors }: Theme) =>
     micButton: {
       width: 36,
       height: 36,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       overflow: 'hidden',
       borderCurve: 'continuous',
       justifyContent: 'center',

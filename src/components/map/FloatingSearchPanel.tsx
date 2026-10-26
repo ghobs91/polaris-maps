@@ -536,7 +536,7 @@ const ctrlStyles = StyleSheet.create({
   btn: {
     width: 46,
     height: 46,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -546,7 +546,7 @@ const ctrlStyles = StyleSheet.create({
     alignItems: 'center',
   },
   layersCard: {
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.panel,
     borderCurve: 'continuous',
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -2294,7 +2294,7 @@ export function FloatingSearchPanel({
                       gap: 8,
                       paddingVertical: 8,
                       paddingHorizontal: 10,
-                      borderRadius: 10,
+                      borderRadius: borderRadius.md,
                       borderWidth: 1,
                       borderColor: isPrimary ? accent : subColor + '33',
                       backgroundColor: isPrimary
@@ -2772,7 +2772,7 @@ export function FloatingSearchPanel({
                             gap: 4,
                             paddingVertical: 4,
                             paddingHorizontal: 10,
-                            borderRadius: 12,
+                            borderRadius: borderRadius.md,
                             backgroundColor: 'rgba(142,142,147,0.18)',
                           }}
                           onPress={() => setShowFilters(true)}
@@ -3003,7 +3003,6 @@ function shorten(text: string, max: number): string {
 const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) =>
   StyleSheet.create({
     panel: {
-      borderRadius: borderRadius.lg,
       overflow: 'hidden',
       borderCurve: 'continuous',
     },
@@ -3059,7 +3058,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     resultIconWrap: {
       width: 32,
       height: 32,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
       justifyContent: 'center',
@@ -3069,7 +3068,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     recentIcon: {
       width: 32,
       height: 32,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
       justifyContent: 'center',
@@ -3120,7 +3119,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     locCloseCircle: {
       width: 28,
       height: 28,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       justifyContent: 'center',
       alignItems: 'center',
@@ -3136,7 +3135,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       justifyContent: 'center',
       gap: spacing.sm,
       backgroundColor: colors.primary,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       paddingVertical: spacing.md - 2,
       paddingHorizontal: spacing.xl,
@@ -3193,7 +3192,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     stepBadge: {
       width: 22,
       height: 22,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       justifyContent: 'center',
       alignItems: 'center',
@@ -3257,7 +3256,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     paddingVertical: 9,
     paddingHorizontal: 18,
@@ -3267,7 +3266,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   glassPanel: {
-    borderRadius: 20,
+    borderRadius: borderRadius.panel,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -3301,7 +3300,7 @@ const styles = StyleSheet.create({
   miniPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     paddingVertical: 10,
     paddingLeft: 14,
@@ -3321,7 +3320,7 @@ const styles = StyleSheet.create({
   miniProfileCircle: {
     width: 32,
     height: 32,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3348,7 +3347,7 @@ const styles = StyleSheet.create({
   micBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: borderRadius.control,
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: spacing.xs,
@@ -3384,7 +3383,7 @@ const styles = StyleSheet.create({
   profileCircle: {
     width: 34,
     height: 34,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3404,7 +3403,7 @@ const styles = StyleSheet.create({
   favIconCircle: {
     width: 56,
     height: 56,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3416,7 +3415,7 @@ const styles = StyleSheet.create({
     right: 2,
     width: 16,
     height: 16,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     backgroundColor: '#8E8E93',
     justifyContent: 'center',
@@ -3484,12 +3483,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: borderRadius.md,
     borderCurve: 'continuous',
   },
   stopResultsList: {
     marginTop: 4,
-    borderRadius: 10,
+    borderRadius: borderRadius.md,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -3521,7 +3520,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: 'rgba(0,0,0,0.72)',
-    borderRadius: 10,
+    borderRadius: borderRadius.md,
     borderCurve: 'continuous',
     paddingHorizontal: 14,
     paddingVertical: 8,

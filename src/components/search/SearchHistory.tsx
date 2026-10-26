@@ -97,7 +97,7 @@ const createStyles = ({ colors }: Theme) =>
       color: colors.primary,
     },
     list: {
-      borderRadius: borderRadius.lg,
+      borderRadius: borderRadius.card,
       overflow: 'hidden',
       borderCurve: 'continuous',
     },
@@ -115,7 +115,7 @@ const createStyles = ({ colors }: Theme) =>
     iconContainer: {
       width: 32,
       height: 32,
-      borderRadius: 16,
+      borderRadius: borderRadius.card,
       overflow: 'hidden',
       borderCurve: 'continuous',
       backgroundColor: colors.border + '60',

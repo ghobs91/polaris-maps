@@ -18,7 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassView } from './GlassView';
-import { sheet as sheetTokens } from '../../constants/theme';
+import { borderRadius, sheet as sheetTokens } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { resolveSheetSnap, snapTopsForFractions } from '../../utils/sheetSnap';
 import { hapticSelection, hapticWarning } from '../../utils/haptics';
@@ -231,8 +231,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: borderRadius.sheet,
+    borderTopRightRadius: borderRadius.sheet,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   glassFill: {

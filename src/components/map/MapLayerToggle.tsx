@@ -1,19 +1,11 @@
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Switch,
-  Platform,
-  ActivityIndicator,
-} from 'react-native';
-import { BlurView } from 'expo-blur';
+import { View, Text, TouchableOpacity, StyleSheet, Switch, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMapStore } from '../../stores/mapStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { useTheme } from '../../contexts/ThemeContext';
+import { GlassView } from '../common/GlassView';
 import { spacing, borderRadius, shadow } from '../../constants/theme';
 
 export function MapLayerToggle() {
@@ -37,64 +29,28 @@ export function MapLayerToggle() {
         activeOpacity={0.7}
         style={styles.buttonOuter}
       >
-        {Platform.OS === 'ios' ? (
-          <BlurView
-            intensity={60}
-            tint={isDark ? 'dark' : 'systemChromeMaterial'}
-            style={styles.button}
-          >
-            <Ionicons name="layers" size={22} color={iconColor} />
-          </BlurView>
-        ) : (
-          <View style={[styles.button, isDark ? styles.buttonAndroidDark : styles.buttonAndroid]}>
-            <Ionicons name="layers" size={22} color={iconColor} />
-          </View>
-        )}
+        <GlassView material="regular" isInteractive style={styles.button}>
+          <Ionicons name="layers" size={22} color={iconColor} />
+        </GlassView>
       </TouchableOpacity>
 
-      {open &&
-        (Platform.OS === 'ios' ? (
-          <View style={[styles.cardWrapper, shadow.lg]}>
-            <BlurView
-              intensity={60}
-              tint={isDark ? 'dark' : 'systemChromeMaterial'}
-              style={StyleSheet.absoluteFill}
+      {open && (
+        <View style={[styles.cardWrapper, shadow.lg]}>
+          <GlassView material="regular" style={StyleSheet.absoluteFill} />
+          <View style={styles.cardInner}>
+            <CardContent
+              isDark={isDark}
+              trafficVisible={trafficLayerVisible}
+              onTrafficToggle={setTrafficLayerVisible}
+              transitVisible={transitLayerVisible}
+              onTransitToggle={setTransitLayerVisible}
+              transitLoading={transitLayerVisible && isLoadingLines}
+              mapStyle={mapStyle}
+              onMapStyleChange={setMapStyle}
             />
-            <View style={styles.cardInner}>
-              <CardContent
-                isDark={isDark}
-                trafficVisible={trafficLayerVisible}
-                onTrafficToggle={setTrafficLayerVisible}
-                transitVisible={transitLayerVisible}
-                onTransitToggle={setTransitLayerVisible}
-                transitLoading={transitLayerVisible && isLoadingLines}
-                mapStyle={mapStyle}
-                onMapStyleChange={setMapStyle}
-              />
-            </View>
           </View>
-        ) : (
-          <View
-            style={[
-              styles.cardWrapper,
-              isDark ? styles.cardAndroidDark : styles.cardAndroid,
-              shadow.lg,
-            ]}
-          >
-            <View style={styles.cardInner}>
-              <CardContent
-                isDark={isDark}
-                trafficVisible={trafficLayerVisible}
-                onTrafficToggle={setTrafficLayerVisible}
-                transitVisible={transitLayerVisible}
-                onTransitToggle={setTransitLayerVisible}
-                transitLoading={transitLayerVisible && isLoadingLines}
-                mapStyle={mapStyle}
-                onMapStyleChange={setMapStyle}
-              />
-            </View>
-          </View>
-        ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -222,39 +178,27 @@ const styles = StyleSheet.create({
     elevation: 30,
   },
   buttonOuter: {
-    borderRadius: borderRadius.full,
+    borderRadius: borderRadius.control,
     overflow: 'hidden',
     ...shadow.md,
   },
   button: {
     width: 44,
     height: 44,
-    borderRadius: borderRadius.full,
+    borderRadius: borderRadius.control,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
   },
-  buttonAndroid: {
-    backgroundColor: 'rgba(255,255,255,0.92)',
-  },
-  buttonAndroidDark: {
-    backgroundColor: 'rgba(40,40,60,0.92)',
-  },
   cardWrapper: {
     marginTop: spacing.sm,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.panel,
     minWidth: 200,
     overflow: 'hidden',
   },
   cardInner: {
     paddingVertical: 12,
     paddingHorizontal: 16,
-  },
-  cardAndroid: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
-  },
-  cardAndroidDark: {
-    backgroundColor: 'rgba(30,30,50,0.95)',
   },
   cardTitle: {
     fontSize: 14,
