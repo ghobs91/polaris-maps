@@ -19,6 +19,7 @@ import {
   teardownFixDrivenRefresh,
 } from '@/services/navigation/fixDrivenRefresh';
 import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
+import { StreetViewContribution } from '@/components/imagery/StreetViewContribution';
 import {
   initTrafficP2P,
   disposeTrafficP2P,
@@ -193,6 +194,7 @@ function RootLayoutInner() {
         <Stack.Screen name="settings/index" options={{ title: '' }} />
         <Stack.Screen name="places/list" options={{ headerShown: false }} />
       </Stack>
+      <StreetViewContribution />
     </>
   );
 }

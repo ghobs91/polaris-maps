@@ -279,6 +279,28 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
   lastGpsSpeedMps = rawSpeed >= 0 ? rawSpeed : 0;
   lastGpsHeading = trustedHeading ?? null;
 
+  // Publish the raw fix before snapping. Street-imagery capture needs the
+  // camera's real position and heading; the snapped puck is road-centre and
+  // dead-reckoned, which would misplace every photo.
+  useNavigationTrackingStore.getState().setRawFix({
+    lat: location.coords.latitude,
+    lng: location.coords.longitude,
+    altitude:
+      location.coords.altitude != null && Number.isFinite(location.coords.altitude)
+        ? location.coords.altitude
+        : null,
+    heading: headingValid ? rawHeading! : null,
+    speedMps: rawSpeed >= 0 && Number.isFinite(rawSpeed) ? rawSpeed : 0,
+    accuracyMeters:
+      location.coords.accuracy != null && Number.isFinite(location.coords.accuracy)
+        ? location.coords.accuracy
+        : null,
+    timestamp:
+      typeof location.timestamp === 'number' && location.timestamp > 0
+        ? location.timestamp
+        : Date.now(),
+  });
+
   // Constrain the snap to the previous segment's neighbourhood (and prefer the
   // direction of travel) so a fix near a self-approaching section cannot snap
   // to a distant part of the route and make the puck "fly" off in another

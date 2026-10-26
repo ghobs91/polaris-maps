@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { StreetViewFix } from '../models/streetViewCapture';
 
 interface NavigationTrackingState {
   /** Snapped/dead-reckoned vehicle position as [lng, lat]. */
@@ -21,6 +22,12 @@ interface NavigationTrackingState {
   navFixTime: number;
   /** True while the managed background location session is running (iOS). */
   backgroundSessionActive: boolean;
+  /**
+   * Latest raw GPS fix, before route snapping. Street-imagery capture uses
+   * this so images are placed at the camera's real position, not the
+   * map-matched puck position.
+   */
+  rawFix: StreetViewFix | null;
 
   setNavPosition: (pos: [number, number] | null) => void;
   setNavBearing: (bearing: number) => void;
@@ -41,6 +48,7 @@ interface NavigationTrackingState {
     navFixTime?: number,
   ) => void;
   setBackgroundSessionActive: (active: boolean) => void;
+  setRawFix: (fix: StreetViewFix | null) => void;
 }
 
 export const useNavigationTrackingStore = create<NavigationTrackingState>()((set) => ({
@@ -50,6 +58,7 @@ export const useNavigationTrackingStore = create<NavigationTrackingState>()((set
   navSpeedMps: 0,
   navFixTime: 0,
   backgroundSessionActive: false,
+  rawFix: null,
 
   setNavPosition: (navPosition) => set({ navPosition }),
   setNavBearing: (navBearing) => set({ navBearing }),
@@ -63,4 +72,5 @@ export const useNavigationTrackingStore = create<NavigationTrackingState>()((set
       ...(navFixTime !== undefined ? { navFixTime } : {}),
     }),
   setBackgroundSessionActive: (backgroundSessionActive) => set({ backgroundSessionActive }),
+  setRawFix: (rawFix) => set({ rawFix }),
 }));

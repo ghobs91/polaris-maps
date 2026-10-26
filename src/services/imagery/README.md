@@ -39,6 +39,46 @@ Available to peers for discovery
 browseService.ts ← spatial query (nearby imagery)
 ```
 
+## Navigation street-imagery contribution (external)
+
+A separate, opt-in pipeline captures stills while turn-by-turn navigation is
+active and uploads them to external platforms. It is deliberately independent of
+the P2P `street_imagery` feed above.
+
+| File                                                  | Description                                                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                            |
+| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, per-platform status, upload batches, crash recovery, and local-file cleanup.                                           |
+| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                  |
+| `panoramaxService.ts`                                 | Panoramax instance catalog, token-claim auth, upload-set creation, multipart JPEG upload with overrides + `picture_id`, completion, and secure token storage. |
+| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, and secure token storage.                   |
+| `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                             |
+| `../../components/imagery/CaptureHost.tsx`            | Global 16:9 camera preview and capture trigger; uses the raw GPS fix and writes EXIF at capture.                                                              |
+| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, target selection, upload progress, Delete all, and deferred uploads.                                                                    |
+| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                            |
+| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), auto-start, Wi-Fi-only, pending drives, Panoramax account.                                               |
+
+Flow:
+
+```
+Navigation raw GPS fix (trackingService)
+    ↓ distance/speed/interval gate
+CaptureHost (global 16:9 CameraView)
+    ↓ EXIF: GPS + heading + capture time
+streetViewQueue (SQLite + document/streetview/<drive>/)
+    ↓ navigation ends
+DriveUploadSheet (summary, consent, Delete all)
+    ├─ Panoramax upload set + per-file overrides
+    │      → Panoramax instance
+    └─ Mapillary raw upload + manifest + finish_upload
+           → Mapillary cluster (processing)
+```
+
+The existing `captureService`/`uploadService`/`blurService` pipeline is **not**
+used here: it is P2P-specific, has no EXIF writing, and its placeholder blur
+strips metadata. Mapillary blurs server-side; Panoramax instances blur only
+when the instance has a blur service enabled.
+
 ## Street View 3D (online supplement)
 
 The P2P `street_imagery` feed stays the primary, offline-capable source. The

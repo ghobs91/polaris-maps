@@ -257,6 +257,67 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_imagery_geohash ON street_imagery (geohash8, bearing);
     CREATE INDEX IF NOT EXISTS idx_imagery_author ON street_imagery (author_pubkey);
 
+    -- Street-imagery contribution queue (Mapillary / Panoramax). Separate from
+    -- the P2P street_imagery table above; these rows are external uploads.
+    CREATE TABLE IF NOT EXISTS streetview_drives (
+      id TEXT PRIMARY KEY,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      status TEXT NOT NULL DEFAULT 'recording',
+      capture_count INTEGER NOT NULL DEFAULT 0,
+      bytes INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_streetview_drives_status
+      ON streetview_drives (status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS streetview_captures (
+      id TEXT PRIMARY KEY,
+      drive_id TEXT NOT NULL,
+      local_uri TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      altitude REAL,
+      heading REAL,
+      speed_mps REAL,
+      captured_at INTEGER NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      bytes INTEGER NOT NULL DEFAULT 0,
+      image_hash TEXT,
+      blurred INTEGER NOT NULL DEFAULT 0,
+      panoramax_status TEXT NOT NULL DEFAULT 'pending',
+      panoramax_instance TEXT,
+      panoramax_picture_id TEXT,
+      mapillary_status TEXT NOT NULL DEFAULT 'pending',
+      mapillary_file_handle TEXT,
+      mapillary_image_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_streetview_captures_drive
+      ON streetview_captures (drive_id, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_streetview_captures_panoramax
+      ON streetview_captures (drive_id, panoramax_status);
+
+    CREATE TABLE IF NOT EXISTS streetview_uploads (
+      id TEXT PRIMARY KEY,
+      drive_id TEXT NOT NULL,
+      target TEXT NOT NULL,
+      remote_batch_id TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      total INTEGER NOT NULL DEFAULT 0,
+      uploaded INTEGER NOT NULL DEFAULT 0,
+      failed INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (drive_id, target)
+    );
+    CREATE INDEX IF NOT EXISTS idx_streetview_uploads_drive
+      ON streetview_uploads (drive_id);
+
     CREATE TABLE IF NOT EXISTS place_detail_cache (
       canonical_id TEXT PRIMARY KEY,
       place_id TEXT,
