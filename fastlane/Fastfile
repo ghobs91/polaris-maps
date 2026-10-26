@@ -96,7 +96,11 @@ platform :ios do
       )
     end
 
-    dirty = `git -C #{repo_root} status --porcelain`.strip
+    # Do not `strip` this output: porcelain lines carry a two-character status
+    # prefix (" M path" / "M  path"), and stripping removes the leading space of
+    # the first line, shifting its path by one character — a lane-owned file in
+    # that position then reads as blocking.
+    dirty = `git -C #{repo_root} status --porcelain`
     # The release lane mutates these itself (build-number bump, pod install,
     # fastlane's regenerated README). They must not block a re-run; anything
     # else does.
