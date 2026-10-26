@@ -1,9 +1,16 @@
-> **Implementation status (2026-10-23):** the capture/queue/summary flow and
+> **Implementation status (2026-10-26):** the capture/queue/summary flow and
 > both Panoramax and Mapillary upload clients are implemented and covered by
 > unit tests; `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, the full Jest
-> suite, and an iOS production export pass. Device spikes (camera geometry,
-> ultra-wide lens, real-account uploads), privacy/store copy, and release
-> verification remain.
+> suite, and an iOS production export pass. The Mapillary client now also
+> refreshes on a mid-upload 401 (disconnecting the account if the refresh is
+> rejected), backs off and retries 429/5xx failures, and submits one cluster per
+> drive segment (1,000 images or a >10 min gap). The navigation screen shows the
+> live camera in the bottom quarter of the screen with the driving HUD above it,
+> and a rolling dash cam (segmented muted recording, time + size retention with
+> automatic oldest-first pruning, playback and export) ships alongside it.
+> Remaining: device spikes (camera geometry, ultra-wide lens, real-account
+> uploads), the `react-native-vision-camera` migration that allows stills and
+> video to run simultaneously, privacy/store copy, and release verification.
 
 ## 0. Spikes and decisions
 

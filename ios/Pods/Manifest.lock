@@ -263,6 +263,8 @@ PODS:
     - RNScreens
   - ExpoSecureStore (57.0.4):
     - ExpoModulesCore
+  - ExpoSharing (57.0.24):
+    - ExpoModulesCore
   - ExpoSpeech (57.0.3):
     - ExpoModulesCore
   - ExpoSpeechRecognition (56.0.1):
@@ -282,6 +284,8 @@ PODS:
     - ExpoModulesCore
     - ExpoModulesWorklets
     - React-RCTFabric
+  - ExpoVideo (57.0.5):
+    - ExpoModulesCore
   - ExpoWebBrowser (57.0.3):
     - ExpoModulesCore
   - EXUpdatesInterface (57.0.2):
@@ -2674,6 +2678,7 @@ DEPENDENCIES:
   - "ExpoModulesWorkletsAdapter (from `../node_modules/.pnpm/expo-modules-core@57.0.24_react-native-worklets@0.10.1_@babel+core@7.29.0_@react-native_af967d6db7ff022c83505d24b0c95ea3/node_modules/expo-modules-core`)"
   - "ExpoRouter (from `../node_modules/.pnpm/expo-router@57.0.29_4cfdf8a29382680259f8bbe945e81db4/node_modules/expo-router/ios`)"
   - "ExpoSecureStore (from `../node_modules/.pnpm/expo-secure-store@57.0.4_expo@57.0.31/node_modules/expo-secure-store/ios`)"
+  - "ExpoSharing (from `../node_modules/.pnpm/expo-sharing@57.0.24_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-_b6b81b16408aabf9c6ce76653bae1850/node_modules/expo-sharing/ios`)"
   - "ExpoSpeech (from `../node_modules/.pnpm/expo-speech@57.0.3_expo@57.0.31/node_modules/expo-speech/ios`)"
   - "ExpoSpeechRecognition (from `../node_modules/.pnpm/expo-speech-recognition@56.0.1_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@rea_717156f6bcb9cce01a31bbde491d39bb/node_modules/expo-speech-recognition/ios`)"
   - "ExpoSplashScreen (from `../node_modules/.pnpm/expo-splash-screen@57.0.10_expo@57.0.31_typescript@6.0.3/node_modules/expo-splash-screen/ios`)"
@@ -2682,6 +2687,7 @@ DEPENDENCIES:
   - "ExpoSystemUI (from `../node_modules/.pnpm/expo-system-ui@57.0.4_expo@57.0.31_react-native-web@0.21.2_encoding@0.1.13_react-dom@19_65ad5a974a98df61eed4e1e2abb99ec5/node_modules/expo-system-ui/ios`)"
   - "ExpoTaskManager (from `../node_modules/.pnpm/expo-task-manager@57.0.21_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-na_37d316eec61653ed1d10e4c0de85af3d/node_modules/expo-task-manager/ios`)"
   - "ExpoUI (from `../node_modules/.pnpm/@expo+ui@57.0.26_@babel+core@7.29.0_@types+react@19.2.17_expo@57.0.31_react-dom@19.2.3__e34e909c692c46aa977f730379449044/node_modules/@expo/ui/ios`)"
+  - "ExpoVideo (from `../node_modules/.pnpm/expo-video@57.0.5_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-com_0f761fa544e95d90597801f443e48b7b/node_modules/expo-video/ios`)"
   - "ExpoWebBrowser (from `../node_modules/.pnpm/expo-web-browser@57.0.3_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-nati_ba3df7d138482b94420036bd14da57ed/node_modules/expo-web-browser/ios`)"
   - "EXUpdatesInterface (from `../node_modules/.pnpm/expo-updates-interface@57.0.2_expo@57.0.31/node_modules/expo-updates-interface/ios`)"
   - "FBLazyVector (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/Libraries/FBLazyVector`)"
@@ -2853,6 +2859,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-router@57.0.29_4cfdf8a29382680259f8bbe945e81db4/node_modules/expo-router/ios"
   ExpoSecureStore:
     :path: "../node_modules/.pnpm/expo-secure-store@57.0.4_expo@57.0.31/node_modules/expo-secure-store/ios"
+  ExpoSharing:
+    :path: "../node_modules/.pnpm/expo-sharing@57.0.24_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-_b6b81b16408aabf9c6ce76653bae1850/node_modules/expo-sharing/ios"
   ExpoSpeech:
     :path: "../node_modules/.pnpm/expo-speech@57.0.3_expo@57.0.31/node_modules/expo-speech/ios"
   ExpoSpeechRecognition:
@@ -2869,6 +2877,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-task-manager@57.0.21_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-na_37d316eec61653ed1d10e4c0de85af3d/node_modules/expo-task-manager/ios"
   ExpoUI:
     :path: "../node_modules/.pnpm/@expo+ui@57.0.26_@babel+core@7.29.0_@types+react@19.2.17_expo@57.0.31_react-dom@19.2.3__e34e909c692c46aa977f730379449044/node_modules/@expo/ui/ios"
+  ExpoVideo:
+    :path: "../node_modules/.pnpm/expo-video@57.0.5_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-com_0f761fa544e95d90597801f443e48b7b/node_modules/expo-video/ios"
   ExpoWebBrowser:
     :path: "../node_modules/.pnpm/expo-web-browser@57.0.3_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-nati_ba3df7d138482b94420036bd14da57ed/node_modules/expo-web-browser/ios"
   EXUpdatesInterface:
@@ -3088,6 +3098,7 @@ SPEC CHECKSUMS:
   ExpoModulesWorkletsAdapter: 584685dcb1d21f560c9ab1b482f57fc8a74af1d6
   ExpoRouter: 7e81d46cec8d324f07fb13c764d89f1664cc2fef
   ExpoSecureStore: ff1fd5e073957417ba8f9dec0bebcbd55a60e747
+  ExpoSharing: 4f0529a876e307b0dc5463f80dd318e4c1457c77
   ExpoSpeech: ab83f97ede99c65a23fd4c228122deadc430de01
   ExpoSpeechRecognition: 119acf84448579e53f841d040aad76982f945e2d
   ExpoSplashScreen: 856060f5724dc4fca4d69a2d18a161e3baa37019
@@ -3096,6 +3107,7 @@ SPEC CHECKSUMS:
   ExpoSystemUI: 05ee8d4aaba1b6af330f3621e19b39ff9f21e718
   ExpoTaskManager: ede265f5b4a6e075b422eb4d45c8cb393b0dc465
   ExpoUI: 162ba2d970e9fba2d53d819945c41ed6b529a73f
+  ExpoVideo: 31d5dc617d913808aeba05c3ab900712637b0e47
   ExpoWebBrowser: a4d7c382116fbe33c1ec7f60293f02b7e97042e4
   EXUpdatesInterface: 4c96533f11c8cefe879bd506564cc2d537f56804
   FBLazyVector: 2138c6c2ab66c31bf5754dc18097fbc498a49c7f

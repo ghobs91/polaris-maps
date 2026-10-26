@@ -45,10 +45,26 @@ export interface StreetViewPreferences {
   mapillaryUsername: string | null;
 }
 
+/**
+ * Rolling dash-cam buffer. Recording is always explicit (the user taps the
+ * dash-cam action); these values bound how much footage is kept on disk.
+ */
+export interface DashCamPreferences {
+  /** Show and allow the dash-cam action. */
+  enabled: boolean;
+  /** Length of one continuous clip before it rolls over to a new file. */
+  clipSeconds: number;
+  /** Rolling window of footage to keep. */
+  maxMinutes: number;
+  /** Hard disk budget; whichever cap is hit first drops the oldest clips. */
+  maxBytes: number;
+}
+
 interface PersistedSettings {
   permissions: PermissionPreferences;
   routePreferences: RoutePreferences;
   streetView: StreetViewPreferences;
+  dashCam: DashCamPreferences;
   themeMode: ThemeMode;
   useMetric: boolean;
   voiceGuidanceEnabled: boolean;
@@ -68,6 +84,7 @@ interface SettingsState extends PersistedSettings {
   setPermissions: (prefs: Partial<PermissionPreferences>) => void;
   setRoutePreferences: (prefs: Partial<RoutePreferences>) => void;
   setStreetView: (prefs: Partial<StreetViewPreferences>) => void;
+  setDashCam: (prefs: Partial<DashCamPreferences>) => void;
   setThemeMode: (mode: ThemeMode) => void;
   setUseMetric: (metric: boolean) => void;
   setVoiceGuidanceEnabled: (enabled: boolean) => void;
@@ -106,6 +123,12 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     panoramaxUsername: null,
     mapillaryUsername: null,
   },
+  dashCam: {
+    enabled: true,
+    clipSeconds: 60,
+    maxMinutes: 60,
+    maxBytes: 2 * 1024 * 1024 * 1024,
+  },
   themeMode: 'system',
   useMetric: false,
   voiceGuidanceEnabled: true,
@@ -133,6 +156,10 @@ function loadSettings(): PersistedSettings {
           ...DEFAULT_SETTINGS.streetView,
           ...(parsed.streetView ?? {}),
         },
+        dashCam: {
+          ...DEFAULT_SETTINGS.dashCam,
+          ...(parsed.dashCam ?? {}),
+        },
       };
     } catch {
       // ignore corrupt data
@@ -148,6 +175,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       permissions: state.permissions,
       routePreferences: state.routePreferences,
       streetView: state.streetView,
+      dashCam: state.dashCam,
       themeMode: state.themeMode,
       useMetric: state.useMetric,
       voiceGuidanceEnabled: state.voiceGuidanceEnabled,
@@ -172,6 +200,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setStreetView: (prefs) => {
       set({ streetView: { ...get().streetView, ...prefs } });
+      persist();
+    },
+    setDashCam: (prefs) => {
+      set({ dashCam: { ...get().dashCam, ...prefs } });
       persist();
     },
     setThemeMode: (themeMode) => {

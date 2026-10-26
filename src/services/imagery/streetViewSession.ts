@@ -1,5 +1,6 @@
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { useDashCamStore } from '../../stores/dashCamStore';
 import { confirmStreetViewConsent } from './streetViewConsent';
 import {
   createDrive,
@@ -19,6 +20,11 @@ import {
  * auto-start coordinator.
  */
 export async function requestStreetViewStart(startedBy: 'manual' | 'auto'): Promise<boolean> {
+  if (useDashCamStore.getState().recording) {
+    throw new Error(
+      'Stop the dash cam first — the camera can only record or take photos at one time.',
+    );
+  }
   const accepted = await confirmStreetViewConsent();
   if (!accepted) return false;
   // An explicit per-drive start also opts the master switch back in, so the
