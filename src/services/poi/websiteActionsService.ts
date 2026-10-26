@@ -13,6 +13,8 @@
  * Only http(s) URLs are ever returned; results are cached in-memory.
  */
 
+import { fetchWebsiteHtml } from './websiteHtmlService';
+
 export type WebsiteActionKind = 'order' | 'reserve' | 'menu';
 
 export interface WebsiteAction {
@@ -241,26 +243,12 @@ export async function fetchWebsiteActions(
   const cached = getCached(pageUrl);
   if (cached) return cached;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(pageUrl, {
-      signal: controller.signal,
-      headers: { Accept: 'text/html' },
-    });
-    if (!res.ok) return [];
-    const contentType = res.headers.get('content-type') ?? '';
-    if (contentType && !/html/i.test(contentType)) return [];
-    const html = (await res.text()).slice(0, 500_000);
-    // Resolve links against the post-redirect URL so a site that moved to a new
-    // host still yields its (relative) order/reserve/menu links.
-    const baseUrl = (res as { url?: string }).url || pageUrl;
-    const actions = parseWebsiteActionsFromHtml(html, baseUrl);
-    setCached(pageUrl, actions);
-    return actions;
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(timer);
-  }
+  // Shared with `cuisineOriginService`, so the homepage is fetched once even
+  // when both detectors run for the same place card.
+  const page = await fetchWebsiteHtml(pageUrl, timeoutMs);
+  if (!page) return [];
+
+  const actions = parseWebsiteActionsFromHtml(page.html, page.url);
+  setCached(pageUrl, actions);
+  return actions;
 }

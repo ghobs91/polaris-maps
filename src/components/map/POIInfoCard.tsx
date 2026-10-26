@@ -48,6 +48,11 @@ import {
   type WebsiteAction,
   type WebsiteActionKind,
 } from '../../services/poi/websiteActionsService';
+import {
+  fetchCuisineOrigins,
+  isFoodVenue,
+  type CuisineOrigin,
+} from '../../services/poi/cuisineOriginService';
 import { findStreetViewPanoramas } from '../../services/imagery/streetViewService';
 import { openInAppBrowser } from '../../utils/inAppBrowser';
 import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
@@ -662,6 +667,8 @@ export function POIInfoCard() {
   const [streetViewFound, setStreetViewFound] = useState(false);
   // Detected order / reserve / menu links on the venue website.
   const [websiteActions, setWebsiteActions] = useState<WebsiteAction[]>([]);
+  // Cuisine-origin labels found on the venue's about/story page.
+  const [cuisineOrigins, setCuisineOrigins] = useState<CuisineOrigin[]>([]);
 
   useEffect(() => {
     setStreetViewThumb(null);
@@ -697,6 +704,21 @@ export function POIInfoCard() {
       cancelled = true;
     };
   }, [parsed?.website, isOnline]);
+
+  useEffect(() => {
+    setCuisineOrigins([]);
+    const website = parsed?.website ? normalizeWebsiteUrl(parsed.website) : null;
+    if (!website || !isOnline || !isFoodVenue(poi?.subtype)) return;
+    let cancelled = false;
+    fetchCuisineOrigins(website)
+      .then((origins) => {
+        if (!cancelled) setCuisineOrigins(origins);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [parsed?.website, isOnline, poi?.subtype]);
 
   const openActionUrl = useCallback((url: string, label: string) => {
     void openInAppBrowser(url).then((opened) => {
@@ -1281,6 +1303,29 @@ export function POIInfoCard() {
               >
                 {poiDisplayName}
               </Text>
+              {cuisineOrigins.length > 0 && (
+                <View style={styles.cuisineRow}>
+                  {cuisineOrigins.map((origin) => (
+                    <View
+                      key={origin.countryCode}
+                      style={[
+                        styles.cuisinePill,
+                        {
+                          backgroundColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.06)',
+                          borderColor,
+                        },
+                      ]}
+                      accessible
+                      accessibilityRole="text"
+                      accessibilityLabel={`${origin.label} cuisine, according to the restaurant's website`}
+                    >
+                      <Text style={[styles.cuisinePillText, { color: textColor }]}>
+                        {origin.flag} {origin.label}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
               <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
                 {category
                   ? enrichedData?.poiCategory
@@ -1620,6 +1665,25 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     textAlign: 'center',
     marginTop: 1,
+  },
+  cuisineRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  cuisinePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: borderRadius.round,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  cuisinePillText: {
+    fontSize: 11,
+    fontWeight: '600' as const,
   },
   actionsRow: {
     marginBottom: spacing.md,
