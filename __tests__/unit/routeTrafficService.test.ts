@@ -1,6 +1,7 @@
 import {
   congestionColor,
   buildRouteTrafficGeoJSON,
+  splitTrafficAtDistance,
   averageRouteTrafficColor,
   ETA_COLOR_GREEN,
   ETA_COLOR_ORANGE,
@@ -8,6 +9,7 @@ import {
   DEFAULT_ROUTE_COLOR,
 } from '../../src/services/traffic/routeTrafficService';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
+import { haversineMeters } from '../../src/utils/routeSnap';
 
 // ---------------------------------------------------------------------------
 // congestionColor
@@ -436,6 +438,73 @@ describe('averageRouteTrafficColor', () => {
       congestionRatio: 0.25,
     });
     expect(averageRouteTrafficColor(route, [seg])).toBe(ETA_COLOR_ORANGE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splitTrafficAtDistance
+// ---------------------------------------------------------------------------
+describe('splitTrafficAtDistance', () => {
+  // Two runs sharing a boundary vertex, each leg ~1.1 km.
+  const blue = '#2FD4F2';
+  const red = '#D50000';
+  const collection = {
+    type: 'FeatureCollection' as const,
+    features: [
+      {
+        type: 'Feature' as const,
+        properties: { color: blue },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [
+            [0, 0],
+            [0, 0.01],
+            [0, 0.02],
+          ] as [number, number][],
+        },
+      },
+      {
+        type: 'Feature' as const,
+        properties: { color: red },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [
+            [0, 0.02],
+            [0, 0.03],
+          ] as [number, number][],
+        },
+      },
+    ],
+  };
+  const legMeters = haversineMeters([0, 0], [0, 0.01]);
+
+  it('returns the whole collection as remaining when nothing is driven', () => {
+    const split = splitTrafficAtDistance(collection, 0);
+    expect(split.completed.features).toHaveLength(0);
+    expect(split.remaining.features).toHaveLength(2);
+  });
+
+  it('splits the run that contains the seam and keeps colours', () => {
+    const split = splitTrafficAtDistance(collection, legMeters);
+    expect(split.completed.features).toHaveLength(1);
+    expect(split.completed.features[0].properties.color).toBe(blue);
+    expect(split.completed.features[0].geometry.coordinates).toHaveLength(2);
+
+    // The blue run's tail plus the whole red run stay ahead of the vehicle.
+    expect(split.remaining.features).toHaveLength(2);
+    expect(split.remaining.features[0].properties.color).toBe(blue);
+    expect(split.remaining.features[1].properties.color).toBe(red);
+    // No point is lost at the seam: the split halves share it.
+    const doneTail = split.completed.features[0].geometry.coordinates.slice(-1)[0];
+    expect(split.remaining.features[0].geometry.coordinates[0]).toEqual(doneTail);
+  });
+
+  it('moves whole runs across once the seam is behind them', () => {
+    const split = splitTrafficAtDistance(collection, legMeters * 2.5);
+    expect(split.completed.features.map((f) => f.properties.color)).toEqual([blue, red]);
+    // Only the tail of the red run is left ahead.
+    expect(split.remaining.features).toHaveLength(1);
+    expect(split.remaining.features[0].geometry.coordinates.length).toBe(2);
   });
 });
 

@@ -207,6 +207,80 @@ export function buildRouteTrafficGeoJSON(
 }
 
 /**
+ * Split a built traffic collection at `completedMeters` along the route.
+ *
+ * Features are contiguous runs of the route, emitted in order, so this is one
+ * linear walk over the points. Re-running {@link buildRouteTrafficGeoJSON} on
+ * the two halves would re-match every route point against every traffic
+ * segment — tens of milliseconds per call on a long route, far too slow to run
+ * on each position update while driving.
+ */
+export function splitTrafficAtDistance(
+  collection: TrafficFeatureCollection,
+  completedMeters: number,
+): { completed: TrafficFeatureCollection; remaining: TrafficFeatureCollection } {
+  const empty: TrafficFeatureCollection = { type: 'FeatureCollection', features: [] };
+  if (!(completedMeters > 0)) return { completed: empty, remaining: collection };
+
+  const completedFeatures: TrafficFeatureCollection['features'] = [];
+  const remainingFeatures: TrafficFeatureCollection['features'] = [];
+  /** Route distance at the first point of the run being walked. */
+  let travelled = 0;
+  let splitDone = false;
+
+  for (const feature of collection.features) {
+    const coords = feature.geometry.coordinates;
+    if (splitDone) {
+      remainingFeatures.push(feature);
+      continue;
+    }
+
+    const doneCoords: [number, number][] = [];
+    let aheadCoords: [number, number][] | null = null;
+
+    for (let i = 0; i < coords.length; i++) {
+      if (i > 0) {
+        const segMeters = haversineMeters(coords[i - 1], coords[i]);
+        const segStart = travelled;
+        travelled += segMeters;
+        if (!splitDone && travelled >= completedMeters) {
+          const t = segMeters > 0 ? (completedMeters - segStart) / segMeters : 0;
+          const seam: [number, number] = [
+            coords[i - 1][0] + (coords[i][0] - coords[i - 1][0]) * t,
+            coords[i - 1][1] + (coords[i][1] - coords[i - 1][1]) * t,
+          ];
+          // The seam lands on a vertex when t is 0 or 1; don't duplicate it.
+          if (t > 0) doneCoords.push(seam);
+          aheadCoords = t < 1 ? [seam, coords[i]] : [coords[i]];
+          splitDone = true;
+          continue;
+        }
+      }
+      if (aheadCoords) aheadCoords.push(coords[i]);
+      else doneCoords.push(coords[i]);
+    }
+
+    if (doneCoords.length >= 2) {
+      completedFeatures.push({
+        ...feature,
+        geometry: { ...feature.geometry, coordinates: doneCoords },
+      });
+    }
+    if (aheadCoords && aheadCoords.length >= 2) {
+      remainingFeatures.push({
+        ...feature,
+        geometry: { ...feature.geometry, coordinates: aheadCoords },
+      });
+    }
+  }
+
+  return {
+    completed: { type: 'FeatureCollection', features: completedFeatures },
+    remaining: { type: 'FeatureCollection', features: remainingFeatures },
+  };
+}
+
+/**
  * Compute a distance-weighted average congestion ratio across route sections
  * that have matching traffic data, then map it to a single display color.
  *

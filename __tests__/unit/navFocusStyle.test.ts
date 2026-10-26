@@ -50,6 +50,7 @@ describe('applyNavigationFocus', () => {
     it.each([
       'poi-label',
       'housenumber',
+      'road-label-primary',
       'road-label-secondary',
       'road-label-minor',
       'place-suburb',
@@ -65,9 +66,12 @@ describe('applyNavigationFocus', () => {
       expect(layer(focused, 'water-name-other')?.layout?.visibility).toBe('none');
     });
 
-    it('keeps the road names and place anchors a driver navigates by', () => {
+    it('hides every road name — the ribbon covers the road it would label', () => {
       const focused = applyNavigationFocus(DARK_MAP_STYLE_JSON, true);
-      expect(layer(focused, 'road-label-primary')?.layout?.visibility).not.toBe('none');
+      for (const id of ['road-label-primary', 'road-label-secondary', 'road-label-minor']) {
+        expect(layer(focused, id)?.layout?.visibility).toBe('none');
+      }
+      // Town/city anchors still orient the driver.
       expect(layer(focused, 'place-town')?.layout?.visibility).not.toBe('none');
       expect(layer(focused, 'place-city')?.layout?.visibility).not.toBe('none');
     });
@@ -346,8 +350,8 @@ describe('applyNavigationFocus', () => {
       const focused = applyNavigationFocus(SATELLITE_STYLE_JSON, false);
       expect(layer(focused, 'road-label-minor')?.layout?.visibility).toBe('none');
       expect(layer(focused, 'water-name-other')?.layout?.visibility).toBe('none');
-      // The imagery and the road names a driver still needs survive.
-      expect(layer(focused, 'road-label-primary')?.layout?.visibility).toBeUndefined();
+      // Road names go too: the ribbon covers the carriageway they label.
+      expect(layer(focused, 'road-label-primary')?.layout?.visibility).toBe('none');
       const raster = layers(focused).filter((l) => l.type === 'raster');
       expect(raster).toEqual(layers(SATELLITE_STYLE_JSON).filter((l) => l.type === 'raster'));
     });

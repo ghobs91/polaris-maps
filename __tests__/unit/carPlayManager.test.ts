@@ -662,7 +662,7 @@ describe('CarPlayManager', () => {
     );
   });
 
-  it('follows the car content style over the phone theme', () => {
+  it('follows the car content style over the phone theme in system mode', () => {
     initCarPlay();
     fireEvent('carPlayConnected');
     expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
@@ -671,6 +671,22 @@ describe('CarPlayManager', () => {
 
     // The head unit is in dark mode while the phone stays light.
     fireEvent('carPlayContentStyleChanged', { dark: true });
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
+      expect.stringContaining('Polaris Dark'),
+    );
+  });
+
+  it('keeps an explicit dark theme over a light head-unit report', () => {
+    useSettingsStore.getState().setThemeMode('dark');
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
+      expect.stringContaining('Polaris Dark'),
+    );
+
+    // A Dashboard-only session can report "light" before the head unit's style
+    // resolves; the explicit Dark theme must not be overridden by it.
+    fireEvent('carPlayContentStyleChanged', { dark: false });
     expect(NativeModules.PolarisCarPlay.updateMapStyle).toHaveBeenLastCalledWith(
       expect.stringContaining('Polaris Dark'),
     );

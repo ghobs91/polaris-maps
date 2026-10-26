@@ -9,9 +9,10 @@
  *
  * What changes while a trip is active:
  *   - Context labels with no driving value are hidden: neighbourhood/suburb
- *     names, secondary/minor road names, lake names, house numbers and POI
- *     labels. Motorway/trunk/primary road names and town/city anchors stay, so
- *     the driver keeps their bearings.
+ *     names, all road names (the route ribbon covers the carriageway, so a road
+ *     label under it is sliced by the line — the current-road pill names the
+ *     road instead), lake names, house numbers and POI labels. Town/city
+ *     anchors stay, so the driver keeps their bearings.
  *   - Roads a car can drive on are drawn heavier. At the navigation camera's
  *     zoom 17 the browse widths land around 9pt for a primary road; navigation
  *     maps draw arterials around a third heavier so the carriageway is legible
@@ -42,6 +43,11 @@
 const NAV_HIDDEN_LAYER_IDS: readonly string[] = [
   'poi-label',
   'housenumber',
+  // Every road-name label. The route ribbon covers the carriageway it follows,
+  // so the name of the road under the car ends up sliced by the line; the
+  // current-road pill under the puck names it instead. Cross-street names are
+  // announced by the turn banner, so no driving information is lost.
+  'road-label-primary',
   'road-label-secondary',
   'road-label-minor',
   'place-suburb',
