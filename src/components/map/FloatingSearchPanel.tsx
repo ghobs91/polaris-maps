@@ -92,6 +92,7 @@ import {
   geocodingResultToSearchResult,
   isGenericNearbyQuery,
   isSameDestination,
+  preferNearbyResults,
   selectSearchPins,
   shouldFrameResults,
 } from './floatingSearchPanelHelpers';
@@ -743,11 +744,19 @@ export function FloatingSearchPanel({
     });
 
     // Ranked order, best first: transit stations are a deliberate boost, then
-    // the unified pipeline (which carries real POI categories, so those rows
-    // get their coloured category icon and a distance), then MapKit's nearby
-    // results as a fill. MapKit rows have no category metadata and render as
-    // grey pins, so letting them lead demoted the better-typed results.
-    const displayedResults = [...stationResults, ...filteredUnified, ...filteredApple];
+    // the place rows ordered around where the user is looking. The unified
+    // pipeline ranks by relevance, so a text-perfect match from another metro
+    // can otherwise lead; MapKit's nearby rows arrive as an unordered fill.
+    // Proximity ordering puts the local branches first and drops the distant
+    // tail once something local matched.
+    const bounds = useOsmPoiStore.getState().viewportBounds;
+    const anchor = bounds
+      ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
+      : userLocationRef.current;
+    const displayedResults = [
+      ...stationResults,
+      ...preferNearbyResults([...filteredUnified, ...filteredApple], anchor),
+    ];
     setResults(displayedResults);
 
     const mapPois: OsmPoi[] = displayedResults

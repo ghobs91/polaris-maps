@@ -3,6 +3,7 @@ import {
   geocodingResultToSearchResult,
   isGenericNearbyQuery,
   isSameDestination,
+  preferNearbyResults,
   selectSearchPins,
   shouldFrameResults,
 } from '../../src/components/map/floatingSearchPanelHelpers';
@@ -169,6 +170,72 @@ describe('floatingSearchPanelHelpers', () => {
       expect(isGenericNearbyQuery('h&h bagels')).toBe(false);
       expect(isGenericNearbyQuery('pizza palace')).toBe(false);
       expect(isGenericNearbyQuery('starbucks')).toBe(false);
+    });
+  });
+
+  describe('proximity ordering of merged results', () => {
+    const unionSquare = { lat: 40.7359, lng: -73.9911 };
+
+    function result(id: number, text: string, lat: number, lng: number): GeocodingResult {
+      return {
+        entry: {
+          id,
+          text,
+          type: 'place',
+          housenumber: null,
+          street: null,
+          city: null,
+          state: null,
+          postcode: null,
+          country: null,
+          lat,
+          lng,
+        },
+        rank: 0,
+      };
+    }
+
+    const nycTatte = result(1, 'Tatte', 40.7355, -73.9945); // ~0.3 km
+    const bostonTatte = result(2, 'Tatte', 42.3532, -71.0573); // ~300 km
+    const arlingtonTatte = result(3, 'Tatte', 42.4154, -71.1565); // ~305 km
+
+    it('keeps local matches above a distant cluster', () => {
+      const ordered = preferNearbyResults([bostonTatte, arlingtonTatte, nycTatte], unionSquare);
+
+      expect(ordered.map((r) => r.entry.id)).toEqual([1]);
+    });
+
+    it('keeps distant results when nothing local matched', () => {
+      const ordered = preferNearbyResults([bostonTatte, arlingtonTatte], unionSquare);
+
+      expect(ordered.map((r) => r.entry.id)).toEqual([2, 3]);
+    });
+
+    it('preserves the source order inside each proximity bucket', () => {
+      const nearA = result(4, 'Near A', 40.74, -73.99);
+      const nearB = result(5, 'Near B', 40.73, -73.98);
+      const outer = result(6, 'Outer', 40.7359, -73.36); // ~53 km, kept but not local
+      const ordered = preferNearbyResults([outer, bostonTatte, nearA, nearB], unionSquare);
+
+      expect(ordered.map((r) => r.entry.id)).toEqual([4, 5, 6]);
+    });
+
+    it('leaves the list untouched without an anchor', () => {
+      const input = [bostonTatte, nycTatte];
+      expect(preferNearbyResults(input, null)).toBe(input);
+    });
+
+    it('keeps an explicit address destination in another city', () => {
+      const farAddress: GeocodingResult = {
+        ...result(7, '350 5th Ave, Boston', 42.35, -71.06),
+        entry: {
+          ...result(7, '350 5th Ave, Boston', 42.35, -71.06).entry,
+          type: 'address',
+        },
+      };
+      const ordered = preferNearbyResults([nycTatte, farAddress], unionSquare);
+
+      expect(ordered.map((r) => r.entry.id)).toEqual([1, 7]);
     });
   });
 });

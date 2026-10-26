@@ -79,6 +79,59 @@ export function kmBetween(
 }
 
 /**
+ * Results within this radius of the search anchor count as local to the user.
+ * Slightly wider than the camera-fit radius ({@link MAX_FIT_ANCHOR_KM}) so a
+ * suburban search still counts its own metro as local.
+ */
+export const NEARBY_RESULT_KM = 50;
+
+/**
+ * Results farther than this are dropped when at least one local match exists.
+ * Sources that rank by text alone (Photon, Nominatim) can otherwise answer a
+ * New York search with a 300 km Boston cluster, burying the local branches.
+ */
+export const DISTANT_RESULT_KM = 120;
+
+/**
+ * Order a merged result list around the search anchor.
+ *
+ * The list mixes sources with different notions of distance: the unified
+ * pipeline ranks by relevance (text match can outweigh a 300 km distance) and
+ * MapKit's nearby results arrive as a plain fill. Partitioning on proximity
+ * keeps every local match above the distant tail while preserving each
+ * bucket's existing order. Distant matches are dropped entirely once a local
+ * one exists — a search made while looking at a place should not lead with
+ * another metro. Address results are explicit destinations and are never
+ * dropped, even in another city.
+ */
+export function preferNearbyResults(
+  results: GeocodingResult[],
+  anchor: { lat: number; lng: number } | null | undefined,
+): GeocodingResult[] {
+  if (!anchor || results.length < 2) return results;
+
+  const withDistance = results.map((result, index) => {
+    const distanceKm = kmBetween(anchor, result.entry);
+    return {
+      result,
+      index,
+      distanceKm,
+      // An address is an explicit destination: it always counts as local so an
+      // address lookup in another city is never dropped for a nearby namesake.
+      isLocal: result.entry.type === 'address' || distanceKm <= NEARBY_RESULT_KM,
+    };
+  });
+  const hasNearby = withDistance.some((entry) => entry.isLocal);
+  const kept = hasNearby
+    ? withDistance.filter((entry) => entry.isLocal || entry.distanceKm <= DISTANT_RESULT_KM)
+    : withDistance;
+
+  return kept
+    .sort((a, b) => Number(b.isLocal) - Number(a.isLocal) || a.index - b.index)
+    .map((entry) => entry.result);
+}
+
+/**
  * Pick the pins shown for a result set, and the subset worth framing.
  *
  * With an anchor (the user's location at submit time), places are ordered
