@@ -40,19 +40,101 @@ platform :ios do
   end
 
   # Preflight for the repo-root .env consumed by the Xcode build phase
-  # (`expo export:embed` inlines EXPO_PUBLIC_* vars from it). Every var is
-  # optional — the app degrades gracefully without them — so a missing .env is
-  # only a warning, never a build failure.
+  # (`expo export:embed` inlines EXPO_PUBLIC_* vars from it at bundle time).
+  #
+  # This is a hard failure, not a warning. A build without the traffic key
+  # still installs and runs, but every viewport resolves to "No traffic data"
+  # because the cascade has no source left (no TomTom seed, no open feeds, no
+  # peers in a fresh install). Ships before: builds 318-328 shipped from
+  # worktrees that had no .env at all. A TestFlight build with a silently
+  # degraded map is worse than no build.
   private_lane :ensure_app_env do
     env_file = File.expand_path("../.env", __dir__)
-    if File.file?(env_file)
-      UI.success(".env found — optional EXPO_PUBLIC_* features will be inlined")
-    else
-      UI.important(
-        ".env not found at #{env_file} — building without optional " \
-          "EXPO_PUBLIC_* features (traffic/transit keys, region catalog, …)"
+    unless File.file?(env_file)
+      UI.user_error!(
+        ".env not found at #{env_file}. `expo export:embed` inlines " \
+          "EXPO_PUBLIC_* from the repo-root .env, so this build would ship with no " \
+          "traffic key, no transit keys and no region catalog. Copy .env into this " \
+          "working tree (worktrees do not share it) and re-run."
       )
     end
+
+    values = File.readlines(env_file, chomp: true).each_with_object({}) do |line, acc|
+      next if line.strip.start_with?("#") || !line.include?("=")
+
+      name, value = line.split("=", 2)
+      acc[name.strip] = value.to_s.strip.gsub(/\A["']|["']\z/, "")
+    end
+
+    tomtom = values["EXPO_PUBLIC_TOMTOM_API_KEY"].to_s
+    if tomtom.empty?
+      UI.user_error!(
+        "EXPO_PUBLIC_TOMTOM_API_KEY is missing or blank in #{env_file}. " \
+          "The traffic cascade would have no cold-start source, so every viewport " \
+          "would read \"No traffic data\"."
+      )
+    end
+
+    UI.success(".env found — traffic key present (#{tomtom.length} chars), features will be inlined")
+  end
+
+  # Refuse to cut a release from anything but a clean checkout of main.
+  #
+  # Every TestFlight build so far was archived from a feature worktree (or a
+  # detached HEAD), which is how unmerged work and stale native files reached
+  # testers. Override for a deliberate one-off with POLARIS_ALLOW_NON_MAIN=1 /
+  # POLARIS_ALLOW_DIRTY=1.
+  private_lane :ensure_release_source do
+    repo_root = File.expand_path("..", __dir__)
+
+    branch = `git -C #{repo_root} rev-parse --abbrev-ref HEAD`.strip
+    if branch != "main" && ENV["POLARIS_ALLOW_NON_MAIN"] != "1"
+      UI.user_error!(
+        "Refusing to archive from '#{branch}'. Release builds must come from main so the " \
+          "binary matches what is merged. Merge your branch first, or set " \
+          "POLARIS_ALLOW_NON_MAIN=1 for a deliberate one-off."
+      )
+    end
+
+    dirty = `git -C #{repo_root} status --porcelain`.strip
+    unless dirty.empty? || ENV["POLARIS_ALLOW_DIRTY"] == "1"
+      UI.user_error!(
+        "Working tree is dirty — commit or stash before archiving:\n#{dirty}"
+      )
+    end
+
+    behind = `git -C #{repo_root} rev-list --count HEAD..origin/main 2>/dev/null`.strip
+    UI.important("main is #{behind} commit(s) behind origin/main — fetch/pull first") if behind.to_i.positive?
+
+    UI.success("Release source OK: clean main at #{`git -C #{repo_root} rev-parse --short HEAD`.strip}")
+  end
+
+  # Belt and braces: prove the key actually landed in the exported JS bundle.
+  # The preflight checks the .env; this checks the artefact that ships, so a
+  # changed build phase or a cache hit cannot slip past it.
+  private_lane :verify_bundle_has_traffic_key do
+    key = ENV["EXPO_PUBLIC_TOMTOM_API_KEY"].to_s
+    ipa = File.expand_path("../build_derived_data/PolarisMaps.ipa", __dir__)
+    unless File.file?(ipa)
+      UI.user_error!("Built archive not found at #{ipa} — cannot verify the traffic key")
+    end
+
+    found = false
+    IO.popen({ "POLARIS_TRAFFIC_KEY" => key }, ["unzip", "-p", ipa, "Payload/PolarisMaps.app/main.jsbundle"]) do |io|
+      while (chunk = io.read(1 << 20))
+        found ||= chunk.include?(key)
+        break if found
+      end
+    end
+
+    unless found
+      UI.user_error!(
+        "The exported main.jsbundle does not contain the TomTom key. The build would ship " \
+          "with no traffic data — investigate the Expo bundling step before uploading."
+      )
+    end
+
+    UI.success("Verified: traffic key present in the exported bundle")
   end
 
   # Warn when the documented marketing version (app.json → expo.version, per
@@ -95,6 +177,7 @@ platform :ios do
     )
 
     ensure_app_env
+    ensure_release_source
     verify_version_alignment
 
     # Quick validation before building
@@ -186,6 +269,7 @@ platform :ios do
 
     # Upload to TestFlight
     UI.header("Step 7/7: Uploading to TestFlight")
+    verify_bundle_has_traffic_key
     upload_to_testflight(
       app_identifier: "com.polarismaps.app",
       # Uses the App Store Connect API key for authentication
@@ -226,6 +310,7 @@ platform :ios do
     )
 
     ensure_app_env
+    ensure_release_source
     verify_version_alignment
 
     UI.important("⚠️  This lane uploads a release build to App Store Connect.")
@@ -281,6 +366,7 @@ platform :ios do
 
     # Upload to App Store Connect
     UI.header("Step 7/7: Uploading to App Store Connect")
+    verify_bundle_has_traffic_key
     upload_to_app_store(
       app_identifier: "com.polarismaps.app",
       api_key: app_store_connect_api_key(
