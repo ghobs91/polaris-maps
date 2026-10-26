@@ -1,18 +1,35 @@
 <div align="center">
 
+<img src="assets/icon.png" width="96" alt="Polaris Maps app icon" />
+
 # Polaris Maps
 
-**The people's map — turn-by-turn navigation and live traffic owned by users, not a corporate cloud. Every device is a node.**
+**Maps owned by the people who use them.**
 
-POI search, transit, offline maps, street imagery — all served over a peer-to-peer network instead of a corporate cloud.
+Turn-by-turn navigation, live traffic, place search, transit, and offline maps —
+shared directly between devices instead of a corporate cloud.
 
-[Features](#features) · [How It Works](#how-the-p2p-layer-works) · [Architecture](#architecture) · [Getting Started](#getting-started)
+[![iOS](https://img.shields.io/badge/iOS-16.4%2B-black?logo=apple&logoColor=white)](#-getting-started)
+[![Android](https://img.shields.io/badge/Android-7%2B-3DDC84?logo=android&logoColor=white)](#-getting-started)
+[![Expo SDK 57](https://img.shields.io/badge/Expo_SDK-57-4630EB?logo=expo&logoColor=white)](#tech-stack)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#tech-stack)
+[![License: MIT](https://img.shields.io/badge/license-MIT-6C5CE7.svg)](LICENSE)
+
+[Features](#-features) · [How it works](#-how-the-p2p-layer-works) · [Architecture](#-architecture) · [Getting started](#-getting-started)
 
 </div>
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/search.jpg" width="220" alt="Search and category results" /><br /><sub><b>Search that stays out of the way</b></sub></td>
+    <td align="center"><img src="docs/screenshots/satellite.jpg" width="220" alt="Satellite map with place markers" /><br /><sub><b>Satellite, traffic, and transit layers</b></sub></td>
+    <td align="center"><img src="docs/screenshots/offline-regions.jpg" width="220" alt="Offline region download screen" /><br /><sub><b>Maps that work without a signal</b></sub></td>
+  </tr>
+</table>
+
 ---
 
-## Why Polaris?
+## 💡 Why Polaris?
 
 Google Maps and Apple Maps are remarkable products — but they work by funneling the world's location data through a single company's servers. Polaris Maps inverts that model. Your device doesn't just _consume_ map data; it _contributes_ it. Traffic speeds, place information, map tiles, street imagery — all shared directly between devices over an encrypted peer-to-peer mesh.
 
@@ -20,55 +37,53 @@ The result is a mapping app that gets better the more people use it, where no co
 
 ---
 
-## Features
+## ✨ Features
 
-### Navigation & Routing
+Every feature heading links to the technical README for that service — architecture diagrams, file maps, data flows, and design notes.
+
+### 🧭 [Navigation & Routing →](src/services/routing/README.md)
 
 Turn-by-turn directions via [Valhalla](https://github.com/valhalla/valhalla) with GPS snap-to-route, off-route detection, automatic rerouting, and park-and-ride suggestions that combine driving + transit. Route ETAs adjust in real time based on live traffic from both commercial feeds and peer-reported congestion.
 
-### Live Traffic
+### 🚗 [Live Traffic & Incidents →](src/services/traffic/README.md)
 
-Color-coded congestion overlays fused from TomTom traffic flow and crowd-sourced speed probes broadcast by nearby peers. Once you've completed onboarding and left traffic telemetry on, your phone contributes anonymous speed data on geohash topic channels; the network merges it all into a unified picture. When significant congestion builds up ahead on your route, Polaris reroutes automatically.
+Color-coded congestion overlays fused from TomTom traffic flow, open feeds, and crowd-sourced speed probes broadcast by nearby peers. Once onboarding is complete and traffic telemetry is on, your phone contributes anonymous speed data on geohash topic channels. Reports are Schnorr-signed, shared over the peer mesh (with a Nostr relay fallback), verified and de-duplicated by receivers, and surfaced as map markers plus a non-blocking warning ahead when you're navigating. When significant congestion builds up ahead on your route, Polaris suggests a faster route instead of rerouting silently.
 
-### Incident Reporting
-
-Report accidents, road closures, hazards, construction, police, and other incidents. Reports are Schnorr-signed, shared over the peer mesh (with a Nostr relay fallback), verified and de-duplicated by receivers, and shown as map markers plus a non-blocking warning ahead when you're navigating. Offline reports are queued and replayed when connectivity returns.
-
-### Places & POI
+### 📍 [Places & POI →](src/services/poi/README.md)
 
 A 3-phase search that returns results in milliseconds: local Overture Maps SQLite first, then parallel Overpass + Overture network queries, then Nominatim fallback. Apple MapKit enriches selected POIs with phone, hours, and photos on iOS. Zoom-adaptive spatial filtering keeps the map readable at every zoom level.
 
-### Search
+### 🔎 [Search & Geocoding →](src/services/search/README.md)
 
-Natural-language queries ("coffee shops open now near me") are parsed for brand, cuisine, and modifier hints, then run in parallel across local FTS5 indexes, Photon geocoding, Overpass, and address search. Results are deduplicated and scored 0–100 by distance, name similarity, category match, and popularity.
+Natural-language queries ("coffee shops open now near me") are parsed for brand, cuisine, and modifier hints, then run in parallel across local FTS5 indexes, Photon geocoding, Overpass, and address search. Results stream in by stage, are deduplicated, and are scored 0–100 by distance, name similarity, category match, and popularity.
 
-### Public Transit
+### 🚇 [Public Transit →](src/services/transit/README.md)
 
 Multi-modal trip planning via OpenTripPlanner with route line rendering, stop departures, and dedicated integrations for Amtrak and MBTA. An endpoint registry maps geographic regions to the correct OTP deployment automatically.
 
-### Offline Regions
+### 📥 [Offline Regions →](src/services/regions/README.md)
 
-Download region packs (vector tiles, Overture places, routing graphs, geocoding indexes) and use them without connectivity. Downloaded regions are automatically seeded back to the P2P network so nearby peers can grab them from you instead of a CDN.
+Download region packs (vector tiles, Overture places, routing graphs, geocoding indexes) and use them without connectivity. Downloaded regions are automatically seeded back to the P2P network so nearby peers can grab them from you instead of a CDN. Canonical pack keys come from signed manifests, with peer-discovered manifests verified before merge.
 
-### Street-Level Imagery
+### 📷 [Street-Level Imagery →](src/services/imagery/README.md)
 
-Capture geotagged street photos with automatic interval shooting, privacy blur, and Schnorr-signed metadata. Images are appended to your Hypercore feed and discoverable by other peers through Gun.js spatial queries.
+Capture geotagged street photos with automatic interval shooting, privacy blur, and Schnorr-signed metadata. Images are appended to your Hypercore feed and discoverable by other peers through Gun.js spatial queries. An online street-view layer also merges Google Street View, Panoramax, and Mapillary panoramas.
 
-### Place Lists & Favorites
+### ⭐ [Place Lists & Favorites →](src/services/places/README.md)
 
-Curate place lists with full CRUD, import from Google Maps Takeout (CSV, JSON, GeoJSON, KML, GPX), sync across iOS devices via iCloud, and set Home/Work favorites.
+Curate place lists with full CRUD, import from Google Maps Takeout (CSV, JSON, GeoJSON, KML, GPX), sync across iOS devices via iCloud, and set Home/Work favorites. Shared lists replicate over Gun.js with per-list keys and revoke-by-rotation.
 
-### OSM Editing
+### ✏️ [OSM Editing →](src/services/osm/README.md)
 
 Edit OpenStreetMap directly — OAuth 2.0 + PKCE login, fetch live node state, edit tags (name, hours, wheelchair access, Wi-Fi, cuisine, etc.), and submit changesets via OSM API v0.6.
 
-### CarPlay
+### 🚘 [CarPlay →](src/services/carplay/README.md)
 
-Navigation state, maneuvers, and search forwarded to CarPlay templates in real time.
+Navigation state, maneuvers, lane guidance, traffic, incidents, and search forwarded to CarPlay templates in real time — including the Dashboard and instrument-cluster scenes, a phone-style route preview, and an add-stop search flow.
 
 ---
 
-## How the P2P Layer Works
+## 🌐 How the P2P Layer Works
 
 Polaris treats every running instance as a **node** in a decentralized physical infrastructure network (DePIN). There are three interlocking P2P systems, each chosen for what it does best:
 
@@ -79,8 +94,8 @@ Your phone                           Nearby phones
     │                                     │
     ├─ SHA-256(geohash4) ──► topic ◄── SHA-256(geohash4) ─┤
     │      "u4pr"                "u4pr"                    │
-    │                                     │
-    └──── encrypted connection ◄──────────┘
+    │                                                     │
+    └──── encrypted connection ◄──────────────────────────┘
               (traffic probes, POI updates)
 ```
 
@@ -118,7 +133,7 @@ All outbound actions (probes, edits, reviews) are queued in MMKV (capped at 500 
 
 ---
 
-## Architecture
+## 🏗 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -172,7 +187,7 @@ All outbound actions (probes, edits, reviews) are queued in MMKV (capped at 500 
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
@@ -223,12 +238,12 @@ pnpm check                # All of the above
 
 ---
 
-## Security
+## 🔒 Security
 
 Full OWASP Top 10:2025 audit with 50 regression tests. See the [Security Review](SECURITY.md) for findings, fixes, and reproduction steps.
 
 ---
 
-## License
+## 📄 License
 
 [MIT](LICENSE)

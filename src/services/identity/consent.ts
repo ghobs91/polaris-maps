@@ -12,11 +12,15 @@ export interface ConsentChoices {
   imagerySharingEnabled: boolean;
 }
 
+/**
+ * Onboarding is opt-out: every toggle starts on so the app works end-to-end,
+ * and each one can be switched off before continuing.
+ */
 const DEFAULT_CHOICES: ConsentChoices = {
-  locationEnabled: false,
-  trafficTelemetryEnabled: false,
-  poiContributionsEnabled: false,
-  imagerySharingEnabled: false,
+  locationEnabled: true,
+  trafficTelemetryEnabled: true,
+  poiContributionsEnabled: true,
+  imagerySharingEnabled: true,
 };
 
 export function hasCompletedConsent(): boolean {

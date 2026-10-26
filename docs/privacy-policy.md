@@ -12,10 +12,10 @@ cloud in the middle. This policy explains what leaves your device and why.
 ## Summary
 
 - We run **no advertising, analytics, or cross-app tracking**.
-- Location is used on-device for navigation. If you turn on **Traffic Telemetry**,
-  your device also shares **anonymised speed probes** with nearby peers.
-- Camera photos and reviews are shared only when you explicitly enable the
-  relevant feature.
+- Location is used on-device for navigation. If **Traffic Telemetry** is on (the
+  default), your device also shares **anonymised speed probes** with nearby peers.
+- Camera photos and reviews are shared only when the relevant feature is on. It
+  is on by default after onboarding, and you can switch it off at any time.
 - Traffic and geocoding use a few third-party services (listed below) that
   receive the coordinates needed to answer a request.
 
@@ -26,7 +26,7 @@ cloud in the middle. This policy explains what leaves your device and why.
 - **On device:** your location is used to show your position, provide
   turn-by-turn guidance, and adjust ETAs. This stays on your device unless you
   enable Traffic Telemetry.
-- **Traffic telemetry (opt-in, default on):** while the app is in the foreground
+- **Traffic telemetry (on by default, opt-out):** while the app is in the foreground
   and the permission is enabled, we derive an **anonymised speed probe**
   (geohash cell, speed, bearing, timestamp) and share it with nearby Polaris
   peers over a peer-to-peer network. Probes use a **random ID that rotates
@@ -39,7 +39,8 @@ cloud in the middle. This policy explains what leaves your device and why.
 ### Photos and imagery
 
 - **Street-level imagery** is captured and shared only when **Imagery Sharing**
-  is enabled.
+  is enabled. Onboarding enables it by default; you can turn it off before
+  finishing setup or later in Settings.
 - **Review photos** are uploaded only when **Review Photo Sharing** is enabled.
 
 ### Content you create

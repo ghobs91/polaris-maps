@@ -40,6 +40,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const setUseMetric = useSettingsStore((s) => s.setUseMetric);
   const setVoiceGuidanceEnabled = useSettingsStore((s) => s.setVoiceGuidanceEnabled);
+  const showOnboardingOnLaunch = useSettingsStore((s) => s.showOnboardingOnLaunch);
+  const setShowOnboardingOnLaunch = useSettingsStore((s) => s.setShowOnboardingOnLaunch);
   const { colors, isDark } = useTheme();
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
@@ -389,8 +391,26 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
       {__DEV__ && (
         <SettingsGroup
           header="Developer"
-          footer="App identity public key — add it to the trusted region-manifest publisher allowlist to publish signed regional packs."
+          footer="Show onboarding on launch replays the first-run flow on every cold start. The app identity public key can be added to the trusted region-manifest publisher allowlist to publish signed regional packs."
         >
+          <SettingsRow
+            title="Show Onboarding on Launch"
+            rightAdornment={
+              <Switch
+                value={showOnboardingOnLaunch}
+                onValueChange={(enabled) => {
+                  setShowOnboardingOnLaunch(enabled);
+                  if (enabled) {
+                    Alert.alert(
+                      'Onboarding will replay',
+                      'It will appear the next time the app is cold started.',
+                    );
+                  }
+                }}
+                trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              />
+            }
+          />
           <SettingsRow
             title="Identity Public Key"
             value={identityPubkey ? `${identityPubkey.slice(0, 12)}…` : 'Unavailable'}

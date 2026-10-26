@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, Switch, Pressable } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, Switch, Pressable } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
 import { Button, GlassView } from '@/components/common';
@@ -7,7 +8,7 @@ import { spacing, typography, borderRadius } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useMapStore } from '@/stores/mapStore';
 import { useReviewImportStore } from '@/stores/reviewImportStore';
-import { TAKEOUT_REQUEST_STEPS } from '@/components/reviews/takeoutCopy';
+import { TAKEOUT_ONBOARDING_STEPS } from '@/components/reviews/takeoutCopy';
 import {
   applyConsentChoices,
   getConsentChoices,
@@ -27,17 +28,28 @@ interface OnboardingFlowProps {
 }
 
 interface ConsentToggleProps {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
   description: string;
   value: boolean;
   onToggle: (v: boolean) => void;
 }
 
-function ConsentToggle({ label, description, value, onToggle }: ConsentToggleProps) {
+function ConsentToggle({ icon, label, description, value, onToggle }: ConsentToggleProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <Pressable style={styles.toggleRow} onPress={() => onToggle(!value)}>
+    <Pressable
+      style={styles.toggleRow}
+      onPress={() => onToggle(!value)}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityHint={description}
+      accessibilityState={{ checked: value }}
+    >
+      <View style={styles.toggleIcon}>
+        <MaterialCommunityIcons name={icon} size={20} color={colors.primary} />
+      </View>
       <View style={styles.toggleText}>
         <Text style={styles.toggleLabel}>{label}</Text>
         <Text style={styles.toggleDesc}>{description}</Text>
@@ -51,12 +63,54 @@ function ConsentToggle({ label, description, value, onToggle }: ConsentTogglePro
   );
 }
 
+interface FeatureRowProps {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  title: string;
+  description: string;
+}
+
+function FeatureRow({ icon, title, description }: FeatureRowProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.featureRow}>
+      <View style={styles.featureIcon}>
+        <MaterialCommunityIcons name={icon} size={22} color={colors.primary} />
+      </View>
+      <View style={styles.featureText}>
+        <Text style={styles.featureTitle}>{title}</Text>
+        <Text style={styles.featureDesc}>{description}</Text>
+      </View>
+    </View>
+  );
+}
+
+const FIRST_RUN_STEPS = 4;
+
+function StepProgress({ step }: { step: number }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View
+      style={styles.progressRow}
+      accessibilityRole="progressbar"
+      accessibilityLabel={`Step ${step + 1} of ${FIRST_RUN_STEPS}`}
+      accessibilityValue={{ min: 1, max: FIRST_RUN_STEPS, now: step + 1 }}
+    >
+      {Array.from({ length: FIRST_RUN_STEPS }, (_, index) => (
+        <View key={index} style={[styles.progressDot, index <= step && styles.progressDotActive]} />
+      ))}
+    </View>
+  );
+}
+
 export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowProps) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [step, setStep] = useState(initialStep);
   const [locationGranted, setLocationGranted] = useState(false);
-  // Pre-fill from saved choices on re-consent; first-run starts privacy-preserving (all off).
+  // Pre-fill from saved choices on re-consent. First-run starts with the
+  // recommended defaults (all on) so the whole experience works out of the box.
   const [consent, setConsent] = useState<ConsentChoices>(() =>
     hasCompletedConsent() ? getConsentChoices() : getDefaultConsentChoices(),
   );
@@ -66,30 +120,9 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
   /** First-run starts at the welcome step; re-consent entries start later. */
   const isFirstRun = initialStep === 0;
 
-  const requestLocation = useCallback(async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status === 'granted') {
-      setLocationGranted(true);
-      try {
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 12 });
-      } catch {
-        // location unavailable, use defaults
-      }
-    }
-    setStep(1);
-  }, [setViewport]);
-
   const updateConsent = useCallback((key: keyof ConsentChoices, value: boolean) => {
     setConsent((prev) => ({ ...prev, [key]: value }));
   }, []);
-
-  const submitConsent = useCallback(() => {
-    applyConsentChoices(consent);
-    setStep(2);
-  }, [consent]);
 
   const completeOnboarding = useCallback(() => {
     if (onComplete) {
@@ -99,6 +132,34 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
   }, [onComplete, router]);
+
+  const submitConsent = useCallback(async () => {
+    let choices = consent;
+
+    if (choices.locationEnabled) {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        setLocationGranted(true);
+        try {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          setViewport({ lat: loc.coords.latitude, lng: loc.coords.longitude, zoom: 12 });
+        } catch {
+          // Location unavailable — keep the default viewport.
+        }
+      } else {
+        // The OS denied location, so reflect it in the choice the user sees.
+        choices = { ...choices, locationEnabled: false };
+        setConsent(choices);
+      }
+    }
+
+    applyConsentChoices(choices);
+
+    if (isFirstRun) setStep(2);
+    else completeOnboarding();
+  }, [consent, isFirstRun, completeOnboarding, setViewport]);
 
   /** Region step leads into the Google-data step on first run; re-consent exits directly. */
   const afterRegions = useCallback(() => {
@@ -113,98 +174,131 @@ export function OnboardingFlow({ initialStep = 0, onComplete }: OnboardingFlowPr
 
   return (
     <SafeAreaView style={styles.container}>
-      {step === 0 && (
-        <GlassView material="regular" style={styles.card}>
-          <Text style={styles.title}>Welcome to Polaris Maps</Text>
-          <Text style={styles.body}>
-            A fully decentralized mapping app. No servers, no tracking — just you and the open road.
-            Every phone is a node: you share traffic, places, tiles, and imagery peer-to-peer.
-          </Text>
-          <Text style={styles.body}>
-            No accounts — a secp256k1 key in your secure enclave is your identity, and actions are
-            Schnorr-signed. CarPlay mirrors navigation when connected.
-          </Text>
-          <Text style={styles.body}>
-            We need location access to center the map and provide navigation.
-          </Text>
-          <Button title="Grant Location Access" onPress={requestLocation} />
-          <Button title="Skip" onPress={() => setStep(1)} variant="ghost" />
-        </GlassView>
-      )}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {step === 0 && (
+          <GlassView material="regular" style={styles.card}>
+            {isFirstRun && <StepProgress step={step} />}
+            <View style={styles.heroIcon}>
+              <MaterialCommunityIcons name="compass-outline" size={40} color={colors.primary} />
+            </View>
+            <Text style={styles.title}>Welcome to Polaris</Text>
+            <Text style={styles.lead}>The map that belongs to everyone.</Text>
+            <View style={styles.featureList}>
+              <FeatureRow
+                icon="map-marker-path"
+                title="Navigate anywhere"
+                description="Turn-by-turn directions, online or offline."
+              />
+              <FeatureRow
+                icon="traffic-light"
+                title="Live traffic, together"
+                description="Nearby drivers share anonymous speeds."
+              />
+              <FeatureRow
+                icon="shield-check-outline"
+                title="No account. No ads."
+                description="Your data stays yours."
+              />
+            </View>
+            <Button title="Get started" onPress={() => setStep(1)} />
+          </GlassView>
+        )}
 
-      {step === 1 && (
-        <GlassView material="regular" style={styles.card}>
-          <Text style={styles.title}>Privacy Choices</Text>
-          <Text style={styles.body}>
-            Choose what you share. Each option is independent — you can change these later in
-            Settings.
-          </Text>
-          <ConsentToggle
-            label="Location for Navigation"
-            description="Used to center the map and provide turn-by-turn directions."
-            value={consent.locationEnabled}
-            onToggle={(v) => updateConsent('locationEnabled', v)}
-          />
-          <ConsentToggle
-            label="Traffic Telemetry"
-            description="Share anonymized speed data to help others avoid congestion."
-            value={consent.trafficTelemetryEnabled}
-            onToggle={(v) => updateConsent('trafficTelemetryEnabled', v)}
-          />
-          <ConsentToggle
-            label="POI Contributions"
-            description="Add and edit places, write reviews, and verify edits."
-            value={consent.poiContributionsEnabled}
-            onToggle={(v) => updateConsent('poiContributionsEnabled', v)}
-          />
-          <ConsentToggle
-            label="Street-Level Imagery"
-            description="Capture and share geotagged photos (faces and plates are blurred on-device)."
-            value={consent.imagerySharingEnabled}
-            onToggle={(v) => updateConsent('imagerySharingEnabled', v)}
-          />
-          <Button title="Continue" onPress={submitConsent} />
-        </GlassView>
-      )}
-
-      {step === 2 && (
-        <GlassView material="regular" style={styles.card}>
-          <Text style={styles.title}>Download a Region</Text>
-          <Text style={styles.body}>
-            Polaris Maps works offline. Download a region to get started with map tiles, routing,
-            and search data.
-          </Text>
-          {locationGranted && (
-            <Text style={styles.hint}>
-              We detected your location — we'll suggest nearby regions.
+        {step === 1 && (
+          <GlassView material="regular" style={styles.card}>
+            {isFirstRun && <StepProgress step={step} />}
+            <View style={styles.heroIcon}>
+              <MaterialCommunityIcons name="tune-variant" size={40} color={colors.primary} />
+            </View>
+            <Text style={styles.title}>You're in control</Text>
+            <Text style={styles.lead}>
+              These are on to give you the full experience. Turn off anything you'd rather keep
+              private.
             </Text>
-          )}
-          <Button title="Browse Regions" onPress={afterRegions} />
-          <Button title="Skip for Now" onPress={afterRegions} variant="ghost" />
-        </GlassView>
-      )}
+            <View style={styles.toggleList}>
+              <ConsentToggle
+                icon="crosshairs-gps"
+                label="Location for Navigation"
+                description="Center the map and guide your trips."
+                value={consent.locationEnabled}
+                onToggle={(v) => updateConsent('locationEnabled', v)}
+              />
+              <ConsentToggle
+                icon="traffic-light"
+                label="Traffic Telemetry"
+                description="Share anonymous speeds to show live traffic."
+                value={consent.trafficTelemetryEnabled}
+                onToggle={(v) => updateConsent('trafficTelemetryEnabled', v)}
+              />
+              <ConsentToggle
+                icon="map-marker-plus"
+                label="Place Contributions"
+                description="Add places, reviews, and corrections."
+                value={consent.poiContributionsEnabled}
+                onToggle={(v) => updateConsent('poiContributionsEnabled', v)}
+              />
+              <ConsentToggle
+                icon="camera-outline"
+                label="Street Imagery"
+                description="Share photos with faces and plates blurred."
+                value={consent.imagerySharingEnabled}
+                onToggle={(v) => updateConsent('imagerySharingEnabled', v)}
+              />
+            </View>
+            <Button title="Continue" onPress={submitConsent} />
+            <Text style={styles.hint}>Change any of these anytime in Settings.</Text>
+          </GlassView>
+        )}
 
-      {step === 3 && (
-        <GlassView material="regular" style={styles.card}>
-          <Text style={styles.title}>Bring your Google data</Text>
-          <Text style={styles.body}>
-            Already use Google Maps? Bring your saved places and reviews with you. Both imports live
-            in My Places after setup — saved-place files import any time, and Reviews.json needs a
-            Bluesky sign-in (in Settings) since each review is published to your account.
-          </Text>
-          <Text style={styles.body}>To request your export:</Text>
-          {TAKEOUT_REQUEST_STEPS.map((item, i) => (
-            <Text key={i} style={styles.step}>
-              {i + 1}. {item}
+        {step === 2 && (
+          <GlassView material="regular" style={styles.card}>
+            {isFirstRun && <StepProgress step={step} />}
+            <View style={styles.heroIcon}>
+              <MaterialCommunityIcons name="download-outline" size={40} color={colors.primary} />
+            </View>
+            <Text style={styles.title}>Take the map with you</Text>
+            <Text style={styles.lead}>
+              Download your area once, then navigate and search without a signal.
             </Text>
-          ))}
-          <Text style={styles.hint}>
-            Google usually takes a few hours — we can remind you tomorrow to do the imports.
-          </Text>
-          <Button title="Remind me in 24 hours" onPress={remindMeLater} />
-          <Button title="Skip" onPress={completeOnboarding} variant="ghost" />
-        </GlassView>
-      )}
+            <Text style={styles.body}>
+              Map tiles, routing, and local search — ready before you lose signal. Download a region
+              anytime from Profile → Manage Regions.
+            </Text>
+            {locationGranted && (
+              <Text style={styles.hint}>We found you — nearby regions are suggested first.</Text>
+            )}
+            <Button title="Continue" onPress={afterRegions} />
+          </GlassView>
+        )}
+
+        {step === 3 && (
+          <GlassView material="regular" style={styles.card}>
+            {isFirstRun && <StepProgress step={step} />}
+            <View style={styles.heroIcon}>
+              <MaterialCommunityIcons
+                name="map-marker-multiple-outline"
+                size={40}
+                color={colors.primary}
+              />
+            </View>
+            <Text style={styles.title}>Keep your saved places</Text>
+            <Text style={styles.lead}>Bring your Google Maps places and reviews with you.</Text>
+            <View style={styles.stepList}>
+              {TAKEOUT_ONBOARDING_STEPS.map((item, i) => (
+                <View key={i} style={styles.stepRow}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>{i + 1}</Text>
+                  </View>
+                  <Text style={styles.stepText}>{item}</Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.hint}>Google usually emails your export within a few hours.</Text>
+            <Button title="Remind me tomorrow" onPress={remindMeLater} />
+            <Button title="Maybe later" onPress={completeOnboarding} variant="ghost" />
+          </GlassView>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -214,23 +308,58 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     container: {
       flex: 1,
       backgroundColor: colors.background,
+    },
+    scrollContent: {
+      flexGrow: 1,
       justifyContent: 'center',
       padding: spacing.lg,
     },
     card: {
+      width: '100%',
+      maxWidth: 560,
+      alignSelf: 'center',
       padding: spacing.xl,
       gap: spacing.md,
       borderRadius: borderRadius.xl,
       borderCurve: 'continuous',
       overflow: 'hidden',
     },
+    progressRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: spacing.xs,
+      marginBottom: spacing.xs,
+    },
+    progressDot: {
+      width: 8,
+      height: 8,
+      borderRadius: borderRadius.round,
+      backgroundColor: colors.border,
+    },
+    progressDotActive: {
+      backgroundColor: colors.primary,
+    },
+    heroIcon: {
+      alignSelf: 'center',
+      width: 72,
+      height: 72,
+      borderRadius: borderRadius.round,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${colors.primary}14`,
+    },
     title: {
       ...typography.h1,
       color: colors.text,
       textAlign: 'center',
     },
-    body: {
+    lead: {
       ...typography.body,
+      color: colors.textSecondary,
+      textAlign: 'center',
+    },
+    body: {
+      ...typography.bodySmall,
       color: colors.textSecondary,
       textAlign: 'center',
     },
@@ -239,22 +368,57 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       color: colors.primary,
       textAlign: 'center',
     },
-    step: {
+    featureList: {
+      gap: spacing.md,
+      marginVertical: spacing.xs,
+    },
+    featureRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    featureIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: borderRadius.round,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${colors.primary}14`,
+    },
+    featureText: {
+      flex: 1,
+    },
+    featureTitle: {
       ...typography.body,
+      color: colors.text,
+      fontWeight: '600',
+    },
+    featureDesc: {
+      ...typography.caption,
       color: colors.textSecondary,
-      textAlign: 'left',
+      marginTop: 2,
+    },
+    toggleList: {
+      marginVertical: spacing.xs,
     },
     toggleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: spacing.md,
       paddingVertical: spacing.sm,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
+    toggleIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: borderRadius.round,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${colors.primary}14`,
+    },
     toggleText: {
       flex: 1,
-      marginRight: spacing.md,
     },
     toggleLabel: {
       ...typography.body,
@@ -265,5 +429,32 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       ...typography.caption,
       color: colors.textSecondary,
       marginTop: 2,
+    },
+    stepList: {
+      gap: spacing.sm,
+      marginVertical: spacing.xs,
+    },
+    stepRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    stepNumber: {
+      width: 26,
+      height: 26,
+      borderRadius: borderRadius.round,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${colors.primary}14`,
+    },
+    stepNumberText: {
+      ...typography.caption,
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    stepText: {
+      ...typography.bodySmall,
+      color: colors.text,
+      flex: 1,
     },
   });

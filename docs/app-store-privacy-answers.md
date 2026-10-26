@@ -33,9 +33,10 @@ Notes:
 - **Precise Location — not linked.** Traffic probes use a random ID that rotates
   hourly and carry no account or device identifier. Location is additionally sent
   to the optional TomTom traffic service as a functional data processor.
-- **Photos or Videos — linked.** Street-level imagery and review photos are only
-  uploaded when the user enables Imagery Sharing / Review Photo Sharing, and are
-  attributed to the signed-in account when applicable.
+- **Photos or Videos — linked.** Street-level imagery is on by default after
+  onboarding and can be turned off in Settings → Privacy. Review photos are
+  uploaded only when Review Photo Sharing is enabled. Uploads are attributed to
+  the signed-in account when applicable.
 - **Other User Content — linked.** Place reviews (AT Protocol), OpenStreetMap
   edits, and incident reports.
 - **User ID — linked.** Bluesky handle/DID and OpenStreetMap username, only when

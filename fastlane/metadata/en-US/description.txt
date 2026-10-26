@@ -1,41 +1,46 @@
-Polaris Maps is a peer-to-peer navigation app built entirely on open map data.
-Turn-by-turn directions, live traffic, place search, public transit, offline
-maps, and community street-level imagery — without routing your every move
-through a single company's servers.
+Polaris Maps is a navigation app that puts you in control. Get turn-by-turn
+directions, live traffic, and offline maps — with no ads, no tracking, and no
+account required.
 
-WHY POLARIS
-Many navigation apps send the world's location data to one company's cloud.
-Polaris flips that model: your device can contribute anonymous traffic data
-directly to nearby devices over an encrypted peer-to-peer mesh. No ads. No
-tracking. No account required.
+WHY PEOPLE USE POLARIS
+• Clear, calm navigation that just works
+• Live traffic from nearby drivers and open data
+• Download maps and keep navigating when you lose signal
+• Search places, plan transit trips, and explore street-level photos
+• Your privacy choices are yours — change them anytime
 
-NAVIGATION
-• Turn-by-turn guidance with GPS snap-to-route and off-route detection
-• Automatic rerouting when traffic builds up ahead
-• Congestion- and traffic-aware ETAs
+GET WHERE YOU'RE GOING
+• Turn-by-turn voice directions
+• Automatic rerouting when traffic builds up
+• ETAs that update as conditions change
+• Suggestions that combine driving and transit
 
-LIVE TRAFFIC
-• Colour-coded traffic built from crowd-sourced speed probes shared between
-  devices, blended with open traffic feeds
-• Optional commercial feed only used to seed areas with no peer data
-• Contribute anonymous probes with a rotating ID — opt in, switch off any time
+SEE WHAT'S AHEAD
+• Color-coded traffic at a glance
+• Warnings for accidents, closures, hazards, and construction
+• Report incidents to help other drivers
+• Satellite, terrain, and street-level views
 
-INCIDENTS
-• Report accidents, road closures, hazards, construction and more
-• Reports are cryptographically signed and shared peer-to-peer
-• Warnings appear ahead while you navigate
+FIND ANYTHING
+• Search by name, category, or what's nearby
+• See hours, phone numbers, photos, and reviews
+• Save favorites and build lists of places
+• Import your saved places from Google Maps
 
-SEARCH, TRANSIT & OFFLINE
-• Fast place search with open data and rich place details
-• Public transit trip planning and stop departures where available
-• Download offline region packs so maps keep working without a signal
-• Community-captured street-level imagery
+TRAVEL YOUR WAY
+• Plan trips across bus, train, subway, and ferry where available
+• See route lines and stop departures
+• Download a region for offline search and routing
+• Use CarPlay on supported vehicles
 
-BUILT ON OPEN DATA
-Map data © OpenStreetMap contributors (ODbL). Places from Overture Maps.
-No proprietary map lock-in.
+OPEN MAPS, HONEST PRIVACY
+Polaris is built on OpenStreetMap and other open data. There are no advertising
+or analytics SDKs, and we don't sell your data.
 
-PRIVACY FIRST
-Traffic telemetry is optional and can be disabled at any time. We run no
-advertising or analytics SDKs, and we do not sell your data. Read the full
-policy at https://app.polarismaps.app/privacy
+Location powers navigation. Traffic telemetry shares anonymous speed data with
+nearby devices to build live traffic; it's on by default and can be turned off
+in Settings → Privacy. Street-level imagery and place contributions are also on
+by default during setup and can be switched off at any time.
+
+Map data © OpenStreetMap contributors (ODbL). Places from Overture Maps. Read
+the full privacy policy at https://app.polarismaps.app/privacy

@@ -36,12 +36,12 @@ describe('consent service', () => {
     expect(hasCompletedConsent()).toBe(false);
   });
 
-  it('defaults every choice off (privacy-preserving)', () => {
+  it('defaults every choice on (opt-out onboarding)', () => {
     expect(getDefaultConsentChoices()).toEqual({
-      locationEnabled: false,
-      trafficTelemetryEnabled: false,
-      poiContributionsEnabled: false,
-      imagerySharingEnabled: false,
+      locationEnabled: true,
+      trafficTelemetryEnabled: true,
+      poiContributionsEnabled: true,
+      imagerySharingEnabled: true,
     });
   });
 

@@ -11,6 +11,13 @@ export const TAKEOUT_REQUEST_STEPS: string[] = [
   'Download the zip and unzip it, then import from My Places.',
 ];
 
+/** Three-step summary used by onboarding; the full walkthrough lives above. */
+export const TAKEOUT_ONBOARDING_STEPS: string[] = [
+  'Open takeout.google.com',
+  'Select Maps, then create your export',
+  'Import the file from My Places',
+];
+
 /** How to find Reviews.json inside an already-downloaded Takeout. */
 export const REVIEWS_FILE_STEPS: string[] = [
   'Unzip the Takeout download Google emailed you.',

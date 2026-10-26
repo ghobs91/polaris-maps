@@ -1,1 +1,1 @@
-maps,navigation,offline maps,traffic,transit,openstreetmap,gps,directions
+maps,navigation,offline maps,traffic,transit,openstreetmap,gps,directions,privacy,no ads
