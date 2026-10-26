@@ -266,7 +266,9 @@ describe('fetchOverturePlaces', () => {
     await fetchOverturePlaces(40.0, -74.5, 40.9, -73.5, 420);
 
     expect(mockGetZxy.mock.calls.length).toBeGreaterThan(0);
-    expect(mockGetZxy.mock.calls.length).toBeLessThanOrEqual(9);
+    // Cap raised from 9 to 16 when street-level searches needed more nearby
+    // freshness; the bound is what matters, not the exact number.
+    expect(mockGetZxy.mock.calls.length).toBeLessThanOrEqual(16);
   });
 
   it('samples at most a bounded number of features per tile', async () => {

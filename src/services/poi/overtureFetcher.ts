@@ -39,6 +39,9 @@ const MAX_TILES_PER_FETCH = 16;
 /** Tiles fetched in parallel; keeps a search from saturating the connection pool. */
 const TILE_FETCH_CONCURRENCY = 6;
 
+/** Maximum features materialised from one tile (dense urban tiles hold 40k+). */
+const MAX_FEATURES_PER_TILE = 4_000;
+
 /**
  * Overall wall-clock budget for the tile phase of one Overture fetch (ms).
  * Individual tiles are already bounded; this caps the *source* so a run of
@@ -305,11 +308,16 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
     const layer = vectorTile.layers.place;
     if (!layer) return [];
 
+    // Dense urban tiles hold tens of thousands of features. Sample evenly
+    // across the tile instead of materialising every feature, keeping decode
+    // cost and retained cache memory bounded.
+    const step = Math.max(1, Math.ceil(layer.length / MAX_FEATURES_PER_TILE));
     const features: OverturePlace[] = [];
-    for (let index = 0; index < layer.length; index++) {
+    for (let index = 0; index < layer.length; index += step) {
       const geojsonFeature = layer.feature(index).toGeoJSON(x, y, z) as GeoJSON.Feature;
       const overtureFeature = toOvertureFeature(geojsonFeature);
       if (overtureFeature) features.push(overtureFeature);
+      if (features.length >= MAX_FEATURES_PER_TILE) break;
     }
     return features;
   })();
