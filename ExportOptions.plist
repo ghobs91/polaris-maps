@@ -8,6 +8,8 @@
   <string>export</string>
   <key>signingStyle</key>
   <string>automatic</string>
+  <key>manageAppVersionAndBuildNumber</key>
+  <false/>
   <key>uploadSymbols</key>
   <true/>
   <key>stripSwiftSymbols</key>
