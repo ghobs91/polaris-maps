@@ -1,11 +1,13 @@
 import React, { memo } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { getPoiCategory } from '../../utils/poiCategories';
 import { formatDistance } from '../../utils/units';
-import { spacing, typography } from '../../constants/theme';
+import { borderRadius, spacing, typography } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
+import { usePlaceThumbnail } from '../../hooks/usePlaceThumbnail';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 
 interface SearchResultRowProps {
@@ -18,8 +20,8 @@ function priceLabel(level: number): string {
 }
 
 /**
- * Rich search result row: category icon or thumbnail, name, subtitle, and
- * optional rating / open-now / price / distance with graceful omission.
+ * Rich search result row: category icon or lazily loaded photo, name, subtitle,
+ * and optional rating / open-now / price / distance with graceful omission.
  */
 export const SearchResultRow = memo(function SearchResultRow({
   result,
@@ -27,6 +29,7 @@ export const SearchResultRow = memo(function SearchResultRow({
 }: SearchResultRowProps) {
   const styles = useThemedStyles(createStyles);
   const { colors } = useTheme();
+  const thumbnailUrl = usePlaceThumbnail(result);
   const isStation = result.osmType === 'railway' || result.osmSubtype === 'station';
   const { icon, color } = getPoiCategory(result.osmType ?? '', result.osmSubtype ?? '');
 
@@ -53,12 +56,21 @@ export const SearchResultRow = memo(function SearchResultRow({
         .join(', ')}
     >
       <View style={[styles.iconWrap, { backgroundColor: `${color}22` }]}>
-        {result.thumbnailUrl ? (
-          <Image source={{ uri: result.thumbnailUrl }} style={styles.thumbnail} />
+        {thumbnailUrl ? (
+          <Image
+            source={{ uri: thumbnailUrl }}
+            style={styles.thumbnail}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={180}
+            recyclingKey={thumbnailUrl}
+            accessibilityIgnoresInvertColors
+            testID="search-result-thumbnail"
+          />
         ) : (
           <Ionicons
             name={isStation ? 'train' : (icon as keyof typeof Ionicons.glyphMap)}
-            size={18}
+            size={20}
             color={color}
           />
         )}
@@ -105,23 +117,24 @@ const createStyles = ({ colors }: Theme) =>
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.md - 2,
+      paddingVertical: spacing.sm + 2,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border + '40',
+      borderBottomColor: colors.border + '30',
     },
     rowPressed: { opacity: 0.7 },
     iconWrap: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
+      width: 44,
+      height: 44,
+      borderRadius: borderRadius.md,
+      borderCurve: 'continuous',
       overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: spacing.sm,
+      marginRight: spacing.sm + 2,
     },
-    thumbnail: { width: 34, height: 34 },
+    thumbnail: { width: 44, height: 44 },
     body: { flex: 1, marginRight: spacing.sm },
-    name: { ...typography.body, color: colors.text },
+    name: { ...typography.body, color: colors.text, fontWeight: '500' },
     subtitle: { ...typography.caption, color: colors.textSecondary, marginTop: 2 },
     metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
     metaItem: { flexDirection: 'row', alignItems: 'center', gap: 2 },

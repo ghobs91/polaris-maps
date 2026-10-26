@@ -12,9 +12,23 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn(),
 }));
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn(() => '0'.repeat(32)) }));
+jest.mock('expo-image', () => ({
+  Image: (props: Record<string, unknown>) => {
+    const mockReact = jest.requireActual('react') as typeof React;
+    return mockReact.createElement('Image', props);
+  },
+}));
+
+const mockGetCachedPlaceThumbnail = jest.fn();
+const mockResolvePlaceThumbnail = jest.fn();
+jest.mock('../../src/services/places/placeThumbnailService', () => ({
+  getCachedPlaceThumbnail: (...args: unknown[]) => mockGetCachedPlaceThumbnail(...args),
+  resolvePlaceThumbnail: (...args: unknown[]) => mockResolvePlaceThumbnail(...args),
+  placeThumbnailSource: () => ({ key: 'wd:Q1', source: 'wikidata', value: 'Q1' }),
+}));
 
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { SearchResultRow } from '../../src/components/search/SearchResultRow';
 import type { UnifiedSearchResult } from '../../src/services/search/unifiedSearch';
 
@@ -86,5 +100,53 @@ describe('SearchResultRow', () => {
     const { getByText } = render(<SearchResultRow result={full} onPress={onPress} />);
     fireEvent.press(getByText('Cafe A'));
     expect(onPress).toHaveBeenCalledWith(full);
+  });
+
+  describe('thumbnails', () => {
+    const withPlace: UnifiedSearchResult = {
+      ...full,
+      poi: {
+        id: 42,
+        lat: 0,
+        lng: 0,
+        name: 'Cafe A',
+        type: 'amenity',
+        subtype: 'cafe',
+        tags: { amenity: 'cafe', wikidata: 'Q1' },
+      },
+    };
+
+    beforeEach(() => {
+      mockGetCachedPlaceThumbnail.mockReset().mockReturnValue(null);
+      mockResolvePlaceThumbnail.mockReset().mockResolvedValue(null);
+    });
+
+    it('paints a cached thumbnail on the first render', () => {
+      mockGetCachedPlaceThumbnail.mockReturnValue('https://cdn.example/cafe.jpg');
+
+      const { getByTestId } = render(<SearchResultRow result={withPlace} onPress={() => {}} />);
+
+      expect(getByTestId('search-result-thumbnail')).toBeTruthy();
+      expect(mockResolvePlaceThumbnail).not.toHaveBeenCalled();
+    });
+
+    it('does not resolve a photo during render (lazy)', async () => {
+      render(<SearchResultRow result={withPlace} onPress={() => {}} />);
+
+      // Nothing is fetched synchronously — the row must paint first.
+      expect(mockResolvePlaceThumbnail).not.toHaveBeenCalled();
+
+      mockResolvePlaceThumbnail.mockResolvedValue('https://cdn.example/cafe.jpg');
+      await waitFor(() =>
+        expect(mockResolvePlaceThumbnail).toHaveBeenCalledWith(withPlace.poi?.tags),
+      );
+    });
+
+    it('requests nothing for a result without place tags', async () => {
+      render(<SearchResultRow result={sparse} onPress={() => {}} />);
+
+      await waitFor(() => expect(mockGetCachedPlaceThumbnail).not.toHaveBeenCalled());
+      expect(mockResolvePlaceThumbnail).not.toHaveBeenCalled();
+    });
   });
 });
