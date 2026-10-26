@@ -29,12 +29,38 @@ export interface CuisineOrigin {
   countryCode: string;
   /** Short label shown in the pill, e.g. "Israeli". */
   label: string;
+  /** Country the cuisine comes from, e.g. "Israel". */
+  countryName: string;
   /** Flag emoji derived from the country code, e.g. "🇮🇱". */
   flag: string;
   /** Internal confidence score (higher = more distinct evidence). */
   score: number;
   /** Matched signals, useful for tests and debugging. */
   evidence: string[];
+}
+
+/** Display name for every country in {@link DEFINITIONS}, keyed by ISO code. */
+const COUNTRY_NAMES: Record<string, string> = {
+  IL: 'Israel',
+  LB: 'Lebanon',
+  EG: 'Egypt',
+  SY: 'Syria',
+  JO: 'Jordan',
+  PS: 'Palestine',
+  TR: 'Turkey',
+  GR: 'Greece',
+  CY: 'Cyprus',
+  AR: 'Armenia',
+  IR: 'Iran',
+  IT: 'Italy',
+  FR: 'France',
+  ES: 'Spain',
+  MA: 'Morocco',
+};
+
+/** Country name for a cuisine origin, falling back to its demonym label. */
+export function cuisineCountryName(countryCode: string, fallbackLabel: string): string {
+  return COUNTRY_NAMES[countryCode.trim().toUpperCase()] ?? fallbackLabel;
 }
 
 interface CuisineOriginDefinition {
@@ -399,6 +425,7 @@ export function detectCuisineOrigins(text: string): CuisineOrigin[] {
       origin: {
         countryCode: definition.countryCode,
         label: definition.label,
+        countryName: cuisineCountryName(definition.countryCode, definition.label),
         flag: flagEmoji(definition.countryCode),
         score,
         evidence,

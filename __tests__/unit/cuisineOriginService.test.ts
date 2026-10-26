@@ -1,5 +1,6 @@
 import {
   clearCuisineOriginCache,
+  cuisineCountryName,
   detectCuisineOrigins,
   extractVisibleText,
   fetchCuisineOrigins,
@@ -30,6 +31,23 @@ describe('flagEmoji', () => {
   it('returns empty for malformed codes', () => {
     expect(flagEmoji('USA')).toBe('');
     expect(flagEmoji('')).toBe('');
+  });
+});
+
+describe('cuisineCountryName', () => {
+  it('maps a country code to its country name', () => {
+    expect(cuisineCountryName('IL', 'Israeli')).toBe('Israel');
+    expect(cuisineCountryName('it', 'Italian')).toBe('Italy');
+  });
+
+  it('falls back to the demonym label for unknown codes', () => {
+    expect(cuisineCountryName('ZZ', 'Zetlandic')).toBe('Zetlandic');
+  });
+
+  it('carries the country name on a detected origin', () => {
+    const origins = detectCuisineOrigins('Our Italian kitchen, run by a family from Naples.');
+
+    expect(origins[0]).toMatchObject({ label: 'Italian', countryName: 'Italy' });
   });
 });
 

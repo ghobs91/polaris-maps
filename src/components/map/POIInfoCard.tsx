@@ -1317,10 +1317,10 @@ export function POIInfoCard() {
                       ]}
                       accessible
                       accessibilityRole="text"
-                      accessibilityLabel={`${origin.label} cuisine, according to the restaurant's website`}
+                      accessibilityLabel={`Cuisine from ${origin.countryName}, according to the restaurant's website`}
                     >
                       <Text style={[styles.cuisinePillText, { color: textColor }]}>
-                        {origin.flag} {origin.label}
+                        {origin.flag} Cuisine: {origin.countryName}
                       </Text>
                     </View>
                   ))}
@@ -1678,11 +1678,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: borderRadius.round,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   cuisinePillText: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '600' as const,
   },
   actionsRow: {
