@@ -84,6 +84,10 @@ export interface CategorySearchOptions {
   signal?: AbortSignal;
   /** Return local-DB results only — skip the Overpass/Nominatim fallbacks. */
   localOnly?: boolean;
+  /** Point to bias truncation toward (user location or map centre). Without
+   *  it, the result limit cuts an arbitrary geographic slice — dense far-away
+   *  clusters then crowd out nearby places. */
+  anchor?: { lat: number; lng: number };
 }
 
 export async function searchByCategory(
@@ -98,6 +102,7 @@ export async function searchByCategory(
   const categories = resolveSearchCategories(query);
   if (!categories) return null;
   throwIfAborted(opts?.signal);
+  const anchor = opts?.anchor;
 
   // Extract cuisine hint for refined searches (e.g. "chinese" from "chinese food")
   const cuisineHint = extractCuisineHint(query);
@@ -109,9 +114,10 @@ export async function searchByCategory(
 
   // When a specific cuisine/food type is requested, filter & rank local
   // results by relevance so generic restaurants don't drown out matches.
-  if (cuisineHint) {
-    localPois = rankByCuisineRelevance(localPois, cuisineHint);
-  }
+  // Otherwise order nearest-first so the limit keeps local places.
+  localPois = cuisineHint
+    ? rankByCuisineRelevance(localPois, cuisineHint, anchor)
+    : keepNearest(localPois, anchor);
 
   const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD;
 
@@ -144,9 +150,6 @@ export async function searchByCategory(
         requireName: false,
         signal: opts?.signal,
       });
-      if (cuisineHint) {
-        overpassPois = rankByCuisineRelevance(overpassPois, cuisineHint);
-      }
     }
   } catch (err) {
     // A caller abort must propagate; Overpass outages fall through to Nominatim.
@@ -155,7 +158,11 @@ export async function searchByCategory(
 
   if (overpassPois.length > 0) {
     const merged = deduplicateCategoryResults(localPois, overpassPois);
-    return { categories, pois: merged.slice(0, limit), localPrimary: false };
+    return {
+      categories,
+      pois: orderForLimit(merged, anchor, cuisineHint).slice(0, limit),
+      localPrimary: false,
+    };
   }
 
   // Step 3: Nominatim fallback — query with cuisine-specific or category terms + viewbox
@@ -181,9 +188,41 @@ export async function searchByCategory(
 
   return {
     categories,
-    pois: merged.slice(0, limit),
+    pois: orderForLimit(merged, anchor, cuisineHint).slice(0, limit),
     localPrimary: false,
   };
+}
+
+/** Great-circle distance in km (used only to order candidates before truncation). */
+function distanceKmTo(anchor: { lat: number; lng: number }, lat: number, lng: number): number {
+  const R = 6371;
+  const dLat = ((lat - anchor.lat) * Math.PI) / 180;
+  const dLng = ((lng - anchor.lng) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((anchor.lat * Math.PI) / 180) *
+      Math.cos((lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Nearest-first copy (stable ordering for equal distances). */
+function keepNearest(pois: OsmPoi[], anchor?: { lat: number; lng: number }): OsmPoi[] {
+  if (!anchor) return pois;
+  return [...pois].sort(
+    (a, b) => distanceKmTo(anchor, a.lat, a.lng) - distanceKmTo(anchor, b.lat, b.lng),
+  );
+}
+
+/** Order candidates so the caller's limit drops the far tail, not nearby places. */
+function orderForLimit(
+  pois: OsmPoi[],
+  anchor: { lat: number; lng: number } | undefined,
+  cuisineHint: string | null,
+): OsmPoi[] {
+  return cuisineHint
+    ? rankByCuisineRelevance(pois, cuisineHint, anchor)
+    : keepNearest(pois, anchor);
 }
 
 /** ~30 m threshold for deduplication */
@@ -211,12 +250,19 @@ function cuisineRelevanceScore(poi: OsmPoi, cuisine: string): number {
 
 /**
  * Rank POIs by relevance to a specific cuisine keyword.
- * Matching POIs come first (sorted by score), followed by non-matching ones.
+ * Matching POIs come first (sorted by score), then nearest-first within a
+ * relevance tier so a limit truncation keeps nearby matches.
  */
-function rankByCuisineRelevance(pois: OsmPoi[], cuisine: string): OsmPoi[] {
-  return [...pois].sort(
-    (a, b) => cuisineRelevanceScore(b, cuisine) - cuisineRelevanceScore(a, cuisine),
-  );
+function rankByCuisineRelevance(
+  pois: OsmPoi[],
+  cuisine: string,
+  anchor?: { lat: number; lng: number },
+): OsmPoi[] {
+  return [...pois].sort((a, b) => {
+    const relevance = cuisineRelevanceScore(b, cuisine) - cuisineRelevanceScore(a, cuisine);
+    if (relevance !== 0 || !anchor) return relevance;
+    return distanceKmTo(anchor, a.lat, a.lng) - distanceKmTo(anchor, b.lat, b.lng);
+  });
 }
 
 function deduplicateCategoryResults(primary: OsmPoi[], secondary: OsmPoi[]): OsmPoi[] {

@@ -19,6 +19,12 @@ Search is a staged multi-source pipeline:
 5. **Ranker v2** scores 0–100 using bm25 + text match, distance, category, popularity, viewport, active intent modifiers, and bounded personalization
 6. **Search history** persists the last 10 selections (with their query) in MMKV and drives the personalization boost
 
+## Locality rules
+
+- Category boxes are capped at ~0.25° (~28 km): a zoomed-out map must not turn "bagels" into a continental Overpass query.
+- Category candidates are anchored (user location, else map centre) and truncated **nearest-first** before ranking — Overpass returns features in arbitrary geographic order, so slicing first would let a dense far-away cluster bury nearby places.
+- On an explicit submit only a place/brand/address lookup may frame a distant match. Nearby-intent queries (category/cuisine/"near me") keep the camera where the user is when every match is > 20 km away; the list stays authoritative.
+
 ## Architecture
 
 ```
