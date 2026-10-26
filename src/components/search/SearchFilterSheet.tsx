@@ -1,6 +1,8 @@
 import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { borderRadius } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 import { useSearchViewStore } from '../../stores/searchViewStore';
 import {
   isFilterEmpty,
@@ -75,7 +77,7 @@ export function SearchFilterSheet({ visible, onClose }: SearchFilterSheetProps) 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.sheet}>
+        <GlassView material="regular" colorScheme="dark" style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Filters & Sort</Text>
             <Pressable
@@ -156,7 +158,7 @@ export function SearchFilterSheet({ visible, onClose }: SearchFilterSheetProps) 
               <Text style={styles.doneText}>{isFilterEmpty(filters) ? 'Done' : 'Apply'}</Text>
             </Pressable>
           </View>
-        </View>
+        </GlassView>
       </View>
     </Modal>
   );
@@ -200,9 +202,10 @@ function ChipRow<T>({
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: 'rgba(28,28,30,0.98)',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: borderRadius.sheet,
+    borderTopRightRadius: borderRadius.sheet,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 30,
@@ -228,7 +231,7 @@ const styles = StyleSheet.create({
   chip: {
     paddingVertical: 7,
     paddingHorizontal: 12,
-    borderRadius: 14,
+    borderRadius: borderRadius.md,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -243,7 +246,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: borderRadius.md,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   clearText: { color: 'rgba(255,255,255,0.85)', fontSize: 15, fontWeight: '600' },
@@ -251,7 +254,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: borderRadius.md,
     backgroundColor: '#0A84FF',
   },
   doneBtnMuted: { backgroundColor: 'rgba(10,132,255,0.6)' },

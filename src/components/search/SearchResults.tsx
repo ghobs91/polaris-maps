@@ -63,7 +63,7 @@ const createStyles = ({ colors }: Theme) =>
     list: {
       marginHorizontal: spacing.md,
       marginTop: spacing.xs,
-      borderRadius: borderRadius.lg,
+      borderRadius: borderRadius.panel,
       overflow: 'hidden',
       borderCurve: 'continuous',
       flex: 1,

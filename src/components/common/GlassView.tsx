@@ -39,7 +39,7 @@ export function GlassView({
   const glassBackgroundColor = useMemo(() => {
     if (material === 'none') return undefined;
     if (material === 'clear') {
-      return isDark ? 'rgba(28,28,30,0.55)' : 'rgba(255,255,255,0.55)';
+      return isDark ? 'rgba(28,28,30,0.42)' : 'rgba(255,255,255,0.5)';
     }
     return colors.glass.background;
   }, [material, isDark, colors.glass.background]);
@@ -64,8 +64,20 @@ export function GlassView({
 
   return (
     <BlurView
-      intensity={material === 'clear' ? 40 : material === 'none' ? 0 : 80}
-      tint={isDark ? 'systemThickMaterialDark' : 'systemThickMaterialLight'}
+      // `intensity` is blur strength, not opacity: a thin material plus a
+      // translucent fill is what gives Apple Maps glass its see-through look.
+      intensity={material === 'clear' ? 40 : material === 'none' ? 0 : 70}
+      tint={
+        isDark
+          ? material === 'clear'
+            ? 'systemUltraThinMaterialDark'
+            : 'systemThinMaterialDark'
+          : material === 'clear'
+            ? 'systemUltraThinMaterialLight'
+            : 'systemThinMaterialLight'
+      }
+      // Android has no blur target wired here, so it keeps the translucent
+      // fill only (expo-blur falls back to `blurMethod="none"` regardless).
       style={[styles.blur, glassStyle]}
       {...rest}
     >

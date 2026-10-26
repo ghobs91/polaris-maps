@@ -1564,13 +1564,13 @@ const styles = StyleSheet.create({
   sheetSurface: {
     backgroundColor: 'transparent',
     paddingBottom: 0,
-    borderTopLeftRadius: borderRadius.xxl,
-    borderTopRightRadius: borderRadius.xxl,
+    borderTopLeftRadius: borderRadius.sheet,
+    borderTopRightRadius: borderRadius.sheet,
   },
   cardGlass: {
     ...StyleSheet.absoluteFill,
-    borderTopLeftRadius: borderRadius.xxl,
-    borderTopRightRadius: borderRadius.xxl,
+    borderTopLeftRadius: borderRadius.sheet,
+    borderTopRightRadius: borderRadius.sheet,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -1591,7 +1591,7 @@ const styles = StyleSheet.create({
   closeCircle: {
     width: 36,
     height: 36,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1632,7 +1632,7 @@ const styles = StyleSheet.create({
   section: {
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.card,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },

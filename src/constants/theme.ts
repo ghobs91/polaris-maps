@@ -17,12 +17,14 @@ export const colors = {
   success: '#34C759',
   white: '#FFFFFF',
   black: '#000000',
-  // Glass design tokens tuned for an Apple Maps-style liquid glass feel
+  // Glass design tokens tuned for an Apple Maps-style liquid glass feel.
+  // The fill is deliberately translucent — the blur does the work of keeping
+  // text legible, so panels read as part of the map instead of a solid card.
   glass: {
-    background: 'rgba(255,255,255,0.78)',
-    backgroundDark: 'rgba(28,28,45,0.78)',
-    border: 'rgba(255,255,255,0.35)',
-    shadow: 'rgba(0,0,0,0.08)',
+    background: 'rgba(250,250,252,0.72)',
+    backgroundDark: 'rgba(28,28,32,0.58)',
+    border: 'rgba(255,255,255,0.42)',
+    shadow: 'rgba(0,0,0,0.12)',
   },
   tabBar: {
     active: '#007AFF',
@@ -61,10 +63,10 @@ export const darkColors = {
   white: '#FFFFFF',
   black: '#000000',
   glass: {
-    background: 'rgba(28,28,45,0.78)',
-    backgroundDark: 'rgba(20,20,35,0.82)',
-    border: 'rgba(255,255,255,0.1)',
-    shadow: 'rgba(0,0,0,0.5)',
+    background: 'rgba(28,28,32,0.58)',
+    backgroundDark: 'rgba(20,20,24,0.62)',
+    border: 'rgba(255,255,255,0.14)',
+    shadow: 'rgba(0,0,0,0.55)',
   },
   tabBar: {
     active: '#0A84FF',
@@ -213,12 +215,29 @@ export const typography = {
   label: { fontSize: 14, fontWeight: '500' as const, lineHeight: 20 },
 } as const;
 
+/**
+ * Corner radii on a single Apple-Maps-style scale.
+ *
+ * Rule of thumb: small controls use `sm`/`md`, content cards use `lg`,
+ * floating map panels use `panel`, and bottom sheets use `sheet`. Circular
+ * controls and pills use `control` (never a raw 999).
+ */
 export const borderRadius = {
-  sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 20,
+  /** Inline chips, tiny badges. */
+  xs: 6,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 22,
   xxl: 28,
+  /** Content card inside a panel or list. */
+  card: 16,
+  /** Floating panel over the map (search panel, layers card, menus). */
+  panel: 22,
+  /** Bottom sheet, matching the place card that sits in it. */
+  sheet: 28,
+  /** Circular control or pill — anything that should read as fully round. */
+  control: 999,
   /** iOS Settings list uses a chunky radius on the grouped section container. */
   iosGrouped: 10,
   round: 999,

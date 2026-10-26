@@ -8,7 +8,6 @@ import {
   Pressable,
   type ViewStyle,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from './GlassView';
@@ -28,9 +27,10 @@ export function Modal({ visible, onClose, title, children, style }: ModalProps) 
   return (
     <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <BlurView
-          intensity={30}
-          tint="systemUltraThinMaterialDark"
+        <GlassView
+          material="clear"
+          colorScheme="dark"
+          pointerEvents="none"
           style={StyleSheet.absoluteFill}
         />
         <Pressable style={styles.backdrop} onPress={onClose} />
@@ -62,7 +62,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       ...StyleSheet.absoluteFill,
     },
     content: {
-      borderRadius: borderRadius.xl,
+      borderRadius: borderRadius.panel,
       padding: spacing.lg,
       width: '100%',
       maxHeight: '80%',

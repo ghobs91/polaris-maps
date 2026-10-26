@@ -13,7 +13,6 @@ import {
   ActivityIndicator,
   Switch,
   InteractionManager,
-  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   runOnJS,
@@ -29,7 +28,6 @@ import * as Location from 'expo-location';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useToast } from '../../contexts/ToastContext';
 import { spacing, typography, borderRadius, sheet as sheetTokens } from '../../constants/theme';
-import { largeFloatingPanelWidth } from '../../constants/layout';
 import { GlassView } from '../common/GlassView';
 import { type GeocodingResult } from '../../services/geocoding/geocodingService';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
@@ -60,7 +58,6 @@ import { useParkingStore } from '../../stores/parkingStore';
 import { useTransitStore } from '../../stores/transitStore';
 import { useStreetViewStore } from '../../stores/streetViewStore';
 import { computeRoute } from '../../services/routing/routingService';
-import { preferTurnManagedRoute } from '../../services/routing/hassleTurns';
 import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRouting';
 import { buildRouteAlternatives } from '../../services/routing/routeAlternatives';
 import type { ValhallaRoute } from '../../models/route';
@@ -539,7 +536,7 @@ const ctrlStyles = StyleSheet.create({
   btn: {
     width: 46,
     height: 46,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -549,7 +546,7 @@ const ctrlStyles = StyleSheet.create({
     alignItems: 'center',
   },
   layersCard: {
-    borderRadius: borderRadius.lg,
+    borderRadius: borderRadius.panel,
     borderCurve: 'continuous',
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -624,8 +621,6 @@ interface FavChipProps {
   onLongPress?: () => void;
   unset?: boolean;
   isDark: boolean;
-  /** Sidebar chips share the row instead of scrolling at a fixed width. */
-  embedded?: boolean;
 }
 
 function FavChip({
@@ -637,7 +632,6 @@ function FavChip({
   onLongPress,
   unset,
   isDark,
-  embedded,
 }: FavChipProps) {
   const { colors } = useTheme();
   const textColor = isDark ? '#F2F2F7' : colors.text;
@@ -648,7 +642,7 @@ function FavChip({
       onPress={onPress}
       onLongPress={onLongPress}
       activeOpacity={0.7}
-      style={embedded ? styles.favChipEmbedded : styles.favChip}
+      style={styles.favChip}
     >
       <View style={[styles.favIconCircle, { backgroundColor: iconBg, opacity: unset ? 0.55 : 1 }]}>
         <Ionicons name={icon as any} size={22} color="#fff" />
@@ -682,7 +676,6 @@ export function FloatingSearchPanel({
   const { colors, isDark } = useTheme();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
   const router = useRouter();
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
@@ -721,7 +714,7 @@ export function FloatingSearchPanel({
   const [isRouting, setIsRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [isTransitRouting, setIsTransitRouting] = useState(false);
-  const [recentsExpanded, setRecentsExpanded] = useState(embedded);
+  const [recentsExpanded, setRecentsExpanded] = useState(false);
   const [transportMode, setTransportMode] = useState<TransportMode>('drive');
   const [showParkAndRide, setShowParkAndRide] = useState(false);
   const [parkAndRideResult, setParkAndRideResult] = useState<ParkAndRideResult | null>(null);
@@ -1476,17 +1469,12 @@ export function FloatingSearchPanel({
           return;
         }
 
-        // Prefer a candidate whose turns are managed by a signal or stop sign
-        // where Mapillary has coverage. Returns the input order unchanged when
-        // nothing safer is available.
-        const rankedRoutes = await preferTurnManagedRoute(routes, costing);
-
-        setRoutePreview(rankedRoutes[0], rankedRoutes.slice(1), dest, costing, currentWaypoints);
-        if (rankedRoutes[0].boundingBox) setFitBounds(rankedRoutes[0].boundingBox);
+        setRoutePreview(routes[0], routes.slice(1), dest, costing, currentWaypoints);
+        if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
         setMode('route-preview');
 
         // Fetch traffic data along the route for color-coded segments
-        const routeCoords = decodePolyline(rankedRoutes[0].geometry);
+        const routeCoords = decodePolyline(routes[0].geometry);
         fetchRouteTrafficImmediate(routeCoords);
 
         // Check if park-and-ride should be offered (runs in background)
@@ -1497,7 +1485,7 @@ export function FloatingSearchPanel({
         // Fetch the traffic-adjusted ETA in the background — car only, since
         // TomTom traffic is meaningless for walking/cycling.
         if (costing === 'auto') {
-          fetchRouteTrafficEta(rankedRoutes[0].geometry).then((result) => {
+          fetchRouteTrafficEta(routes[0].geometry).then((result) => {
             if (result) {
               useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
             }
@@ -1715,14 +1703,11 @@ export function FloatingSearchPanel({
           setRouteError('No route found');
           return;
         }
-
-        const rankedRoutes = await preferTurnManagedRoute(routes, costing);
-
-        setRoutePreview(rankedRoutes[0], rankedRoutes.slice(1), dest, costing, waypoints);
-        if (rankedRoutes[0].boundingBox) setFitBounds(rankedRoutes[0].boundingBox);
+        setRoutePreview(routes[0], routes.slice(1), dest, costing, waypoints);
+        if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
 
         // Fetch traffic data along the rerouted path
-        const routeCoords = decodePolyline(rankedRoutes[0].geometry);
+        const routeCoords = decodePolyline(routes[0].geometry);
         fetchRouteTrafficImmediate(routeCoords);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -2002,8 +1987,6 @@ export function FloatingSearchPanel({
 
   const textColor = isDark ? '#F2F2F7' : colors.text;
   const subColor = isDark ? '#8E8E93' : colors.textSecondary;
-  /** Fill behind the search field, sitting on top of the panel's glass. */
-  const searchFieldBg = isDark ? 'rgba(118,118,128,0.24)' : 'rgba(118,118,128,0.12)';
 
   // ── Render results list (search or history) ──
   const showResults =
@@ -2311,7 +2294,7 @@ export function FloatingSearchPanel({
                       gap: 8,
                       paddingVertical: 8,
                       paddingHorizontal: 10,
-                      borderRadius: 10,
+                      borderRadius: borderRadius.md,
                       borderWidth: 1,
                       borderColor: isPrimary ? accent : subColor + '33',
                       backgroundColor: isPrimary
@@ -2597,101 +2580,6 @@ export function FloatingSearchPanel({
     );
   }
 
-  // The sidebar lays its shortcuts out as a fixed row (like Apple Maps on
-  // macOS) instead of a clipped horizontal scroller. Wider windows get one
-  // more pinned place.
-  const favoriteSlots = largeFloatingPanelWidth(windowWidth) >= 420 ? 5 : 4;
-  const visiblePinnedEntries = embedded
-    ? pinnedEntries.slice(0, Math.max(0, favoriteSlots - 3))
-    : pinnedEntries;
-
-  /** Sidebar shows a short recents list; phones show one row until expanded. */
-  const visibleRecents = recentsExpanded
-    ? embedded
-      ? history.slice(0, 5)
-      : history
-    : history.slice(0, 1);
-
-  const favoriteChips = (
-    <>
-      <FavChip
-        icon="home"
-        label="Home"
-        iconBg="#30C7E0"
-        subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
-        onPress={handleHomeTap}
-        onLongPress={handleHomeHold}
-        unset={!homeEntry}
-        isDark={isDark}
-        embedded={embedded}
-      />
-      <FavChip
-        icon="briefcase"
-        label="Work"
-        iconBg="#A47455"
-        subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
-        onPress={handleWorkTap}
-        onLongPress={handleWorkHold}
-        unset={!workEntry}
-        isDark={isDark}
-        embedded={embedded}
-      />
-      {visiblePinnedEntries.map((fav) => (
-        <FavChip
-          key={fav.id}
-          icon="bookmark"
-          label={fav.label}
-          iconBg="#6246EA"
-          subtitle={shorten(fav.entry.text, 12)}
-          onPress={() => {
-            navigateToResult({ entry: fav.entry, rank: 0 });
-            setSelectedResult({ entry: fav.entry, rank: 0 });
-            setRouteError(null);
-            clearRoutePreview();
-            setMode('location');
-          }}
-          onLongPress={() => {
-            Alert.alert('Remove Place', `Remove "${fav.label}"?`, [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Remove',
-                style: 'destructive',
-                onPress: () => {
-                  removeFavorite(fav.id);
-                  setFavorites(getFavorites());
-                  showToast({
-                    message: `Removed "${fav.label}"`,
-                    actionLabel: 'Undo',
-                    onAction: () => {
-                      setFavorite(fav);
-                      setFavorites(getFavorites());
-                    },
-                  });
-                },
-              },
-            ]);
-          }}
-          isDark={isDark}
-          embedded={embedded}
-        />
-      ))}
-      <FavChip
-        icon="add"
-        label="Add Place"
-        iconBg="#8E8E93"
-        onPress={() => {
-          setMode('setting-pin');
-          clearSearch();
-          setResults([]);
-          Keyboard.dismiss();
-          setTimeout(() => inputRef.current?.focus(), 150);
-        }}
-        isDark={isDark}
-        embedded={embedded}
-      />
-    </>
-  );
-
   return (
     <>
       {!embedded && showSearchThisArea && (
@@ -2760,41 +2648,37 @@ export function FloatingSearchPanel({
 
           {/* ── Search row ── */}
           <View style={styles.searchRow}>
-            {/* Filled field, like Apple Maps: the glass panel is the surface,
-                the field is the control. */}
-            <View style={[styles.searchField, { backgroundColor: searchFieldBg }]}>
-              <Ionicons name="search" size={18} color={subColor} style={styles.searchIcon} />
-              <TextInput
-                ref={inputRef}
-                style={[styles.searchInput, { color: textColor }]}
-                value={query}
-                onChangeText={handleQueryChange}
-                onFocus={handleFocusExpanding}
-                onSubmitEditing={handleSearchSubmit}
-                placeholder={placeholder}
-                placeholderTextColor={subColor}
-                autoCorrect={false}
-                returnKeyType="search"
-                clearButtonMode="while-editing"
-              />
-              {isAvailable && (mode === 'idle' || mode === 'searching') && (
-                <TouchableOpacity
-                  onPress={handleMicPress}
-                  hitSlop={10}
-                  style={[styles.micBtn, isListening && styles.micBtnActive]}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
-                  accessibilityHint="Tap to search by voice"
-                >
-                  <Ionicons
-                    name={isListening ? 'mic' : 'mic-outline'}
-                    size={18}
-                    color={isListening ? colors.error : subColor}
-                  />
-                </TouchableOpacity>
-              )}
-            </View>
+            <Ionicons name="search" size={18} color={subColor} style={styles.searchIcon} />
+            <TextInput
+              ref={inputRef}
+              style={[styles.searchInput, { color: textColor }]}
+              value={query}
+              onChangeText={handleQueryChange}
+              onFocus={handleFocusExpanding}
+              onSubmitEditing={handleSearchSubmit}
+              placeholder={placeholder}
+              placeholderTextColor={subColor}
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            {isAvailable && (mode === 'idle' || mode === 'searching') && (
+              <TouchableOpacity
+                onPress={handleMicPress}
+                hitSlop={10}
+                style={[styles.micBtn, isListening && styles.micBtnActive]}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={isListening ? 'Stop voice search' : 'Voice search'}
+                accessibilityHint="Tap to search by voice"
+              >
+                <Ionicons
+                  name={isListening ? 'mic' : 'mic-outline'}
+                  size={18}
+                  color={isListening ? colors.error : subColor}
+                />
+              </TouchableOpacity>
+            )}
             {mode !== 'idle' ? (
               <TouchableOpacity onPress={dismissSearch} hitSlop={10} style={styles.cancelBtn}>
                 <Text style={[styles.cancelText, { color: colors.primary }]}>Cancel</Text>
@@ -2827,7 +2711,7 @@ export function FloatingSearchPanel({
           <>
             {/* ── Results / history ── */}
             {(showResults || showHistory) && (
-              <Animated.View style={embedded ? [fadeStyle, st.resultsFill] : fadeStyle}>
+              <Animated.View style={fadeStyle}>
                 <View style={st.divider} />
                 <FlatList
                   data={
@@ -2868,7 +2752,7 @@ export function FloatingSearchPanel({
                       />
                     ) : null
                   }
-                  style={embedded ? st.resultListEmbedded : st.resultList}
+                  style={st.resultList}
                   ListHeaderComponent={
                     showHistory ? (
                       <Text style={[st.sectionHeader, { color: subColor }]}>Recents</Text>
@@ -2888,7 +2772,7 @@ export function FloatingSearchPanel({
                             gap: 4,
                             paddingVertical: 4,
                             paddingHorizontal: 10,
-                            borderRadius: 12,
+                            borderRadius: borderRadius.md,
                             backgroundColor: 'rgba(142,142,147,0.18)',
                           }}
                           onPress={() => setShowFilters(true)}
@@ -2938,36 +2822,91 @@ export function FloatingSearchPanel({
 
             {/* ── Idle: Favorites + Recents ── */}
             {mode === 'idle' && (
-              // The sidebar body scrolls; the search field above stays pinned.
-              // Without this, a long Recents list ran past the window and the
-              // empty tail of the panel read as a layout bug.
-              <ScrollView
-                style={embedded ? st.sidebarScroll : undefined}
-                contentContainerStyle={st.sidebarScrollContent}
-                showsVerticalScrollIndicator={false}
-              >
+              <>
                 {/* Favorites row */}
                 <View style={st.divider} />
-                <TouchableOpacity
-                  style={st.sectionHeaderRow}
-                  onPress={() => router.push('/(tabs)/places')}
-                  activeOpacity={0.7}
-                >
+                <View style={st.sectionHeaderRow}>
                   <Text style={[st.sectionTitle, { color: textColor }]}>Places</Text>
                   <Ionicons name="chevron-forward" size={15} color={subColor} />
-                </TouchableOpacity>
+                </View>
 
-                {embedded ? (
-                  <View style={styles.favRowEmbedded}>{favoriteChips}</View>
-                ) : (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.favRow}
-                  >
-                    {favoriteChips}
-                  </ScrollView>
-                )}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.favRow}
+                >
+                  <FavChip
+                    icon="home"
+                    label="Home"
+                    iconBg="#30C7E0"
+                    subtitle={homeEntry ? shorten(homeEntry.entry.text, 12) : undefined}
+                    onPress={handleHomeTap}
+                    onLongPress={handleHomeHold}
+                    unset={!homeEntry}
+                    isDark={isDark}
+                  />
+                  <FavChip
+                    icon="briefcase"
+                    label="Work"
+                    iconBg="#A47455"
+                    subtitle={workEntry ? shorten(workEntry.entry.text, 12) : undefined}
+                    onPress={handleWorkTap}
+                    onLongPress={handleWorkHold}
+                    unset={!workEntry}
+                    isDark={isDark}
+                  />
+                  {pinnedEntries.map((fav) => (
+                    <FavChip
+                      key={fav.id}
+                      icon="bookmark"
+                      label={fav.label}
+                      iconBg="#6246EA"
+                      subtitle={shorten(fav.entry.text, 12)}
+                      onPress={() => {
+                        navigateToResult({ entry: fav.entry, rank: 0 });
+                        setSelectedResult({ entry: fav.entry, rank: 0 });
+                        setRouteError(null);
+                        clearRoutePreview();
+                        setMode('location');
+                      }}
+                      onLongPress={() => {
+                        Alert.alert('Remove Place', `Remove "${fav.label}"?`, [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Remove',
+                            style: 'destructive',
+                            onPress: () => {
+                              removeFavorite(fav.id);
+                              setFavorites(getFavorites());
+                              showToast({
+                                message: `Removed "${fav.label}"`,
+                                actionLabel: 'Undo',
+                                onAction: () => {
+                                  setFavorite(fav);
+                                  setFavorites(getFavorites());
+                                },
+                              });
+                            },
+                          },
+                        ]);
+                      }}
+                      isDark={isDark}
+                    />
+                  ))}
+                  <FavChip
+                    icon="add"
+                    label="Add Place"
+                    iconBg="#8E8E93"
+                    onPress={() => {
+                      setMode('setting-pin');
+                      clearSearch();
+                      setResults([]);
+                      Keyboard.dismiss();
+                      setTimeout(() => inputRef.current?.focus(), 150);
+                    }}
+                    isDark={isDark}
+                  />
+                </ScrollView>
 
                 {/* ── Saved Places link (embedded/sidebar mode only) ── */}
                 {embedded && (
@@ -2989,8 +2928,7 @@ export function FloatingSearchPanel({
                   </TouchableOpacity>
                 )}
 
-                {/* Recents — expanded by default in the sidebar, collapsed to
-                    one row on phones. */}
+                {/* Recents — collapsed to 1 item by default */}
                 {history.length > 0 && (
                   <>
                     <View style={st.divider} />
@@ -3006,7 +2944,7 @@ export function FloatingSearchPanel({
                         color={subColor}
                       />
                     </TouchableOpacity>
-                    {visibleRecents.map((item) => (
+                    {(recentsExpanded ? history : history.slice(0, 1)).map((item) => (
                       <TouchableOpacity
                         key={item.entry.id}
                         style={st.recentRow}
@@ -3028,7 +2966,7 @@ export function FloatingSearchPanel({
                     ))}
                   </>
                 )}
-              </ScrollView>
+              </>
             )}
 
             {/* Setting-home/work/pin header when no results yet */}
@@ -3065,7 +3003,6 @@ function shorten(text: string, max: number): string {
 const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boolean) =>
   StyleSheet.create({
     panel: {
-      borderRadius: borderRadius.lg,
       overflow: 'hidden',
       borderCurve: 'continuous',
     },
@@ -3074,13 +3011,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     embeddedPanel: {
       flex: 1,
-    },
-    /** Scrolling body under the pinned search field in the sidebar. */
-    sidebarScroll: {
-      flex: 1,
-    },
-    sidebarScrollContent: {
-      paddingBottom: spacing.md,
     },
     divider: {
       height: StyleSheet.hairlineWidth,
@@ -3093,12 +3023,10 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,
       paddingBottom: 2,
-      gap: 4,
     },
     sectionTitle: {
-      fontSize: 17,
-      fontWeight: '600',
-      lineHeight: 22,
+      ...typography.subtitle,
+      flex: 1,
     },
     sectionHeader: {
       ...typography.label,
@@ -3110,14 +3038,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     },
     resultList: {
       maxHeight: 300,
-    },
-    /** Sidebar results fill the panel instead of floating in a short list. */
-    resultListEmbedded: {
-      flex: 1,
-    },
-    resultsFill: {
-      flex: 1,
-      minHeight: 0,
     },
     resultRow: {
       flexDirection: 'row',
@@ -3138,7 +3058,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     resultIconWrap: {
       width: 32,
       height: 32,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
       justifyContent: 'center',
@@ -3148,7 +3068,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     recentIcon: {
       width: 32,
       height: 32,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
       justifyContent: 'center',
@@ -3199,7 +3119,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     locCloseCircle: {
       width: 28,
       height: 28,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       justifyContent: 'center',
       alignItems: 'center',
@@ -3215,7 +3135,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       justifyContent: 'center',
       gap: spacing.sm,
       backgroundColor: colors.primary,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       paddingVertical: spacing.md - 2,
       paddingHorizontal: spacing.xl,
@@ -3272,7 +3192,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
     stepBadge: {
       width: 22,
       height: 22,
-      borderRadius: 999,
+      borderRadius: borderRadius.control,
       borderCurve: 'continuous',
       justifyContent: 'center',
       alignItems: 'center',
@@ -3336,7 +3256,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     paddingVertical: 9,
     paddingHorizontal: 18,
@@ -3346,7 +3266,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   glassPanel: {
-    borderRadius: 20,
+    borderRadius: borderRadius.panel,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -3380,7 +3300,7 @@ const styles = StyleSheet.create({
   miniPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     paddingVertical: 10,
     paddingLeft: 14,
@@ -3400,7 +3320,7 @@ const styles = StyleSheet.create({
   miniProfileCircle: {
     width: 32,
     height: 32,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3409,18 +3329,8 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.sm + 4,
-    paddingVertical: spacing.sm,
-  },
-  searchField: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 40,
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    paddingLeft: spacing.sm + 2,
-    paddingRight: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
   },
   searchIcon: {
     marginRight: 6,
@@ -3429,17 +3339,18 @@ const styles = StyleSheet.create({
     ...typography.body,
     flex: 1,
     fontSize: 17,
-    paddingVertical: 0,
+    paddingVertical: 4,
   },
   cancelBtn: {
     paddingLeft: spacing.sm,
   },
   micBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.control,
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: spacing.xs,
   },
   micBtnActive: {
     backgroundColor: 'rgba(239,68,68,0.12)',
@@ -3472,7 +3383,7 @@ const styles = StyleSheet.create({
   profileCircle: {
     width: 34,
     height: 34,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3484,28 +3395,15 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     gap: 6,
   },
-  /** Sidebar shortcuts share the row five-across instead of clipping. */
-  favRowEmbedded: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.sm + 2,
-    gap: spacing.xs,
-  },
   favChip: {
     alignItems: 'center',
     width: 72,
     marginHorizontal: 4,
   },
-  favChipEmbedded: {
-    flex: 1,
-    alignItems: 'center',
-    maxWidth: 84,
-  },
   favIconCircle: {
     width: 56,
     height: 56,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     justifyContent: 'center',
     alignItems: 'center',
@@ -3517,7 +3415,7 @@ const styles = StyleSheet.create({
     right: 2,
     width: 16,
     height: 16,
-    borderRadius: 999,
+    borderRadius: borderRadius.control,
     borderCurve: 'continuous',
     backgroundColor: '#8E8E93',
     justifyContent: 'center',
@@ -3525,12 +3423,12 @@ const styles = StyleSheet.create({
   },
   favLabel: {
     ...typography.caption,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
     textAlign: 'center',
   },
   favSub: {
-    fontSize: 11,
+    fontSize: 10,
     textAlign: 'center',
     marginTop: 1,
   },
@@ -3585,12 +3483,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 8,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: borderRadius.md,
     borderCurve: 'continuous',
   },
   stopResultsList: {
     marginTop: 4,
-    borderRadius: 10,
+    borderRadius: borderRadius.md,
     borderCurve: 'continuous',
     overflow: 'hidden',
   },
@@ -3622,7 +3520,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: 'rgba(0,0,0,0.72)',
-    borderRadius: 10,
+    borderRadius: borderRadius.md,
     borderCurve: 'continuous',
     paddingHorizontal: 14,
     paddingVertical: 8,

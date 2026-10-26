@@ -431,7 +431,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.Debug.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = PolarisMaps/PolarisMaps.SimulatorCarPlay.entitlements;
-				CURRENT_PROJECT_VERSION = 327;
+				CURRENT_PROJECT_VERSION = 328;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -473,7 +473,7 @@
 				CODE_SIGN_ENTITLEMENTS = PolarisMaps/PolarisMaps.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = PolarisMaps/PolarisMaps.SimulatorCarPlay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 327;
+				CURRENT_PROJECT_VERSION = 328;
 				DEVELOPMENT_TEAM = XTXZ3CYRPX;
 				INFOPLIST_FILE = PolarisMaps/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Polaris MAps";

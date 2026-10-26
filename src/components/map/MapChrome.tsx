@@ -1,6 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { borderRadius } from '../../constants/theme';
+import { GlassView } from '../common/GlassView';
 import { compassVisible, computeScaleBar } from '../../utils/mapChrome';
 import { formatDistance } from '../../utils/units';
 import { MAX_FONT_SCALE_CHROME } from '../../constants/a11y';
@@ -44,18 +46,20 @@ export function MapChrome({
     >
       {showCompass && (
         <Pressable
-          style={styles.compass}
+          style={styles.compassPressable}
           onPress={onReset}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Reset map orientation to north-up"
         >
-          <Ionicons
-            name="compass"
-            size={30}
-            color="#0A84FF"
-            style={{ transform: [{ rotate: `${-bearing}deg` }] }}
-          />
+          <GlassView material="regular" isInteractive style={styles.compass}>
+            <Ionicons
+              name="compass"
+              size={30}
+              color="#0A84FF"
+              style={{ transform: [{ rotate: `${-bearing}deg` }] }}
+            />
+          </GlassView>
         </Pressable>
       )}
       <View
@@ -78,13 +82,16 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8,
   },
+  compassPressable: {
+    borderRadius: borderRadius.control,
+    overflow: 'hidden',
+  },
   compass: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 20,
-    backgroundColor: 'rgba(28,28,30,0.72)',
+    borderRadius: borderRadius.control,
   },
   scale: {
     paddingHorizontal: 6,

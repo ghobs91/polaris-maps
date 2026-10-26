@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   FlatList,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { GlassView } from '../common/GlassView';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -417,9 +417,9 @@ export function LocationActionPanel() {
   return (
     <View style={[styles.container, { bottom: safeBottom + 200 }]}>
       {Platform.OS === 'ios' ? (
-        <BlurView intensity={70} tint="systemChromeMaterial" style={styles.blurCard}>
+        <GlassView material="regular" style={styles.blurCard}>
           {panelContent}
-        </BlurView>
+        </GlassView>
       ) : (
         <View style={[styles.blurCard, styles.androidCard]}>{panelContent}</View>
       )}
