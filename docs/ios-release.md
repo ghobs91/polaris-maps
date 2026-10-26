@@ -57,15 +57,41 @@ Hosted EAS Build remains available as a fallback for CI or when you specifically
 pnpm install --frozen-lockfile
 bundle install
 
-# 2. Install CocoaPods
+# 2. Copy the environment file (worktrees do NOT share it)
+cp <primary-checkout>/.env .env
+
+# 3. Install CocoaPods
 cd ios && bundle exec pod install && cd ..
 
-# 3. Run on simulator
+# 4. Run on simulator
 pnpm ios
 
-# 4. Run on physical device
+# 5. Run on physical device
 npx expo run:ios --device
 ```
+
+## Release Preflight (enforced)
+
+`EXPO_PUBLIC_*` values are inlined into the JS bundle at build time from the
+repo-root `.env`. A release build without that file still installs and runs, but
+it ships with no traffic key, no transit keys and no region catalog — the map
+shows "No traffic data" everywhere because the traffic cascade has no source
+left (no TomTom seed, no open feeds, no peers).
+
+Builds 318–328 shipped this way: they were archived from feature worktrees that
+had no `.env`. The `beta` and `release` lanes now refuse to proceed unless all
+of these hold:
+
+| Check                                      | Lane step                       | Override                     |
+| ------------------------------------------ | ------------------------------- | ---------------------------- |
+| `.env` exists at the repo root             | `ensure_app_env`                | none — copy the file         |
+| `EXPO_PUBLIC_TOMTOM_API_KEY` is non-blank  | `ensure_app_env`                | none — set the key           |
+| `HEAD` is `main`                           | `ensure_release_source`         | `POLARIS_ALLOW_NON_MAIN=1`   |
+| working tree is clean                      | `ensure_release_source`         | `POLARIS_ALLOW_DIRTY=1`      |
+| the key is in the exported `main.jsbundle` | `verify_bundle_has_traffic_key` | none — fix the bundling step |
+
+Merge work into `main` before archiving. A release built from an unmerged
+branch is a binary nobody can reproduce from `main`.
 
 ## Development Workflow
 
