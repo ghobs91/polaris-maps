@@ -250,6 +250,51 @@ describe('fetchOverturePlaces', () => {
     expect(mockGetZxy.mock.calls[0][0]).toBe(14);
   });
 
+  it('caps tiles fetched for a wide viewport', async () => {
+    const mockGetZxy = jest.fn().mockResolvedValue(undefined);
+    (PMTiles as jest.Mock).mockImplementation(() => ({
+      getHeader: jest.fn().mockResolvedValue({ maxZoom: 14 }),
+      getZxy: mockGetZxy,
+    }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+    (VectorTile as jest.Mock).mockImplementation(() => ({ layers: {} }));
+
+    // ~0.9° x 1.0° spans thousands of z14 tiles.
+    await fetchOverturePlaces(40.0, -74.5, 40.9, -73.5, 420);
+
+    expect(mockGetZxy.mock.calls.length).toBeGreaterThan(0);
+    expect(mockGetZxy.mock.calls.length).toBeLessThanOrEqual(9);
+  });
+
+  it('samples at most a bounded number of features per tile', async () => {
+    const mockGetZxy = jest.fn().mockResolvedValue({ data: new Uint8Array([1, 2, 3]) });
+    (PMTiles as jest.Mock).mockImplementation(() => ({
+      getHeader: jest.fn().mockResolvedValue({ maxZoom: 14 }),
+      getZxy: mockGetZxy,
+    }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+
+    const geojsonFeature = {
+      type: 'Feature',
+      id: 123,
+      geometry: { type: 'Point', coordinates: [-73.52854832, 40.72402722] },
+      properties: {
+        id: 'f4a35e34-75f4-45d2-9ac3-033d50242880',
+        names: '{"primary":"Calda Pizzeria"}',
+        categories: '{"primary":"pizza_restaurant"}',
+        confidence: 0.98,
+      },
+    };
+    const mockFeature = jest.fn(() => ({ toGeoJSON: jest.fn(() => geojsonFeature) }));
+    (VectorTile as jest.Mock).mockImplementation(() => ({
+      layers: { place: { length: 50_000, feature: mockFeature } },
+    }));
+
+    await fetchOverturePlaces(40.7239, -73.5287, 40.7243, -73.5282, 50);
+
+    expect(mockFeature.mock.calls.length).toBeLessThanOrEqual(4_000);
+  });
+
   it('resolves the current release from the STAC catalog', async () => {
     delete process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL;
     resetOverturePmtilesStateForTests();
