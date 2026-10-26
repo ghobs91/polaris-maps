@@ -283,9 +283,14 @@ platform :ios do
       export_options: export_options,
       # Force the correct development team
       export_team_id: "XTXZ3CYRPX",
-      # Xcode automatic signing — no manual cert/profile management
+      # Xcode automatic signing — no manual cert/profile management.
+      #
+      # gym appends `xcargs` to the `-exportArchive` command as well as the
+      # archive, so passing the same flags again via `export_xcargs` duplicates
+      # `-authenticationKeyPath`. Xcode 27 rejects the repeated option outright
+      # ("option '-authenticationKeyPath' may only be provided once"), which
+      # fails the export after a successful archive.
       xcargs: auth_xcargs,
-      export_xcargs: auth_xcargs,
       silent: false,
     )
 
