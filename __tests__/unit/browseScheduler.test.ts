@@ -97,4 +97,65 @@ describe('browse scheduler', () => {
     await scheduler.schedule('a.com', async () => undefined);
     expect(sleeps).toEqual([60_000]);
   });
+
+  describe('page-load budget', () => {
+    it('allows a burst, then refuses until a token refills', async () => {
+      const { scheduler, advance } = makeScheduler({
+        pageBurst: 2,
+        pageRefillMs: 10_000,
+        pageIntervalMs: 0,
+        pageJitterMs: 0,
+        maxPageWaitMs: 0,
+      });
+
+      expect(await scheduler.acquirePageLoad('a.com')).toEqual({ ok: true });
+      expect(await scheduler.acquirePageLoad('a.com')).toEqual({ ok: true });
+
+      const refused = await scheduler.acquirePageLoad('a.com');
+      expect(refused.ok).toBe(false);
+      expect(refused.reason).toBe('rate');
+
+      advance(10_000);
+      expect(await scheduler.acquirePageLoad('a.com')).toEqual({ ok: true });
+    });
+
+    it('refuses a host during a challenge cool-down', async () => {
+      const { scheduler } = makeScheduler({ maxPageWaitMs: 0 });
+      scheduler.reportChallenge('a.com');
+
+      const decision = await scheduler.acquirePageLoad('a.com');
+      expect(decision.ok).toBe(false);
+      expect(decision.reason).toBe('cooldown');
+    });
+
+    it('refuses a hard-blocked host for the whole block window', async () => {
+      const { scheduler, advance } = makeScheduler({ blockMs: 100_000, maxPageWaitMs: 0 });
+      scheduler.reportBlocked('a.com');
+
+      const decision = await scheduler.acquirePageLoad('a.com');
+      expect(decision.ok).toBe(false);
+      expect(decision.reason).toBe('blocked');
+      expect(scheduler.blockedRemainingMs('a.com')).toBe(100_000);
+
+      advance(100_001);
+      expect((await scheduler.acquirePageLoad('a.com')).ok).toBe(true);
+    });
+
+    it('enforces a daily cap independent of the token bucket', async () => {
+      const { scheduler } = makeScheduler({
+        pageBurst: 10,
+        pageRefillMs: 1,
+        pageDailyCap: 2,
+        pageIntervalMs: 0,
+        pageJitterMs: 0,
+        maxPageWaitMs: 0,
+      });
+
+      expect((await scheduler.acquirePageLoad('a.com')).ok).toBe(true);
+      expect((await scheduler.acquirePageLoad('a.com')).ok).toBe(true);
+      const decision = await scheduler.acquirePageLoad('a.com');
+      expect(decision.ok).toBe(false);
+      expect(decision.reason).toBe('daily-cap');
+    });
+  });
 });

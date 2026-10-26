@@ -25,6 +25,13 @@ import {
 } from '../services/poi/externalRatings';
 import { browseScheduler } from '../services/poi/externalRatings/antiBot';
 import {
+  getCachedListing,
+  hydrateListingCache,
+  setCachedListing,
+  type ListingOrigin,
+} from '../services/poi/externalRatings/listingCache';
+import {
+  parsePageVerdict,
   setCachedExternalRating,
   validateExternalRating,
 } from '../services/poi/externalRatings/core';
@@ -90,9 +97,15 @@ function log(...args: unknown[]): void {
   if (__DEV__) console.log('[externalRatings]', ...args);
 }
 
-export type ExternalRatingStatus = 'idle' | 'searching' | 'loading' | 'loaded' | 'failed';
+export type ExternalRatingStatus =
+  | 'idle'
+  | 'searching'
+  | 'loading'
+  | 'loaded'
+  | 'failed'
+  | 'blocked';
 
-type Origin = 'tag' | 'website' | 'search';
+type Origin = ListingOrigin;
 
 export interface ExternalRatingWebViewStage {
   provider: ExternalRatingProviderId;
@@ -107,6 +120,10 @@ export interface ExternalRatingProviderState {
   summary: ExternalRatingSummary | null;
   webView: ExternalRatingWebViewStage | null;
   listingUrl: string | null;
+  /** When the provider lookup is paused, the earliest retry time (ms epoch). */
+  blockedUntil: number | null;
+  /** Why the lookup is paused: a provider block or the app's own pacing. */
+  blockReason: 'blocked' | 'paced' | null;
 }
 
 interface InternalState extends ExternalRatingProviderState {
@@ -116,7 +133,7 @@ interface InternalState extends ExternalRatingProviderState {
 export interface UseExternalRatingsResult {
   states: ExternalRatingProviderState[];
   handleMessage: (provider: ExternalRatingProviderId, data: string) => void;
-  handleError: (provider: ExternalRatingProviderId) => void;
+  handleError: (provider: ExternalRatingProviderId, statusCode?: number) => void;
 }
 
 function blankState(provider: ExternalRatingProviderId): InternalState {
@@ -126,6 +143,8 @@ function blankState(provider: ExternalRatingProviderId): InternalState {
     summary: null,
     webView: null,
     listingUrl: null,
+    blockedUntil: null,
+    blockReason: null,
     origin: 'website',
   };
 }
@@ -217,6 +236,21 @@ export function useExternalRatings(
     [clearBudget, update],
   );
 
+  /**
+   * Settle a provider as host-blocked. Unlike a verdict this is not remembered
+   * per place: the block belongs to the host and expires on its own, so every
+   * place gets the same honest "blocked" state without a page load.
+   */
+  const blockProvider = useCallback(
+    (id: ExternalRatingProviderId, retryAt: number, reason: 'blocked' | 'paced') => {
+      clearBudget(id);
+      clearTimer(id);
+      log(id, `${reason} — pausing provider until`, new Date(retryAt).toISOString());
+      update(id, { status: 'blocked', webView: null, blockedUntil: retryAt, blockReason: reason });
+    },
+    [clearBudget, clearTimer, update],
+  );
+
   const armTimeout = useCallback(
     (id: ExternalRatingProviderId) => {
       clearTimer(id);
@@ -282,56 +316,90 @@ export function useExternalRatings(
       }
 
       void (async () => {
+        // Hydration runs in the background: a slow or unavailable disk must
+        // never hold the ratings row open. The module already started this at
+        // import time; this call only joins an in-flight load.
+        void hydrateListingCache();
+        if (cancelled) return;
+
+        const placeKey = placeRatingKey(q);
         let listingUrl: string | null = null;
         let origin: Origin = explicitTag ? 'tag' : 'website';
-        try {
-          listingUrl = await resolveKnownListing(provider, q);
-        } catch {
-          listingUrl = null;
+
+        const cachedListing = getCachedListing(id, placeKey);
+        if (cachedListing) {
+          listingUrl = cachedListing.url;
+          origin = cachedListing.origin;
+        } else {
+          try {
+            listingUrl = await resolveKnownListing(provider, q);
+          } catch {
+            listingUrl = null;
+          }
+          if (listingUrl) setCachedListing(id, placeKey, listingUrl, origin);
         }
         if (cancelled) return;
         log(id, listingUrl ? `known listing (${origin})` : 'no known listing', listingUrl ?? '');
 
-        if (listingUrl) {
-          const summary = await withPhaseTimeout(
-            paceFetch(listingUrl, () => fetchAndParseRating(provider, listingUrl as string, q)),
-            FETCH_PHASE_TIMEOUT_MS,
-          );
+        /**
+         * Open a provider page after acquiring a paced page-load slot.
+         * A refresh/new place is paced; search → listing continuations are not
+         * (they are an in-site click, not a new browsing chain).
+         */
+        const openStage = async (
+          stage: 'search' | 'listing',
+          uri: string,
+          stageOrigin: Origin,
+        ): Promise<void> => {
+          const decision = await browseScheduler.acquirePageLoad(hostOf(uri));
           if (cancelled) return;
-          if (summary) {
-            log(id, 'fetch hit', summary.rating, summary.reviewCount);
-            clearBudget(id);
-            update(id, { status: 'loaded', summary, listingUrl, webView: null, origin });
+          if (!decision.ok) {
+            if (decision.reason === 'blocked') {
+              blockProvider(id, decision.retryAt ?? Date.now() + 2 * 60 * 60 * 1000, 'blocked');
+            } else {
+              log(id, 'page load deferred', decision.reason, decision.retryAt ?? 0);
+              blockProvider(id, decision.retryAt ?? Date.now() + 5 * 60_000, 'paced');
+            }
             return;
           }
-          log(id, 'fetch miss → WebView listing', listingUrl);
           update(id, {
-            status: 'loading',
-            listingUrl,
-            origin,
+            status: stage === 'search' ? 'searching' : 'loading',
+            origin: stageOrigin,
+            listingUrl: stage === 'listing' ? uri : null,
             webView: {
               provider: id,
-              uri: listingUrl,
-              injectedJavaScript: provider.listingJs,
-              stage: 'listing',
+              uri,
+              injectedJavaScript: stage === 'search' ? provider.searchJs : provider.listingJs,
+              stage,
             },
           });
+        };
+
+        if (listingUrl) {
+          // Opt-in fetch path; both current providers are browser-only.
+          if (provider.supportsPlainFetch) {
+            const summary = await withPhaseTimeout(
+              paceFetch(listingUrl, () => fetchAndParseRating(provider, listingUrl as string, q)),
+              FETCH_PHASE_TIMEOUT_MS,
+            );
+            if (cancelled) return;
+            if (summary) {
+              log(id, 'fetch hit', summary.rating, summary.reviewCount);
+              clearBudget(id);
+              update(id, { status: 'loaded', summary, listingUrl, webView: null, origin });
+              return;
+            }
+            log(id, 'fetch miss → WebView listing', listingUrl);
+          } else {
+            log(id, 'browser-only listing → WebView', listingUrl);
+          }
+          await openStage('listing', listingUrl, origin);
           return;
         }
 
         const searchUrl = provider.buildSearchUrl(q.name, q.address ?? null);
         log(id, 'search', searchUrl);
-        update(id, {
-          status: 'searching',
-          origin: 'search',
-          listingUrl: null,
-          webView: {
-            provider: id,
-            uri: searchUrl,
-            injectedJavaScript: provider.searchJs,
-            stage: 'search',
-          },
-        });
+        await openStage('search', searchUrl, 'search');
       })();
     });
 
@@ -342,7 +410,7 @@ export function useExternalRatings(
     };
     // Resolution is keyed to the place (`resetKey`), not to every query field,
     // so late enrichment can't reset an already-loaded rating.
-  }, [resetKey, update, clearTimer, clearBudget, fail]);
+  }, [resetKey, update, clearTimer, clearBudget, fail, blockProvider]);
 
   // The section mounts at most one hidden WebView at a time — the first provider
   // (registry order) exposing a stage. A stage's clock must start when its
@@ -366,6 +434,25 @@ export function useExternalRatings(
       const q = queryRef.current;
 
       if (current.webView.stage === 'search') {
+        // A blocked or challenged search page carries no candidates; classify
+        // it before the empty-result path so the host backs off instead of
+        // being retried on the next card.
+        const verdict = parsePageVerdict(data);
+        if (verdict.blocked) {
+          const host = hostOf(current.webView.uri);
+          browseScheduler.reportBlocked(host);
+          blockProvider(id, Date.now() + browseScheduler.blockedRemainingMs(host), 'blocked');
+          return;
+        }
+        if (verdict.challenge) {
+          const host = hostOf(current.webView.uri);
+          browseScheduler.reportChallenge(host);
+          clearTimer(id);
+          log(id, 'search challenge detected', host);
+          fail(id, 'verdict');
+          return;
+        }
+
         const candidates = candidatesFromSearchMessage(provider, data);
         const chosen = selectSearchCandidate(candidates, q);
         log(
@@ -420,6 +507,7 @@ export function useExternalRatings(
             { expectedName: q.name },
           );
           if (summary) {
+            setCachedListing(id, placeRatingKey(q), inlineListingUrl, 'search');
             setCachedExternalRating(id, inlineListingUrl, summary);
             clearTimer(id);
             clearBudget(id);
@@ -429,12 +517,34 @@ export function useExternalRatings(
           }
         }
 
-        // Fetch-first: provider listing pages are server-rendered and expose
-        // JSON-LD, so try the plain fetch before spending a second hidden-WebView
-        // stage on the very same page. Identity is re-confirmed from the
-        // listing's own address/`geo`, so a sibling chain branch is still
-        // rejected even though the candidate came from a search.
+        // Remember the listing this search confirmed so the next visit skips
+        // the search page entirely.
         clearTimer(id);
+        setCachedListing(id, placeRatingKey(q), chosen.url, 'search');
+
+        // Browser-only providers go straight to the listing: a plain fetch of
+        // them is a guaranteed 403 and only adds a bot signature.
+        if (!provider.supportsPlainFetch) {
+          log(id, 'browser-only listing (search) → WebView', chosen.url);
+          armTimeout(id);
+          update(id, {
+            status: 'loading',
+            listingUrl: chosen.url,
+            origin: 'search',
+            webView: {
+              provider: id,
+              uri: chosen.url,
+              injectedJavaScript: provider.listingJs,
+              stage: 'listing',
+            },
+          });
+          return;
+        }
+
+        // Fetch-first is opt-in (`supportsPlainFetch`); no current provider sets
+        // it. Identity would be re-confirmed from the listing's own
+        // address/`geo`, so a sibling chain branch would still be rejected even
+        // though the candidate came from a search.
         update(id, {
           status: 'loading',
           listingUrl: chosen.url,
@@ -485,6 +595,16 @@ export function useExternalRatings(
       const raw = provider.parseRatingMessage(data);
       if (!raw) return;
 
+      // A terminal block page is a host-wide verdict, not a per-place one:
+      // persist it so no later card (in this launch or the next) retries into
+      // the same wall.
+      if (raw.blocked) {
+        const host = hostOf(current.webView.uri);
+        browseScheduler.reportBlocked(host);
+        blockProvider(id, Date.now() + browseScheduler.blockedRemainingMs(host), 'blocked');
+        return;
+      }
+
       if (raw.challenge) {
         browseScheduler.reportChallenge(hostOf(current.webView.uri));
         clearTimer(id);
@@ -528,15 +648,24 @@ export function useExternalRatings(
       log(id, 'loaded', summary.rating, summary.reviewCount, listingUrl);
       update(id, { status: 'loaded', summary, webView: null });
     },
-    [armTimeout, clearBudget, clearTimer, fail],
+    [armTimeout, blockProvider, clearBudget, clearTimer, fail],
   );
 
   const handleError = useCallback(
-    (id: ExternalRatingProviderId) => {
+    (id: ExternalRatingProviderId, statusCode?: number) => {
       const current = statesRef.current.find((s) => s.provider === id);
       if (current?.webView) {
-        browseScheduler.reportRateLimited(hostOf(current.webView.uri), 0);
-        log(id, 'webview error', hostOf(current.webView.uri));
+        const host = hostOf(current.webView.uri);
+        // A 403/429 is the provider's edge refusing this device, not a network
+        // hiccup: 403 escalates the challenge cool-down, 429 waits a minute.
+        if (statusCode === 403) {
+          browseScheduler.reportChallenge(host);
+        } else if (statusCode === 429) {
+          browseScheduler.reportRateLimited(host, 60_000);
+        } else {
+          browseScheduler.reportRateLimited(host, 0);
+        }
+        log(id, 'webview error', host, statusCode ?? 'network');
       }
       clearTimer(id);
       fail(id, 'retry');
@@ -546,13 +675,17 @@ export function useExternalRatings(
 
   const publicStates = useMemo<ExternalRatingProviderState[]>(
     () =>
-      states.map(({ provider, status, summary, webView, listingUrl }) => ({
-        provider,
-        status,
-        summary,
-        webView,
-        listingUrl,
-      })),
+      states.map(
+        ({ provider, status, summary, webView, listingUrl, blockedUntil, blockReason }) => ({
+          provider,
+          status,
+          summary,
+          webView,
+          listingUrl,
+          blockedUntil,
+          blockReason,
+        }),
+      ),
     [states],
   );
 

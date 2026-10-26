@@ -1,14 +1,17 @@
 /**
  * TripAdvisor provider for on-device aggregate ratings.
  *
- * TripAdvisor listing pages reliably expose JSON-LD `aggregateRating`, so the
- * plain-fetch path is primary and the hidden WebView is the fallback. Only the
- * `tripadvisor.com` / `www.tripadvisor.com` hosts are ever loaded, direct listing
- * references only — no search-engine scraping, no CAPTCHA solving, no stealth.
+ * Resolution is browser-only: TripAdvisor treats headerless app requests as
+ * bot traffic, so a plain fetch is a guaranteed challenge and only adds a bot
+ * signature to the device. The hidden WebView is the single transport. Only the
+ * `tripadvisor.com` / `www.tripadvisor.com` hosts are ever loaded, direct
+ * listing references only — no search-engine scraping, no CAPTCHA solving, no
+ * stealth.
  */
 
 import {
   buildCollectorScript,
+  COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
   discoverListingFromAnchors,
@@ -213,8 +216,8 @@ export function parseExternalRatingFromHtml(html: string): RawExternalRating | n
 export const TRIPADVISOR_RATING_JS = buildCollectorScript({
   providerId: 'tripadvisor',
   payloadType: 'external-rating',
-  hasDataJs: 'out.ldRating != null && out.ldCount != null',
-  initialDelayMs: 0,
+  hasDataJs: 'out.ldRating != null && out.ldCount != null && out.ldName != null',
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.ldRating = null;
@@ -223,6 +226,7 @@ export const TRIPADVISOR_RATING_JS = buildCollectorScript({
     out.ldAddress = null;
     out.geo = null;
     out.automation = [];
+    var fallbackName = null, fallbackAddress = null, fallbackGeo = null;
     var scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (var i = 0; i < scripts.length; i++) {
       try {
@@ -233,21 +237,37 @@ export const TRIPADVISOR_RATING_JS = buildCollectorScript({
           if (!it || typeof it !== 'object') continue;
           var ar = it.aggregateRating;
           var arr = Array.isArray(ar) ? ar : (ar ? [ar] : []);
+          var hasAgg = arr.length > 0;
           for (var a = 0; a < arr.length; a++) {
             if (out.ldRating == null && arr[a].ratingValue != null) out.ldRating = Number(arr[a].ratingValue);
             if (out.ldCount == null && arr[a].reviewCount != null) out.ldCount = Number(arr[a].reviewCount);
           }
-          if (out.ldName == null && it.name) out.ldName = String(it.name);
-          if (!out.ldAddress && it.address) {
-            out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+          if (!hasAgg) {
+            if (it.ratingValue != null) { if (out.ldRating == null) out.ldRating = Number(it.ratingValue); hasAgg = true; }
+            if (it.reviewCount != null) { if (out.ldCount == null) out.ldCount = Number(it.reviewCount); hasAgg = true; }
           }
-          if (!out.geo && it.geo && it.geo.latitude != null && it.geo.longitude != null) {
-            out.geo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
+          // Only the object that owns the rating may name the listing; other
+          // named blocks on the page can be tours, videos, or photo lists.
+          if (hasAgg) {
+            if (out.ldName == null && it.name) out.ldName = String(it.name);
+            if (!out.ldAddress && it.address) {
+              out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+            }
+            if (!out.geo && it.geo && it.geo.latitude != null && it.geo.longitude != null) {
+              out.geo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
+            }
+          } else if (fallbackName == null && it.name) {
+            fallbackName = String(it.name);
+            if (!fallbackAddress && it.address) fallbackAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+            if (!fallbackGeo && it.geo && it.geo.latitude != null && it.geo.longitude != null) fallbackGeo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
           }
-          if (out.ldRating != null && out.ldCount != null) break;
+          if (out.ldRating != null && out.ldCount != null && out.ldName != null) break;
         }
       } catch (e) { /* malformed JSON-LD — ignore */ }
     }
+    if (out.ldName == null && fallbackName) out.ldName = fallbackName;
+    if (!out.ldAddress && fallbackAddress) out.ldAddress = fallbackAddress;
+    if (!out.geo && fallbackGeo) out.geo = fallbackGeo;
     if (out.ldRating == null || out.ldCount == null) {
       var autos = document.querySelectorAll('[data-automation]');
       for (var j = 0; j < autos.length; j++) {
@@ -269,8 +289,9 @@ export const TRIPADVISOR_RATING_JS = buildCollectorScript({
 export const TRIPADVISOR_SEARCH_JS = buildCollectorScript({
   providerId: 'tripadvisor',
   payloadType: 'rating-search',
-  hasDataJs: 'out.candidates.length > 0',
-  initialDelayMs: 0,
+  // Wait for a named candidate rather than an image-only anchor.
+  hasDataJs: 'out.candidates.length > 0 && out.candidates.some(function (c) { return !!c.name; })',
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.candidates = [];
@@ -357,6 +378,9 @@ export function buildTripadvisorSearchUrl(name: string, address: string | null):
 export const tripadvisorProvider: ExternalRatingProvider = {
   id: 'tripadvisor',
   allowedHosts: TRIPADVISOR_ALLOWED_HOSTS,
+  // TripAdvisor's edge rejects headerless app fetches; the hidden browser is
+  // the only transport that can return a listing.
+  supportsPlainFetch: false,
   isProviderUrl: isTripadvisorUrl,
   parseListingUrl: canonicalTripadvisorListingUrl,
   discoverFromWebsiteHtml: discoverTripadvisorFromWebsiteHtml,

@@ -51,11 +51,13 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 import { ExternalRatingsSection } from '../../src/components/map/ExternalRatingsSection';
 import { GEOLOCATION_GUARD_JS } from '../../src/constants/webViewScripts';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
+import { clearListingCache } from '../../src/services/poi/externalRatings/listingCache';
 import { clearSessionPlaceRatings } from '../../src/services/places/placeRatingSessionCache';
 import type { OsmPoi } from '../../src/services/poi/osmFetcher';
 
 const TA_LISTING_URL =
   'https://www.tripadvisor.com/Restaurant_Review-g1-d123-Review-Foo-Bar-New_York_City.html';
+const YELP_LISTING_URL = 'https://www.yelp.com/biz/foo-bar';
 
 function makePoi(name: string, tags: Record<string, string> = {}): OsmPoi {
   return {
@@ -89,9 +91,13 @@ describe('ExternalRatingsSection', () => {
     (global as any).__lastWebViewProps = null;
     mockResolveKnownListing.mockReset();
     mockFetchAndParseRating.mockReset();
-    mockFetchAndParseRating.mockResolvedValue(null);
     browseScheduler.reset();
+    // The section tests exercise rendering, not wall-clock pacing; the
+    // scheduler's unit tests cover intervals, tokens and blocks.
+    jest.spyOn(browseScheduler, 'acquirePageLoad').mockResolvedValue({ ok: true });
+    jest.spyOn(browseScheduler, 'schedule').mockImplementation((_host, task) => task());
     clearSessionPlaceRatings();
+    clearListingCache();
   });
 
   it('loads a known TripAdvisor listing in a hidden WebView and surfaces a validated rating', async () => {
@@ -103,6 +109,7 @@ describe('ExternalRatingsSection', () => {
 
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
     expect(typeof webViewProps().injectedJavaScript).toBe('string');
+    expect(mockFetchAndParseRating).not.toHaveBeenCalled();
 
     onMessage({
       type: 'external-rating',
@@ -344,6 +351,66 @@ describe('ExternalRatingsSection', () => {
     expect(shouldStart({ url: 'about:blank' })).toBe(true);
     expect(shouldStart({ url: 'https://evil.example.com/ad' })).toBe(false);
     expect(shouldStart({ url: 'data:text/html,hi' })).toBe(false);
+  });
+
+  it('gives the hidden browser a real viewport instead of a zero-size frame', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+
+    const style = webViewProps().style as { width?: number; height?: number };
+    expect(style.width).toBeGreaterThan(0);
+    expect(style.height).toBeGreaterThan(0);
+  });
+
+  it('shows an honest blocked state after a hard block page', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'yelp' ? YELP_LISTING_URL : null),
+    );
+
+    const screen = render(
+      <ExternalRatingsSection
+        poi={makePoi('Foo Bar', {
+          'addr:housenumber': '123',
+          'addr:street': 'Main St',
+          'addr:city': 'New York',
+        })}
+      />,
+    );
+
+    // TripAdvisor holds the single hidden-WebView slot first.
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_SEARCH_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: null,
+      ldCount: null,
+      ldName: null,
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: true,
+    });
+
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: YELP_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'yelp',
+      ldRating: null,
+      ldCount: null,
+      ldName: null,
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+      blocked: true,
+    });
+
+    await waitFor(() => expect(screen.getByTestId('external-ratings-blocked')).toBeTruthy());
+    expect(screen.getByText(/Yelp is temporarily blocking review lookups/)).toBeTruthy();
   });
 
   it('stays hidden when the extraction is an anti-bot challenge page', async () => {

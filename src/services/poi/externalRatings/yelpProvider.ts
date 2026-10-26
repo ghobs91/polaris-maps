@@ -10,6 +10,7 @@
 
 import {
   buildCollectorScript,
+  COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
   discoverListingFromAnchors,
@@ -274,7 +275,7 @@ export function parseYelpSearchResults(html: string, baseUrl: string): RatingSea
   const data = extractNextData(html);
   if (data) scanSearchBusinesses(data, out, null);
 
-  const seen = new Set(out.map((c) => c.url));
+  const byUrl = new Map(out.map((c) => [c.url, c]));
   const anchorRe = /<a\b[^>]*href=["']([^"']*\/biz\/[^"']*)["'][^>]*>([\s\S]{0,200}?)<\/a>/gi;
   let m: RegExpExecArray | null;
   while ((m = anchorRe.exec(html)) !== null && out.length < 20) {
@@ -285,14 +286,22 @@ export function parseYelpSearchResults(html: string, baseUrl: string): RatingSea
       continue;
     }
     const canonical = canonicalYelpListingUrl(abs.toString());
-    if (!canonical || seen.has(canonical)) continue;
-    seen.add(canonical);
+    if (!canonical) continue;
     const name = (m[2] ?? '')
       .replace(/<[^>]*>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 120);
-    out.push({ url: canonical, name: name || null, address: null, geo: null });
+    const existing = byUrl.get(canonical);
+    if (existing) {
+      // Yelp renders an image anchor before the named link for a listing.
+      // The first anchor is often empty; a later one carries the name.
+      if (!existing.name && name) existing.name = name;
+      continue;
+    }
+    const candidate = { url: canonical, name: name || null, address: null, geo: null };
+    byUrl.set(canonical, candidate);
+    out.push(candidate);
   }
 
   return out;
@@ -314,8 +323,8 @@ export function buildYelpSearchUrl(name: string, address: string | null): string
 export const YELP_RATING_JS = buildCollectorScript({
   providerId: 'yelp',
   payloadType: 'external-rating',
-  hasDataJs: 'out.ldRating != null && out.ldCount != null',
-  initialDelayMs: 0,
+  hasDataJs: 'out.ldRating != null && out.ldCount != null && out.ldName != null',
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.ldRating = null;
@@ -324,6 +333,7 @@ export const YELP_RATING_JS = buildCollectorScript({
     out.ldAddress = null;
     out.geo = null;
     out.automation = [];
+    var fallbackName = null, fallbackAddress = null, fallbackGeo = null;
     var scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (var i = 0; i < scripts.length; i++) {
       try {
@@ -334,16 +344,34 @@ export const YELP_RATING_JS = buildCollectorScript({
           if (!it || typeof it !== 'object') continue;
           var ar = it.aggregateRating;
           var arr = Array.isArray(ar) ? ar : (ar ? [ar] : []);
+          var hasAgg = arr.length > 0;
           for (var a = 0; a < arr.length; a++) {
             if (out.ldRating == null && arr[a].ratingValue != null) out.ldRating = Number(arr[a].ratingValue);
             if (out.ldCount == null && arr[a].reviewCount != null) out.ldCount = Number(arr[a].reviewCount);
           }
-          if (out.ldName == null && it.name) out.ldName = String(it.name);
-          if (!out.ldAddress && it.address) out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
-          if (!out.geo && it.geo && it.geo.latitude != null) out.geo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
+          if (!hasAgg) {
+            if (it.ratingValue != null) { if (out.ldRating == null) out.ldRating = Number(it.ratingValue); hasAgg = true; }
+            if (it.reviewCount != null) { if (out.ldCount == null) out.ldCount = Number(it.reviewCount); hasAgg = true; }
+          }
+          // Yelp emits named ItemLists ("Business Photos", "Popular Dishes")
+          // before the Restaurant block. Only the object that owns the rating
+          // may name the listing; other names are a last-resort fallback.
+          if (hasAgg) {
+            if (out.ldName == null && it.name) out.ldName = String(it.name);
+            if (!out.ldAddress && it.address) out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+            if (!out.geo && it.geo && it.geo.latitude != null) out.geo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
+          } else if (fallbackName == null && it.name) {
+            fallbackName = String(it.name);
+            if (!fallbackAddress && it.address) fallbackAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
+            if (!fallbackGeo && it.geo && it.geo.latitude != null) fallbackGeo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
+          }
+          if (out.ldRating != null && out.ldCount != null && out.ldName != null) break;
         }
       } catch (e) { /* malformed JSON-LD — ignore */ }
     }
+    if (out.ldName == null && fallbackName) out.ldName = fallbackName;
+    if (!out.ldAddress && fallbackAddress) out.ldAddress = fallbackAddress;
+    if (!out.geo && fallbackGeo) out.geo = fallbackGeo;
     if (out.ldRating == null || out.ldCount == null) {
       var next = document.getElementById('__NEXT_DATA__');
       if (next) {
@@ -384,10 +412,13 @@ export const YELP_RATING_JS = buildCollectorScript({
         if (am) out.ldRating = Number(am[1]);
       }
     }
-    if (out.ldCount == null && document.body) {
-      var bodyTxt = (document.body.innerText || '').replace(/\\s+/g, ' ');
-      var cm = /([0-9][0-9,]*)\\s*reviews?\\b/i.exec(bodyTxt);
-      if (cm) out.ldCount = parseInt(cm[1].replace(/,/g, ''), 10);
+    if (out.ldCount == null) {
+      // The listing title carries the exact business count
+      // ("… - 1241 Reviews - …"). The visible page abbreviates it to "1.2k
+      // reviews", and the body also contains dish/photo review counts, so the
+      // title is the only safe fallback.
+      var tm = /([0-9][0-9,]*)\\s*reviews?\\b/i.exec(document.title || '');
+      if (tm) out.ldCount = parseInt(tm[1].replace(/,/g, ''), 10);
     }`,
 });
 
@@ -399,8 +430,10 @@ export const YELP_RATING_JS = buildCollectorScript({
 export const YELP_SEARCH_JS = buildCollectorScript({
   providerId: 'yelp',
   payloadType: 'rating-search',
-  hasDataJs: 'out.candidates.length > 0',
-  initialDelayMs: 0,
+  // Wait for a named candidate: the first anchor for a listing is often an
+  // image with no text, and the name arrives on a later anchor.
+  hasDataJs: 'out.candidates.length > 0 && out.candidates.some(function (c) { return !!c.name; })',
+  initialDelayMs: COLLECTOR_INITIAL_DELAY_MS,
   retryIntervalMs: COLLECTOR_RETRY_INTERVAL_MS,
   maxAttempts: COLLECTOR_MAX_ATTEMPTS,
   collectBodyJs: `    out.candidates = [];
@@ -447,15 +480,28 @@ export const YELP_SEARCH_JS = buildCollectorScript({
       } catch (e) { /* malformed next data — ignore */ }
     }
     if (out.candidates.length === 0) {
+      var byUrl = {};
       var anchors = document.querySelectorAll('a[href*="/biz/"]');
       for (var i = 0; i < anchors.length && out.candidates.length < 20; i++) {
         var href = anchors[i].getAttribute('href') || '';
         var abs;
-        try { abs = new URL(href, location.href).toString(); } catch (e) { continue; }
-        if (seen[abs]) continue;
-        seen[abs] = true;
+        try {
+          var u = new URL(href, location.href);
+          u.search = '';
+          u.hash = '';
+          abs = u.toString();
+        } catch (e) { continue; }
         var text = (anchors[i].textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
-        out.candidates.push({ url: abs, name: text || null, address: null, geo: null });
+        var existing = byUrl[abs];
+        if (existing) {
+          // Yelp renders an image anchor before the named link for a listing.
+          // Fill the name from a later anchor instead of dropping it.
+          if (!existing.name && text) existing.name = text;
+          continue;
+        }
+        var cand = { url: abs, name: text || null, address: null, geo: null };
+        byUrl[abs] = cand;
+        out.candidates.push(cand);
       }
     }`,
 });
@@ -472,6 +518,9 @@ export function extractYelpSearchFromWebViewMessage(data: string): RatingSearchC
 export const yelpProvider: ExternalRatingProvider = {
   id: 'yelp',
   allowedHosts: YELP_ALLOWED_HOSTS,
+  // Yelp's DataDome edge rejects plain app fetches with a 403; the hidden
+  // browser is the only transport that can ever return a listing.
+  supportsPlainFetch: false,
   isProviderUrl: isYelpUrl,
   parseListingUrl: canonicalYelpListingUrl,
   discoverFromWebsiteHtml: discoverYelpFromWebsiteHtml,

@@ -12,6 +12,10 @@ import type { ExternalRatingQuery } from '../../src/services/poi/externalRatings
 
 const TA = providerById('tripadvisor');
 const YELP = providerById('yelp');
+// A test-only fetch-capable view of the Yelp adapter: the real provider is
+// browser-only, but its HTML parser is still exercised through the shared
+// fetch pipeline here.
+const FETCHABLE_YELP = { ...YELP, supportsPlainFetch: true };
 
 const QUERY: ExternalRatingQuery = {
   name: 'Foo Bar',
@@ -64,13 +68,21 @@ describe('fetchAndParseRating', () => {
     mockFetchOnce(
       `<script type="application/ld+json">{"@type":"Restaurant","name":"Foo Bar","aggregateRating":{"ratingValue":"4.5","reviewCount":"321"}}</script>`,
     );
-    const first = await fetchAndParseRating(YELP, 'https://www.yelp.com/biz/foo-bar', QUERY);
+    const first = await fetchAndParseRating(
+      FETCHABLE_YELP,
+      'https://www.yelp.com/biz/foo-bar',
+      QUERY,
+    );
     expect(first?.rating).toBe(4.5);
     expect(first?.reviewCount).toBe(321);
     expect(first?.provider).toBe('yelp');
 
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    const second = await fetchAndParseRating(YELP, 'https://www.yelp.com/biz/foo-bar', QUERY);
+    const second = await fetchAndParseRating(
+      FETCHABLE_YELP,
+      'https://www.yelp.com/biz/foo-bar',
+      QUERY,
+    );
     expect(second).toBe(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -79,35 +91,57 @@ describe('fetchAndParseRating', () => {
     mockFetchOnce(
       `<script type="application/ld+json">{"@type":"Restaurant","name":"Some Other Place","aggregateRating":{"ratingValue":"4.5","reviewCount":"321"}}</script>`,
     );
-    expect(await fetchAndParseRating(YELP, 'https://www.yelp.com/biz/foo-bar', QUERY)).toBeNull();
+    expect(
+      await fetchAndParseRating(FETCHABLE_YELP, 'https://www.yelp.com/biz/foo-bar', QUERY),
+    ).toBeNull();
   });
 });
 
 describe('resolveExternalRatings (fetch-only path)', () => {
   beforeEach(() => clearExternalRatingCache());
 
-  it('collects ratings from providers with a resolvable listing', async () => {
-    (global as unknown as { fetch: jest.Mock }).fetch = jest
-      .fn()
-      .mockImplementation((url: string) => {
-        if (url.includes('foo.com')) {
-          return Promise.resolve({
-            ok: true,
-            text: () => Promise.resolve('<a href="https://www.yelp.com/biz/foo-bar">Yelp</a>'),
-          });
-        }
+  it('skips browser-only providers even when a listing is discoverable', async () => {
+    const fetchMock = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('foo.com')) {
         return Promise.resolve({
           ok: true,
           text: () =>
             Promise.resolve(
-              `<script type="application/ld+json">{"@type":"Restaurant","name":"Foo Bar","aggregateRating":{"ratingValue":"4.2","reviewCount":"100"}}</script>`,
+              '<a href="https://www.tripadvisor.com/Restaurant_Review-g1-d1-Review-Foo-Bar.html">Tripadvisor</a>',
             ),
         });
+      }
+      return Promise.resolve({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            `<script type="application/ld+json">{"@type":"Restaurant","name":"Foo Bar","aggregateRating":{"ratingValue":"4.2","reviewCount":"100"}}</script>`,
+          ),
       });
+    });
+    (global as unknown as { fetch: jest.Mock }).fetch = fetchMock;
 
     const summaries = await resolveExternalRatings({ ...QUERY, website: 'foo.com' });
-    expect(summaries.map((s) => s.provider)).toEqual(['yelp']);
-    expect(summaries[0]?.rating).toBe(4.2);
+    expect(summaries).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'https://www.tripadvisor.com/Restaurant_Review-g1-d1-Review-Foo-Bar.html',
+      expect.anything(),
+    );
+  });
+
+  it('never fetches a browser-only provider', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<a href="https://www.yelp.com/biz/foo-bar">Yelp</a>'),
+    });
+    (global as unknown as { fetch: jest.Mock }).fetch = fetchMock;
+
+    const summaries = await resolveExternalRatings({ ...QUERY, website: 'foo.com' });
+    expect(summaries).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'https://www.yelp.com/biz/foo-bar',
+      expect.anything(),
+    );
   });
 });
 

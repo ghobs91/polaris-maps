@@ -3,12 +3,16 @@ import {
   fetchAndParseRating,
 } from '../../src/services/poi/externalRatings';
 import {
+  COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
+  isHardBlockPage,
 } from '../../src/services/poi/externalRatings/core';
+import { yelpProvider } from '../../src/services/poi/externalRatings/yelpProvider';
 import {
   TRIPADVISOR_RATING_JS,
   TRIPADVISOR_SEARCH_JS,
+  tripadvisorProvider,
 } from '../../src/services/poi/externalRatings/tripadvisorProvider';
 import {
   YELP_RATING_JS,
@@ -32,6 +36,7 @@ function fakeProvider(overrides: Partial<ExternalRatingProvider> = {}): External
   return {
     id: 'tripadvisor',
     allowedHosts: ['tripadvisor.com'],
+    supportsPlainFetch: true,
     isProviderUrl: () => true,
     parseListingUrl: () => LISTING,
     discoverFromWebsiteHtml: () => null,
@@ -65,7 +70,8 @@ describe('collector pacing budget', () => {
   it('posts its verdict before the stage clock unmounts the WebView', () => {
     // STAGE_TIMEOUT_MS in useExternalRatings is 8_000; the collector's last
     // attempt must land inside that window or the stage never hears its verdict.
-    const lastAttemptAt = (COLLECTOR_MAX_ATTEMPTS - 1) * COLLECTOR_RETRY_INTERVAL_MS;
+    const lastAttemptAt =
+      COLLECTOR_INITIAL_DELAY_MS + (COLLECTOR_MAX_ATTEMPTS - 1) * COLLECTOR_RETRY_INTERVAL_MS;
     expect(lastAttemptAt).toBeLessThan(8_000);
     expect(8_000 - lastAttemptAt).toBeGreaterThanOrEqual(1_000);
   });
@@ -79,7 +85,86 @@ describe('collector pacing budget', () => {
     ]) {
       expect(script).toContain(`var ATTEMPTS = ${COLLECTOR_MAX_ATTEMPTS};`);
       expect(script).toContain(`var INTERVAL = ${COLLECTOR_RETRY_INTERVAL_MS};`);
+      expect(script).toContain(`var FIRST_DELAY = ${COLLECTOR_INITIAL_DELAY_MS};`);
     }
+  });
+});
+
+function runTripadvisorCollector(blocks: unknown[]): Array<Record<string, unknown>> {
+  const posted: string[] = [];
+  const scripts = blocks.map((b) => ({ textContent: JSON.stringify(b) }));
+  const fakeDocument = {
+    title: '',
+    body: { innerHTML: '', innerText: '' },
+    querySelectorAll: (selector: string) =>
+      selector === 'script[type="application/ld+json"]' ? scripts : [],
+  };
+  const fakeWindow = { ReactNativeWebView: { postMessage: (s: string) => posted.push(s) } };
+  const run = new Function('window', 'document', 'setTimeout', TRIPADVISOR_RATING_JS) as (
+    w: unknown,
+    d: unknown,
+    s: (cb: () => void) => unknown,
+  ) => void;
+  run(fakeWindow, fakeDocument, (cb) => cb());
+  return posted.map((p) => JSON.parse(p) as Record<string, unknown>);
+}
+
+describe('Tripadvisor listing collector', () => {
+  it('uses the object with aggregateRating when earlier blocks are named', () => {
+    const posted = runTripadvisorCollector([
+      {},
+      { '@type': 'VideoObject', name: "Antonio's Real New York Pizza" },
+      {
+        '@type': 'FoodEstablishment',
+        name: "Antonio's Real New York Pizza",
+        aggregateRating: { ratingValue: '4.5', reviewCount: '1449' },
+        geo: { latitude: 40.37, longitude: -105.52 },
+        address: { streetAddress: '123 W Elkhorn Ave' },
+      },
+      { '@type': 'LocalBusiness', name: 'Top of the World Tour' },
+    ]);
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      ldRating: 4.5,
+      ldCount: 1449,
+      ldName: "Antonio's Real New York Pizza",
+    });
+  });
+});
+
+describe('hard block detection', () => {
+  it('recognizes the terminal Yelp/DataDome block page', () => {
+    expect(
+      isHardBlockPage(
+        '<html><body>You have been blocked. Why? Something about the behaviour of the browser has caught our attention.</body></html>',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not treat a normal listing as blocked', () => {
+    expect(isHardBlockPage('<html><body>4.5 stars · 321 reviews</body></html>')).toBe(false);
+  });
+});
+
+describe('browser-only providers', () => {
+  beforeEach(() => {
+    clearExternalRatingCache();
+    mockFetchHtml();
+  });
+
+  it('never issues a plain fetch to either provider', async () => {
+    const fetchMock = (global as any).fetch as jest.Mock;
+    const yelp = await fetchAndParseRating(yelpProvider, 'https://www.yelp.com/biz/foo-bar', QUERY);
+    const tripadvisor = await fetchAndParseRating(tripadvisorProvider, LISTING, QUERY);
+    expect(yelp).toBeNull();
+    expect(tripadvisor).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('marks both providers browser-only', () => {
+    expect(yelpProvider.supportsPlainFetch).toBe(false);
+    expect(tripadvisorProvider.supportsPlainFetch).toBe(false);
   });
 });
 

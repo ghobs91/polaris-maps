@@ -1,3 +1,5 @@
+import { selectSearchCandidate } from '../../src/services/poi/externalRatings/search';
+import type { RatingSearchCandidate } from '../../src/services/poi/externalRatings/types';
 import {
   buildYelpSearchUrl,
   canonicalYelpListingUrl,
@@ -9,6 +11,8 @@ import {
   parseYelpRatingFromHtml,
   parseYelpSearchResults,
   resolveYelpUrl,
+  YELP_RATING_JS,
+  YELP_SEARCH_JS,
 } from '../../src/services/poi/externalRatings/yelpProvider';
 
 describe('Yelp host allowlist + URL validation', () => {
@@ -93,6 +97,133 @@ describe('parseYelpRatingFromHtml', () => {
   });
 });
 
+function runYelpCollector(
+  blocks: unknown[],
+  options: { title?: string; bodyText?: string; bodyHtml?: string } = {},
+): Array<Record<string, unknown>> {
+  const posted: string[] = [];
+  const scripts = blocks.map((b) => ({ textContent: JSON.stringify(b) }));
+  const fakeDocument = {
+    title: options.title ?? '',
+    body: { innerHTML: options.bodyHtml ?? '', innerText: options.bodyText ?? '' },
+    querySelectorAll: (selector: string) =>
+      selector === 'script[type="application/ld+json"]' ? scripts : [],
+    getElementById: () => null,
+    querySelector: () => null,
+  };
+  const fakeWindow = { ReactNativeWebView: { postMessage: (s: string) => posted.push(s) } };
+  const run = new Function('window', 'document', 'setTimeout', YELP_RATING_JS) as (
+    w: unknown,
+    d: unknown,
+    s: (cb: () => void) => unknown,
+  ) => void;
+  run(fakeWindow, fakeDocument, (cb) => cb());
+  return posted.map((p) => JSON.parse(p) as Record<string, unknown>);
+}
+
+function runYelpSearchCollector(
+  anchors: Array<{ href: string; text: string }>,
+): Array<Record<string, unknown>> {
+  const posted: string[] = [];
+  const fakeAnchors = anchors.map((a) => ({
+    getAttribute: (name: string) => (name === 'href' ? a.href : null),
+    textContent: a.text,
+  }));
+  const fakeDocument = {
+    body: { innerHTML: '', innerText: '' },
+    getElementById: () => null,
+    querySelectorAll: (selector: string) => (selector === 'a[href*="/biz/"]' ? fakeAnchors : []),
+  };
+  const fakeWindow = { ReactNativeWebView: { postMessage: (s: string) => posted.push(s) } };
+  const run = new Function('window', 'document', 'setTimeout', 'location', YELP_SEARCH_JS) as (
+    w: unknown,
+    d: unknown,
+    s: (cb: () => void) => unknown,
+    l: unknown,
+  ) => void;
+  run(fakeWindow, fakeDocument, (cb) => cb(), { href: 'https://www.yelp.com/search' });
+  return posted.map((p) => JSON.parse(p) as Record<string, unknown>);
+}
+
+describe('Yelp search collector', () => {
+  it('fills a listing name from a later anchor for the same business', () => {
+    const posted = runYelpSearchCollector([
+      { href: '/biz/l-industrie-pizzeria-new-york?osq=Pizza', text: '' },
+      { href: '/biz/l-industrie-pizzeria-new-york?osq=Pizza', text: 'L’industrie Pizzeria' },
+    ]);
+
+    expect(posted).toHaveLength(1);
+    expect((posted[0]?.candidates as Array<Record<string, unknown>>)[0]).toMatchObject({
+      url: 'https://www.yelp.com/biz/l-industrie-pizzeria-new-york',
+      name: 'L’industrie Pizzeria',
+    });
+
+    const candidates = posted[0]?.candidates as RatingSearchCandidate[];
+    const chosen = selectSearchCandidate(candidates, {
+      name: 'L’industrie Pizzeria',
+      lat: 40.733,
+      lng: -74.005,
+    });
+    expect(chosen?.url).toBe('https://www.yelp.com/biz/l-industrie-pizzeria-new-york');
+  });
+});
+
+describe('Yelp listing collector', () => {
+  it('attributes a rating to the Restaurant block, not a preceding ItemList', () => {
+    const posted = runYelpCollector([
+      { '@type': 'ItemList', name: 'Business Photos' },
+      { '@type': 'ItemList', name: 'Popular Dishes' },
+      {
+        '@type': 'Restaurant',
+        name: 'L’industrie Pizzeria',
+        address: { streetAddress: '104 Christopher St' },
+        geo: { latitude: 40.733, longitude: -74.005 },
+        aggregateRating: { ratingValue: '4.5', reviewCount: '1242' },
+      },
+    ]);
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({
+      ldRating: 4.5,
+      ldCount: 1242,
+      ldName: 'L’industrie Pizzeria',
+    });
+  });
+
+  it('reads the exact count from the title when the page only abbreviates it', () => {
+    const posted = runYelpCollector(
+      [
+        {
+          '@type': 'Restaurant',
+          name: 'L’industrie Pizzeria',
+          aggregateRating: { ratingValue: '4.5' },
+        },
+      ],
+      {
+        title: 'L’INDUSTRIE PIZZERIA - Updated October 2026 - 1,241 Reviews - Yelp',
+        bodyText: '4.5 (1.2k reviews) Popular Dishes 90 Reviews',
+      },
+    );
+
+    expect(posted[0]).toMatchObject({ ldRating: 4.5, ldCount: 1241 });
+  });
+
+  it('does not take a dish review count from the page body', () => {
+    const posted = runYelpCollector(
+      [
+        {
+          '@type': 'Restaurant',
+          name: 'L’industrie Pizzeria',
+          aggregateRating: { ratingValue: '4.5' },
+        },
+      ],
+      { bodyText: 'Popular Dishes 90 Reviews' },
+    );
+
+    expect(posted[0]?.ldCount).toBeNull();
+  });
+});
+
 describe('parseYelpSearchResults', () => {
   it('reads structured businesses from __NEXT_DATA__', () => {
     const html = `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"searchResults":[{"business":{"alias":"foo-bar","name":"Foo Bar","coordinates":{"latitude":40.75,"longitude":-73.99},"location":{"address1":"123 Main St","city":"New York","state":"NY"}}}]}}}</script>`;
@@ -110,6 +241,22 @@ describe('parseYelpSearchResults', () => {
       {
         url: 'https://www.yelp.com/biz/foo-bar-cafe',
         name: 'Foo Bar Cafe',
+        address: null,
+        geo: null,
+      },
+    ]);
+  });
+
+  it('fills a name from a later anchor when the first is an image link', () => {
+    const html = [
+      '<a href="/biz/foo-bar?osq=Pizza"><img src="x.jpg"></a>',
+      '<a href="/biz/foo-bar?osq=Pizza">Foo Bar</a>',
+    ].join('');
+    const candidates = parseYelpSearchResults(html, 'https://www.yelp.com/search');
+    expect(candidates).toEqual([
+      {
+        url: 'https://www.yelp.com/biz/foo-bar',
+        name: 'Foo Bar',
         address: null,
         geo: null,
       },

@@ -13,12 +13,12 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 });
 
 import {
-  FETCH_PHASE_TIMEOUT_MS,
   PROVIDER_BUDGET_MS,
   STAGE_TIMEOUT_MS,
   useExternalRatings,
 } from '../../src/hooks/useExternalRatings';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
+import { clearListingCache } from '../../src/services/poi/externalRatings/listingCache';
 import {
   clearSessionPlaceRatings,
   isExternalRatingMiss,
@@ -68,15 +68,6 @@ const SEARCH_PAYLOAD = JSON.stringify({
   candidates: [{ url: TA_LISTING, name: 'Foo Bar', address: null, geo: null }],
 });
 
-const FETCHED_SUMMARY = {
-  provider: 'tripadvisor' as const,
-  listingUrl: TA_LISTING,
-  listingName: 'Foo Bar',
-  rating: 4.5,
-  reviewCount: 98,
-  observedAt: 1_700_000_000_000,
-};
-
 const missKey = (provider: 'tripadvisor' | 'yelp') => `${provider}:${placeRatingKey(QUERY)}`;
 
 async function flush(): Promise<void> {
@@ -89,7 +80,12 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     browseScheduler.reset();
+    // These tests exercise the controller state machine, not wall-clock pacing
+    // (the scheduler's own unit tests cover intervals and budgets).
+    jest.spyOn(browseScheduler, 'acquirePageLoad').mockResolvedValue({ ok: true });
+    jest.spyOn(browseScheduler, 'schedule').mockImplementation((_host, task) => task());
     clearSessionPlaceRatings();
+    clearListingCache();
     mockResolveKnownListing.mockReset();
     mockFetchAndParseRating.mockReset();
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
@@ -129,6 +125,87 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     const yelp = result.current.states.find((s) => s.provider === 'yelp');
     expect(yelp?.status).toBe('loaded');
     expect(yelp?.summary?.rating).toBe(4.2);
+  });
+
+  it('never issues a plain fetch for either browser-only provider', async () => {
+    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
+
+    await act(async () => {
+      await flush();
+    });
+
+    // Yelp reaches a known listing, TripAdvisor a search stage — neither may
+    // touch the fetch path.
+    expect(result.current.states.find((s) => s.provider === 'yelp')?.webView?.uri).toBe(
+      YELP_LISTING,
+    );
+    expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.webView?.stage).toBe(
+      'search',
+    );
+    expect(mockFetchAndParseRating).not.toHaveBeenCalled();
+  });
+
+  it('pauses a hard-blocked host and does not memoize it as a place verdict', async () => {
+    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
+
+    await act(async () => {
+      await flush();
+    });
+
+    act(() => {
+      result.current.handleMessage(
+        'yelp',
+        JSON.stringify({
+          type: 'external-rating',
+          provider: 'yelp',
+          ldRating: null,
+          ldCount: null,
+          ldName: null,
+          ldAddress: null,
+          geo: null,
+          automation: [],
+          challenge: false,
+          blocked: true,
+        }),
+      );
+    });
+
+    const yelp = result.current.states.find((s) => s.provider === 'yelp');
+    expect(yelp?.status).toBe('blocked');
+    expect(yelp?.blockReason).toBe('blocked');
+    expect(yelp?.blockedUntil).toBeGreaterThan(Date.now());
+    expect(browseScheduler.blockedRemainingMs('www.yelp.com')).toBeGreaterThan(0);
+    expect(isExternalRatingMiss(missKey('yelp'))).toBe(false);
+  });
+
+  it('pauses the host when the search page itself is blocked', async () => {
+    mockResolveKnownListing.mockResolvedValue(null);
+
+    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
+
+    await act(async () => {
+      await flush();
+    });
+
+    const active = result.current.states.find((s) => s.webView);
+    expect(active?.webView?.stage).toBe('search');
+
+    act(() => {
+      result.current.handleMessage(
+        active!.provider,
+        JSON.stringify({
+          type: 'rating-search',
+          provider: active!.provider,
+          candidates: [],
+          blocked: true,
+          challenge: false,
+        }),
+      );
+    });
+
+    const blocked = result.current.states.find((s) => s.provider === active!.provider);
+    expect(blocked?.status).toBe('blocked');
+    expect(blocked?.blockReason).toBe('blocked');
   });
 
   it('starts a queued provider stage clock only once its WebView mounts', async () => {
@@ -215,9 +292,8 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     expect(yelp?.summary?.rating).toBe(4.2);
   });
 
-  it('resolves a search-found listing with a plain fetch, not a second WebView stage', async () => {
+  it('resolves a search-selected listing in the WebView without a plain fetch', async () => {
     mockResolveKnownListing.mockResolvedValue(null);
-    mockFetchAndParseRating.mockResolvedValue(FETCHED_SUMMARY);
 
     const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
 
@@ -225,36 +301,7 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
       await flush();
     });
 
-    // The search stage reports one candidate.
-    act(() => {
-      result.current.handleMessage('tripadvisor', SEARCH_PAYLOAD);
-    });
-    await act(async () => {
-      await flush();
-    });
-
-    const tripadvisor = result.current.states.find((s) => s.provider === 'tripadvisor');
-    expect(tripadvisor?.status).toBe('loaded');
-    expect(tripadvisor?.summary?.rating).toBe(4.5);
-    expect(tripadvisor?.webView).toBeNull();
-    expect(mockFetchAndParseRating).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'tripadvisor' }),
-      TA_LISTING,
-      QUERY,
-      { confirmIdentity: true },
-    );
-  });
-
-  it('falls back to the WebView listing stage when the search listing fetch is blocked', async () => {
-    mockResolveKnownListing.mockResolvedValue(null);
-    mockFetchAndParseRating.mockResolvedValue(null);
-
-    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
-
-    await act(async () => {
-      await flush();
-    });
-
+    // The TripAdvisor search stage reports one candidate.
     act(() => {
       result.current.handleMessage('tripadvisor', SEARCH_PAYLOAD);
     });
@@ -265,33 +312,7 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     const tripadvisor = result.current.states.find((s) => s.provider === 'tripadvisor');
     expect(tripadvisor?.webView?.stage).toBe('listing');
     expect(tripadvisor?.webView?.uri).toBe(TA_LISTING);
-  });
-
-  it('bounds a stalled fetch phase so a fetch-only pipeline still settles', async () => {
-    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
-      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING : null),
-    );
-    // A fetch that never settles — the phase bound must break the deadlock.
-    mockFetchAndParseRating.mockReturnValue(new Promise(() => {}));
-
-    const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
-
-    await act(async () => {
-      await flush();
-    });
-
-    expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.webView).toBeNull();
-
-    act(() => {
-      jest.advanceTimersByTime(FETCH_PHASE_TIMEOUT_MS + 1_000);
-    });
-    await act(async () => {
-      await flush();
-    });
-
-    expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.webView?.stage).toBe(
-      'listing',
-    );
+    expect(mockFetchAndParseRating).not.toHaveBeenCalled();
   });
 
   it('keeps a timed-out provider retryable instead of memoizing a miss', async () => {
@@ -315,8 +336,6 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING : null),
     );
-    // Force the WebView listing stage: the plain fetch yields nothing.
-    mockFetchAndParseRating.mockResolvedValue(null);
 
     const { result } = renderHook(() => useExternalRatings(QUERY, 'place-1'));
 
