@@ -62,16 +62,19 @@ non-web schemes (`data:`, `blob:`, `file:`) MUST never be loaded.
 
 ### Requirement: Genuine on-device browser context
 
-Headless browsing SHALL use the genuine platform WebView with the native mobile user
-agent and a persistent, non-incognito cookie store, so that normal provider session or
-clearance cookies persist as they would in a user's browser. A user agent or browser
-fingerprint SHALL NOT be spoofed.
+Headless browsing SHALL use the genuine platform WebView with the app's fixed mobile
+Safari user agent and a persistent, non-incognito cookie store, so that normal provider
+session or clearance cookies persist as they would in a user's browser. The user agent
+MUST remain a real mobile Safari string on every platform (including an iPad app running
+on macOS, whose WebKit default is a desktop UA); no desktop user agent and no other
+browser fingerprint SHALL be spoofed.
 
 #### Scenario: Native context used
 
 - **WHEN** a provider page is loaded
-- **THEN** the WebView uses the platform's native user agent and a persistent cookie store
-- **AND** no desktop user agent or fingerprint override is applied
+- **THEN** the WebView uses the app's mobile Safari user agent and a persistent cookie store
+- **AND** plain provider fetches send the same user agent
+- **AND** no desktop user agent or non-UA fingerprint override is applied
 
 ### Requirement: Paced, serialized browsing
 
@@ -137,4 +140,4 @@ walls, or harvest listings in bulk.
 #### Scenario: No fingerprint spoofing or auth bypass
 
 - **WHEN** a page is loaded
-- **THEN** no fingerprint override is applied and no login or auth wall is bypassed
+- **THEN** no non-UA fingerprint override is applied and no login or auth wall is bypassed

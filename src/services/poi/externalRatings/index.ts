@@ -155,7 +155,7 @@ export async function resolveExternalRatings(
   return results.filter((s): s is ExternalRatingSummary => s !== null);
 }
 
-export { clearExternalRatingCache } from './core';
+export { clearExternalRatingCache, EXTERNAL_RATINGS_USER_AGENT } from './core';
 export { combineExternalRatings, type CombinedRating } from './combine';
 export {
   candidatesFromSearchHtml,

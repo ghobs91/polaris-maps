@@ -35,10 +35,11 @@ Style changes cannot fix this. Showing buildings at navigation zoom the way Goog
 ### External ratings (TripAdvisor + Yelp)
 
 `ExternalRatingsSection.tsx` renders one independent row per provider from
-`useExternalRatings`. Hidden WebViews are serialized (one at a time), use the
-native user agent with a persistent (non-incognito) cookie store, and are
-time-boxed; a provider that fails or is challenged renders nothing. No review
-text is fetched or displayed, and nothing is persisted.
+`useExternalRatings`. Hidden WebViews are serialized (one at a time), use a fixed
+mobile Safari user agent (so macOS WebKit is served the mobile provider pages)
+with a persistent (non-incognito) cookie store, and are time-boxed; a provider
+that fails or is challenged renders nothing. No review text is fetched or
+displayed, and nothing is persisted.
 
 ## POI Rendering Pipeline
 

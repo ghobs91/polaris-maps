@@ -50,6 +50,7 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 
 import { ExternalRatingsSection } from '../../src/components/map/ExternalRatingsSection';
 import { GEOLOCATION_GUARD_JS } from '../../src/constants/webViewScripts';
+import { EXTERNAL_RATINGS_USER_AGENT } from '../../src/services/poi/externalRatings';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
 import { clearListingCache } from '../../src/services/poi/externalRatings/listingCache';
 import { clearSessionPlaceRatings } from '../../src/services/places/placeRatingSessionCache';
@@ -108,6 +109,7 @@ describe('ExternalRatingsSection', () => {
     const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
 
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    expect(webViewProps().userAgent).toBe(EXTERNAL_RATINGS_USER_AGENT);
     expect(typeof webViewProps().injectedJavaScript).toBe('string');
     expect(mockFetchAndParseRating).not.toHaveBeenCalled();
 

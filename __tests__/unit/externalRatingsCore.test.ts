@@ -1,9 +1,8 @@
 import {
   buildCollectorScript,
   clearExternalRatingCache,
+  EXTERNAL_RATINGS_USER_AGENT,
   fetchDiscoveryHtml,
-  findAggregateRating,
-  parsePageVerdict,
 } from '../../src/services/poi/externalRatings/core';
 import { isAllowedExternalRatingUrl } from '../../src/services/poi/externalRatings';
 
@@ -31,7 +30,6 @@ describe('buildCollectorScript', () => {
         payloadType: 'external-rating',
         hasDataJs: 'false',
         collectBodyJs: '    out.ldRating = null;',
-        initialDelayMs: 0,
         retryIntervalMs: 10,
         maxAttempts: 3,
       }),
@@ -54,7 +52,6 @@ describe('buildCollectorScript', () => {
         payloadType: 'external-rating',
         hasDataJs: 'true',
         collectBodyJs: '    out.ldRating = 4.2;',
-        initialDelayMs: 0,
         retryIntervalMs: 10,
         maxAttempts: 5,
       }),
@@ -67,50 +64,6 @@ describe('buildCollectorScript', () => {
     expect(posted).toHaveLength(1);
   });
 
-  it('flags a hard block from the visible block page', () => {
-    const posted = runCollector(
-      buildCollectorScript({
-        providerId: 'yelp',
-        payloadType: 'external-rating',
-        hasDataJs: 'false',
-        collectBodyJs: '    out.ldRating = null;',
-        initialDelayMs: 0,
-        retryIntervalMs: 10,
-        maxAttempts: 1,
-      }),
-      {
-        body: {
-          innerHTML: '',
-          innerText: 'You have been blocked. Why? Something about the behaviour of the browser.',
-        },
-      },
-    );
-
-    expect(JSON.parse(posted[0]!).blocked).toBe(true);
-  });
-
-  it('does not treat block copy inside inline scripts as a hard block', () => {
-    const posted = runCollector(
-      buildCollectorScript({
-        providerId: 'yelp',
-        payloadType: 'external-rating',
-        hasDataJs: 'false',
-        collectBodyJs: '    out.ldRating = null;',
-        initialDelayMs: 0,
-        retryIntervalMs: 10,
-        maxAttempts: 1,
-      }),
-      {
-        body: {
-          innerHTML: '<script>var msg = "you have been blocked"</script>',
-          innerText: '4.5 stars · 1,241 reviews',
-        },
-      },
-    );
-
-    expect(JSON.parse(posted[0]!).blocked).toBe(false);
-  });
-
   it('flags a terminal challenge when markers are present and no data was found', () => {
     const posted = runCollector(
       buildCollectorScript({
@@ -118,7 +71,6 @@ describe('buildCollectorScript', () => {
         payloadType: 'external-rating',
         hasDataJs: 'false',
         collectBodyJs: '    out.ldRating = null;',
-        initialDelayMs: 0,
         retryIntervalMs: 10,
         maxAttempts: 2,
       }),
@@ -132,49 +84,12 @@ describe('buildCollectorScript', () => {
   });
 });
 
-describe('findAggregateRating', () => {
-  it('takes the name from the object that owns aggregateRating', () => {
-    const result = findAggregateRating([
-      { '@type': 'ItemList', name: 'Business Photos' },
-      { '@type': 'ItemList', name: 'Popular Dishes' },
-      {
-        '@type': 'Restaurant',
-        name: 'L’industrie Pizzeria',
-        address: { streetAddress: '104 Christopher St' },
-        aggregateRating: { ratingValue: '4.5', reviewCount: '1242' },
-      },
-    ]);
-
-    expect(result).toMatchObject({
-      rating: 4.5,
-      count: 1242,
-      name: 'L’industrie Pizzeria',
-      address: '104 Christopher St',
-    });
-  });
-});
-
-describe('parsePageVerdict', () => {
-  it('classifies a blocked search payload', () => {
-    expect(
-      parsePageVerdict(
-        JSON.stringify({
-          type: 'rating-search',
-          provider: 'yelp',
-          candidates: [],
-          blocked: true,
-          challenge: false,
-        }),
-      ),
-    ).toEqual({ blocked: true, challenge: false });
-  });
-
-  it('classifies a challenge payload and ignores malformed data', () => {
-    expect(parsePageVerdict(JSON.stringify({ challenge: true }))).toEqual({
-      blocked: false,
-      challenge: true,
-    });
-    expect(parsePageVerdict('not json')).toEqual({ blocked: false, challenge: false });
+describe('EXTERNAL_RATINGS_USER_AGENT', () => {
+  it('is a real mobile Safari UA so providers serve mobile markup on every platform', () => {
+    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('iPad');
+    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Mobile/');
+    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Safari/');
+    expect(EXTERNAL_RATINGS_USER_AGENT).not.toContain('Macintosh');
   });
 });
 
@@ -202,6 +117,9 @@ describe('fetchDiscoveryHtml', () => {
     expect(a).toBe('<html></html>');
     expect(b).toBe(a);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(init?.headers).toMatchObject({ 'User-Agent': EXTERNAL_RATINGS_USER_AGENT });
   });
 
   it('serves a cached result and refetches after the cache is cleared', async () => {

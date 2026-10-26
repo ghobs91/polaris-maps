@@ -138,10 +138,10 @@ as a fetch-path optimization before falling back to the WebView.
 
 **Allowed (the reasonable tier):**
 
-- Genuine, non-incognito WebView with the **native mobile user agent** (no spoofing —
-  a desktop UA on iOS WebKit is itself anomalous) and a **persistent cookie store**
-  (`sharedCookiesEnabled`) so Datadome/Cloudflare clearance cookies accumulate like a
-  real browser.
+- Genuine, non-incognito WebView with a **fixed mobile Safari user agent** (the same UA
+  the app already presents on iOS; on macOS this avoids WebKit's desktop UA being served
+  a provider block) and a **persistent cookie store** (`sharedCookiesEnabled`) so
+  Datadome/Cloudflare clearance cookies accumulate like a real browser.
 - **One hidden WebView at a time**, single-flight per host, a minimum interval between
   requests to the same host (target 3–8 s) with random jitter.
 - Load → settle → small incremental scroll → dwell before collecting, so lazy rating
@@ -154,6 +154,9 @@ as a fetch-path optimization before falling back to the WebView.
 **Prohibited (outside the tier):** CAPTCHA solving, proxy/IP rotation, TLS/JA3 or
 canvas/WebGL fingerprint spoofing, forging `navigator.webdriver`/permissions, login or
 auth-wall bypass, and bulk harvesting.
+
+**Note:** the fixed mobile Safari user agent is the one browser-facing override this
+policy allows; the remaining identifiers stay genuine.
 
 **Rationale:** A real device WebView passes most checks because IP, TLS, and browser
 fingerprint are genuine; the residual failures are best handled by pacing and backing
