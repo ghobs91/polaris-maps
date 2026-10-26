@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="understarGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#62E7F0"/>
+      <stop offset="0.48" stop-color="#168BD9"/>
+      <stop offset="1" stop-color="#245BEA"/>
+    </linearGradient>
+  </defs>
+  <!-- Smaller diagonal compass star. Place behind 04_compass_star.svg.
+       The 45-degree rotation lets its points peek through the main star's valleys. -->
+  <g transform="translate(512 512) rotate(45) scale(0.69) translate(-512 -512)">
+    <path
+      d="M512 235
+         C542 235 554 354 592 402
+         C630 450 750 462 788 492
+         C810 510 810 514 788 532
+         C750 562 630 574 592 622
+         C554 670 542 789 512 789
+         C482 789 470 670 432 622
+         C394 574 274 562 236 532
+         C214 514 214 510 236 492
+         C274 462 394 450 432 402
+         C470 354 482 235 512 235Z"
+      fill="url(#understarGradient)"
+      stroke="#8CF7F5"
+      stroke-opacity="0.62"
+      stroke-width="8"
+      stroke-linejoin="round"/>
+  </g>
+</svg>

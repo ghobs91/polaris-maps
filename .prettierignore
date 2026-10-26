@@ -5,6 +5,8 @@ ios/
 android/
 coverage/
 .expo/
+# Icon Composer documents: written by Icon Composer with its own formatting
+assets/*.icon/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml

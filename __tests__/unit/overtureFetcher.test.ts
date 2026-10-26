@@ -14,6 +14,7 @@ import {
   mapOvertureCategory,
   resetOverturePmtilesStateForTests,
   extractYelpListingUrl,
+  selectTilesForBounds,
 } from '../../src/services/poi/overtureFetcher';
 import { placeToOsmPoi } from '../../src/utils/placeToOsmPoi';
 import type { OverturePlace } from '../../src/types/overture';
@@ -21,6 +22,7 @@ import { PMTiles } from 'pmtiles';
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
 import { getDatabase } from '../../src/services/database/init';
+import { cacheGet, cacheSet, clearSearchCache } from '../../src/services/search/searchCache';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -58,6 +60,7 @@ beforeEach(() => {
   // Pin the archive URL so fetchOverturePlaces doesn't hit the STAC catalog.
   process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL = 'https://overture.test/places.pmtiles';
   resetOverturePmtilesStateForTests();
+  clearSearchCache();
   jest.clearAllMocks();
 
   const txn: { runAsync: jest.Mock; getAllAsync: jest.Mock } = {
@@ -320,6 +323,89 @@ describe('fetchOverturePlaces', () => {
     } finally {
       (global as { fetch?: unknown }).fetch = originalFetch;
     }
+  });
+
+  it('caps PMTiles requests for a wide search box', async () => {
+    const mockGetZxy = jest.fn().mockResolvedValue({ data: new Uint8Array([1]) });
+    (PMTiles as jest.Mock).mockImplementation(() => ({
+      getHeader: jest.fn().mockResolvedValue({ maxZoom: 14 }),
+      getZxy: mockGetZxy,
+    }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+    (VectorTile as jest.Mock).mockImplementation(() => ({ layers: {} }));
+
+    // ~18 km box: 60+ z14 tiles before the cap.
+    await fetchOverturePlaces(40.64, -73.5, 40.8, -73.34, 50);
+
+    expect(mockGetZxy.mock.calls.length).toBeLessThanOrEqual(16);
+    expect(mockGetZxy.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('does not invalidate overlapping search-cache entries on the search path', async () => {
+    const mockGetZxy = jest.fn().mockResolvedValue({ data: new Uint8Array([1]) });
+    (PMTiles as jest.Mock).mockImplementation(() => ({
+      getHeader: jest.fn().mockResolvedValue({ maxZoom: 14 }),
+      getZxy: mockGetZxy,
+    }));
+    (Pbf as jest.Mock).mockImplementation(() => ({}));
+    const geojsonFeature = {
+      type: 'Feature',
+      id: 123,
+      geometry: { type: 'Point', coordinates: [-73.52854832, 40.72402722] },
+      properties: {
+        id: 'f4a35e34-75f4-45d2-9ac3-033d50242880',
+        names: '{"primary":"Calda Pizzeria"}',
+        categories: '{"primary":"pizza_restaurant"}',
+        confidence: 0.98,
+      },
+    };
+    (VectorTile as jest.Mock).mockImplementation(() => ({
+      layers: {
+        place: {
+          length: 1,
+          feature: jest.fn(() => ({ toGeoJSON: jest.fn(() => geojsonFeature) })),
+        },
+      },
+    }));
+
+    const bounds = { south: 40.7239, north: 40.7243, west: -73.5287, east: -73.5282 };
+    cacheSet('photon|michaels', [{ name: 'Michaels' }], { bounds });
+
+    const places = await fetchOverturePlaces(
+      bounds.south,
+      bounds.west,
+      bounds.north,
+      bounds.east,
+      50,
+    );
+
+    expect(places).toHaveLength(1);
+    expect(cacheGet('photon|michaels')).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectTilesForBounds
+// ---------------------------------------------------------------------------
+
+describe('selectTilesForBounds', () => {
+  it('requests every tile when the box fits under the cap', () => {
+    const { zoom, tiles } = selectTilesForBounds(40.7239, -73.5287, 40.7243, -73.5282, 14, 16);
+    expect(zoom).toBe(14);
+    expect(tiles.length).toBeLessThanOrEqual(16);
+    expect(tiles.length).toBeGreaterThan(0);
+  });
+
+  it('caps a wide box to the tiles nearest its centre', () => {
+    const { zoom, tiles } = selectTilesForBounds(40.64, -73.5, 40.8, -73.34, 14, 16);
+
+    expect(zoom).toBe(14);
+    expect(tiles).toHaveLength(16);
+    // 0.16° ≈ 7 z14 tiles across; a centre-first subset must stay near 40.72/-73.42.
+    const centerX = Math.floor(((-73.42 + 180) / 360) * Math.pow(2, 14));
+    const xs = tiles.map((tile) => tile.x);
+    expect(Math.min(...xs)).toBeLessThanOrEqual(centerX);
+    expect(Math.max(...xs)).toBeGreaterThanOrEqual(centerX);
   });
 });
 

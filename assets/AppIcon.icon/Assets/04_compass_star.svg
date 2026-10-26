@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><linearGradient id="star" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9FFFF0"/><stop offset=".43" stop-color="#24D8EF"/><stop offset="1" stop-color="#0874FF"/></linearGradient><linearGradient id="left" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B7FFF5"/><stop offset="1" stop-color="#28BFEA"/></linearGradient></defs>
+<path d="M512 235 C542 235 554 354 592 402 C630 450 750 462 788 492 C810 510 810 514 788 532 C750 562 630 574 592 622 C554 670 542 789 512 789 C482 789 470 670 432 622 C394 574 274 562 236 532 C214 514 214 510 236 492 C274 462 394 450 432 402 C470 354 482 235 512 235Z" fill="url(#star)" stroke="#83FFF2" stroke-opacity=".55" stroke-width="5" stroke-linejoin="round"/>
+<path d="M512 235 C542 235 554 354 592 402 C630 450 750 462 788 492 C810 510 810 514 788 532 L512 512Z" fill="#35AFFF" opacity=".32"/>
+<path d="M512 235 L512 512 L236 492 C274 462 394 450 432 402 C470 354 482 235 512 235Z" fill="url(#left)" opacity=".56"/>
+<path d="M512 512 L788 532 C750 562 630 574 592 622 C554 670 542 789 512 789Z" fill="#0565E9" opacity=".52"/>
+</svg>

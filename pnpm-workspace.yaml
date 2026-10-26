@@ -7,6 +7,5 @@ allowBuilds:
 
 patchedDependencies:
   '@maplibre/maplibre-react-native': patches/@maplibre__maplibre-react-native.patch
-  expo-modules-jsi@57.0.4: patches/expo-modules-jsi@57.0.4.patch
   react-native-bare-kit@0.13.3: patches/react-native-bare-kit@0.13.3.patch
   react-native-webview@13.16.1: patches/react-native-webview@13.16.1.patch

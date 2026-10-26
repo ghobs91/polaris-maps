@@ -86,6 +86,11 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
   let localController: AbortController | null = null;
   let lastQuery = '';
   let disposed = false;
+  /** Most recent results emitted for a generation, used to terminate cleanly. */
+  let lastEmitted: { generation: number; results: UnifiedSearchResult[] } = {
+    generation: -1,
+    results: [],
+  };
 
   function clearDebounce(): void {
     if (debounceTimer !== null) {
@@ -127,6 +132,7 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
         localOnly: true,
       });
       if (gen !== generation || disposed) return;
+      lastEmitted = { generation: gen, results };
       onResults(results, { query, source: 'local', final: false });
     } catch (err) {
       if (!isAbortError(err) && gen === generation && !disposed) onError?.(err);
@@ -143,6 +149,7 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
         query,
         buildOptions(controller.signal, (partial, meta) => {
           if (gen !== generation || disposed || meta.final) return;
+          lastEmitted = { generation: gen, results: partial };
           onResults(partial, {
             query,
             source: meta.stage === 'local' ? 'local' : 'full',
@@ -151,10 +158,18 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
         }),
       );
       if (gen !== generation || disposed) return [];
+      lastEmitted = { generation: gen, results };
       onResults(results, { query, source: 'full', final: true });
       return results;
     } catch (err) {
-      if (!isAbortError(err) && gen === generation && !disposed) onError?.(err);
+      if (!isAbortError(err) && gen === generation && !disposed) {
+        onError?.(err);
+        // A failed search must still terminate: without a final emission the
+        // consumer keeps its loading state (and spinner) forever. Keep the best
+        // results already shown for this query instead of blanking the list.
+        const fallback = lastEmitted.generation === gen ? lastEmitted.results : [];
+        onResults(fallback, { query, source: 'full', final: true });
+      }
       return [];
     } finally {
       if (networkController === controller) networkController = null;

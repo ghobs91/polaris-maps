@@ -1,0 +1,107 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.00000,0.00000,0.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "06_marker_top_left.svg",
+          "name" : "06_marker_top_left",
+          "opacity-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : 1
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -76,
+              -76
+            ]
+          }
+        },
+        {
+          "image-name" : "07_marker_top_right.svg",
+          "name" : "07_marker_top_right",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              76,
+              -76
+            ]
+          }
+        },
+        {
+          "image-name" : "08_marker_bottom_left.svg",
+          "name" : "08_marker_bottom_left",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -89.4765625,
+              66.890625
+            ]
+          }
+        },
+        {
+          "image-name" : "09_marker_bottom_right.svg",
+          "name" : "09_marker_bottom_right",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              110.5,
+              57.421875
+            ]
+          }
+        },
+        {
+          "image-name" : "04_compass_star.svg",
+          "name" : "04_compass_star",
+          "opacity-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : 1
+            }
+          ]
+        },
+        {
+          "image-name" : "04b_compass_understar.svg",
+          "name" : "04b_compass_understar",
+          "position" : {
+            "scale" : 1.15,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "image-name" : "03_compass_ring.svg",
+          "name" : "03_compass_ring",
+          "position" : {
+            "scale" : 1.1800000000000002,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

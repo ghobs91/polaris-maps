@@ -595,7 +595,15 @@ export async function unifiedSearch(
         );
 
   // Source 4 (full): Address geocoding (local FTS + Nominatim)
-  const isAddressPass = addressQuery || (parsed.isNameSearch && !parsed.categories);
+  //
+  // The local structured/trigram pass already runs for name searches. The
+  // network fallback is only worth its cost (Nominatim is throttled to 1 req/s
+  // and can take up to 8 s) when the text actually looks like an address:
+  // a street-address heuristic, a house number, or a comma-separated address.
+  // Photon, Overpass and Overture already cover plain place-name queries.
+  const looksLikeAddress = addressQuery || /\d/.test(query) || query.includes(',');
+  const isAddressPass =
+    addressQuery || (parsed.isNameSearch && !parsed.categories && looksLikeAddress);
   const addressQueryText = addressQuery ? parsed.originalQuery : parsed.coreQuery;
   const addressPromise: Promise<GeocodingResult[]> = (() => {
     if (!isAddressPass) return Promise.resolve([] as GeocodingResult[]);

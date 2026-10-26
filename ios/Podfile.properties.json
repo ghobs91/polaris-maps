@@ -1,5 +1,6 @@
 {
   "expo.jsEngine": "hermes",
+  "EXPO_USE_PRECOMPILED_MODULES": "false",
   "EX_DEV_CLIENT_NETWORK_INSPECTOR": "true",
   "expo.inlineModules.watchedDirectories": "[]",
   "expo.inlineModules.xcodeProjectTargets": "{\"mainTarget\":\"PolarisMaps\",\"targets\":[]}",
