@@ -66,8 +66,6 @@ jest.mock('../../src/stores/settingsStore', () => ({
         wifiOnly: true,
         autoUpload: false,
         maxStorageBytes: 2 * 1024 * 1024 * 1024,
-        panoramaxInstanceUrl: null,
-        panoramaxUsername: null,
         mapillaryUsername: null,
       },
       dashCam: {

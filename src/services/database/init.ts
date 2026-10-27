@@ -257,8 +257,8 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_imagery_geohash ON street_imagery (geohash8, bearing);
     CREATE INDEX IF NOT EXISTS idx_imagery_author ON street_imagery (author_pubkey);
 
-    -- Street-imagery contribution queue (Mapillary / Panoramax). Separate from
-    -- the P2P street_imagery table above; these rows are external uploads.
+    -- Street-imagery contribution queue (Mapillary). Separate from the P2P
+    -- street_imagery table above; these rows are external uploads.
     CREATE TABLE IF NOT EXISTS streetview_drives (
       id TEXT PRIMARY KEY,
       started_at INTEGER NOT NULL,
@@ -287,9 +287,6 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       bytes INTEGER NOT NULL DEFAULT 0,
       image_hash TEXT,
       blurred INTEGER NOT NULL DEFAULT 0,
-      panoramax_status TEXT NOT NULL DEFAULT 'pending',
-      panoramax_instance TEXT,
-      panoramax_picture_id TEXT,
       mapillary_status TEXT NOT NULL DEFAULT 'pending',
       mapillary_file_handle TEXT,
       mapillary_image_id TEXT,
@@ -298,8 +295,6 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     );
     CREATE INDEX IF NOT EXISTS idx_streetview_captures_drive
       ON streetview_captures (drive_id, captured_at);
-    CREATE INDEX IF NOT EXISTS idx_streetview_captures_panoramax
-      ON streetview_captures (drive_id, panoramax_status);
 
     CREATE TABLE IF NOT EXISTS streetview_uploads (
       id TEXT PRIMARY KEY,

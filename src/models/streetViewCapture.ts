@@ -12,7 +12,7 @@ export type StreetViewDriveStatus =
 /** Delivery state for one platform on one capture. */
 export type StreetViewTargetStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'skipped';
 
-export type StreetViewUploadTarget = 'panoramax' | 'mapillary';
+export type StreetViewUploadTarget = 'mapillary';
 
 export interface StreetViewDrive {
   id: string;
@@ -41,9 +41,6 @@ export interface StreetViewCapture {
   bytes: number;
   imageHash: string | null;
   blurred: boolean;
-  panoramaxStatus: StreetViewTargetStatus;
-  panoramaxInstance: string | null;
-  panoramaxPictureId: string | null;
   mapillaryStatus: StreetViewTargetStatus;
   mapillaryFileHandle: string | null;
   mapillaryImageId: string | null;

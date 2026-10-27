@@ -39,9 +39,6 @@ interface CaptureRow {
   bytes: number;
   image_hash: string | null;
   blurred: number;
-  panoramax_status: StreetViewTargetStatus;
-  panoramax_instance: string | null;
-  panoramax_picture_id: string | null;
   mapillary_status: StreetViewTargetStatus;
   mapillary_file_handle: string | null;
   mapillary_image_id: string | null;
@@ -96,9 +93,6 @@ function captureFromRow(row: CaptureRow): StreetViewCapture {
     bytes: row.bytes,
     imageHash: row.image_hash,
     blurred: row.blurred === 1,
-    panoramaxStatus: row.panoramax_status,
-    panoramaxInstance: row.panoramax_instance,
-    panoramaxPictureId: row.panoramax_picture_id,
     mapillaryStatus: row.mapillary_status,
     mapillaryFileHandle: row.mapillary_file_handle,
     mapillaryImageId: row.mapillary_image_id,
@@ -211,10 +205,9 @@ export async function insertCapture(input: InsertCaptureInput): Promise<StreetVi
     `INSERT INTO streetview_captures (
        id, drive_id, local_uri, lat, lng, altitude, heading, speed_mps, captured_at,
        width, height, bytes, image_hash, blurred,
-       panoramax_status, panoramax_instance, panoramax_picture_id,
        mapillary_status, mapillary_file_handle, mapillary_image_id,
        error, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, NULL, 'pending', NULL, NULL, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, NULL, ?, ?)`,
     [
       id,
       input.driveId,
@@ -249,9 +242,6 @@ export async function insertCapture(input: InsertCaptureInput): Promise<StreetVi
     bytes: input.bytes,
     imageHash: null,
     blurred: input.blurred === true,
-    panoramaxStatus: 'pending',
-    panoramaxInstance: null,
-    panoramaxPictureId: null,
     mapillaryStatus: 'pending',
     mapillaryFileHandle: null,
     mapillaryImageId: null,
@@ -447,27 +437,6 @@ export async function updateUploadBatch(
   );
 }
 
-export async function setCapturePanoramaxStatus(
-  captureId: string,
-  status: StreetViewTargetStatus,
-  options: {
-    instance?: string | null;
-    pictureId?: string | null;
-    error?: string | null;
-  } = {},
-): Promise<void> {
-  const db = await getDatabase();
-  await db.runAsync(
-    `UPDATE streetview_captures
-        SET panoramax_status = ?,
-            panoramax_instance = COALESCE(?, panoramax_instance),
-            panoramax_picture_id = COALESCE(?, panoramax_picture_id),
-            error = ?
-      WHERE id = ?`,
-    [status, options.instance ?? null, options.pictureId ?? null, options.error ?? null, captureId],
-  );
-}
-
 export async function setCaptureMapillaryStatus(
   captureId: string,
   status: StreetViewTargetStatus,
@@ -494,17 +463,6 @@ export async function getPendingMapillaryCaptures(driveId: string): Promise<Stre
   const rows = await db.getAllAsync<CaptureRow>(
     `SELECT * FROM streetview_captures
       WHERE drive_id = ? AND mapillary_status IN ('pending', 'failed', 'uploading')
-      ORDER BY captured_at ASC`,
-    [driveId],
-  );
-  return rows.map(captureFromRow);
-}
-
-export async function getPendingPanoramaxCaptures(driveId: string): Promise<StreetViewCapture[]> {
-  const db = await getDatabase();
-  const rows = await db.getAllAsync<CaptureRow>(
-    `SELECT * FROM streetview_captures
-      WHERE drive_id = ? AND panoramax_status IN ('pending', 'failed', 'uploading')
       ORDER BY captured_at ASC`,
     [driveId],
   );

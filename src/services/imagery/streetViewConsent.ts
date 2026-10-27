@@ -12,7 +12,7 @@ export function confirmStreetViewConsent(): Promise<boolean> {
   return new Promise((resolve) => {
     Alert.alert(
       'Capture street imagery?',
-      'Polaris can capture street-level photos while you navigate and upload them to Panoramax or Mapillary after the drive. Photos include GPS position, heading, and capture time. Mapillary blurs faces and licence plates on its servers; Panoramax instances blur when the instance has a blur service enabled. Published imagery is public under the platform licences. Only capture public streets, mount the phone before you start driving, and do not interact with it while driving.',
+      'Polaris can capture street-level photos while you navigate and upload them to Mapillary after the drive. Photos include GPS position, heading, and capture time. Mapillary blurs faces and licence plates on its servers. Published imagery is public under the platform licence. Only capture public streets, mount the phone before you start driving, and do not interact with it while driving.',
       [
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
         {
