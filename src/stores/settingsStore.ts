@@ -30,10 +30,8 @@ export interface StreetViewPreferences {
   enabled: boolean;
   /** One-time explainer accepted. */
   consentAccepted: boolean;
-  /** Start a capture session automatically on driving routes. */
+  /** Start a capture session automatically on driving routes (set in Settings only). */
   autoStart: boolean;
-  /** The first-run auto-start question has been answered. */
-  autoStartPromptAnswered: boolean;
   mode: StreetViewCaptureModePreference;
   /**
    * Capture a paired telephoto frame every few wide frames. Needs a device
@@ -49,12 +47,17 @@ export interface StreetViewPreferences {
 }
 
 /**
- * Rolling dash-cam buffer. Recording is always explicit (the user taps the
- * dash-cam action); these values bound how much footage is kept on disk.
+ * Rolling dash-cam buffer. Recording starts from the dash-cam action or,
+ * after the first-run question, automatically with navigation; these values
+ * bound how much footage is kept on disk.
  */
 export interface DashCamPreferences {
   /** Show and allow the dash-cam action. */
   enabled: boolean;
+  /** Start recording automatically when active navigation begins. */
+  autoStart: boolean;
+  /** The first-run "record your drives?" question has been answered. */
+  autoStartPromptAnswered: boolean;
   /** Length of one continuous clip before it rolls over to a new file. */
   clipSeconds: number;
   /** Rolling window of footage to keep. */
@@ -117,7 +120,6 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     enabled: false,
     consentAccepted: false,
     autoStart: false,
-    autoStartPromptAnswered: false,
     mode: 'standard',
     detailStream: false,
     wifiOnly: true,
@@ -127,6 +129,8 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   },
   dashCam: {
     enabled: true,
+    autoStart: false,
+    autoStartPromptAnswered: false,
     clipSeconds: 60,
     maxMinutes: 60,
     maxBytes: 2 * 1024 * 1024 * 1024,

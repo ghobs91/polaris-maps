@@ -25,6 +25,7 @@ import {
   type Recorder,
 } from 'react-native-vision-camera';
 import { createLocation } from 'react-native-vision-camera-location';
+import { captureBandHeight } from './captureBand';
 import { spacing, typography } from '../../constants/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
@@ -56,9 +57,6 @@ import {
 const PREVIEW_WIDTH = 96;
 const PREVIEW_HEIGHT = 54;
 
-/** The live preview owns the bottom quarter of the navigation screen. */
-const BAND_SCREEN_FRACTION = 0.25;
-const BAND_MIN_HEIGHT = 150;
 /** Stop recording rather than fill the last of the device's free space. */
 const MIN_FREE_BYTES = 300 * 1024 * 1024;
 /** Let exposure and focus settle after the telephoto lens takes over. */
@@ -166,7 +164,7 @@ export function CaptureHost() {
   // the bottom quarter"; every other screen keeps the compact pill so the map
   // and lists are not covered while a drive is running.
   const expanded = captureActive && Boolean(pathname?.includes('navigation'));
-  const bandHeight = Math.max(BAND_MIN_HEIGHT, Math.round(windowHeight * BAND_SCREEN_FRACTION));
+  const bandHeight = captureBandHeight(windowHeight);
   const usingUltraWide =
     mode === 'threeD' &&
     Boolean(device?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'));

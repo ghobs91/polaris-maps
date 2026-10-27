@@ -45,17 +45,17 @@ A separate, opt-in pipeline captures stills while turn-by-turn navigation is
 active and uploads them to external platforms. It is deliberately independent of
 the P2P `street_imagery` feed above.
 
-| File                                                  | Description                                                                                                                                                                                                                         |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                                                                                                  |
-| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, Mapillary upload status, upload batches, crash recovery, and local-file cleanup.                                                                                                             |
-| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                        |
-| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage. |
-| `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                                                                                                   |
-| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills (wide + optional paired telephoto detail), and segmented dash-cam recording from one photo + video session.     |
-| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, Mapillary upload, upload progress, Delete all, and deferred uploads.                                                                                                                                          |
-| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                                                                                                  |
-| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), detail frames, auto-start, Wi-Fi-only, pending drives, Mapillary account.                                                                                                      |
+| File                                                  | Description                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                                                                                                                                                                                                   |
+| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, Mapillary upload status, upload batches, crash recovery, and local-file cleanup.                                                                                                                                                                                                              |
+| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                                                                                                                         |
+| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage.                                                                                                  |
+| `streetViewConsent.ts`                                | One-time consent explainer for the street-imagery master switch and manual capture starts. Navigation start itself never prompts — street imagery is a Settings-only decision.                                                                                                                                                       |
+| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills (wide + optional paired telephoto detail), and segmented dash-cam recording from one photo + video session.                                                                                                      |
+| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, Mapillary upload, upload progress, Delete all, and deferred uploads.                                                                                                                                                                                                                                           |
+| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end and crash recovery. Dash cam first: the first-ever navigation start asks once whether to record every drive ("Not now" keeps the record button and never asks again); an auto-started run stops with its navigation. Street imagery auto-starts silently when enabled in Settings. |
+| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), detail frames, auto-start, Wi-Fi-only, pending drives, Mapillary account.                                                                                                                                                                                                       |
 
 Flow:
 
@@ -108,7 +108,15 @@ above stays the same, only the capture call site changes.
 ## Dash cam (local rolling buffer)
 
 `src/services/dashcam/` records muted video in fixed-length segments while you
-drive and keeps only the most recent footage:
+drive and keeps only the most recent footage. It is the capture feature users
+are offered first: the first time active navigation starts (phone or CarPlay),
+one alert asks whether to record every drive. "Not now" keeps the record
+button on the navigation screen and the question never returns;
+Settings → Dash cam → Start on every drive changes the answer later. An
+auto-started run stops when its navigation ends, and `dashCamStartLogic.ts`
+holds the decision so it stays testable.
+
+Recording pipeline:
 
 ```
 CaptureHost (VisionCamera: CameraPhotoOutput + CameraVideoOutput in one session)

@@ -135,9 +135,7 @@ export function StreetViewSettings() {
             <Switch
               value={streetView.autoStart}
               disabled={!streetView.enabled}
-              onValueChange={(value) =>
-                setStreetView({ autoStart: value, autoStartPromptAnswered: true })
-              }
+              onValueChange={(autoStart) => setStreetView({ autoStart })}
               trackColor={{
                 false: isDark ? '#39393D' : '#E5E5EA',
                 true: colors.primary + 'CC',

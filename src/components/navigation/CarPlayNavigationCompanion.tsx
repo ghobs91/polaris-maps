@@ -14,6 +14,8 @@ interface CarPlayNavigationCompanionProps {
   etaSeconds: number | null;
   remainingDistanceMeters: number | null;
   destinationName?: string;
+  /** Height of the live capture band at the bottom (0 when not capturing). */
+  bottomInset?: number;
   /** Open the add-stop search (a waypoint along the route). */
   onAddStop: () => void;
   /** End the navigation session. */
@@ -31,6 +33,7 @@ export function CarPlayNavigationCompanion({
   etaSeconds,
   remainingDistanceMeters,
   destinationName,
+  bottomInset = 0,
   onAddStop,
   onEnd,
 }: CarPlayNavigationCompanionProps) {
@@ -48,7 +51,9 @@ export function CarPlayNavigationCompanion({
         {
           backgroundColor: colors.backgroundDark,
           paddingTop: insets.top + 12,
-          paddingBottom: insets.bottom + 12,
+          // The capture band overlays the bottom quarter of the screen; the
+          // list shrinks to sit above it instead of being covered.
+          paddingBottom: insets.bottom + 12 + bottomInset,
         },
       ]}
     >

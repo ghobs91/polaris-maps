@@ -27,6 +27,7 @@ import { SpeedCluster } from '@/components/navigation/SpeedCluster';
 import { CurrentRoadPill } from '@/components/navigation/CurrentRoadPill';
 import { NavigationStepsList } from '@/components/navigation/NavigationStepsList';
 import { CarPlayNavigationCompanion } from '@/components/navigation/CarPlayNavigationCompanion';
+import { captureBandHeight } from '@/components/imagery/captureBand';
 import { useCarPlayStore } from '@/stores/carPlayStore';
 import { OverSpeedMonitor, resolveSpeedLimitMph } from '@/services/navigation/speedAlerts';
 import { useSpeedLimitSignFallback } from '@/hooks/useSpeedLimitSignFallback';
@@ -91,14 +92,13 @@ export default function NavigationScreen() {
   const { height: windowHeight } = useWindowDimensions();
   // While the live camera owns the bottom quarter of the screen, the driving
   // HUD moves above it instead of being covered.
-  const captureBandHeight =
-    streetViewSession || dashRecording ? Math.max(150, Math.round(windowHeight * 0.25)) : 0;
-  const bottomAnchor = captureBandHeight > 0 ? captureBandHeight : insets.bottom;
+  const bandHeight = streetViewSession || dashRecording ? captureBandHeight(windowHeight) : 0;
+  const bottomAnchor = bandHeight > 0 ? bandHeight : insets.bottom;
   // The rail is 52pt per action; the full stack would reach into the turn
   // banner once the camera band lifts it. While capturing, keep the two camera
   // actions (so the other capture mode can still be started or stopped) plus
   // mute, and drop the secondary actions.
-  const compactRail = captureBandHeight > 0;
+  const compactRail = bandHeight > 0;
   // While CarPlay is attached the car screen drives the map; the phone becomes
   // the companion (step list + add-stop search), like Apple Maps.
   const carPlayConnected = useCarPlayStore((s) => s.connected);
@@ -647,6 +647,7 @@ export default function NavigationScreen() {
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
           destinationName={destination?.name}
+          bottomInset={bandHeight}
           onAddStop={handleOpenAddDestination}
           onEnd={stopNavigation}
         />
