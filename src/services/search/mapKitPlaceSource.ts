@@ -81,8 +81,10 @@ function toOsmPoi(item: NativeMapKitPoi): OsmPoi | null {
 }
 
 /**
- * Search Apple Maps around a point. Returns [] on Android, when the native
- * module is unavailable, or when the request fails — never throws.
+ * Search Apple Maps around a point. Returns [] on Android or when the native
+ * module is unavailable — source absence, a legitimate empty. A failed native
+ * call throws instead: silently converting it to [] would let the search cache
+ * negative-log the whole MapKit source for 60 s after one transient error.
  */
 export async function searchMapKitPlaces(
   query: string,
@@ -93,12 +95,7 @@ export async function searchMapKitPlaces(
 ): Promise<OsmPoi[]> {
   if (!query.trim() || !isMapKitAvailable() || opts?.signal?.aborted) return [];
 
-  let items: NativeMapKitPoi[];
-  try {
-    items = await searchNearby(query, lat, lng, MAPKIT_RADIUS_METERS);
-  } catch {
-    return [];
-  }
+  const items = await searchNearby(query, lat, lng, MAPKIT_RADIUS_METERS);
   if (opts?.signal?.aborted) return [];
 
   const pois: OsmPoi[] = [];

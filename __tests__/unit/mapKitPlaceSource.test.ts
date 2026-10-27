@@ -92,10 +92,12 @@ describe('mapKitPlaceSource', () => {
     expect(searchNearby).not.toHaveBeenCalled();
   });
 
-  it('degrades a native failure to no results', async () => {
+  it('rejects on a native failure so it stays retryable, not cached as empty', async () => {
     (searchNearby as jest.Mock).mockRejectedValue(new Error('MapKit offline'));
 
-    expect(await searchMapKitPlaces('tatte', 40.745, -73.992, 20)).toEqual([]);
+    await expect(searchMapKitPlaces('tatte', 40.745, -73.992, 20)).rejects.toThrow(
+      'MapKit offline',
+    );
   });
 
   it('does not start a request for an already-aborted search', async () => {

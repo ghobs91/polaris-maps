@@ -20,7 +20,7 @@ import type { GeocodingResult } from '../geocoding/geocodingService';
 import { searchPlacesFts } from '../poi/poiService';
 import { searchByCategory, type CategorySearchResult } from '../poi/categorySearchService';
 import { searchAddress } from '../geocoding/geocodingService';
-import { throwIfAborted, withSourceTimeout } from './abortUtils';
+import { throwIfAborted, withSourceTimeout, isAbortError } from './abortUtils';
 import { searchPhoton, type PhotonResult } from './photonGeocoder';
 import {
   parseSearchQuery,
@@ -502,6 +502,13 @@ export async function unifiedSearch(
       .then((value) => {
         apply(value);
         return value;
+      })
+      .catch((err) => {
+        // A failed source is not "zero results" — it silently shrinks the final
+        // list. Warn so an incomplete result always has a visible cause
+        // (Photon timeout, Overpass outage, native MapKit error, …).
+        if (!isAbortError(err)) console.warn(`[search] source "${name}" failed:`, err);
+        throw err;
       })
       .finally(() => {
         pendingSources.delete(name);

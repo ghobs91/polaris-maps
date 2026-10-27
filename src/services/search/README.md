@@ -29,6 +29,20 @@ Search is a staged multi-source pipeline:
 - On an explicit submit only a place/brand/address lookup may frame a distant match. Nearby-intent queries (category/cuisine/"near me") keep the camera where the user is when every match is > 20 km away; the list stays authoritative.
 - The floating panel applies the same rule to its merged rows (stations, ranked hits): distant non-destination rows are dropped, and an empty local list shows "no places nearby" instead of another metro's matches.
 
+## Failure handling (failure ≠ empty)
+
+- A source that **throws** (Photon timeout/HTTP error, Overpass outage, Overture archive
+  unavailable, MapKit native error) stays _uncached_: the orchestrator absorbs the rejection
+  via `Promise.allSettled`, the remaining sources still answer, and the next keystroke
+  retries the network. Warn-log the failure (`[search] source "<name>" failed`) so an
+  incomplete list always has a visible cause.
+- A source that **resolves `[]`** is an honest "zero results" and is negative-cached for
+  60 s — only reachable once sources no longer swallow errors into empty results
+  (see `photonGeocoder.ts`, `mapKitPlaceSource.ts`, `overtureFetcher.ts`).
+- Overpass is hedged across three mirrors but is routinely unavailable; Photon
+  (osm-tag POIs), Overture (commercial-grade place coverage) and MapKit (iOS POI
+  search) carry name/brand searches when it is down.
+
 ## Architecture
 
 ```
