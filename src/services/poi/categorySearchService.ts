@@ -122,7 +122,9 @@ export async function searchByCategory(
   const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD;
 
   if (localPrimary || opts?.localOnly) {
-    return { categories, pois: localPois.slice(0, limit), localPrimary: true };
+    // Report the honest flag: a local-only pass with too few rows is not
+    // "local is primary", it is "local is all we have so far".
+    return { categories, pois: localPois.slice(0, limit), localPrimary };
   }
   throwIfAborted(opts?.signal);
 

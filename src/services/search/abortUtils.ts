@@ -50,6 +50,10 @@ export async function sleepWithAbort(ms: number, signal?: AbortSignal | null): P
  * Resolve with `null` when a source promise does not settle within the
  * timeout, so callers can treat the timeout as "no results". Rejections
  * propagate unchanged.
+ *
+ * This bounds the *wait*, not the work: the underlying request keeps running
+ * (it owns its own timeout) and its result still lands in the cache. Callers
+ * that need cancellation must pass an AbortSignal into the source instead.
  */
 export function withSourceTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
   return new Promise<T | null>((resolve, reject) => {

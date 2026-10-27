@@ -110,6 +110,40 @@ const BRAND_ALIASES: Record<string, string> = {
 // Sorted by length descending so multi-word brands match first
 const SORTED_BRAND_KEYS = Object.keys(BRAND_ALIASES).sort((a, b) => b.length - a.length);
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+interface BrandMatch {
+  /** The alias key as it appeared in the normalized query. */
+  key: string;
+  /** Canonical brand name. */
+  brand: string;
+  /** Whole-word matcher for the key, so "mobil" cannot match "mobile". */
+  matcher: RegExp;
+}
+
+/**
+ * Whole-word match on the normalized query.
+ *
+ * A substring test is not good enough: it turns "mobile phone repair" into the
+ * Mobil gas brand (and "upscale bar" into UPS), which then routes the whole
+ * search through the brand path — brand-biased text scoring, a widened fetch
+ * radius and branch ordering. "upscale" and "mobile" are unrelated words.
+ *
+ * Matchers are built once: `parseSearchQuery` runs on every keystroke.
+ */
+const BRAND_MATCHERS: BrandMatch[] = SORTED_BRAND_KEYS.map((key) => ({
+  key,
+  brand: BRAND_ALIASES[key],
+  matcher: new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(key)}(?=$|[^\\p{L}\\p{N}])`, 'iu'),
+}));
+
+function findBrandMatch(normalized: string): BrandMatch | null {
+  if (!normalized) return null;
+  return BRAND_MATCHERS.find((candidate) => candidate.matcher.test(normalized)) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Modifier patterns
 // ---------------------------------------------------------------------------
@@ -183,20 +217,18 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
   const canonicalQuery = normalizeSearchText(originalQuery);
   const normalized = canonicalQuery.toLowerCase();
 
-  // 1. Extract modifiers
-  const wantsNearMe = NEAR_ME_PATTERNS.test(normalized);
-  const wantsOpenNow = OPEN_NOW_PATTERNS.test(normalized);
-  const wantsQuality = QUALITY_PATTERNS.test(normalized);
-  const wantsCheap = CHEAP_PATTERNS.test(normalized);
+  // 1. Brand first: modifier words inside a brand name are not intent
+  // ("best buy" is the store, not a request for top-rated places).
+  const brandMatch = findBrandMatch(normalized);
+  const brand = brandMatch?.brand ?? null;
 
-  // 2. Check for brand match
-  let brand: string | null = null;
-  for (const key of SORTED_BRAND_KEYS) {
-    if (normalized.includes(key)) {
-      brand = BRAND_ALIASES[key];
-      break;
-    }
-  }
+  // 2. Extract modifiers from the query with the brand removed, so
+  // "best buy coffee" still doesn't read as "best".
+  const modifierText = brandMatch ? normalized.replace(brandMatch.matcher, ' ') : normalized;
+  const wantsNearMe = NEAR_ME_PATTERNS.test(modifierText);
+  const wantsOpenNow = OPEN_NOW_PATTERNS.test(modifierText);
+  const wantsQuality = QUALITY_PATTERNS.test(modifierText);
+  const wantsCheap = CHEAP_PATTERNS.test(modifierText);
 
   // 3. Resolve categories from the original query
   const categories = resolveSearchCategories(canonicalQuery);
@@ -235,15 +267,20 @@ export function parseSearchQuery(query: string): ParsedSearchQuery {
 // ---------------------------------------------------------------------------
 
 /**
- * Regex that matches common street-type abbreviations and full words as
- * whole tokens — handles commas, end-of-string, and other punctuation
- * after the token (e.g. "pkwy," or "ave.").
- *
- * Covers the most common USPS street suffix abbreviations and their
- * full-word equivalents.
+ * Street-type abbreviations as whole tokens. Unambiguous as address evidence —
+ * but only after the first word: "St Louis", "Ave Maria" and "Dr King" start
+ * with an honorific or a name, not with a street type.
  */
-const ADDRESS_TOKEN_RE =
-  /\b(st|ave|blvd|rd|dr|ln|ct|pl|pkwy|way|cir|ter|trl|aly|cv|loop|pass|sq|walk|path|pky|street|avenue|boulevard|road|drive|lane|court|place|highway|hwy|parkway|circle|terrace|trail|alley|cove|square)\b/i;
+const ADDRESS_ABBREV_RE = /\b(st|ave|blvd|rd|dr|ln|ct|pl|pkwy|pky|hwy|cir|ter|trl|aly|cv|sq)\b/i;
+
+/**
+ * Full street-type words. These are everyday nouns too — "pizza place",
+ * "tennis court", "the loop", "drive in movie" — so on their own they are not
+ * address evidence; they only count alongside a house number or a numeric
+ * route ("Country Road 5", "Highway 101").
+ */
+const ADDRESS_FULLWORD_RE =
+  /\b(street|avenue|boulevard|road|drive|lane|court|place|highway|parkway|circle|terrace|trail|alley|cove|square|way|loop|path|walk|pass)\b/i;
 
 /** Starts with a house number (digits, optionally followed by a letter like "314A"). */
 const LEADING_NUMBER_RE = /^\s*\d+[a-z]?[\s,]/i;
@@ -264,11 +301,21 @@ const LEADING_NUMBER_WITH_SUFFIX_RE =
  * Photon results to house + street layers.
  */
 export function isAddressQuery(query: string): boolean {
-  if (ADDRESS_TOKEN_RE.test(query)) return true;
-  // "314 columbus pkwy" — leading house number + comma (city/state pattern)
-  if (LEADING_NUMBER_RE.test(query) && query.includes(',')) return true;
-  // "1000 Broadway" — leading house number + word ending with street suffix
-  if (LEADING_NUMBER_WITH_SUFFIX_RE.test(query)) return true;
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+
+  const hasStreetToken = ADDRESS_ABBREV_RE.test(trimmed) || ADDRESS_FULLWORD_RE.test(trimmed);
+  const leadingHouseNumber = LEADING_NUMBER_RE.test(trimmed);
+
+  // "314 columbus pkwy", "123 main street" — a house number plus any street token.
+  if (leadingHouseNumber && (trimmed.includes(',') || hasStreetToken)) return true;
+  // "Country Road 5", "Route 66 Highway", "Highway 101" — numbered routes.
+  if (/\d/.test(trimmed) && hasStreetToken) return true;
+  // "main st", "union sq" — abbreviations are street types anywhere but first.
+  const afterFirstWord = trimmed.replace(/^\s*\S+\s*/, '');
+  if (ADDRESS_ABBREV_RE.test(afterFirstWord)) return true;
+  // "1000 Broadway" — leading house number + word ending with an embedded suffix.
+  if (LEADING_NUMBER_WITH_SUFFIX_RE.test(trimmed)) return true;
   return false;
 }
 
@@ -306,15 +353,17 @@ export function levenshtein(a: string, b: string): number {
  */
 export function fuzzyMatchBrand(query: string): string | null {
   const normalized = query.toLowerCase().trim();
-  // Exact check first (already done in parseSearchQuery, but useful standalone)
-  for (const key of SORTED_BRAND_KEYS) {
-    if (normalized.includes(key)) return BRAND_ALIASES[key];
-  }
-  // Fuzzy check — only for single-word or 2-word queries that might be typos
+  // Exact (whole-word) check first — already done in parseSearchQuery, but useful standalone
+  const exact = findBrandMatch(normalized);
+  if (exact) return exact.brand;
+
+  // Typo tolerance only makes sense for a single token: comparing a whole
+  // multi-word query against a brand by edit distance matches almost anything.
   const words = normalized.split(/\s+/);
-  if (words.length > 3) return null;
+  if (words.length !== 1) return null;
 
   for (const key of SORTED_BRAND_KEYS) {
+    if (key.includes(' ')) continue; // phrase brands only match exactly
     const maxDist = key.length <= 4 ? 1 : key.length <= 8 ? 2 : 3;
     const dist = levenshtein(normalized, key);
     if (dist <= maxDist && dist > 0) return BRAND_ALIASES[key];
