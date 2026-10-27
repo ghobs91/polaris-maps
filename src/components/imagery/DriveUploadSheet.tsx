@@ -15,7 +15,6 @@ import {
   getDriveSummary,
   setDriveStatus,
 } from '../../services/imagery/streetViewQueue';
-import { loadPanoramaxAuth, uploadDriveToPanoramax } from '../../services/imagery/panoramaxService';
 import {
   getValidMapillaryAuth,
   uploadDriveToMapillary,
@@ -26,7 +25,7 @@ import { formatDuration } from '../../utils/units';
 
 /**
  * End-of-drive consent gate. It shows what was captured and only uploads after
- * the user confirms a target. MVP has no per-photo review; Delete all is the
+ * the user confirms the target. MVP has no per-photo review; Delete all is the
  * escape hatch.
  */
 export function DriveUploadSheet() {
@@ -35,16 +34,12 @@ export function DriveUploadSheet() {
   const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const pendingDriveId = useStreetViewCaptureStore((s) => s.pendingDriveId);
   const setPendingDriveId = useStreetViewCaptureStore((s) => s.setPendingDriveId);
-  const panoramaxInstanceUrl = useSettingsStore((s) => s.streetView.panoramaxInstanceUrl);
-  const panoramaxUsername = useSettingsStore((s) => s.streetView.panoramaxUsername);
   const mapillaryUsername = useSettingsStore((s) => s.streetView.mapillaryUsername);
   const wifiOnly = useSettingsStore((s) => s.streetView.wifiOnly);
   const upload = useStreetViewUploadStore();
   const [summary, setSummary] = useState<StreetViewDriveSummary | null>(null);
   const [loading, setLoading] = useState(false);
-  const [hasAuth, setHasAuth] = useState(false);
   const [hasMapillaryAuth, setHasMapillaryAuth] = useState(false);
-  const [panoramaxSelected, setPanoramaxSelected] = useState(true);
   const [mapillarySelected, setMapillarySelected] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
 
@@ -65,12 +60,6 @@ export function DriveUploadSheet() {
           return;
         }
         setSummary(result);
-        if (panoramaxInstanceUrl) {
-          const auth = await loadPanoramaxAuth(panoramaxInstanceUrl);
-          if (!cancelled) setHasAuth(Boolean(auth));
-        } else if (!cancelled) {
-          setHasAuth(false);
-        }
 
         if (isMapillaryUploadConfigured()) {
           const mapAuth = await getValidMapillaryAuth().catch(() => null);
@@ -89,7 +78,7 @@ export function DriveUploadSheet() {
     return () => {
       cancelled = true;
     };
-  }, [pendingDriveId, panoramaxInstanceUrl, setPendingDriveId]);
+  }, [pendingDriveId, setPendingDriveId]);
 
   if (!pendingDriveId) return null;
 
@@ -121,17 +110,19 @@ export function DriveUploadSheet() {
 
   const handleUpload = () => {
     if (!summary) return;
-    const panoramaxReady = panoramaxSelected && Boolean(panoramaxInstanceUrl) && hasAuth;
     const mapillaryReady = mapillarySelected && isMapillaryUploadConfigured() && hasMapillaryAuth;
 
-    if (!panoramaxSelected && !mapillarySelected) {
-      Alert.alert('Choose a destination', 'Select Panoramax, Mapillary, or delete the drive.');
+    if (!mapillarySelected) {
+      Alert.alert(
+        'Mapillary upload is off',
+        'Turn on Mapillary to upload this drive, or delete it.',
+      );
       return;
     }
-    if (!panoramaxReady && !mapillaryReady) {
+    if (!mapillaryReady) {
       Alert.alert(
-        'Connect an upload target',
-        'Open Settings → Street Imagery to connect Panoramax or Mapillary.',
+        'Connect Mapillary',
+        'Open Settings → Street Imagery to sign in to Mapillary before uploading.',
         [
           { text: 'Not now', style: 'cancel' },
           {
@@ -153,55 +144,33 @@ export function DriveUploadSheet() {
       let failed = 0;
 
       try {
-        if (panoramaxReady && panoramaxInstanceUrl) {
-          const auth = await loadPanoramaxAuth(panoramaxInstanceUrl);
-          if (!auth) {
-            setHasAuth(false);
-            errors.push('Panoramax session expired');
-          } else {
-            setStage('Uploading to Panoramax…');
-            const result = await uploadDriveToPanoramax(summary, auth, {
-              wifiOnly,
-              onProgress: (progress) =>
-                upload.progress(progress.uploaded, progress.failed, progress.total),
-            });
-            uploaded += result.uploaded;
-            failed += result.failed;
-            if (result.failed > 0) {
-              errors.push(`${result.failed} Panoramax photo(s) failed`);
-            }
-          }
+        const auth = await getValidMapillaryAuth();
+        setStage('Uploading to Mapillary…');
+        const result = await uploadDriveToMapillary(summary, auth, {
+          wifiOnly,
+          onProgress: (progress) =>
+            upload.progress(progress.uploaded, progress.failed, progress.total),
+        });
+        uploaded += result.uploaded;
+        failed += result.failed + result.skipped;
+        if (result.failed > 0) {
+          errors.push(`${result.failed} Mapillary photo(s) failed`);
         }
-
-        if (mapillaryReady) {
-          const auth = await getValidMapillaryAuth();
-          setStage('Uploading to Mapillary…');
-          const result = await uploadDriveToMapillary(summary, auth, {
-            wifiOnly,
-            onProgress: (progress) =>
-              upload.progress(progress.uploaded, progress.failed, progress.total),
-          });
-          uploaded += result.uploaded;
-          failed += result.failed + result.skipped;
-          if (result.failed > 0) {
-            errors.push(`${result.failed} Mapillary photo(s) failed`);
-          }
-          if (result.skipped > 0) {
-            errors.push(`${result.skipped} portrait photo(s) skipped by Mapillary`);
-          }
+        if (result.skipped > 0) {
+          errors.push(`${result.skipped} portrait photo(s) skipped by Mapillary`);
         }
 
         const error = errors.length ? errors.join('; ') : null;
         upload.finish(error);
         if (!error) {
-          // Every selected target accepted the files; drop the originals so a
-          // long drive does not keep several GB in the document directory.
+          // Mapillary accepted the files; drop the originals so a long drive does
+          // not keep several GB in the document directory.
           await deleteDriveFile(summary.drive.id).catch(() => {});
           setPendingDriveId(null);
           upload.reset();
           Alert.alert(
             'Street imagery uploaded',
-            `${summary.captures.length} photo${summary.captures.length === 1 ? '' : 's'} sent to the selected platforms. Panoramax and Mapillary process uploads asynchronously.`,
+            `${summary.captures.length} photo${summary.captures.length === 1 ? '' : 's'} sent to Mapillary. Mapillary processes uploads asynchronously.`,
           );
         } else {
           await setDriveStatus(summary.drive.id, 'partial', error).catch(() => {});
@@ -226,9 +195,6 @@ export function DriveUploadSheet() {
   };
 
   const uploading = upload.status === 'uploading';
-  const anyTargetReady =
-    (Boolean(panoramaxInstanceUrl) && hasAuth) ||
-    (isMapillaryUploadConfigured() && hasMapillaryAuth);
   const durationSeconds =
     summary?.drive.endedAt != null
       ? Math.max(0, Math.round((summary.drive.endedAt - summary.drive.startedAt) / 1000))
@@ -270,52 +236,38 @@ export function DriveUploadSheet() {
           </View>
 
           <View style={styles.targets}>
-            <View style={styles.targetRow}>
-              <View style={styles.targetText}>
-                <Text style={styles.targetTitle}>Panoramax</Text>
-                <Text style={styles.targetSubtitle} numberOfLines={1}>
-                  {panoramaxInstanceUrl
-                    ? `${panoramaxUsername ?? 'Connected'} · ${panoramaxInstanceUrl.replace(
-                        /^https:\/\//,
-                        '',
-                      )}`
-                    : 'No instance connected'}
-                </Text>
-              </View>
-              <Switch
-                value={panoramaxSelected && Boolean(panoramaxInstanceUrl) && hasAuth}
-                onValueChange={setPanoramaxSelected}
-                disabled={!panoramaxInstanceUrl || !hasAuth || uploading}
-                trackColor={{
-                  false: isDark ? '#39393D' : '#E5E5EA',
-                  true: colors.primary + 'CC',
-                }}
-              />
-            </View>
             {isMapillaryUploadConfigured() ? (
-              <View style={styles.targetRow}>
-                <View style={styles.targetText}>
-                  <Text style={styles.targetTitle}>Mapillary</Text>
-                  <Text style={styles.targetSubtitle} numberOfLines={1}>
-                    {hasMapillaryAuth ? (mapillaryUsername ?? 'Connected') : 'Not connected'}
-                  </Text>
+              <>
+                <View style={styles.targetRow}>
+                  <View style={styles.targetText}>
+                    <Text style={styles.targetTitle}>Mapillary</Text>
+                    <Text style={styles.targetSubtitle} numberOfLines={1}>
+                      {hasMapillaryAuth ? (mapillaryUsername ?? 'Connected') : 'Not connected'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={mapillarySelected && hasMapillaryAuth}
+                    onValueChange={setMapillarySelected}
+                    disabled={!hasMapillaryAuth || uploading}
+                    trackColor={{
+                      false: isDark ? '#39393D' : '#E5E5EA',
+                      true: colors.primary + 'CC',
+                    }}
+                  />
                 </View>
-                <Switch
-                  value={mapillarySelected && hasMapillaryAuth}
-                  onValueChange={setMapillarySelected}
-                  disabled={!hasMapillaryAuth || uploading}
-                  trackColor={{
-                    false: isDark ? '#39393D' : '#E5E5EA',
-                    true: colors.primary + 'CC',
-                  }}
-                />
-              </View>
-            ) : null}
-            {!anyTargetReady ? (
+                {!hasMapillaryAuth ? (
+                  <Text style={styles.hint}>
+                    Connect Mapillary in Settings to upload. You can still keep or delete this
+                    drive.
+                  </Text>
+                ) : null}
+              </>
+            ) : (
               <Text style={styles.hint}>
-                Connect a target in Settings to upload. You can still keep or delete this drive.
+                Mapillary upload is not configured in this build. You can still keep or delete this
+                drive.
               </Text>
-            ) : null}
+            )}
           </View>
 
           {uploading ? (
@@ -348,7 +300,7 @@ export function DriveUploadSheet() {
           </View>
           <Text style={styles.footer}>
             Photos stay on this device until you upload or delete them. Mapillary blurs faces and
-            plates; Panoramax blurs only on instances with a blur service enabled.
+            plates on its servers.
           </Text>
           <Text style={styles.delete} onPress={uploading ? undefined : handleDelete}>
             Delete all

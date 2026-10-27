@@ -45,18 +45,17 @@ A separate, opt-in pipeline captures stills while turn-by-turn navigation is
 active and uploads them to external platforms. It is deliberately independent of
 the P2P `street_imagery` feed above.
 
-| File                                                  | Description                                                                                                                                                                                                                                             |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                                                                                                                      |
-| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, per-platform status, upload batches, crash recovery, and local-file cleanup.                                                                                                                                     |
-| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                                            |
-| `panoramaxService.ts`                                 | Panoramax instance catalog, token-claim auth (claim link opened in the system browser so the instance's OAuth session cookie survives), upload-set creation, multipart JPEG upload with overrides + `picture_id`, completion, and secure token storage. |
-| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage.                     |
-| `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                                                                                                                       |
-| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills, and segmented dash-cam recording from one photo + video session.                                                                   |
-| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, target selection, upload progress, Delete all, and deferred uploads.                                                                                                                                                              |
-| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                                                                                                                      |
-| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), auto-start, Wi-Fi-only, pending drives, Panoramax account.                                                                                                                                         |
+| File                                                  | Description                                                                                                                                                                                                                         |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                                                                                                  |
+| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, Mapillary upload status, upload batches, crash recovery, and local-file cleanup.                                                                                                             |
+| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                        |
+| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage. |
+| `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                                                                                                   |
+| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills, and segmented dash-cam recording from one photo + video session.                                               |
+| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, Mapillary upload, upload progress, Delete all, and deferred uploads.                                                                                                                                          |
+| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                                                                                                  |
+| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), auto-start, Wi-Fi-only, pending drives, Mapillary account.                                                                                                                     |
 
 Flow:
 
@@ -68,16 +67,13 @@ CaptureHost (global 16:9 CameraView)
 streetViewQueue (SQLite + document/streetview/<drive>/)
     ↓ navigation ends
 DriveUploadSheet (summary, consent, Delete all)
-    ├─ Panoramax upload set + per-file overrides
-    │      → Panoramax instance
     └─ Mapillary raw upload + manifest + finish_upload
            → Mapillary cluster (processing)
 ```
 
 The existing `captureService`/`uploadService`/`blurService` pipeline is **not**
 used here: it is P2P-specific, has no EXIF writing, and its placeholder blur
-strips metadata. Mapillary blurs server-side; Panoramax instances blur only
-when the instance has a blur service enabled.
+strips metadata. Mapillary blurs faces and plates server-side.
 
 ## Dash cam (local rolling buffer)
 

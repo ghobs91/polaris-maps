@@ -103,8 +103,7 @@ function normalizeHeading(heading: number | null | undefined): number | null {
 
 /**
  * EXIF tags written at capture time. Mapillary needs GPS + capture time;
- * Panoramax can also use upload overrides, but writing these makes the files
- * self-describing and keeps both platforms correct.
+ * writing these makes the files self-describing.
  *
  * Note: the camera path is VisionCamera, which writes GPS latitude, longitude
  * and the capture time itself via `react-native-vision-camera-location`. This

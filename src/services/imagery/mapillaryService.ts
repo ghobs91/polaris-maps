@@ -511,8 +511,8 @@ function errorMessage(error: unknown): string {
 
 /**
  * Upload landscape captures from one drive. Portrait captures are skipped
- * because Mapillary rejects them; they remain in the local queue (and can still
- * go to Panoramax).
+ * because Mapillary rejects them; they remain in the local queue until the
+ * drive is deleted.
  */
 export async function uploadDriveToMapillary(
   summary: StreetViewDriveSummary,

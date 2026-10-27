@@ -40,8 +40,6 @@ export interface StreetViewPreferences {
   /** Reserved for automatic end-of-drive upload (MVP uses the confirmation sheet). */
   autoUpload: boolean;
   maxStorageBytes: number;
-  panoramaxInstanceUrl: string | null;
-  panoramaxUsername: string | null;
   mapillaryUsername: string | null;
 }
 
@@ -119,8 +117,6 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     wifiOnly: true,
     autoUpload: false,
     maxStorageBytes: 2 * 1024 * 1024 * 1024,
-    panoramaxInstanceUrl: null,
-    panoramaxUsername: null,
     mapillaryUsername: null,
   },
   dashCam: {
