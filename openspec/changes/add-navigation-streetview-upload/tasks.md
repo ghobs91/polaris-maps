@@ -1,16 +1,21 @@
-> **Implementation status (2026-10-26):** the capture/queue/summary flow and
+> **Implementation status (2026-10-27):** the capture/queue/summary flow and
 > both Panoramax and Mapillary upload clients are implemented and covered by
 > unit tests; `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, the full Jest
-> suite, and an iOS production export pass. The Mapillary client now also
-> refreshes on a mid-upload 401 (disconnecting the account if the refresh is
-> rejected), backs off and retries 429/5xx failures, and submits one cluster per
-> drive segment (1,000 images or a >10 min gap). The navigation screen shows the
-> live camera in the bottom quarter of the screen with the driving HUD above it,
-> and a rolling dash cam (segmented muted recording, time + size retention with
-> automatic oldest-first pruning, playback and export) ships alongside it.
-> Remaining: device spikes (camera geometry, ultra-wide lens, real-account
-> uploads), the `react-native-vision-camera` migration that allows stills and
-> video to run simultaneously, privacy/store copy, and release verification.
+> suite, and an iOS production export pass. The Mapillary client refreshes on a
+> mid-upload 401 (disconnecting the account if the refresh is rejected), backs
+> off and retries 429/5xx failures, and submits one cluster per drive segment
+> (1,000 images or a >10 min gap). Panoramax sign-in opens the claim link in the
+> system browser: the instance stores its OAuth state in a session cookie that
+> an in-app `SFSafariViewController` does not preserve, which made every
+> OpenStreetMap login fail with "Impossible to finish authentication flow".
+> The camera moved to `react-native-vision-camera`, so street stills and
+> dash-cam video share one session and run simultaneously; the navigation
+> screen shows the live camera in the bottom quarter of the screen with the
+> driving HUD above it, and the dash cam keeps a rolling buffer bounded by both
+> a time and a size cap, with playback and export. Remaining: device spikes
+> (camera geometry, ultra-wide lens output, real-account uploads), an EXIF
+> post-pass to restore `GPSImgDirection` (VisionCamera writes GPS lat/lng/time
+> only), privacy/store copy, and release verification.
 
 ## 0. Spikes and decisions
 

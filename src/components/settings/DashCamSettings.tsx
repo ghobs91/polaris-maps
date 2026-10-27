@@ -81,7 +81,7 @@ export function DashCamSettings() {
   return (
     <SettingsGroup
       header="Dash cam"
-      footer="Records muted video in segments while you drive and keeps only the most recent footage: once either the time or the storage limit is reached, the oldest clips are deleted automatically. Recording stops when the app is backgrounded or the phone is locked, and it cannot run at the same time as street-imagery stills."
+      footer="Records muted video in segments while you drive and keeps only the most recent footage: once either the time or the storage limit is reached, the oldest clips are deleted automatically. Recording stops when the app is backgrounded or the phone is locked. Street-imagery photos can be captured at the same time as the dash cam."
     >
       <SettingsRow
         title="Dash cam"

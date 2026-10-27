@@ -2,26 +2,35 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
-  Platform,
+  Image,
   Pressable,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Camera,
+  CommonResolutions,
+  useCameraDevice,
+  useCameraPermission,
+  usePhotoOutput,
+  useVideoOutput,
+  type CameraRef,
+  type Recorder,
+} from 'react-native-vision-camera';
+import { createLocation } from 'react-native-vision-camera-location';
 import { spacing, typography } from '../../constants/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { dashCamElapsedSeconds, useDashCamStore } from '../../stores/dashCamStore';
 import {
-  buildCaptureExif,
   captureConfigForMode,
   shouldCapture,
   type LastCapture,
@@ -54,6 +63,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function toFileUri(path: string): string {
+  return path.startsWith('file://') ? path : `file://${path}`;
+}
+
+function getImageSize(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
+  });
+}
+
 function formatClock(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -65,22 +84,22 @@ function formatClock(totalSeconds: number): string {
 }
 
 /**
- * Owns the single CameraView used for on-drive capture: street-imagery stills
- * and the rolling dash-cam buffer.
+ * Owns the single camera session used for on-drive capture: street-imagery
+ * stills and the rolling dash-cam buffer.
+ *
+ * VisionCamera connects a photo output and a video output to the *same*
+ * session, so a still can be taken while a dash-cam segment is recording.
+ * (The previous expo-camera implementation bound either the photo output or
+ * the movie output, which forced the two features to be mutually exclusive.)
  *
  * It is mounted only while something is capturing, but lives at the app root
  * so tab changes and the CarPlay companion screen cannot unmount the camera
  * mid-drive. Frames are triggered by raw GPS fixes from the navigation
  * pipeline, not a timer.
  *
- * The dash cam records in fixed-length segments; each finished segment is moved
- * into the documents directory and the oldest segments are pruned once either
+ * The dash cam records in fixed-length segments; each finished segment lands in
+ * the documents directory and the oldest segments are pruned once either
  * retention cap is exceeded.
- *
- * Known limitation: expo-camera binds either the photo output or the movie
- * output, so still capture and video recording cannot run at the same time.
- * Starting one is refused while the other is active; the VisionCamera migration
- * removes that restriction.
  */
 export function CaptureHost() {
   const session = useStreetViewCaptureStore((s) => s.session);
@@ -96,31 +115,51 @@ export function CaptureHost() {
   const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const cameraRef = useRef<CameraView>(null);
-  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraRef>(null);
+  const { hasPermission, canRequestPermission, requestPermission } = useCameraPermission();
+  // 3D mode asks for the ultra-wide lens; the filter falls back to the closest
+  // match (the wide lens) when the device has no ultra-wide.
+  const device = useCameraDevice(
+    'back',
+    mode === 'threeD' ? { physicalDevices: ['ultra-wide-angle'] } : undefined,
+  );
+  const config = captureConfigForMode(mode);
+  const photoOutput = usePhotoOutput({
+    targetResolution: mode === 'standard' ? CommonResolutions.FHD_16_9 : CommonResolutions.UHD_4_3,
+    containerFormat: 'jpeg',
+    quality: config.quality,
+    qualityPrioritization: 'balanced',
+  });
+  const videoOutput = useVideoOutput({
+    targetResolution: CommonResolutions.FHD_16_9,
+    // No police-report audio: clips stay muted, which also avoids needing the
+    // microphone permission.
+    enableAudio: false,
+  });
+
   const [ready, setReady] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
-  const [selectedLens, setSelectedLens] = useState<string | null>(null);
-  const [pictureSize, setPictureSize] = useState<string | null>(null);
-  const [lensLabel, setLensLabel] = useState(mode === 'threeD' ? '3D' : '1×');
   const [mountError, setMountError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
   const busyRef = useRef(false);
   const lastCaptureRef = useRef<LastCapture | null>(null);
-  const resolvedModeRef = useRef<string | null>(null);
   const permissionRequestedRef = useRef(false);
   const lastStorageCheckRef = useRef(0);
   const activeRef = useRef(appActive);
+  const recorderRef = useRef<Recorder | null>(null);
   activeRef.current = appActive;
 
-  const config = captureConfigForMode(mode);
   const captureActive = Boolean(session) || dashRecording;
   // Only the navigation screen splits into "directions on top, live camera in
   // the bottom quarter"; every other screen keeps the compact pill so the map
   // and lists are not covered while a drive is running.
   const expanded = captureActive && Boolean(pathname?.includes('navigation'));
   const bandHeight = Math.max(BAND_MIN_HEIGHT, Math.round(windowHeight * BAND_SCREEN_FRACTION));
+  const usingUltraWide =
+    mode === 'threeD' &&
+    Boolean(device?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'));
+  const lensLabel = usingUltraWide ? '0.5×' : '1×';
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -144,11 +183,19 @@ export function CaptureHost() {
   // Ask for camera permission once. A denial ends the drive cleanly instead of
   // leaving an empty queue entry behind.
   useEffect(() => {
-    if (!captureActive) return;
-    if (!permission || permission.granted || permissionRequestedRef.current) return;
+    if (!captureActive || hasPermission || permissionRequestedRef.current) return;
+    if (!canRequestPermission) {
+      Alert.alert(
+        'Camera access needed',
+        'Enable camera access for Polaris Maps in the system Settings, then start again.',
+      );
+      useDashCamStore.getState().stop();
+      void discardStreetViewSession();
+      return;
+    }
     permissionRequestedRef.current = true;
-    void requestPermission().then((result) => {
-      if (result.granted) return;
+    void requestPermission().then((granted) => {
+      if (granted) return;
       Alert.alert(
         'Camera access needed',
         'Street imagery and dash-cam recording need camera access. You can enable it later in Settings.',
@@ -159,52 +206,9 @@ export function CaptureHost() {
       useDashCamStore.getState().stop();
       void discardStreetViewSession();
     });
-  }, [captureActive, permission, requestPermission]);
-
-  // Resolve lens and still size when the camera becomes ready. On iOS the
-  // ultra-wide is selected by lens name; 0.5× cannot be reached through `zoom`
-  // (its minimum is 1×).
-  const onCameraReady = useCallback(async () => {
-    setReady(true);
-    setMountError(null);
-    if (resolvedModeRef.current === mode) return;
-    resolvedModeRef.current = mode;
-
-    if (mode === 'threeD' && Platform.OS === 'ios') {
-      try {
-        const lenses = await cameraRef.current?.getAvailableLensesAsync?.();
-        const ultra = lenses?.find((lens) => /ultra/i.test(lens));
-        if (ultra) {
-          setSelectedLens(ultra);
-          setLensLabel('0.5×');
-          return;
-        }
-        setSelectedLens(null);
-        setLensLabel('1×');
-      } catch {
-        setSelectedLens(null);
-        setLensLabel('1×');
-      }
-    } else {
-      setSelectedLens(null);
-      setLensLabel(mode === 'threeD' ? '1×' : '1×');
-    }
-
-    if (mode === 'standard') {
-      try {
-        const sizes = await cameraRef.current?.getAvailablePictureSizesAsync?.();
-        setPictureSize(sizes?.includes('1920x1080') ? '1920x1080' : null);
-      } catch {
-        setPictureSize(null);
-      }
-    } else {
-      setPictureSize(null);
-    }
-  }, [mode]);
+  }, [captureActive, hasPermission, canRequestPermission, requestPermission]);
 
   const takePicture = useCallback(async () => {
-    // One camera output at a time: the dash cam owns it while recording.
-    if (useDashCamStore.getState().recording) return;
     if (!ready || busyRef.current || !activeRef.current) return;
     const currentSession = useStreetViewCaptureStore.getState().session;
     if (!currentSession) return;
@@ -239,33 +243,32 @@ export function CaptureHost() {
     // captured after the app resumes.
     if (!fix || now - fix.timestamp > 3000) return;
     const decision = shouldCapture(fix, lastCaptureRef.current, now, config);
-    if (!decision.capture || !cameraRef.current) return;
+    if (!decision.capture) return;
 
     busyRef.current = true;
     try {
       const capturedAt = Date.now();
-      const tracking = useNavigationTrackingStore.getState();
-      const picture = await cameraRef.current.takePictureAsync({
-        quality: config.quality,
-        exif: true,
-        additionalExif: buildCaptureExif(
-          fix,
-          capturedAt,
-          // The store's bearing defaults to 0 before any fix; only use it as a
-          // heading fallback once a navigation position exists.
-          tracking.navPosition ? tracking.navBearing : null,
-        ),
-        shutterSound: false,
-        skipProcessing: false,
-      });
-      if (!picture) return;
+      // The photo output is separate from the video output, so this still
+      // works while a dash-cam segment is recording.
+      const { filePath } = await photoOutput.capturePhotoToFile(
+        {
+          enableShutterSound: false,
+          // VisionCamera embeds this as GPS EXIF (lat/lng/time).
+          location: createLocation(fix.lat, fix.lng),
+        },
+        {},
+      );
+      if (!filePath) return;
 
+      const source = toFileUri(filePath);
       const dir = await ensureStreetViewDriveDir(currentSession.driveId);
       const id = Crypto.randomUUID();
       const dest = `${dir}${id}.jpg`;
-      await FileSystem.copyAsync({ from: picture.uri, to: dest });
-      await FileSystem.deleteAsync(picture.uri, { idempotent: true }).catch(() => {});
-      const bytes = await getLocalFileSize(dest);
+      await FileSystem.moveAsync({ from: source, to: dest }).catch(async () => {
+        await FileSystem.copyAsync({ from: source, to: dest });
+        await FileSystem.deleteAsync(source, { idempotent: true }).catch(() => {});
+      });
+      const [bytes, size] = await Promise.all([getLocalFileSize(dest), getImageSize(dest)]);
 
       await insertCapture({
         id,
@@ -277,8 +280,8 @@ export function CaptureHost() {
         heading: fix.heading,
         speedMps: fix.speedMps,
         capturedAt,
-        width: picture.width,
-        height: picture.height,
+        width: size.width,
+        height: size.height,
         bytes,
       });
 
@@ -289,7 +292,7 @@ export function CaptureHost() {
     } finally {
       busyRef.current = false;
     }
-  }, [config, ready, recordCapture, setSessionError]);
+  }, [config, photoOutput, ready, recordCapture, setSessionError]);
 
   // The raw fix is published on every navigation tick (1 Hz). A new object is
   // emitted per fix, but guard on the timestamp so a re-render cannot double
@@ -302,23 +305,45 @@ export function CaptureHost() {
     void takePicture();
   }, [rawFix, takePicture]);
 
+  /** Records one segment straight into the documents directory. */
+  const recordSegment = useCallback(
+    async (startedAt: number): Promise<{ uri: string; durationMs: number } | null> => {
+      const dir = await ensureDashCamDir();
+      const destPath = `${dir}${Crypto.randomUUID()}.mp4`;
+      const fix = useNavigationTrackingStore.getState().rawFix;
+      const recorder = await videoOutput.createRecorder({
+        maxDuration: clipSeconds,
+        filePath: destPath,
+        location: fix ? createLocation(fix.lat, fix.lng) : undefined,
+      });
+      recorderRef.current = recorder;
+      try {
+        let settle: (path: string) => void = () => {};
+        let fail: (error: unknown) => void = () => {};
+        const finished = new Promise<string>((resolve, reject) => {
+          settle = resolve;
+          fail = reject;
+        });
+        await recorder.startRecording(settle, fail);
+        const path = await finished;
+        return { uri: toFileUri(path || destPath), durationMs: Date.now() - startedAt };
+      } finally {
+        recorderRef.current = null;
+      }
+    },
+    [clipSeconds, videoOutput],
+  );
+
   /** Saves one finished segment and enforces the rolling retention caps. */
   const persistClip = useCallback(
-    async (uri: string, startedAt: number, durationMs: number) => {
-      const dir = await ensureDashCamDir();
-      const id = Crypto.randomUUID();
-      const dest = `${dir}${id}.mp4`;
-      await FileSystem.moveAsync({ from: uri, to: dest }).catch(async () => {
-        await FileSystem.copyAsync({ from: uri, to: dest });
-        await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
-      });
-      const info = await FileSystem.getInfoAsync(dest);
+    async (clip: { uri: string; durationMs: number }, startedAt: number) => {
+      const info = await FileSystem.getInfoAsync(clip.uri);
       const bytes = info.exists && typeof info.size === 'number' ? info.size : 0;
       await insertDashCamClip({
-        id,
-        localUri: dest,
+        id: Crypto.randomUUID(),
+        localUri: clip.uri,
         startedAt,
-        durationMs,
+        durationMs: clip.durationMs,
         bytes,
         createdAt: Date.now(),
       });
@@ -329,10 +354,10 @@ export function CaptureHost() {
     [recordClip],
   );
 
-  // Segmented loop recorder. Each `recordAsync` call stops at `clipSeconds`, so
-  // the buffer is a series of files rather than one unbounded recording. The
-  // loop pauses while the app is not active (the camera session stops when the
-  // phone locks) and resumes from the next segment.
+  // Segmented loop recorder. Each segment stops at `clipSeconds`, so the buffer
+  // is a series of files rather than one unbounded recording. The loop pauses
+  // while the app is not active (the camera session stops when the phone locks)
+  // and resumes at the next segment.
   useEffect(() => {
     if (!dashRecording || !ready) return;
     let cancelled = false;
@@ -347,21 +372,21 @@ export function CaptureHost() {
         setDashCamPaused(false);
 
         const startedAt = Date.now();
-        let clip: { uri: string } | undefined;
+        let clip: { uri: string; durationMs: number } | null = null;
         try {
-          clip = await cameraRef.current?.recordAsync({ maxDuration: clipSeconds });
+          clip = await recordSegment(startedAt);
         } catch (error) {
           setDashCamError(error instanceof Error ? error.message : String(error));
           await delay(1000);
           continue;
         }
-        if (!clip?.uri) {
+        if (!clip) {
           await delay(500);
           continue;
         }
 
         try {
-          await persistClip(clip.uri, startedAt, Date.now() - startedAt);
+          await persistClip(clip, startedAt);
         } catch (error) {
           setDashCamError(error instanceof Error ? error.message : String(error));
         }
@@ -382,69 +407,47 @@ export function CaptureHost() {
     void run();
     return () => {
       cancelled = true;
-      cameraRef.current?.stopRecording();
+      void recorderRef.current?.stopRecording().catch(() => {});
       setDashCamPaused(false);
     };
-  }, [dashRecording, ready, clipSeconds, persistClip, setDashCamError, setDashCamPaused]);
+  }, [dashRecording, ready, recordSegment, persistClip, setDashCamError, setDashCamPaused]);
 
   if (!session && !dashRecording) return null;
 
-  const handleStop = () => {
-    if (useDashCamStore.getState().recording) {
-      useDashCamStore.getState().stop();
-      cameraRef.current?.stopRecording();
-      return;
-    }
+  const stopStreetView = () => {
     void endStreetViewSession();
   };
+  const stopDashCam = () => {
+    useDashCamStore.getState().stop();
+    void recorderRef.current?.stopRecording().catch(() => {});
+  };
 
-  const camera = (
-    <CameraView
-      ref={cameraRef}
-      style={StyleSheet.absoluteFill}
-      facing="back"
-      mode={dashRecording ? 'video' : 'picture'}
-      mute
-      active={appActive}
-      animateShutter={false}
-      responsiveOrientationWhenOrientationLocked
-      selectedLens={selectedLens ?? undefined}
-      pictureSize={dashRecording ? undefined : (pictureSize ?? undefined)}
-      onCameraReady={onCameraReady}
-      onMountError={(event) => {
-        setMountError(event.message);
-        Alert.alert(
-          'Camera unavailable',
-          event.message || 'The camera could not start. Stop other camera apps and try again.',
-        );
-        const store = useStreetViewCaptureStore.getState();
-        useDashCamStore.getState().stop();
-        if (store.session && store.session.captureCount === 0) {
-          void discardStreetViewSession();
-        } else {
-          void endStreetViewSession();
-        }
-      }}
-    />
-  );
-
-  const stopButton = (
+  const stopButton = (kind: 'streetview' | 'dashcam') => (
     <Pressable
-      onPress={handleStop}
+      onPress={kind === 'dashcam' ? stopDashCam : stopStreetView}
       style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
       accessibilityRole="button"
-      accessibilityLabel={dashRecording ? 'Stop dash cam recording' : 'Stop street imagery capture'}
+      accessibilityLabel={
+        kind === 'dashcam' ? 'Stop dash cam recording' : 'Stop street imagery capture'
+      }
       accessibilityHint={
-        dashRecording
+        kind === 'dashcam'
           ? 'Stops recording and keeps the footage already captured'
           : 'Stops capture and opens the upload summary'
       }
     >
-      <Ionicons name="stop" size={16} color="#fff" />
+      <Ionicons name={kind === 'dashcam' ? 'videocam-off' : 'stop'} size={16} color="#fff" />
     </Pressable>
   );
 
-  if (!permission || !permission.granted) {
+  const stopControls = (
+    <View style={styles.stopRow}>
+      {session ? stopButton('streetview') : null}
+      {dashRecording ? stopButton('dashcam') : null}
+    </View>
+  );
+
+  if (!hasPermission) {
     return (
       <View
         style={[
@@ -453,8 +456,8 @@ export function CaptureHost() {
         ]}
       >
         <Ionicons name="camera-outline" size={16} color="#fff" />
-        <Text style={styles.permissionText}>{permission ? 'Camera off' : 'Starting camera…'}</Text>
-        <Pressable onPress={handleStop} hitSlop={10} accessibilityLabel="Stop capture">
+        <Text style={styles.permissionText}>Camera off</Text>
+        <Pressable onPress={stopStreetView} hitSlop={10} accessibilityLabel="Stop capture">
           <Ionicons name="close" size={18} color="#fff" />
         </Pressable>
       </View>
@@ -463,25 +466,58 @@ export function CaptureHost() {
 
   // One camera tree for both layouts: only the outer/inner styles change, so
   // switching tabs (expanded band ↔ compact pill) never remounts the camera
-  // and never interrupts a dash-cam recording.
+  // and never interrupts a recording.
   return (
     <View
       style={expanded ? [styles.band, { height: bandHeight }] : styles.wrap}
       pointerEvents="box-none"
     >
       <View style={expanded ? styles.bandInner : styles.preview}>
-        {camera}
+        <Camera
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          isActive={appActive}
+          device={device ?? 'back'}
+          outputs={[photoOutput, videoOutput]}
+          resizeMode="cover"
+          onStarted={() => {
+            setReady(true);
+            setMountError(null);
+          }}
+          onStopped={() => setReady(false)}
+          onError={(error) => {
+            setMountError(error.message);
+            Alert.alert(
+              'Camera unavailable',
+              error.message || 'The camera could not start. Stop other camera apps and try again.',
+            );
+            const store = useStreetViewCaptureStore.getState();
+            useDashCamStore.getState().stop();
+            if (store.session && store.session.captureCount === 0) {
+              void discardStreetViewSession();
+            } else {
+              void endStreetViewSession();
+            }
+          }}
+        />
         {expanded ? (
           <View
             style={[styles.bandOverlay, { paddingBottom: insets.bottom }]}
             pointerEvents="box-none"
           >
             <View style={styles.bandTopRow} pointerEvents="none">
-              <View style={styles.recordingDot} />
-              <Text style={styles.bandCounter}>
-                {dashRecording ? formatClock(elapsed) : String(session?.captureCount ?? 0)}
+              {dashRecording || session ? <View style={styles.recordingDot} /> : null}
+              {dashRecording ? (
+                <Text style={styles.bandCounter}>{formatClock(elapsed)}</Text>
+              ) : null}
+              {session ? <Text style={styles.bandCounter}>{session.captureCount}</Text> : null}
+              <Text style={styles.bandChip}>
+                {dashRecording && session
+                  ? 'DASH CAM + PHOTOS'
+                  : dashRecording
+                    ? 'DASH CAM'
+                    : lensLabel}
               </Text>
-              <Text style={styles.bandChip}>{dashRecording ? 'DASH CAM' : lensLabel}</Text>
               {dashRecording ? (
                 <Text style={styles.bandHint}>{dashPaused ? 'Paused' : 'Recording'}</Text>
               ) : null}
@@ -491,12 +527,14 @@ export function CaptureHost() {
                 <Text style={styles.bandError}>Camera unavailable</Text>
               ) : (
                 <Text style={styles.bandHint} numberOfLines={1}>
-                  {dashRecording
-                    ? 'Footage stays on this device'
-                    : 'Street imagery · tap stop to review'}
+                  {dashRecording && session
+                    ? 'Footage stays on this device · photos upload later'
+                    : dashRecording
+                      ? 'Footage stays on this device'
+                      : 'Street imagery · tap stop to review'}
                 </Text>
               )}
-              <View style={styles.bandStop}>{stopButton}</View>
+              <View style={styles.bandStop}>{stopControls}</View>
             </View>
           </View>
         ) : (
@@ -506,7 +544,9 @@ export function CaptureHost() {
               <Text style={styles.count}>
                 {dashRecording ? formatClock(elapsed) : session?.captureCount}
               </Text>
-              <Text style={styles.lens}>{dashRecording ? 'REC' : lensLabel}</Text>
+              <Text style={styles.lens}>
+                {dashRecording && session ? 'REC+IMG' : dashRecording ? 'REC' : lensLabel}
+              </Text>
             </View>
             {mountError ? (
               <View style={styles.errorOverlay} pointerEvents="none">
@@ -516,7 +556,7 @@ export function CaptureHost() {
           </>
         )}
       </View>
-      {!expanded ? stopButton : null}
+      {!expanded ? stopControls : null}
     </View>
   );
 }
@@ -551,7 +591,7 @@ const styles = StyleSheet.create({
   bandTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   bandCounter: {
     color: '#fff',
@@ -619,6 +659,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  stopRow: {
+    flexDirection: 'row',
+    gap: 6,
   },
   recordingDot: {
     width: 7,

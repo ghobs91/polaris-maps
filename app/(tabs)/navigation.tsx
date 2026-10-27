@@ -95,8 +95,9 @@ export default function NavigationScreen() {
     streetViewSession || dashRecording ? Math.max(150, Math.round(windowHeight * 0.25)) : 0;
   const bottomAnchor = captureBandHeight > 0 ? captureBandHeight : insets.bottom;
   // The rail is 52pt per action; the full stack would reach into the turn
-  // banner once the camera band lifts it. While capturing, the band owns the
-  // stop control, so only the mute toggle stays on the rail.
+  // banner once the camera band lifts it. While capturing, keep the two camera
+  // actions (so the other capture mode can still be started or stopped) plus
+  // mute, and drop the secondary actions.
   const compactRail = captureBandHeight > 0;
   // While CarPlay is attached the car screen drives the map; the phone becomes
   // the companion (step list + add-stop search), like Apple Maps.
@@ -805,46 +806,44 @@ export default function NavigationScreen() {
           style={[styles.rightActions, { bottom: bottomAnchor + spacing.md + 110 }]}
           pointerEvents="box-none"
         >
-          {!compactRail ? (
-            <Pressable
-              style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-              onPress={() => {
-                if (streetViewSession) {
-                  void endStreetViewSession().catch((error) =>
-                    Alert.alert(
-                      'Could not stop capture',
-                      error instanceof Error ? error.message : String(error),
-                    ),
-                  );
-                } else {
-                  void requestStreetViewStart('manual').catch((error) =>
-                    Alert.alert(
-                      'Could not start capture',
-                      error instanceof Error ? error.message : String(error),
-                    ),
-                  );
-                }
-              }}
-              accessibilityLabel={
-                streetViewSession ? 'Stop street imagery capture' : 'Capture street imagery'
+          <Pressable
+            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+            onPress={() => {
+              if (streetViewSession) {
+                void endStreetViewSession().catch((error) =>
+                  Alert.alert(
+                    'Could not stop capture',
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                );
+              } else {
+                void requestStreetViewStart('manual').catch((error) =>
+                  Alert.alert(
+                    'Could not start capture',
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                );
               }
-              accessibilityHint={
-                streetViewSession
-                  ? 'Stops capture and opens the upload summary'
-                  : 'Captures street-level photos while you navigate'
-              }
-              accessibilityRole="button"
-            >
-              <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-                <Ionicons
-                  name={streetViewSession ? 'stop-circle' : 'camera-outline'}
-                  size={22}
-                  color={streetViewSession ? '#FF453A' : '#fff'}
-                />
-              </GlassView>
-            </Pressable>
-          ) : null}
-          {!compactRail && dashCamEnabled ? (
+            }}
+            accessibilityLabel={
+              streetViewSession ? 'Stop street imagery capture' : 'Capture street imagery'
+            }
+            accessibilityHint={
+              streetViewSession
+                ? 'Stops capture and opens the upload summary'
+                : 'Captures street-level photos while you navigate'
+            }
+            accessibilityRole="button"
+          >
+            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+              <Ionicons
+                name={streetViewSession ? 'stop-circle' : 'camera-outline'}
+                size={22}
+                color={streetViewSession ? '#FF453A' : '#fff'}
+              />
+            </GlassView>
+          </Pressable>
+          {dashCamEnabled ? (
             <Pressable
               style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
               onPress={() => {

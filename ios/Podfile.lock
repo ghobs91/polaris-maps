@@ -319,6 +319,53 @@ PODS:
   - maplibre-react-native/DynamicLibrary (10.4.2):
     - React
     - React-Core
+  - NitroImage (0.15.2):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - NitroModules (0.37.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - RCTDeprecation (0.86.3)
   - RCTRequired (0.86.3)
   - RCTSwiftUI (0.86.3)
@@ -2638,6 +2685,56 @@ PODS:
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
   - UMAppLoader (57.0.2)
+  - VisionCamera (5.2.3):
+    - hermes-engine
+    - NitroImage
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - VisionCameraLocation (5.2.3):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - VisionCamera
+    - Yoga
   - Yoga (0.0.0)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
@@ -2693,6 +2790,8 @@ DEPENDENCIES:
   - "FBLazyVector (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/Libraries/FBLazyVector`)"
   - "hermes-engine (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)"
   - "maplibre-react-native (from `../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=b4a396491372ba6281405e0330120a54aa518_e0fb5df4e248197087ac99ac1ee45415/node_modules/@maplibre/maplibre-react-native`)"
+  - "NitroImage (from `../node_modules/.pnpm/react-native-nitro-image@0.15.2_react-native-nitro-modules@0.37.1_react-native@0.86.3_@_58b9657fbf3ff59d1298207805a83a29/node_modules/react-native-nitro-image`)"
+  - "NitroModules (from `../node_modules/.pnpm/react-native-nitro-modules@0.37.1_react-native@0.86.3_@babel+core@7.29.0_@react-native-_9620538580cd6cb28848a337c76c95af/node_modules/react-native-nitro-modules`)"
   - "RCTDeprecation (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)"
   - "RCTRequired (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/Libraries/Required`)"
   - "RCTSwiftUI (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactApple/RCTSwiftUI`)"
@@ -2780,6 +2879,8 @@ DEPENDENCIES:
   - "RNScreens (from `../node_modules/.pnpm/react-native-screens@4.26.2_react-native@0.86.3_@babel+core@7.29.0_@react-native-commun_ffadd986fc9c81f8cf5a74b0ddb1d07b/node_modules/react-native-screens`)"
   - "RNWorklets (from `../node_modules/.pnpm/react-native-worklets@0.10.1_@babel+core@7.29.0_@react-native+metro-config@0.86.3_@babe_93abca437ba0fb0164fafab711b246a7/node_modules/react-native-worklets`)"
   - "UMAppLoader (from `../node_modules/.pnpm/unimodules-app-loader@57.0.2/node_modules/unimodules-app-loader/ios`)"
+  - "VisionCamera (from `../node_modules/.pnpm/react-native-vision-camera@5.2.3_c0f2e2705754c5b39e58e3cd0bc35b47/node_modules/react-native-vision-camera`)"
+  - "VisionCameraLocation (from `../node_modules/.pnpm/react-native-vision-camera-location@5.2.3_react-native-nitro-modules@0.37.1_react-nativ_2fa393ea872d45597343ed695470dba5/node_modules/react-native-vision-camera-location`)"
   - "Yoga (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactCommon/yoga`)"
 
 SPEC REPOS:
@@ -2890,6 +2991,10 @@ EXTERNAL SOURCES:
     :tag: hermes-v250829098.0.17
   maplibre-react-native:
     :path: "../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=b4a396491372ba6281405e0330120a54aa518_e0fb5df4e248197087ac99ac1ee45415/node_modules/@maplibre/maplibre-react-native"
+  NitroImage:
+    :path: "../node_modules/.pnpm/react-native-nitro-image@0.15.2_react-native-nitro-modules@0.37.1_react-native@0.86.3_@_58b9657fbf3ff59d1298207805a83a29/node_modules/react-native-nitro-image"
+  NitroModules:
+    :path: "../node_modules/.pnpm/react-native-nitro-modules@0.37.1_react-native@0.86.3_@babel+core@7.29.0_@react-native-_9620538580cd6cb28848a337c76c95af/node_modules/react-native-nitro-modules"
   RCTDeprecation:
     :path: "../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -3062,6 +3167,10 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/react-native-worklets@0.10.1_@babel+core@7.29.0_@react-native+metro-config@0.86.3_@babe_93abca437ba0fb0164fafab711b246a7/node_modules/react-native-worklets"
   UMAppLoader:
     :path: "../node_modules/.pnpm/unimodules-app-loader@57.0.2/node_modules/unimodules-app-loader/ios"
+  VisionCamera:
+    :path: "../node_modules/.pnpm/react-native-vision-camera@5.2.3_c0f2e2705754c5b39e58e3cd0bc35b47/node_modules/react-native-vision-camera"
+  VisionCameraLocation:
+    :path: "../node_modules/.pnpm/react-native-vision-camera-location@5.2.3_react-native-nitro-modules@0.37.1_react-nativ_2fa393ea872d45597343ed695470dba5/node_modules/react-native-vision-camera-location"
   Yoga:
     :path: "../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactCommon/yoga"
 
@@ -3117,6 +3226,8 @@ SPEC CHECKSUMS:
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: af5937a13536ef73f3784d69cc342b98961acf33
   maplibre-react-native: 37d86b5b7b04dedaceebc577644e67acd7b5f437
+  NitroImage: 5daf897d2f37ed419186278d6b0fcdd8aab313b0
+  NitroModules: 38f8754287858ff1294e43fd43f614a664e54050
   RCTDeprecation: 96f68ebf33f8762466b01d57d6e873c4f30efb07
   RCTRequired: 166eed8ad6d8440e73e56d09a9090366609823d2
   RCTSwiftUI: e818198d11928a78c2b2afe281d072171dab617f
@@ -3207,6 +3318,8 @@ SPEC CHECKSUMS:
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   UMAppLoader: d69910810f31d2e2cfd49706e89ad372161b0561
+  VisionCamera: f84550cffbbf23f3cac7a3d1d2e66e5098a4e8eb
+  VisionCameraLocation: 8b23e0c80d722a090590d99b738d2fcc78e5ef3e
   Yoga: 18b74b3ade30bebc1904004dfaceae1dd02a330a
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
