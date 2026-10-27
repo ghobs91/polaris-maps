@@ -12,6 +12,21 @@ export type StreetViewDriveStatus =
 /** Delivery state for one platform on one capture. */
 export type StreetViewTargetStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'skipped';
 
+/**
+ * Which perspective a frame holds. `wide` is the Mapillary sequence (street
+ * context, one frame per capture point). `detail` is the paired telephoto
+ * frame of the same point, kept in its own stream so it never lands in the
+ * middle of the context sequence.
+ */
+export type StreetViewCaptureStream = 'wide' | 'detail';
+
+/**
+ * Capture one detail frame per N wide frames. Wide frames are distance-gated
+ * (20 m in standard mode), so this is ~100 m of detail coverage, while only
+ * one tick in N pays the extra capture latency.
+ */
+export const STREET_VIEW_DETAIL_EVERY_NTH = 5;
+
 export type StreetViewUploadTarget = 'mapillary';
 
 export interface StreetViewDrive {
@@ -41,6 +56,9 @@ export interface StreetViewCapture {
   bytes: number;
   imageHash: string | null;
   blurred: boolean;
+  stream: StreetViewCaptureStream;
+  /** For a `detail` frame, the `wide` frame it was captured with. */
+  pairId: string | null;
   mapillaryStatus: StreetViewTargetStatus;
   mapillaryFileHandle: string | null;
   mapillaryImageId: string | null;

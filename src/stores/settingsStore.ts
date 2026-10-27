@@ -35,6 +35,11 @@ export interface StreetViewPreferences {
   /** The first-run auto-start question has been answered. */
   autoStartPromptAnswered: boolean;
   mode: StreetViewCaptureModePreference;
+  /**
+   * Capture a paired telephoto frame every few wide frames. Needs a device
+   * with a tele lens; ignored otherwise.
+   */
+  detailStream: boolean;
   /** Default to Wi-Fi for uploads. */
   wifiOnly: boolean;
   /** Reserved for automatic end-of-drive upload (MVP uses the confirmation sheet). */
@@ -114,6 +119,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     autoStart: false,
     autoStartPromptAnswered: false,
     mode: 'standard',
+    detailStream: false,
     wifiOnly: true,
     autoUpload: false,
     maxStorageBytes: 2 * 1024 * 1024 * 1024,

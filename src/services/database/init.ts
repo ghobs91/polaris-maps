@@ -287,6 +287,8 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       bytes INTEGER NOT NULL DEFAULT 0,
       image_hash TEXT,
       blurred INTEGER NOT NULL DEFAULT 0,
+      stream TEXT NOT NULL DEFAULT 'wide',
+      pair_id TEXT,
       mapillary_status TEXT NOT NULL DEFAULT 'pending',
       mapillary_file_handle TEXT,
       mapillary_image_id TEXT,
@@ -368,6 +370,14 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     } catch {
       // Column already exists
     }
+  }
+
+  // Detail-stream columns for the street-imagery queue.
+  for (const ddl of [
+    `ALTER TABLE streetview_captures ADD COLUMN stream TEXT NOT NULL DEFAULT 'wide'`,
+    `ALTER TABLE streetview_captures ADD COLUMN pair_id TEXT`,
+  ]) {
+    await database.execAsync(ddl).catch(() => {});
   }
 
   // Add region_id to geocoding_data for per-region cascade deletes

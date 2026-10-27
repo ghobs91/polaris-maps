@@ -87,7 +87,7 @@ export function StreetViewSettings() {
     <>
       <SettingsGroup
         header="Street Imagery"
-        footer="Opt-in capture while navigating. Photos include GPS, heading and capture time. Mapillary blurs faces and plates on its servers. Standard captures every 20 m; 3D uses denser spacing and the iPhone ultra-wide lens when available (much more storage)."
+        footer="Opt-in capture while navigating. Photos include GPS, heading and capture time. Mapillary blurs faces and plates on its servers. Standard captures every 20 m; 3D uses denser spacing and the iPhone ultra-wide lens when available (much more storage). Detail frames add a telephoto frame every fifth capture on iPhones with a tele lens (standard mode only) and upload as a separate Mapillary cluster."
       >
         <SettingsRow
           title="Capture while navigating"
@@ -113,6 +113,20 @@ export function StreetViewSettings() {
                 label="Street imagery capture mode"
               />
             </View>
+          }
+        />
+        <SettingsRow
+          title="Detail frames (telephoto)"
+          rightAdornment={
+            <Switch
+              value={streetView.detailStream}
+              disabled={!streetView.enabled}
+              onValueChange={(detailStream) => setStreetView({ detailStream })}
+              trackColor={{
+                false: isDark ? '#39393D' : '#E5E5EA',
+                true: colors.primary + 'CC',
+              }}
+            />
           }
         />
         <SettingsRow

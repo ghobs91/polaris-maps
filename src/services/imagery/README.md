@@ -52,10 +52,10 @@ the P2P `street_imagery` feed above.
 | `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                        |
 | `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage. |
 | `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                                                                                                   |
-| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills, and segmented dash-cam recording from one photo + video session.                                               |
+| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills (wide + optional paired telephoto detail), and segmented dash-cam recording from one photo + video session.     |
 | `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, Mapillary upload, upload progress, Delete all, and deferred uploads.                                                                                                                                          |
 | `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                                                                                                  |
-| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), auto-start, Wi-Fi-only, pending drives, Mapillary account.                                                                                                                     |
+| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), detail frames, auto-start, Wi-Fi-only, pending drives, Mapillary account.                                                                                                      |
 
 Flow:
 
@@ -74,6 +74,36 @@ DriveUploadSheet (summary, consent, Delete all)
 The existing `captureService`/`uploadService`/`blurService` pipeline is **not**
 used here: it is P2P-specific, has no EXIF writing, and its placeholder blur
 strips metadata. Mapillary blurs faces and plates server-side.
+
+### Detail stream (telephoto)
+
+`streetView.detailStream` adds a second, paired perspective to some capture
+points:
+
+- Every 5th wide frame (≈100 m in standard mode) the camera switches to the
+  telephoto lens — the lowest factor above 1× in
+  `CameraDevice.zoomLensSwitchFactors` — captures one frame, then returns to
+  1×. The detail row reuses the wide frame's GPS fix, speed and heading, and
+  carries `stream = 'detail'` plus `pair_id` (the wide frame's id).
+- The wide frame is always taken **first**, so `stream = 'wide'` remains the
+  distance-accurate Mapillary sequence.
+- Mapillary uploads the wide stream first and the detail stream second.
+  `segmentCaptures` runs per stream and the segment lists are concatenated, so
+  a cluster never mixes perspectives.
+- Skipped on devices without a tele lens, while the dash cam is recording
+  (the zoom change would appear in the footage), and in 3D mode (the
+  ultra-wide input has no tele constituent).
+
+Unverified: Mapillary may treat two frames captured ~0.5 s apart at the same
+fix as duplicates. Check the published cluster coverage after the first real
+drive before enabling detail upload by default.
+
+**Why not concurrent:** iOS lets one `AVCaptureSession` own the camera devices
+at a time, and VisionCamera owns the session that feeds the preview, the
+stills and the dash-cam video. Opening a second `AVCaptureMultiCamSession`
+would interrupt all three. Hardware-concurrent capture requires moving the
+whole camera backend to `AVCaptureMultiCamSession`; the queue/manifest model
+above stays the same, only the capture call site changes.
 
 ## Dash cam (local rolling buffer)
 
