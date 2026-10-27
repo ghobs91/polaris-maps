@@ -5,6 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 import NetInfo from '@react-native-community/netinfo';
 import {
   MAPILLARY_GRAPH_URL,
+  MAPILLARY_APP_CALLBACK,
   MAPILLARY_UPLOAD_CLIENT_ID,
   MAPILLARY_UPLOAD_CLIENT_SECRET,
   MAPILLARY_UPLOAD_REDIRECT_URI,
@@ -331,9 +332,11 @@ export async function connectMapillary(): Promise<MapillaryUser> {
     scope: MAPILLARY_UPLOAD_SCOPE,
     state,
   });
+  // The browser navigates to the https redirect first; that page forwards to
+  // the app scheme, which is what closes the auth session.
   const result = await WebBrowser.openAuthSessionAsync(
     `https://www.mapillary.com/connect?${params.toString()}`,
-    MAPILLARY_UPLOAD_REDIRECT_URI,
+    MAPILLARY_APP_CALLBACK,
   );
   if (result.type !== 'success' || !result.url) {
     throw new Error('Mapillary sign-in was cancelled');

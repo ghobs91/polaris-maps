@@ -115,7 +115,15 @@ export const MAPILLARY_TOKEN: string = process.env.EXPO_PUBLIC_MAPILLARY_TOKEN ?
 export const MAPILLARY_UPLOAD_CLIENT_ID: string = process.env.EXPO_PUBLIC_MAPILLARY_CLIENT_ID ?? '';
 export const MAPILLARY_UPLOAD_CLIENT_SECRET: string =
   process.env.EXPO_PUBLIC_MAPILLARY_CLIENT_SECRET ?? '';
-export const MAPILLARY_UPLOAD_REDIRECT_URI = 'polaris-maps://mapillary-callback';
+/**
+ * Mapillary's app dashboard only stores `https://` callbacks — a custom scheme
+ * is silently dropped on save. The registered value is therefore the static
+ * bounce page on the app's site, which forwards the query string to
+ * `MAPILLARY_APP_CALLBACK` for `openAuthSessionAsync` to intercept.
+ */
+export const MAPILLARY_UPLOAD_REDIRECT_URI = 'https://app.polarismaps.app/mapillary-callback';
+/** The app-owned scheme the https bounce page hands the code back to. */
+export const MAPILLARY_APP_CALLBACK = 'polaris-maps://mapillary-callback';
 export const MAPILLARY_UPLOAD_SCOPE = 'upload';
 export const MAPILLARY_GRAPH_URL = 'https://graph.mapillary.com';
 export const MAPILLARY_UPLOAD_URL = 'https://rupload.facebook.com/mapillary_public_uploads';
