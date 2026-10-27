@@ -45,18 +45,18 @@ A separate, opt-in pipeline captures stills while turn-by-turn navigation is
 active and uploads them to external platforms. It is deliberately independent of
 the P2P `street_imagery` feed above.
 
-| File                                                  | Description                                                                                                                                                   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                            |
-| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, per-platform status, upload batches, crash recovery, and local-file cleanup.                                           |
-| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                  |
-| `panoramaxService.ts`                                 | Panoramax instance catalog, token-claim auth, upload-set creation, multipart JPEG upload with overrides + `picture_id`, completion, and secure token storage. |
-| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, and secure token storage.                   |
-| `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                             |
-| `../../components/imagery/CaptureHost.tsx`            | Global 16:9 camera preview and capture trigger; uses the raw GPS fix and writes EXIF at capture.                                                              |
-| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, target selection, upload progress, Delete all, and deferred uploads.                                                                    |
-| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                            |
-| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), auto-start, Wi-Fi-only, pending drives, Panoramax account.                                               |
+| File                                                  | Description                                                                                                                                                                                                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                                                                                                                      |
+| `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, per-platform status, upload batches, crash recovery, and local-file cleanup.                                                                                                                                     |
+| `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                                            |
+| `panoramaxService.ts`                                 | Panoramax instance catalog, token-claim auth (claim link opened in the system browser so the instance's OAuth session cookie survives), upload-set creation, multipart JPEG upload with overrides + `picture_id`, completion, and secure token storage. |
+| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage.                     |
+| `streetViewConsent.ts`                                | One-time consent explainer and the first-run auto-start question.                                                                                                                                                                                       |
+| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills, and segmented dash-cam recording from one photo + video session.                                                                   |
+| `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, target selection, upload progress, Delete all, and deferred uploads.                                                                                                                                                              |
+| `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end, auto-start, and crash recovery.                                                                                                                                                                      |
+| `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), auto-start, Wi-Fi-only, pending drives, Panoramax account.                                                                                                                                         |
 
 Flow:
 
@@ -78,6 +78,37 @@ The existing `captureService`/`uploadService`/`blurService` pipeline is **not**
 used here: it is P2P-specific, has no EXIF writing, and its placeholder blur
 strips metadata. Mapillary blurs server-side; Panoramax instances blur only
 when the instance has a blur service enabled.
+
+## Dash cam (local rolling buffer)
+
+`src/services/dashcam/` records muted video in fixed-length segments while you
+drive and keeps only the most recent footage:
+
+```
+CaptureHost (VisionCamera: CameraPhotoOutput + CameraVideoOutput in one session)
+    ↓ segmented recorder (maxDuration = clipSeconds), muted
+dashCamQueue (SQLite + document/dashcam/<clipId>.mp4)
+    ↓ after every segment
+dashCamRetention.planDashCamPrune (time cap + size cap, oldest first)
+    → app/dashcam/index.tsx (playback via expo-video, share via expo-sharing)
+```
+
+- **Opt-in and explicit**: recording only starts from the navigation action; it
+  stops when the navigation screen is gone or the app is backgrounded/locked
+  (the camera session ends, so the loop pauses and resumes with the next
+  segment).
+- **Two caps, whichever binds first**: `dashCam.maxMinutes` and
+  `dashCam.maxBytes`. Changing either in Settings prunes immediately.
+- **Muted**: `enableAudio: false`, so no microphone permission is requested.
+- **Runs alongside stills**: VisionCamera connects a photo output and a video
+  output to the same session, so a street-imagery still can be captured while a
+  dash-cam segment is recording. (This replaced expo-camera, which binds either
+  the photo or the movie output and forced the two features to be exclusive.)
+- **EXIF**: stills get GPS latitude/longitude and capture time from
+  VisionCamera's `location` tagging (`react-native-vision-camera-location`).
+  `GPSImgDirection` is not written by VisionCamera; Mapillary derives the
+  compass angle during processing. Restoring the heading tag needs an EXIF
+  post-pass.
 
 ## Street View 3D (online supplement)
 

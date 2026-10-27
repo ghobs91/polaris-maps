@@ -3,6 +3,16 @@ const mockWriteAsStringAsync = jest.fn();
 const mockDeleteAsync = jest.fn();
 const mockNetInfoFetch = jest.fn();
 const mockFetch = jest.fn();
+const mockDeleteItem = jest.fn(async () => undefined);
+
+jest.mock('react-native-mmkv', () => ({
+  MMKV: jest.fn().mockImplementation(() => ({
+    getString: jest.fn(),
+    getNumber: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+  })),
+}));
 
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
@@ -23,7 +33,7 @@ jest.mock('expo-file-system/legacy', () => ({
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(async () => null),
   setItemAsync: jest.fn(async () => undefined),
-  deleteItemAsync: jest.fn(async () => undefined),
+  deleteItemAsync: (...args: unknown[]) => mockDeleteItem(...args),
 }));
 
 jest.mock('expo-web-browser', () => ({
@@ -45,9 +55,11 @@ jest.mock('../../src/services/imagery/streetViewQueue', () => ({
 }));
 
 import type { StreetViewCapture, StreetViewDriveSummary } from '../../src/models/streetViewCapture';
+import { useSettingsStore } from '../../src/stores/settingsStore';
 import {
   MapillaryAuthError,
   MapillaryWifiOnlyError,
+  segmentCaptures,
   uploadDriveToMapillary,
   type MapillaryAuth,
 } from '../../src/services/imagery/mapillaryService';
@@ -124,6 +136,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   global.fetch = mockFetch as unknown as typeof fetch;
   mockNetInfoFetch.mockResolvedValue({ isConnected: true, type: 'wifi' });
+  useSettingsStore.getState().setStreetView({ mapillaryUsername: 'tester' });
   queue.getOrCreateUploadBatch.mockResolvedValue({
     id: 'batch-1',
     driveId: 'drive-1',
@@ -150,6 +163,7 @@ describe('uploadDriveToMapillary', () => {
 
     expect(result).toEqual({
       clusterId: 'cluster-1',
+      clusterIds: ['cluster-1'],
       uploaded: 1,
       failed: 0,
       skipped: 1,
@@ -229,7 +243,13 @@ describe('uploadDriveToMapillary', () => {
       { wifiOnly: true },
     );
 
-    expect(result).toEqual({ clusterId: null, uploaded: 0, failed: 0, skipped: 1 });
+    expect(result).toEqual({
+      clusterId: null,
+      clusterIds: [],
+      uploaded: 0,
+      failed: 0,
+      skipped: 1,
+    });
     expect(mockUploadAsync).not.toHaveBeenCalled();
     expect(queue.setDriveStatus).toHaveBeenCalledWith(
       'drive-1',
@@ -238,17 +258,90 @@ describe('uploadDriveToMapillary', () => {
     );
   });
 
-  it('surfaces an expired token and keeps the drive for retry', async () => {
+  it('refreshes an expired token once and retries the upload', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({ status: 401, body: '{}' })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+    mockFetch.mockReset();
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, { access_token: 'fresh-token', expires_in: 9000 }))
+      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-1' }));
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+    expect(mockFetch.mock.calls[0][0]).toBe('https://graph.mapillary.com/token');
+    // The retry uses the refreshed token rather than the rejected one.
+    expect(mockUploadAsync.mock.calls[1][2]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'OAuth fresh-token' }),
+      }),
+    );
+  });
+
+  it('disconnects the account when the token cannot be refreshed', async () => {
     mockUploadAsync.mockReset();
     mockUploadAsync.mockResolvedValueOnce({ status: 401, body: '{}' });
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue(jsonResponse(401, { error: 'invalid_token' }));
 
     await expect(uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true })).rejects.toBeInstanceOf(
       MapillaryAuthError,
     );
+    expect(mockDeleteItem).toHaveBeenCalled();
+    expect(useSettingsStore.getState().streetView.mapillaryUsername).toBeNull();
     expect(queue.setDriveStatus).toHaveBeenCalledWith(
       'drive-1',
       'partial',
-      expect.stringContaining('authentication'),
+      expect.stringContaining('expired'),
+    );
+  });
+
+  it('retries a transient upload failure before giving up on the file', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({ status: 503, body: '{}' })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+    expect(mockUploadAsync).toHaveBeenCalledTimes(3);
+  });
+
+  it('submits one cluster per drive segment across a long stop', async () => {
+    const first = capture('first', 1920, 1080);
+    const second = {
+      ...capture('second', 1920, 1080),
+      capturedAt: first.capturedAt + 30 * 60 * 1000,
+    };
+    queue.getPendingMapillaryCaptures.mockResolvedValue([first, second]);
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'handle-1' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-1' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'handle-2' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-2' }) });
+    mockFetch.mockReset();
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-1' }))
+      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-2' }));
+
+    const result = await uploadDriveToMapillary(
+      { ...SUMMARY, captures: [first, second], allLandscape: true },
+      AUTH,
+      { wifiOnly: true },
+    );
+
+    expect(result.clusterIds).toEqual(['cluster-1', 'cluster-2']);
+    expect(result.clusterId).toBe('cluster-1');
+    expect(result.uploaded).toBe(2);
+    expect(queue.updateUploadBatch).toHaveBeenCalledWith(
+      'batch-1',
+      expect.objectContaining({ remoteBatchId: 'cluster-1,cluster-2' }),
     );
   });
 
@@ -259,5 +352,36 @@ describe('uploadDriveToMapillary', () => {
       MapillaryWifiOnlyError,
     );
     expect(mockUploadAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('segmentCaptures', () => {
+  it('starts a new segment after a long stop and keeps capture order', () => {
+    const first = capture('a', 1920, 1080);
+    const second = { ...capture('b', 1920, 1080), capturedAt: first.capturedAt + 60_000 };
+    const afterBreak = {
+      ...capture('c', 1920, 1080),
+      capturedAt: second.capturedAt + 11 * 60 * 1000,
+    };
+
+    const segments = segmentCaptures([afterBreak, first, second]);
+
+    expect(segments.map((segment) => segment.map((entry) => entry.id))).toEqual([
+      ['a', 'b'],
+      ['c'],
+    ]);
+  });
+
+  it('caps a single segment at 1,000 images', () => {
+    const captures = Array.from({ length: 1_001 }, (_, index) => ({
+      ...capture(`c${index}`, 1920, 1080),
+      capturedAt: Date.UTC(2026, 9, 23, 14, 0, 0) + index * 1_000,
+    }));
+
+    const segments = segmentCaptures(captures);
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toHaveLength(1_000);
+    expect(segments[1]).toHaveLength(1);
   });
 });

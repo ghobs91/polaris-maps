@@ -33,7 +33,11 @@ jest.mock('../../src/services/imagery/streetViewQueue', () => ({
 }));
 
 import type { StreetViewCapture, StreetViewDriveSummary } from '../../src/models/streetViewCapture';
+import { Linking } from 'react-native';
 import {
+  connectPanoramax,
+  fetchPanoramaxInstances,
+  getPanoramaxMe,
   normalizePanoramaxInstanceUrl,
   PanoramaxAuthError,
   PanoramaxWifiOnlyError,
@@ -195,5 +199,102 @@ describe('uploadDriveToPanoramax', () => {
       PanoramaxWifiOnlyError,
     );
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('getPanoramaxMe', () => {
+  it('treats an unclaimed token as pending, not as a failure', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(403, {
+        details: {
+          error:
+            'Token not yet claimed, this token cannot be used yet. Either claim this token or generate a new one',
+        },
+        message: 'Token not valid',
+      }),
+    );
+
+    await expect(getPanoramaxMe('https://pano.example', 'jwt')).rejects.toBeInstanceOf(
+      PanoramaxAuthError,
+    );
+  });
+
+  it('surfaces a real rejection instead of polling it', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(403, {
+        details: { error: 'Token already claimed by another account' },
+        message: 'Forbidden',
+      }),
+    );
+
+    await expect(getPanoramaxMe('https://pano.example', 'jwt')).rejects.toThrow(/already claimed/);
+  });
+});
+
+describe('connectPanoramax', () => {
+  const generated = {
+    id: 'token-1',
+    jwt_token: 'jwt-1',
+    links: [{ rel: 'claim', href: 'https://pano.example/api/auth/tokens/token-1/claim' }],
+  };
+
+  it('opens the claim URL in the system browser and finishes once the claim lands', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as unknown as true);
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, generated))
+      .mockResolvedValueOnce(jsonResponse(200, { id: 'user-1', name: 'Tester' }));
+
+    const result = await connectPanoramax('https://pano.example');
+
+    expect(openURL).toHaveBeenCalledWith('https://pano.example/api/auth/tokens/token-1/claim');
+    expect(result.user).toEqual({ id: 'user-1', name: 'Tester' });
+    expect(result.auth.jwt).toBe('jwt-1');
+    openURL.mockRestore();
+  });
+
+  it('stops with the instance message when the claim is refused', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as unknown as true);
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, generated))
+      .mockResolvedValueOnce(
+        jsonResponse(403, { details: { error: 'Token already claimed by another account' } }),
+      );
+
+    await expect(connectPanoramax('https://pano.example')).rejects.toThrow(/already claimed/);
+    openURL.mockRestore();
+  });
+
+  it('reports instances that cannot sign accounts in', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(404, { message: 'Not found', status_code: 404 }));
+
+    await expect(connectPanoramax('https://pano.example')).rejects.toThrow(/does not support/i);
+  });
+});
+
+describe('fetchPanoramaxInstances', () => {
+  it('prefers the display label and flags instances without accounts', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(200, {
+        instances: [
+          {
+            url: 'https://alpha.example',
+            name: 'alpha-slug',
+            configuration: { name: { label: 'Alpha Panoramax' }, auth: { enabled: true } },
+          },
+          {
+            url: 'https://beta.example',
+            name: 'beta',
+            configuration: { auth: { enabled: false } },
+          },
+        ],
+      }),
+    );
+
+    const items = await fetchPanoramaxInstances(true);
+
+    expect(items).toEqual([
+      { name: 'Alpha Panoramax', url: 'https://alpha.example', authEnabled: true },
+      { name: 'beta', url: 'https://beta.example', authEnabled: false },
+    ]);
   });
 });

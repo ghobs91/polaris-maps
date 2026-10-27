@@ -318,6 +318,17 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
     CREATE INDEX IF NOT EXISTS idx_streetview_uploads_drive
       ON streetview_uploads (drive_id);
 
+    CREATE TABLE IF NOT EXISTS dashcam_clips (
+      id TEXT PRIMARY KEY,
+      local_uri TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      bytes INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dashcam_clips_started
+      ON dashcam_clips (started_at DESC);
+
     CREATE TABLE IF NOT EXISTS place_detail_cache (
       canonical_id TEXT PRIMARY KEY,
       place_id TEXT,

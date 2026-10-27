@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
@@ -47,7 +47,9 @@ import {
 import { markForegroundInterpolationTick } from '@/services/navigation/foregroundActivity';
 import { useNavigationTrackingStore } from '@/stores/navigationTrackingStore';
 import { useStreetViewCaptureStore } from '@/stores/streetViewCaptureStore';
+import { useDashCamStore } from '@/stores/dashCamStore';
 import { endStreetViewSession, requestStreetViewStart } from '@/services/imagery/streetViewSession';
+import { requestDashCamStart, stopDashCam } from '@/services/dashcam/dashCamSession';
 import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
@@ -84,6 +86,19 @@ export default function NavigationScreen() {
   const setMuted = useNavigationStore((s) => s.setMuted);
   const hasArrived = useNavigationStore((s) => s.hasArrived);
   const streetViewSession = useStreetViewCaptureStore((s) => s.session);
+  const dashRecording = useDashCamStore((s) => s.recording);
+  const dashCamEnabled = useSettingsStore((s) => s.dashCam.enabled);
+  const { height: windowHeight } = useWindowDimensions();
+  // While the live camera owns the bottom quarter of the screen, the driving
+  // HUD moves above it instead of being covered.
+  const captureBandHeight =
+    streetViewSession || dashRecording ? Math.max(150, Math.round(windowHeight * 0.25)) : 0;
+  const bottomAnchor = captureBandHeight > 0 ? captureBandHeight : insets.bottom;
+  // The rail is 52pt per action; the full stack would reach into the turn
+  // banner once the camera band lifts it. While capturing, keep the two camera
+  // actions (so the other capture mode can still be started or stopped) plus
+  // mute, and drop the secondary actions.
+  const compactRail = captureBandHeight > 0;
   // While CarPlay is attached the car screen drives the map; the phone becomes
   // the companion (step list + add-stop search), like Apple Maps.
   const carPlayConnected = useCarPlayStore((s) => s.connected);
@@ -753,7 +768,7 @@ export default function NavigationScreen() {
       {/* Speed limit + current speed, on the band above the ETA bar. Hidden
           with the action rail while the stops sheet is expanded. */}
       {!hudExpanded && (
-        <View style={[styles.bottomBand, { bottom: insets.bottom + spacing.md + 110 }]}>
+        <View style={[styles.bottomBand, { bottom: bottomAnchor + spacing.md + 110 }]}>
           {/* Gated on either capability so the sign survives if a future mode
               posts a limit without a speedometer. */}
           {(modeCapabilities.speedometer || modeCapabilities.speedLimit) && (
@@ -768,7 +783,7 @@ export default function NavigationScreen() {
       )}
 
       {/* Expandable bottom HUD pinned above the safe area. */}
-      <View style={[styles.etaContainer, { bottom: insets.bottom + spacing.md }]}>
+      <View style={[styles.etaContainer, { bottom: bottomAnchor + spacing.md }]}>
         <NavigationHud
           etaSeconds={etaSeconds}
           remainingDistanceMeters={remainingDistanceMeters}
@@ -788,7 +803,7 @@ export default function NavigationScreen() {
           expanded. Re-center appears below Report when the camera is unfollowed. */}
       {!hudExpanded && (
         <View
-          style={[styles.rightActions, { bottom: insets.bottom + spacing.md + 110 }]}
+          style={[styles.rightActions, { bottom: bottomAnchor + spacing.md + 110 }]}
           pointerEvents="box-none"
         >
           <Pressable
@@ -828,6 +843,38 @@ export default function NavigationScreen() {
               />
             </GlassView>
           </Pressable>
+          {dashCamEnabled ? (
+            <Pressable
+              style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+              onPress={() => {
+                if (dashRecording) {
+                  stopDashCam();
+                } else {
+                  void requestDashCamStart().catch((error) =>
+                    Alert.alert(
+                      'Could not start the dash cam',
+                      error instanceof Error ? error.message : String(error),
+                    ),
+                  );
+                }
+              }}
+              accessibilityLabel={dashRecording ? 'Stop dash cam recording' : 'Start dash cam'}
+              accessibilityHint={
+                dashRecording
+                  ? 'Stops recording and keeps the footage already captured'
+                  : 'Continuously records the drive, keeping only the set amount of recent footage'
+              }
+              accessibilityRole="button"
+            >
+              <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+                <Ionicons
+                  name={dashRecording ? 'stop-circle' : 'videocam-outline'}
+                  size={22}
+                  color={dashRecording ? '#FF453A' : '#fff'}
+                />
+              </GlassView>
+            </Pressable>
+          ) : null}
           <Pressable
             style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
             onPress={() => setMuted(!muted)}
@@ -838,51 +885,55 @@ export default function NavigationScreen() {
               <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={22} color="#fff" />
             </GlassView>
           </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-            onPress={() => repeatLastAnnouncement()}
-            accessibilityLabel="Repeat last instruction"
-            accessibilityRole="button"
-          >
-            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-              <Ionicons name="refresh" size={22} color="#fff" />
-            </GlassView>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-            onPress={() => setShowSteps(true)}
-            accessibilityLabel="Show steps"
-            accessibilityHint="Show the full list of directions for this route"
-            accessibilityRole="button"
-          >
-            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-              <Ionicons name="list" size={22} color="#fff" />
-            </GlassView>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-            onPress={() => setShowIncidentReport(true)}
-            accessibilityLabel="Report incident"
-            accessibilityHint="Report a traffic incident at your current location"
-            accessibilityRole="button"
-          >
-            <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-              <Ionicons name="alert-circle-outline" size={22} color="#fff" />
-            </GlassView>
-          </Pressable>
-          {!followCamera && (
-            <Pressable
-              style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
-              onPress={handleRecenter}
-              accessibilityLabel="Re-center map"
-              accessibilityHint="Return the map view to your current location"
-              accessibilityRole="button"
-            >
-              <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-                <Ionicons name="navigate" size={22} color="#fff" />
-              </GlassView>
-            </Pressable>
-          )}
+          {!compactRail ? (
+            <>
+              <Pressable
+                style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+                onPress={() => repeatLastAnnouncement()}
+                accessibilityLabel="Repeat last instruction"
+                accessibilityRole="button"
+              >
+                <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+                  <Ionicons name="refresh" size={22} color="#fff" />
+                </GlassView>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+                onPress={() => setShowSteps(true)}
+                accessibilityLabel="Show steps"
+                accessibilityHint="Show the full list of directions for this route"
+                accessibilityRole="button"
+              >
+                <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+                  <Ionicons name="list" size={22} color="#fff" />
+                </GlassView>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+                onPress={() => setShowIncidentReport(true)}
+                accessibilityLabel="Report incident"
+                accessibilityHint="Report a traffic incident at your current location"
+                accessibilityRole="button"
+              >
+                <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+                  <Ionicons name="alert-circle-outline" size={22} color="#fff" />
+                </GlassView>
+              </Pressable>
+              {!followCamera && (
+                <Pressable
+                  style={({ pressed }) => [styles.actionFab, { opacity: pressed ? 0.85 : 1 }]}
+                  onPress={handleRecenter}
+                  accessibilityLabel="Re-center map"
+                  accessibilityHint="Return the map view to your current location"
+                  accessibilityRole="button"
+                >
+                  <GlassView material="regular" isInteractive style={styles.actionFabInner}>
+                    <Ionicons name="navigate" size={22} color="#fff" />
+                  </GlassView>
+                </Pressable>
+              )}
+            </>
+          ) : null}
         </View>
       )}
 
