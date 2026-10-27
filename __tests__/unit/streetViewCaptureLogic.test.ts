@@ -1,11 +1,13 @@
 import {
   buildCaptureExif,
   captureConfigForMode,
+  detailZoomForDevice,
   formatExifDate,
   formatExifDateTime,
   formatExifTime,
   isDrivingCosting,
   shouldCapture,
+  shouldCaptureDetail,
 } from '../../src/services/imagery/streetViewCaptureLogic';
 import type { StreetViewFix } from '../../src/models/streetViewCapture';
 
@@ -85,6 +87,68 @@ describe('shouldCapture', () => {
       capturedAt: FIX.timestamp - 3000,
     };
     expect(shouldCapture(FIX, last, FIX.timestamp, threeD).capture).toBe(true);
+  });
+});
+
+describe('detailZoomForDevice', () => {
+  it('uses the telephoto switch-over factor of a triple camera', () => {
+    expect(detailZoomForDevice({ maxZoom: 12, zoomLensSwitchFactors: [0.5, 1, 3] })).toBe(3);
+  });
+
+  it('takes the lowest factor above 1x when a device has several', () => {
+    expect(detailZoomForDevice({ maxZoom: 15, zoomLensSwitchFactors: [0.5, 1, 2, 5] })).toBe(2);
+  });
+
+  it('returns null for a camera without a telephoto lens', () => {
+    expect(detailZoomForDevice({ maxZoom: 5, zoomLensSwitchFactors: [0.5, 1] })).toBeNull();
+  });
+
+  it('returns null when the device cannot zoom past 1x', () => {
+    expect(detailZoomForDevice({ maxZoom: 1, zoomLensSwitchFactors: [1] })).toBeNull();
+  });
+
+  it('returns null when the switch factor is outside the device range', () => {
+    expect(detailZoomForDevice({ maxZoom: 2, zoomLensSwitchFactors: [1, 3] })).toBeNull();
+  });
+
+  it('returns null without a device', () => {
+    expect(detailZoomForDevice(undefined)).toBeNull();
+  });
+});
+
+describe('shouldCaptureDetail', () => {
+  const base = {
+    enabled: true,
+    detailZoom: 3,
+    everyNth: 5,
+    wideFrameCount: 5,
+    dashCamRecording: false,
+  };
+
+  it('captures on every Nth wide frame', () => {
+    expect(shouldCaptureDetail(base)).toEqual({ capture: true, reason: 'ok' });
+  });
+
+  it('skips frames between the cadence', () => {
+    expect(shouldCaptureDetail({ ...base, wideFrameCount: 4 }).reason).toBe('not-due');
+  });
+
+  it('stays off when the preference is off', () => {
+    expect(shouldCaptureDetail({ ...base, enabled: false }).reason).toBe('disabled');
+  });
+
+  it('stays off on a device without a telephoto lens', () => {
+    expect(shouldCaptureDetail({ ...base, detailZoom: null }).reason).toBe('no-telephoto');
+  });
+
+  it('stays off while the dash cam records the same session', () => {
+    expect(shouldCaptureDetail({ ...base, dashCamRecording: true }).reason).toBe(
+      'dash-cam-recording',
+    );
+  });
+
+  it('treats a cadence below one as every frame', () => {
+    expect(shouldCaptureDetail({ ...base, everyNth: 0 }).capture).toBe(true);
   });
 });
 

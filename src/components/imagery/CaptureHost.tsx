@@ -32,9 +32,12 @@ import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore
 import { dashCamElapsedSeconds, useDashCamStore } from '../../stores/dashCamStore';
 import {
   captureConfigForMode,
+  detailZoomForDevice,
   shouldCapture,
+  shouldCaptureDetail,
   type LastCapture,
 } from '../../services/imagery/streetViewCaptureLogic';
+import { STREET_VIEW_DETAIL_EVERY_NTH, type StreetViewFix } from '../../models/streetViewCapture';
 import {
   ensureStreetViewDriveDir,
   getLocalFileSize,
@@ -58,6 +61,8 @@ const BAND_SCREEN_FRACTION = 0.25;
 const BAND_MIN_HEIGHT = 150;
 /** Stop recording rather than fill the last of the device's free space. */
 const MIN_FREE_BYTES = 300 * 1024 * 1024;
+/** Let exposure and focus settle after the telephoto lens takes over. */
+const DETAIL_ZOOM_SETTLE_MS = 150;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -124,6 +129,10 @@ export function CaptureHost() {
     mode === 'threeD' ? { physicalDevices: ['ultra-wide-angle'] } : undefined,
   );
   const config = captureConfigForMode(mode);
+  const detailStreamEnabled = useSettingsStore((s) => s.streetView.detailStream);
+  // Null on devices without a telephoto lens — zooming a wide-only camera
+  // would just crop the frame the wide stream already has.
+  const detailZoom = detailZoomForDevice(device);
   const photoOutput = usePhotoOutput({
     targetResolution: mode === 'standard' ? CommonResolutions.FHD_16_9 : CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',
@@ -144,6 +153,8 @@ export function CaptureHost() {
 
   const busyRef = useRef(false);
   const lastCaptureRef = useRef<LastCapture | null>(null);
+  /** Wide frames this drive, for the detail-stream cadence. */
+  const wideFrameCountRef = useRef(0);
   const permissionRequestedRef = useRef(false);
   const lastStorageCheckRef = useRef(0);
   const activeRef = useRef(appActive);
@@ -207,6 +218,68 @@ export function CaptureHost() {
       void discardStreetViewSession();
     });
   }, [captureActive, hasPermission, canRequestPermission, requestPermission]);
+
+  /**
+   * Captures the telephoto half of a pair from the same session.
+   *
+   * This runs *after* the wide frame, not concurrently: iOS gives one capture
+   * session one active set of devices, and VisionCamera owns the session that
+   * also feeds the preview and the dash cam. Opening a second
+   * AVCaptureMultiCamSession would interrupt all three, so the two streams are
+   * separated by a lens switch instead of by hardware concurrency.
+   */
+  const captureDetailFrame = useCallback(
+    async (input: { driveId: string; fix: StreetViewFix; pairId: string; zoom: number }) => {
+      const controller = cameraRef.current?.controller;
+      if (!controller) return;
+      try {
+        await controller.setZoom(input.zoom);
+        await delay(DETAIL_ZOOM_SETTLE_MS);
+        const { filePath } = await photoOutput.capturePhotoToFile(
+          {
+            enableShutterSound: false,
+            location: createLocation(input.fix.lat, input.fix.lng),
+          },
+          {},
+        );
+        if (!filePath) return;
+
+        const source = toFileUri(filePath);
+        const dir = await ensureStreetViewDriveDir(input.driveId);
+        const id = Crypto.randomUUID();
+        const dest = `${dir}${id}.jpg`;
+        await FileSystem.moveAsync({ from: source, to: dest }).catch(async () => {
+          await FileSystem.copyAsync({ from: source, to: dest });
+          await FileSystem.deleteAsync(source, { idempotent: true }).catch(() => {});
+        });
+        const [bytes, size] = await Promise.all([getLocalFileSize(dest), getImageSize(dest)]);
+
+        await insertCapture({
+          id,
+          driveId: input.driveId,
+          localUri: dest,
+          lat: input.fix.lat,
+          lng: input.fix.lng,
+          altitude: input.fix.altitude,
+          heading: input.fix.heading,
+          speedMps: input.fix.speedMps,
+          capturedAt: Date.now(),
+          width: size.width,
+          height: size.height,
+          bytes,
+          stream: 'detail',
+          pairId: input.pairId,
+        });
+        recordCapture(bytes);
+      } catch (error) {
+        // A missed detail frame must never abort the wide stream.
+        setSessionError(error instanceof Error ? error.message : String(error));
+      } finally {
+        await controller.setZoom(1).catch(() => {});
+      }
+    },
+    [photoOutput, recordCapture, setSessionError],
+  );
 
   const takePicture = useCallback(async () => {
     if (!ready || busyRef.current || !activeRef.current) return;
@@ -287,12 +360,38 @@ export function CaptureHost() {
 
       lastCaptureRef.current = { lat: fix.lat, lng: fix.lng, capturedAt };
       recordCapture(bytes);
+
+      wideFrameCountRef.current += 1;
+      const detail = shouldCaptureDetail({
+        enabled: detailStreamEnabled,
+        detailZoom,
+        everyNth: STREET_VIEW_DETAIL_EVERY_NTH,
+        wideFrameCount: wideFrameCountRef.current,
+        dashCamRecording: useDashCamStore.getState().recording,
+      });
+      if (detail.capture && detailZoom != null) {
+        await captureDetailFrame({
+          driveId: currentSession.driveId,
+          fix,
+          pairId: id,
+          zoom: detailZoom,
+        });
+      }
     } catch (error) {
       setSessionError(error instanceof Error ? error.message : String(error));
     } finally {
       busyRef.current = false;
     }
-  }, [config, photoOutput, ready, recordCapture, setSessionError]);
+  }, [
+    captureDetailFrame,
+    config,
+    detailStreamEnabled,
+    detailZoom,
+    photoOutput,
+    ready,
+    recordCapture,
+    setSessionError,
+  ]);
 
   // The raw fix is published on every navigation tick (1 Hz). A new object is
   // emitted per fix, but guard on the timestamp so a re-render cannot double

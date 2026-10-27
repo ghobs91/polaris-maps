@@ -29,6 +29,70 @@ export function captureConfigForMode(mode: StreetViewCaptureMode): StreetViewCap
   return STREET_VIEW_MODE_CONFIG[mode] ?? STREET_VIEW_MODE_CONFIG.standard;
 }
 
+/** The subset of a VisionCamera `CameraDevice` the detail stream needs. */
+export interface DetailCapableDevice {
+  maxZoom: number;
+  /** Zoom factors at which an iPhone virtual camera switches constituent lens. */
+  zoomLensSwitchFactors?: readonly number[];
+}
+
+/**
+ * The zoom at which a virtual back camera hands over to its telephoto lens —
+ * the lowest switch factor above 1× — or null when the device has no tele
+ * lens (a dual wide + ultra-wide iPhone, or a real fixed-lens camera).
+ *
+ * Zooming past 1× on a device without a tele lens only crops the wide sensor,
+ * which adds no detail over the wide frame, so the detail stream stays off.
+ */
+export function detailZoomForDevice(device: DetailCapableDevice | null | undefined): number | null {
+  if (!device || !Number.isFinite(device.maxZoom) || device.maxZoom <= 1) return null;
+  const telephoto = (device.zoomLensSwitchFactors ?? [])
+    .filter((factor) => Number.isFinite(factor) && factor > 1.0001)
+    .sort((a, b) => a - b)[0];
+  if (telephoto == null || telephoto > device.maxZoom) return null;
+  return telephoto;
+}
+
+export type DetailCaptureReason =
+  | 'ok'
+  | 'disabled'
+  | 'no-telephoto'
+  | 'dash-cam-recording'
+  | 'not-due';
+
+export interface DetailCaptureInput {
+  /** The user's detail-stream preference. */
+  enabled: boolean;
+  /** `detailZoomForDevice(device)` — null when this device has no tele lens. */
+  detailZoom: number | null;
+  /** One detail frame per N wide frames. */
+  everyNth: number;
+  /** Wide frames captured in this drive, counting the one just taken. */
+  wideFrameCount: number;
+  /** A dash-cam segment is recording the same session; zooming would show in it. */
+  dashCamRecording: boolean;
+}
+
+/**
+ * Decide whether the wide frame just captured should get a telephoto twin.
+ *
+ * Every rejected branch keeps the wide stream unchanged, so the feature can
+ * never cost the Mapillary sequence a frame.
+ */
+export function shouldCaptureDetail(input: DetailCaptureInput): {
+  capture: boolean;
+  reason: DetailCaptureReason;
+} {
+  if (!input.enabled) return { capture: false, reason: 'disabled' };
+  if (input.detailZoom == null) return { capture: false, reason: 'no-telephoto' };
+  // The detail frame is a zoom change inside the live session, so it would
+  // zoom the dash-cam footage too.
+  if (input.dashCamRecording) return { capture: false, reason: 'dash-cam-recording' };
+  const everyNth = Math.max(1, Math.floor(input.everyNth));
+  if (input.wideFrameCount % everyNth !== 0) return { capture: false, reason: 'not-due' };
+  return { capture: true, reason: 'ok' };
+}
+
 /**
  * Decide whether a raw GPS fix should produce a frame.
  *

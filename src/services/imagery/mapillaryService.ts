@@ -513,6 +513,9 @@ function errorMessage(error: unknown): string {
  * Upload landscape captures from one drive. Portrait captures are skipped
  * because Mapillary rejects them; they remain in the local queue until the
  * drive is deleted.
+ *
+ * `wide` captures form the sequence; `detail` captures are uploaded after
+ * them, as separate clusters.
  */
 export async function uploadDriveToMapillary(
   summary: StreetViewDriveSummary,
@@ -561,7 +564,13 @@ export async function uploadDriveToMapillary(
 
   // The token can be rotated mid-drive; every call reads the current one.
   const authRef = { current: auth };
-  const segments = segmentCaptures(landscape);
+  // Wide frames are the canonical sequence that Mapillary aligns to the road;
+  // detail frames follow as their own clusters. Segmenting each stream on its
+  // own and concatenating the lists (never merging them) guarantees a
+  // telephoto crop never lands between two context frames of the sequence.
+  const wideCaptures = landscape.filter((capture) => capture.stream !== 'detail');
+  const detailCaptures = landscape.filter((capture) => capture.stream === 'detail');
+  const segments = [...segmentCaptures(wideCaptures), ...segmentCaptures(detailCaptures)];
   const clusterIds: string[] = [];
   const uploadedIds: string[] = [];
   let failed = 0;

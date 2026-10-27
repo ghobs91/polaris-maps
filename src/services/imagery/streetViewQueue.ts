@@ -3,6 +3,7 @@ import * as Crypto from 'expo-crypto';
 import { getDatabase } from '../database/init';
 import type {
   StreetViewCapture,
+  StreetViewCaptureStream,
   StreetViewDrive,
   StreetViewDriveStatus,
   StreetViewDriveSummary,
@@ -39,6 +40,8 @@ interface CaptureRow {
   bytes: number;
   image_hash: string | null;
   blurred: number;
+  stream: StreetViewCaptureStream;
+  pair_id: string | null;
   mapillary_status: StreetViewTargetStatus;
   mapillary_file_handle: string | null;
   mapillary_image_id: string | null;
@@ -93,6 +96,8 @@ function captureFromRow(row: CaptureRow): StreetViewCapture {
     bytes: row.bytes,
     imageHash: row.image_hash,
     blurred: row.blurred === 1,
+    stream: row.stream,
+    pairId: row.pair_id,
     mapillaryStatus: row.mapillary_status,
     mapillaryFileHandle: row.mapillary_file_handle,
     mapillaryImageId: row.mapillary_image_id,
@@ -194,6 +199,10 @@ export interface InsertCaptureInput {
   height: number;
   bytes: number;
   blurred?: boolean;
+  /** Defaults to `wide`, the Mapillary sequence. */
+  stream?: StreetViewCaptureStream;
+  /** For a `detail` frame, the `wide` frame it was captured with. */
+  pairId?: string | null;
   error?: string | null;
 }
 
@@ -204,10 +213,10 @@ export async function insertCapture(input: InsertCaptureInput): Promise<StreetVi
   await db.runAsync(
     `INSERT INTO streetview_captures (
        id, drive_id, local_uri, lat, lng, altitude, heading, speed_mps, captured_at,
-       width, height, bytes, image_hash, blurred,
+       width, height, bytes, image_hash, blurred, stream, pair_id,
        mapillary_status, mapillary_file_handle, mapillary_image_id,
        error, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'pending', NULL, NULL, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'pending', NULL, NULL, ?, ?)`,
     [
       id,
       input.driveId,
@@ -222,6 +231,8 @@ export async function insertCapture(input: InsertCaptureInput): Promise<StreetVi
       input.height,
       input.bytes,
       input.blurred ? 1 : 0,
+      input.stream ?? 'wide',
+      input.pairId ?? null,
       input.error ?? null,
       createdAt,
     ],
@@ -242,6 +253,8 @@ export async function insertCapture(input: InsertCaptureInput): Promise<StreetVi
     bytes: input.bytes,
     imageHash: null,
     blurred: input.blurred === true,
+    stream: input.stream ?? 'wide',
+    pairId: input.pairId ?? null,
     mapillaryStatus: 'pending',
     mapillaryFileHandle: null,
     mapillaryImageId: null,

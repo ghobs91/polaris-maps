@@ -94,6 +94,8 @@ function capture(id: string, width: number, height: number): StreetViewCapture {
     bytes: 300_000,
     imageHash: null,
     blurred: false,
+    stream: 'wide',
+    pairId: null,
     mapillaryStatus: 'pending',
     mapillaryFileHandle: null,
     mapillaryImageId: null,
@@ -339,6 +341,64 @@ describe('uploadDriveToMapillary', () => {
     expect(queue.updateUploadBatch).toHaveBeenCalledWith(
       'batch-1',
       expect.objectContaining({ remoteBatchId: 'cluster-1,cluster-2' }),
+    );
+  });
+
+  it('uploads the detail stream as separate clusters after the wide sequence', async () => {
+    const wideOne = capture('wide-1', 1920, 1080);
+    const wideTwo = { ...capture('wide-2', 1920, 1080), capturedAt: wideOne.capturedAt + 20_000 };
+    const detailOne = {
+      ...capture('detail-1', 1920, 1080),
+      stream: 'detail' as const,
+      pairId: wideOne.id,
+      capturedAt: wideOne.capturedAt + 400,
+    };
+    const detailTwo = {
+      ...capture('detail-2', 1920, 1080),
+      stream: 'detail' as const,
+      pairId: wideTwo.id,
+      capturedAt: wideTwo.capturedAt + 400,
+    };
+    // Interleaved in capture order, the way the queue returns them.
+    queue.getPendingMapillaryCaptures.mockResolvedValue([wideOne, detailOne, wideTwo, detailTwo]);
+    mockUploadAsync.mockReset();
+    for (const handle of [
+      'wide-handle-1',
+      'wide-handle-2',
+      'wide-manifest',
+      'detail-handle-1',
+      'detail-handle-2',
+      'detail-manifest',
+    ]) {
+      mockUploadAsync.mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: handle }) });
+    }
+    mockFetch.mockReset();
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-wide' }))
+      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-detail' }));
+
+    const result = await uploadDriveToMapillary(
+      { ...SUMMARY, captures: [wideOne, detailOne, wideTwo, detailTwo], allLandscape: true },
+      AUTH,
+      { wifiOnly: true },
+    );
+
+    expect(result.clusterIds).toEqual(['cluster-wide', 'cluster-detail']);
+    expect(result.uploaded).toBe(4);
+    // No cluster mixes the two perspectives.
+    expect(mockWriteAsStringAsync.mock.calls[0][1]).toBe(
+      JSON.stringify({
+        version: '1',
+        upload_type: 'images',
+        image_handles: ['wide-handle-1', 'wide-handle-2'],
+      }),
+    );
+    expect(mockWriteAsStringAsync.mock.calls[1][1]).toBe(
+      JSON.stringify({
+        version: '1',
+        upload_type: 'images',
+        image_handles: ['detail-handle-1', 'detail-handle-2'],
+      }),
     );
   });
 
