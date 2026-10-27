@@ -1,7 +1,6 @@
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
-import { normalizeSearchText } from '../../services/search/queryParser';
-import { resolveSearchCategories } from '../../services/poi/categoryResolver';
+import { DEFAULT_QUERY_PLAN, type QueryPlan } from '../../services/search/queryPlan';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import {
   applyFilters,
@@ -22,8 +21,11 @@ export interface DirectionsTarget {
  * still move the camera. Kept around the category search radius (~28 km) so a
  * genuinely rural search still frames its results, while a cluster in the next
  * city/borough (Westbury → Manhattan is ~40 km) never yanks the map away.
+ *
+ * Owned by the shared query plan (see `plan.fitAnchorRadiusKm`);
+ * re-exported for existing imports.
  */
-export const MAX_FIT_ANCHOR_KM = 30;
+export const MAX_FIT_ANCHOR_KM = DEFAULT_QUERY_PLAN.fitAnchorRadiusKm;
 
 export function destinationToGeocodingResult(dest: DirectionsTarget): GeocodingResult {
   return {
@@ -89,16 +91,22 @@ export function kmBetween(
  * Results within this radius of the search anchor count as local to the user.
  * Slightly wider than the camera-fit radius ({@link MAX_FIT_ANCHOR_KM}) so a
  * suburban search still counts its own metro as local.
+ *
+ * Owned by the shared query plan (see `plan.nearbyRadiusKm`); re-exported for
+ * existing imports.
  */
-export const NEARBY_RESULT_KM = 50;
+export const NEARBY_RESULT_KM = DEFAULT_QUERY_PLAN.nearbyRadiusKm;
 
 /**
  * Results farther than this are dropped from the merged list. Sources that
  * rank by text alone (Photon, Nominatim) can otherwise answer a New York
  * search with a 300 km Boston cluster, burying the local branches — or, when
  * nothing local matched, presenting that cluster as the answer.
+ *
+ * Owned by the shared query plan (see `plan.tailRadiusKm`); re-exported for
+ * existing imports.
  */
-export const DISTANT_RESULT_KM = 120;
+export const DISTANT_RESULT_KM = DEFAULT_QUERY_PLAN.tailRadiusKm;
 
 /**
  * Order a merged result list around the search anchor.
@@ -125,6 +133,7 @@ function isExplicitDestination(result: GeocodingResult): boolean {
 export function preferNearbyResults(
   results: GeocodingResult[],
   anchor: { lat: number; lng: number } | null | undefined,
+  plan: QueryPlan = DEFAULT_QUERY_PLAN,
 ): GeocodingResult[] {
   if (!anchor || results.length < 2) return results;
 
@@ -137,7 +146,7 @@ export function preferNearbyResults(
       // An address or a city the user named is an explicit destination: it
       // always counts as local, so searching "Paris" from New York is not
       // answered only by the café of the same name down the street.
-      isLocal: isExplicitDestination(result) || distanceKm <= NEARBY_RESULT_KM,
+      isLocal: isExplicitDestination(result) || distanceKm <= plan.nearbyRadiusKm,
     };
   });
 
@@ -145,7 +154,7 @@ export function preferNearbyResults(
   // a Manhattan search for a Boston-only name ended up listing cafés 300 km
   // away as if they were answers; an empty local list is the honest answer.
   const kept = withDistance.filter(
-    (entry) => isExplicitDestination(entry.result) || entry.distanceKm <= DISTANT_RESULT_KM,
+    (entry) => isExplicitDestination(entry.result) || entry.distanceKm <= plan.tailRadiusKm,
   );
 
   return kept
@@ -163,14 +172,15 @@ export function preferNearbyResults(
 export function selectSearchPins(
   mapPois: OsmPoi[],
   anchor?: { lat: number; lng: number } | null,
+  plan: QueryPlan = DEFAULT_QUERY_PLAN,
 ): OsmPoi[] {
   const candidates = anchor
     ? [...mapPois].sort((a, b) => kmBetween(anchor, a) - kmBetween(anchor, b))
     : mapPois;
 
-  if (candidates.length <= 5) return candidates;
+  if (candidates.length <= plan.maxPins) return candidates;
 
-  const pins = candidates.slice(0, 5);
+  const pins = candidates.slice(0, plan.maxPins);
   const first = pins[0];
   let maxDistanceKm = 0;
 
@@ -180,8 +190,8 @@ export function selectSearchPins(
 
   // If one of the first results is still much farther out than the local cluster,
   // keep the map centered on the tighter group the user is likely scanning.
-  if (maxDistanceKm > 18) {
-    return pins.filter((poi) => kmBetween(first, poi) <= 12);
+  if (maxDistanceKm > plan.pinSpreadKm) {
+    return pins.filter((poi) => kmBetween(first, poi) <= plan.pinClusterKm);
   }
 
   return pins;
@@ -260,60 +270,17 @@ export function applySearchView(
  * Place/brand/address lookups may frame a distant match (that is the intent).
  * Nearby-intent queries stay put when every match is a long way off, so
  * "bagels" searched from Westbury can never fly the map to Manhattan.
+ *
+ * The intent is read from the plan the caller built for the query
+ * (`createQueryPlan(query).allowsDistantFraming`) — one classification shared
+ * with the engine instead of a separate verb-set heuristic.
  */
 export function shouldFrameResults(
   pins: OsmPoi[],
   anchor: { lat: number; lng: number } | null | undefined,
-  allowDistantMatch: boolean,
+  plan: QueryPlan = DEFAULT_QUERY_PLAN,
 ): boolean {
   if (pins.length === 0) return false;
-  if (allowDistantMatch || !anchor) return true;
-  return kmBetween(anchor, pins[0]) <= MAX_FIT_ANCHOR_KM;
-}
-
-/** Filler words that don't turn a category phrase into a place lookup. */
-const QUERY_MODIFIERS = new Set([
-  'near',
-  'nearby',
-  'me',
-  'my',
-  'here',
-  'around',
-  'open',
-  'now',
-  'late',
-  'best',
-  'top',
-  'rated',
-  'good',
-  'popular',
-  'cheap',
-  'closest',
-  'nearest',
-  'the',
-  'a',
-  'an',
-  'in',
-  'at',
-  'on',
-  'to',
-  'for',
-  'find',
-  'search',
-  'show',
-]);
-
-/**
- * True when the query is only a category phrase ("bagels", "coffee near me"),
- * i.e. the answer is expected around the user. A proper-name token ("h&h
- * bagels", "pizza palace") makes it a place lookup, which may frame a distant
- * match — Google pans to "H&H Bagels", but not to "bagels".
- */
-export function isGenericNearbyQuery(query: string): boolean {
-  const words = normalizeSearchText(query)
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((word) => word.length >= 2 && !QUERY_MODIFIERS.has(word));
-  if (words.length === 0) return false;
-  return words.every((word) => resolveSearchCategories(word) !== null);
+  if (plan.allowsDistantFraming || !anchor) return true;
+  return kmBetween(anchor, pins[0]) <= plan.fitAnchorRadiusKm;
 }

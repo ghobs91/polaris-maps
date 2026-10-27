@@ -91,12 +91,12 @@ import {
   boundsForPois,
   destinationToGeocodingResult,
   geocodingResultToSearchResult,
-  isGenericNearbyQuery,
   isSameDestination,
   preferNearbyResults,
   selectSearchPins,
   shouldFrameResults,
 } from './floatingSearchPanelHelpers';
+import { createQueryPlan, type QueryPlan } from '../../services/search/queryPlan';
 import { resolveSearchCamera } from '../../utils/searchCamera';
 
 /** Cap on POIs a quick-category pill returns (list rows + map pins). */
@@ -718,7 +718,8 @@ export function FloatingSearchPanel({
   // The camera — not GPS — because a submit answers the area on screen; using
   // the user's position picked pins from the map's old centre after a pan.
   const fitAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
-  const fitAllowsFarRef = useRef(false);
+  /** The query plan built for the submitted text (camera framing + pin policy). */
+  const fitPlanRef = useRef<QueryPlan | null>(null);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const isCategorySearching = useOsmPoiStore((s) => s.isCategorySearching);
   const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
@@ -787,7 +788,14 @@ export function FloatingSearchPanel({
       const anchor = bounds
         ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
         : userLocationRef.current;
-      const displayedResults = [...stationResults, ...preferNearbyResults(filteredUnified, anchor)];
+      const displayedResults = [
+        ...stationResults,
+        ...preferNearbyResults(
+          filteredUnified,
+          anchor,
+          fitPlanRef.current ?? createQueryPlan(viewQueryRef.current),
+        ),
+      ];
       // Keep the unfiltered merge: a filter/sort change re-applies locally (see
       // the effect below) instead of re-running the search.
       mergedRowsRef.current = displayedResults;
@@ -823,8 +831,9 @@ export function FloatingSearchPanel({
         // (`updateMap`); live autosuggest typing must never pan the map.
         // On submit, pins are ordered nearest to where the user searched from so
         // a dense far-away cluster can't take over the map.
+        const plan = fitPlanRef.current ?? createQueryPlan(viewQueryRef.current);
         const pinAnchor = updateMap ? fitAnchorRef.current : null;
-        const fitPois = selectSearchPins(mapPois, pinAnchor);
+        const fitPois = selectSearchPins(mapPois, pinAnchor, plan);
         useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
 
         const fitBounds = boundsForPois(fitPois);
@@ -832,7 +841,7 @@ export function FloatingSearchPanel({
         // around the user: if every match is a long way off, keep the camera
         // where it is instead of yanking the map to another city. Place/brand/
         // address searches may still frame a distant result (that is the intent).
-        const mayFrame = shouldFrameResults(fitPois, fitAnchorRef.current, fitAllowsFarRef.current);
+        const mayFrame = shouldFrameResults(fitPois, fitAnchorRef.current, plan);
 
         if (updateMap && fitBounds && mayFrame) {
           const live = liveViewportContext();
@@ -948,7 +957,7 @@ export function FloatingSearchPanel({
         const anchor = bounds
           ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
           : userLocationRef.current;
-        const rows = preferNearbyResults(staged, anchor);
+        const rows = preferNearbyResults(staged, anchor, createQueryPlan(text));
         mergedRowsRef.current = rows;
         setResults(orderForView(rows));
         useOsmPoiStore.getState().setIsCategorySearching(true);
@@ -1216,7 +1225,10 @@ export function FloatingSearchPanel({
     fitResultsOnEmitRef.current = true;
     // Only a place/brand/address lookup may move the camera to a distant
     // match; "bagels"/"coffee near me" are answered where the user is.
-    fitAllowsFarRef.current = !isGenericNearbyQuery(text);
+    // The shared query plan owns that classification (one copy for the
+    // engine and this panel); the plan also drives pin selection below.
+    const plan = createQueryPlan(text);
+    fitPlanRef.current = plan;
     const live = liveViewportContext();
     // Pins are ordered and framed around the area the user is searching, so a
     // pan away from GPS must not pull the results back to the user's position.
@@ -1247,6 +1259,7 @@ export function FloatingSearchPanel({
     setActiveCategory(null);
     searchAnchorRef.current = null;
     anchorPendingRef.current = false;
+    fitPlanRef.current = null;
     setShowSearchThisArea(false);
     useOsmPoiStore.getState().clearCategorySearch();
   }, [clearSearch]);

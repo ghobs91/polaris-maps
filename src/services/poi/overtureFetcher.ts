@@ -403,7 +403,11 @@ export async function fetchOverturePlaces(
   throwIfAborted(opts?.signal);
 
   const archive = await getPmtilesArchive();
-  if (!archive) return [];
+  // The archive is the source's whole dataset: a failed STAC lookup or absent
+  // URL is an infrastructure failure, not an empty region. Returning [] here
+  // let one cold-start network blip negative-cache Overture as "answered with
+  // zero places" for the next 60 s; a rejection keeps it retryable.
+  if (!archive) throw new Error('Overture places archive unavailable');
 
   const zoom = await resolveTileZoom(archive);
   throwIfAborted(opts?.signal);
@@ -416,14 +420,27 @@ export async function fetchOverturePlaces(
   // already in flight still land in the tile cache for the next search.
   const deadline = Date.now() + TILE_FETCH_BUDGET_MS;
   const responses: OverturePlace[][] = [];
+  let tilesAttempted = 0;
+  let tileFetchFailures = 0;
   for (let i = 0; i < tiles.length; i += TILE_FETCH_CONCURRENCY) {
     throwIfAborted(opts?.signal);
     if (Date.now() >= deadline) break;
     const batch = tiles.slice(i, i + TILE_FETCH_CONCURRENCY);
+    tilesAttempted += batch.length;
     const settled = await Promise.all(
-      batch.map(({ z, x, y }) => fetchTileFeatures(z, x, y).catch(() => [] as OverturePlace[])),
+      batch.map(({ z, x, y }) =>
+        fetchTileFeatures(z, x, y).catch(() => {
+          tileFetchFailures++;
+          return [] as OverturePlace[];
+        }),
+      ),
     );
     responses.push(...settled);
+  }
+  // Every attempted tile request failed — an outage, not an empty area. Throw
+  // so the failure stays uncached and the next keystroke retries the network.
+  if (tilesAttempted > 0 && tileFetchFailures === tilesAttempted) {
+    throw new Error(`Overture fetch failed: ${tileFetchFailures}/${tilesAttempted} tiles`);
   }
   // A superseded search skips the expensive SQLite upsert + FTS rebuild.
   throwIfAborted(opts?.signal);

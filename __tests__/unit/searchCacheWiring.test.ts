@@ -118,4 +118,18 @@ describe('unifiedSearch cache wiring', () => {
     expect(osmFetcher.fetchOsmPoisByName).toHaveBeenCalledTimes(2);
     expect(overtureFetcher.fetchOverturePlaces).toHaveBeenCalledTimes(1);
   });
+
+  it('re-runs a network source that failed: a rejection is not cached as empty', async () => {
+    // One flaky request (timeout/HTTP 503) must not pin the source as
+    // "answered with zero results" — rejected promises stay uncached, so the
+    // next identical search hits the network again.
+    (photonGeocoder.searchPhoton as jest.Mock).mockRejectedValueOnce(new Error('Photon HTTP 503'));
+
+    const first = await unifiedSearch('pizza', defaultOpts);
+    expect(first).toEqual([]);
+    expect(photonGeocoder.searchPhoton).toHaveBeenCalledTimes(1);
+
+    await unifiedSearch('pizza', defaultOpts);
+    expect(photonGeocoder.searchPhoton).toHaveBeenCalledTimes(2);
+  });
 });

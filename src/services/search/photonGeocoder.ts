@@ -90,17 +90,22 @@ export async function searchPhoton(
       signal,
     });
 
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error(`Photon HTTP ${res.status}`);
 
     const data: PhotonResponse = await res.json();
     return data.features
       .filter((f) => f.properties.name || f.properties.housenumber)
       .map(photonFeatureToResult);
   } catch (err) {
-    // A caller abort must propagate so the orchestrator can stop promptly;
-    // timeouts and network errors still degrade to "no Photon results".
+    // A caller abort must propagate so the orchestrator can stop promptly.
+    // Any other failure (timeout, HTTP error, network drop) must also throw:
+    // the caller (`cachedFetch` in the search cache) caches empty *results* for
+    // 60 s as a negative entry, so a swallowed failure used to pin Photon as
+    // "answered with zero Starbucks" for a whole minute after one flaky
+    // request — results randomly missing across consecutive searches.
+    // Rejected promises are never cached, so the next keystroke retries.
     if (opts?.signal?.aborted) throw err;
-    return [];
+    throw err instanceof Error ? err : new Error(String(err));
   } finally {
     cleanup();
   }

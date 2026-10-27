@@ -137,18 +137,16 @@ describe('searchPhoton', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('returns empty array on network failure', async () => {
+  it('rejects on network failure so the failure is retryable, not cached as empty', async () => {
     mockFetch.mockRejectedValue(new Error('network error'));
 
-    const results = await searchPhoton('coffee', 40.748, -73.985);
-    expect(results).toHaveLength(0);
+    await expect(searchPhoton('coffee', 40.748, -73.985)).rejects.toThrow('network error');
   });
 
-  it('returns empty array on non-ok response', async () => {
+  it('rejects on non-ok response so the failure is retryable, not cached as empty', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
 
-    const results = await searchPhoton('coffee', 40.748, -73.985);
-    expect(results).toHaveLength(0);
+    await expect(searchPhoton('coffee', 40.748, -73.985)).rejects.toThrow('HTTP 500');
   });
 
   it('passes location bias, zoom, and limit to the API', async () => {
