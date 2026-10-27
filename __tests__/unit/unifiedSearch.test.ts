@@ -55,7 +55,11 @@ jest.mock('../../src/services/poi/osmFetcher', () => ({
 }));
 jest.mock('../../src/services/geocoding/globalGeocoderService', () => ({
   isGeonamesReady: jest.fn(() => false),
+  isKnownCityName: jest.fn(async () => false),
   searchGlobalPlaces: jest.fn(),
+}));
+jest.mock('../../src/services/search/mapKitPlaceSource', () => ({
+  searchMapKitPlaces: jest.fn(async () => []),
 }));
 
 import { unifiedSearch } from '../../src/services/search/unifiedSearch';
@@ -66,6 +70,8 @@ import * as photonGeocoder from '../../src/services/search/photonGeocoder';
 import * as geocodingService from '../../src/services/geocoding/geocodingService';
 import * as overtureFetcher from '../../src/services/poi/overtureFetcher';
 import * as osmFetcher from '../../src/services/poi/osmFetcher';
+import * as globalGeocoder from '../../src/services/geocoding/globalGeocoderService';
+import * as mapKitPlaceSource from '../../src/services/search/mapKitPlaceSource';
 import type { Place } from '../../src/models/poi';
 
 // ---------------------------------------------------------------------------
@@ -129,6 +135,8 @@ describe('unifiedSearch', () => {
     (geocodingService.searchAddress as jest.Mock).mockResolvedValue([]);
     (overtureFetcher.fetchOverturePlaces as jest.Mock).mockResolvedValue([]);
     (osmFetcher.fetchOsmPoisByName as jest.Mock).mockResolvedValue([]);
+    (mapKitPlaceSource.searchMapKitPlaces as jest.Mock).mockResolvedValue([]);
+    (globalGeocoder.isKnownCityName as jest.Mock).mockResolvedValue(false);
   });
 
   it('returns empty for very short queries', async () => {
@@ -240,7 +248,7 @@ describe('unifiedSearch', () => {
     expect(starbucksResults).toHaveLength(1);
   });
 
-  it('ranks the nearest matching Photon result first', async () => {
+  it('ranks the nearest matching Photon result first and drops another metro', async () => {
     // Simulates "Tanger outlet" where the nearest one (Deer Park, ~20km)
     // should appear above a distant one (Ottawa, Canada)
     const nearResult = makePhotonResult('Tanger Outlet Deer Park', true, 40.762, -73.32);
@@ -255,8 +263,63 @@ describe('unifiedSearch', () => {
       zoom: 14,
     });
 
-    expect(results.length).toBeGreaterThanOrEqual(2);
     expect(results[0].name).toBe('Tanger Outlet Deer Park');
+    // Ottawa is ~570 km away: a different metro is not a local answer.
+    expect(results.some((r) => r.name === 'Tanger Outlet Mall')).toBe(false);
+  });
+
+  it('keeps a distant match when the query names that city', async () => {
+    (globalGeocoder.isKnownCityName as jest.Mock).mockResolvedValue(true);
+    const bostonTatte = makePhotonResult('Tatte', true, 42.3532, -71.0573);
+
+    (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue([bostonTatte]);
+
+    const results = await unifiedSearch('tatte boston', {
+      lat: 40.745,
+      lng: -73.992,
+      zoom: 15,
+    });
+
+    expect(results.map((r) => r.name)).toContain('Tatte');
+  });
+
+  it('drops a text-perfect match from another metro for a local query', async () => {
+    const bostonTatte = makePhotonResult('Tatte', true, 42.3532, -71.0573);
+    const arlingtonTatte = makePhotonResult('Tatte', true, 42.4154, -71.1565);
+
+    (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue([bostonTatte, arlingtonTatte]);
+
+    const results = await unifiedSearch('tatte', {
+      lat: 40.745,
+      lng: -73.992,
+      zoom: 16,
+    });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('merges Apple Maps nearby POIs into the ranked candidates', async () => {
+    (mapKitPlaceSource.searchMapKitPlaces as jest.Mock).mockResolvedValue([
+      {
+        id: -42,
+        name: 'Tatte Bakery & Cafe',
+        lat: 40.7405,
+        lng: -73.9856,
+        type: 'amenity',
+        subtype: 'cafe',
+        tags: { name: 'Tatte Bakery & Cafe', amenity: 'cafe' },
+      },
+    ]);
+    (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue([]);
+
+    const results = await unifiedSearch('tatte', {
+      lat: 40.745,
+      lng: -73.992,
+      zoom: 16,
+    });
+
+    expect(results[0]?.name).toBe('Tatte Bakery & Cafe');
+    expect(results[0]?.distanceKm).toBeLessThan(2);
   });
 
   it('passes the viewport zoom to Photon so distant matches do not drown out local ones', async () => {
@@ -429,6 +492,8 @@ describe('unifiedSearch progressive + cancellation', () => {
     (geocodingService.searchAddress as jest.Mock).mockResolvedValue([]);
     (overtureFetcher.fetchOverturePlaces as jest.Mock).mockResolvedValue([]);
     (osmFetcher.fetchOsmPoisByName as jest.Mock).mockResolvedValue([]);
+    (mapKitPlaceSource.searchMapKitPlaces as jest.Mock).mockResolvedValue([]);
+    (globalGeocoder.isKnownCityName as jest.Mock).mockResolvedValue(false);
   });
 
   it('localOnly resolves local results without touching network sources', async () => {

@@ -40,8 +40,14 @@ import {
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import { cachedFetch, cacheKey, boundsKey } from './searchCache';
 import { getRegionContainingPoint } from '../regions/regionRepository';
-import { isGeonamesReady, searchGlobalPlaces } from '../geocoding/globalGeocoderService';
-import { getPersonalizationBoost } from './searchHistoryService';
+import {
+  isGeonamesReady,
+  isKnownCityName,
+  searchGlobalPlaces,
+  type GlobalPlace,
+} from '../geocoding/globalGeocoderService';
+import { getPersonalizedPlaceNames, PERSONALIZATION_BOOST } from './searchHistoryService';
+import { searchMapKitPlaces } from './mapKitPlaceSource';
 
 // ---------------------------------------------------------------------------
 // Source gating
@@ -55,6 +61,17 @@ const LOCAL_MATCH_RADIUS_KM = 15;
 const STRONG_MATCH_THRESHOLD = 0.72;
 /** Every network source must settle within this budget (spec: time-bounded sources). */
 const SOURCE_TIMEOUT_MS = 8_000;
+/**
+ * Radius (km) around the search anchor that answers a local-intent query.
+ *
+ * A maps search answers where the user is looking. Photon and Nominatim rank by
+ * text and only *bias* by location, so without a hard boundary a search in
+ * Manhattan is happily answered by a Boston café 300 km away — with the
+ * distance printed next to it. 75 km spans the metro and its exurban
+ * destinations (Woodbury Common is ~62 km from Midtown) while excluding
+ * another city. City results and explicit addresses are exempt.
+ */
+const SEARCH_AREA_RADIUS_KM = 75;
 
 /** Filter-sheet keys that differ from the canonical `PlaceCategory` value. */
 const FILTER_CATEGORY_ALIASES: Partial<Record<string, PlaceCategory>> = {
@@ -107,6 +124,35 @@ async function hasOfflineRegionCoverage(lat: number, lng: number): Promise<boole
   } catch {
     return false;
   }
+}
+
+/**
+ * True when the query itself names a destination ("tatte boston").
+ *
+ * A named place is a request to go there, so its matches may sit outside the
+ * area the user is looking at. Only the trailing token counts: "paris cafe" is
+ * a café, "cafe paris" is a café *in Paris*.
+ */
+async function queryNamesDistantPlace(coreQuery: string): Promise<boolean> {
+  const words = normalizeSearchText(coreQuery).toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  const last = words[words.length - 1];
+  if (last.length < 3) return false;
+  return isKnownCityName(last);
+}
+
+/** True when a candidate answers the area the user is looking at (or is near them). */
+function isWithinSearchArea(
+  poi: { lat: number; lng: number },
+  lat: number,
+  lng: number,
+  userLocation?: { lat: number; lng: number },
+): boolean {
+  if (haversineKm(lat, lng, poi.lat, poi.lng) <= SEARCH_AREA_RADIUS_KM) return true;
+  return (
+    !!userLocation &&
+    haversineKm(userLocation.lat, userLocation.lng, poi.lat, poi.lng) <= SEARCH_AREA_RADIUS_KM
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +284,11 @@ export async function unifiedSearch(
   // Detect address queries early — these need fundamentally different handling
   const addressQuery = isAddressQuery(query);
 
+  // A query that names a destination ("tatte boston") may be answered outside
+  // the current area; every other query is answered by the area itself.
+  const namesDistantPlace = !addressQuery && (await queryNamesDistantPlace(parsed.coreQuery));
+  const allowDistantResults = addressQuery || namesDistantPlace;
+
   const queryContext = deriveQueryContext(parsed, options);
   const south = lat - queryContext.viewportRadiusDeg;
   const north = lat + queryContext.viewportRadiusDeg;
@@ -262,6 +313,18 @@ export async function unifiedSearch(
   // onPartial so the UI feels instant while the network phase runs.
   const signal = options.signal;
   throwIfAborted(signal);
+
+  // Offline GeoNames cities resolve in milliseconds and are emitted right
+  // after the local phase. Fetch them first so the same run can also tell a
+  // bare place search from a city search.
+  let cityPlaces: GlobalPlace[] = [];
+  if (!addressQuery && isGeonamesReady()) {
+    try {
+      cityPlaces = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
+    } catch {
+      // Missing/corrupt GeoNames DB degrades to no city results.
+    }
+  }
 
   // allSettled: an individual local-source failure (e.g. empty FTS table)
   // degrades to "no local results" rather than failing the whole search.
@@ -331,6 +394,7 @@ export async function unifiedSearch(
     geocodingResults: localAddressResults,
     parsed,
     addressQuery,
+    allowDistantResults,
     lat,
     lng,
     south,
@@ -394,6 +458,7 @@ export async function unifiedSearch(
       geocodingResults: addressEntries,
       parsed,
       addressQuery,
+      allowDistantResults,
       lat,
       lng,
       south,
@@ -444,34 +509,27 @@ export async function unifiedSearch(
       });
   }
 
-  // Cities stage — offline GeoNames cities resolve in milliseconds, so they
-  // are emitted before any network source completes.
-  if (!addressQuery && isGeonamesReady()) {
-    try {
-      const cities = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
-      if (cities.length > 0 && !signal?.aborted) {
-        for (const city of cities) {
-          allPois.push({
-            id: -Math.abs(city.geonameId),
-            lat: city.lat,
-            lng: city.lng,
-            name: city.name,
-            type: 'place',
-            subtype: 'city',
-            tags: {
-              name: city.name,
-              place: 'city',
-              'addr:city': city.name,
-              ...(city.countryCode ? { 'addr:country': city.countryCode } : {}),
-              'polaris:population': String(city.population),
-            },
-          });
-        }
-        emitStage('cities', false);
-      }
-    } catch {
-      // Missing/corrupt GeoNames DB degrades to no city results.
+  // Cities stage — the offline GeoNames hits were resolved with the local
+  // phase; they are emitted before any network source completes.
+  if (cityPlaces.length > 0 && !signal?.aborted) {
+    for (const city of cityPlaces) {
+      allPois.push({
+        id: -Math.abs(city.geonameId),
+        lat: city.lat,
+        lng: city.lng,
+        name: city.name,
+        type: 'place',
+        subtype: 'city',
+        tags: {
+          name: city.name,
+          place: 'city',
+          'addr:city': city.name,
+          ...(city.countryCode ? { 'addr:country': city.countryCode } : {}),
+          'polaris:population': String(city.population),
+        },
+      });
     }
+    emitStage('cities', false);
   }
 
   // Collect Photon results — include all named results in scoring, not just
@@ -721,6 +779,27 @@ export async function unifiedSearch(
           { bounds: { south, north, west, east }, signal },
         );
 
+  // Source 7: Apple Maps nearby POIs (iOS). The only source here backed by a
+  // commercial POI dataset: open data (OSM/Overture) routinely lacks everyday
+  // chain branches, which is how "tatte" in Manhattan ends up answered by
+  // Boston. Scoped to the same anchor as every other local source.
+  const mapKitPromise: Promise<OsmPoi[]> =
+    addressQuery || !parsed.isNameSearch || skipNameSearch
+      ? Promise.resolve([])
+      : withSourceTimeout(
+          cachedFetch(
+            cacheKey([
+              'mapkit',
+              parsed.originalQuery,
+              boundsKey({ south, north, west, east }),
+              limit,
+            ]),
+            () => searchMapKitPlaces(parsed.originalQuery, lat, lng, limit, { signal }),
+            { bounds: { south, north, west, east }, signal },
+          ),
+          SOURCE_TIMEOUT_MS,
+        ).then((value) => value ?? []);
+
   const sources: Promise<unknown>[] = [
     tracked('photon', photonPromise, applyPhotonResults),
     parsed.categories ? tracked('category', categoryPromise, applyCategoryResult) : categoryPromise,
@@ -744,6 +823,11 @@ export async function unifiedSearch(
       : tracked('osmName', osmNamePromise, (value) => {
           for (const poi of value) allPois.push(poi);
         }),
+    addressQuery
+      ? mapKitPromise
+      : tracked('mapkit', mapKitPromise, (value) => {
+          for (const poi of value) allPois.push(poi);
+        }),
   ];
 
   maybeEmitStages();
@@ -763,6 +847,8 @@ interface AssembleInput {
   geocodingResults: GeocodingResult[];
   parsed: ParsedSearchQuery;
   addressQuery: boolean;
+  /** Keep matches outside {@link SEARCH_AREA_RADIUS_KM} (named destination). */
+  allowDistantResults: boolean;
   lat: number;
   lng: number;
   south: number;
@@ -794,6 +880,7 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     geocodingResults,
     parsed,
     addressQuery,
+    allowDistantResults,
     lat,
     lng,
     south,
@@ -805,12 +892,22 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     limit,
   } = input;
 
-  const density = inferQueryDensity(allPois, parsed, lat, lng, userLocation);
+  // Local intent is answered by the area the user is looking at. Text-first
+  // sources (Photon, Nominatim) otherwise hand back a text-perfect match from
+  // another metro, complete with a 300 km distance — that is not a maps answer.
+  // City results are named places and always survive the gate.
+  const inArea = (candidate: { lat: number; lng: number }) =>
+    allowDistantResults ||
+    ('subtype' in candidate && candidate.subtype === 'city') ||
+    isWithinSearchArea(candidate, lat, lng, userLocation);
+  const localPois = allPois.filter(inArea);
+
+  const density = inferQueryDensity(localPois, parsed, lat, lng, userLocation);
   const proximityAnchor = resolveProximityAnchor(parsed, { userLocation }, density);
 
   // 4. Score and rank all POI results (with dynamic proximity + viewport boost)
   const vpRect = viewportBounds ?? { south, north, west, east };
-  let scored = scoreAndRank(allPois, parsed, lat, lng, {
+  let scored = scoreAndRank(localPois, parsed, lat, lng, {
     viewport: vpRect,
     userLocation,
     proximityAnchor,
@@ -824,13 +921,19 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
   }
 
   // Personalization: bounded boost for results the user has selected before.
+  // Read the history once per assembly, not once per candidate.
   if (parsed.originalQuery.trim().length >= 2) {
-    scored = scored
-      .map((result) => {
-        const boost = getPersonalizationBoost(parsed.originalQuery, result.poi.name);
-        return boost > 0 ? { ...result, score: Math.min(100, result.score + boost) } : result;
-      })
-      .sort((a, b) => b.score - a.score || a.distanceKm - b.distanceKm);
+    const personalizedNames = getPersonalizedPlaceNames(parsed.originalQuery);
+    if (personalizedNames.size > 0) {
+      scored = scored
+        .map((result) => {
+          const boost = personalizedNames.has(result.poi.name.trim().toLowerCase())
+            ? PERSONALIZATION_BOOST
+            : 0;
+          return boost > 0 ? { ...result, score: Math.min(100, result.score + boost) } : result;
+        })
+        .sort((a, b) => b.score - a.score || a.distanceKm - b.distanceKm);
+    }
   }
 
   // Brand queries: order branches nearest-first and attach a branch count so
@@ -856,8 +959,10 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
   }
 
   // 5. Build geocoding (address) results — from Nominatim + Photon house/street
-  const addressResults: UnifiedSearchResult[] = [...photonAddressResults];
+  // Street promotions in a name search follow the same area rule as POIs.
+  const addressResults: UnifiedSearchResult[] = photonAddressResults.filter(inArea);
   for (const gr of geocodingResults) {
+    if (!allowDistantResults && !isWithinSearchArea(gr.entry, lat, lng, userLocation)) continue;
     // Skip if already covered by a Photon address result nearby
     const isDup = addressResults.some(
       (ar) => Math.abs(ar.lat - gr.entry.lat) < 0.0003 && Math.abs(ar.lng - gr.entry.lng) < 0.0003,

@@ -41,7 +41,6 @@ import { usePlaceSearch } from '../../hooks/usePlaceSearch';
 import { useGtfsLoadingBanner } from '../../hooks/useGtfsLoadingBanner';
 import { useVoiceSearch } from '../../hooks/useVoiceSearch';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
-import { searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import {
   getSearchHistory,
   addSearchHistory,
@@ -741,8 +740,7 @@ export function FloatingSearchPanel({
   /** Ranked result per row id, so rows keep distance/rating/open-now. */
   const searchMetaRef = useRef<Map<string, UnifiedSearchResult>>(new Map());
   const stationResultsRef = useRef<GeocodingResult[]>([]);
-  const appleResultsRef = useRef<GeocodingResult[]>([]);
-  /** Query whose auxiliary (OTP + MapKit) search is active. */
+  /** Query whose auxiliary transit (OTP) search is active. */
   const auxQueryRef = useRef('');
   const auxAbortRef = useRef<AbortController | null>(null);
   /** Generation counter for the direct Overpass category-pill flow. */
@@ -777,35 +775,19 @@ export function FloatingSearchPanel({
         ]),
       );
       const stationResults = stationResultsRef.current;
-      const appleGeoResults = appleResultsRef.current;
       const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
       const filteredUnified = unifiedResults.filter(
         (r) => !stationNames.has(r.entry.text.toLowerCase()),
       );
 
-      const filteredApple = appleGeoResults.filter((ar) => {
-        return !filteredUnified.some(
-          (ur) =>
-            Math.abs(ur.entry.lat - ar.entry.lat) < 0.0005 &&
-            Math.abs(ur.entry.lng - ar.entry.lng) < 0.0005 &&
-            ur.entry.text.toLowerCase() === ar.entry.text.toLowerCase(),
-        );
-      });
-
       // Ranked order, best first: transit stations are a deliberate boost, then
-      // the place rows ordered around where the user is looking. The unified
-      // pipeline ranks by relevance, so a text-perfect match from another metro
-      // can otherwise lead; MapKit's nearby rows arrive as an unordered fill.
-      // Proximity ordering puts the local branches first and drops the distant
-      // tail once something local matched.
+      // the place rows ordered around where the user is looking. Proximity
+      // ordering puts the local branches first and drops the distant tail.
       const bounds = useOsmPoiStore.getState().viewportBounds;
       const anchor = bounds
         ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
         : userLocationRef.current;
-      const displayedResults = [
-        ...stationResults,
-        ...preferNearbyResults([...filteredUnified, ...filteredApple], anchor),
-      ];
+      const displayedResults = [...stationResults, ...preferNearbyResults(filteredUnified, anchor)];
       // Keep the unfiltered merge: a filter/sort change re-applies locally (see
       // the effect below) instead of re-running the search.
       mergedRowsRef.current = displayedResults;
@@ -893,55 +875,36 @@ export function FloatingSearchPanel({
       auxAbortRef.current?.abort();
       const controller = new AbortController();
       auxAbortRef.current = controller;
-      // Transit stops and MapKit's nearby rows are viewport-dependent: query
-      // them around the camera, not the last programmatic move.
+      // Transit stops are viewport-dependent: query them around the camera, not
+      // the last programmatic move. Apple Maps POIs now come from the unified
+      // engine (source `mapkit`) so every consumer ranks the same candidates.
       const { lat, lng } = liveViewportContext();
 
-      void Promise.all([
-        searchOtpStops(text, lat, lng).catch(
-          () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
-        ),
-        searchNearby(text, lat, lng, 15000).catch(() => [] as NativeMapKitPoi[]),
-      ]).then(([otpStops, appleResults]) => {
-        if (auxAbortRef.current !== controller || controller.signal.aborted) return;
+      void searchOtpStops(text, lat, lng)
+        .catch(() => [] as Array<{ name: string; lat: number; lon: number; id: string }>)
+        .then((otpStops) => {
+          if (auxAbortRef.current !== controller || controller.signal.aborted) return;
 
-        stationResultsRef.current = otpStops.map((s, i) => ({
-          entry: {
-            id: -(1_000_000 + i),
-            text: s.name,
-            type: 'station' as const,
-            housenumber: null,
-            street: null,
-            city: null,
-            state: null,
-            postcode: null,
-            country: null,
-            lat: s.lat,
-            lng: s.lon,
-            otpStopId: s.id,
-          },
-          rank: 100 + i,
-        }));
+          stationResultsRef.current = otpStops.map((s, i) => ({
+            entry: {
+              id: -(1_000_000 + i),
+              text: s.name,
+              type: 'station' as const,
+              housenumber: null,
+              street: null,
+              city: null,
+              state: null,
+              postcode: null,
+              country: null,
+              lat: s.lat,
+              lng: s.lon,
+              otpStopId: s.id,
+            },
+            rank: 100 + i,
+          }));
 
-        appleResultsRef.current = appleResults.map((r, i) => ({
-          entry: {
-            id: -(2_000_000 + i),
-            text: r.name ?? text,
-            type: 'place' as const,
-            housenumber: r.subThoroughfare ?? null,
-            street: r.thoroughfare ?? null,
-            city: r.locality ?? null,
-            state: r.administrativeArea ?? null,
-            postcode: r.postalCode ?? null,
-            country: r.country ?? null,
-            lat: r.latitude,
-            lng: r.longitude,
-          },
-          rank: 95 - i,
-        }));
-
-        applyMergedResults(fitResultsOnEmitRef.current);
-      });
+          applyMergedResults(fitResultsOnEmitRef.current);
+        });
     },
     [applyMergedResults],
   );
@@ -953,7 +916,6 @@ export function FloatingSearchPanel({
       if (text.length < 2) {
         unifiedResultsRef.current = [];
         stationResultsRef.current = [];
-        appleResultsRef.current = [];
         auxQueryRef.current = '';
         mergedRowsRef.current = [];
         viewQueryRef.current = '';
@@ -966,22 +928,29 @@ export function FloatingSearchPanel({
       unifiedResultsRef.current = emitted;
       viewQueryRef.current = text;
 
-      // First emission for a new query starts the auxiliary transit/MapKit
-      // search so it runs alongside the rest of the unified pipeline.
+      // First emission for a new query starts the auxiliary transit search so
+      // it runs alongside the rest of the unified pipeline.
       if (text !== auxQueryRef.current) {
         auxQueryRef.current = text;
         stationResultsRef.current = [];
-        appleResultsRef.current = [];
         startAuxiliarySearch(text);
       }
 
       if (!meta.final) {
-        // Keep the ranked payload for the staged rows too, so distance/rating
-        // don't disappear until the final emission.
+        // Staged rows go through the same proximity + filter view as the final
+        // emission, but pins wait for the final merge so a fast intermediate
+        // stage cannot thrash the map annotations.
+        const staged = emitted.map(unifiedToGeocodingResult);
         searchMetaRef.current = new Map(
-          emitted.map((result) => [String(unifiedToGeocodingResult(result).entry.id), result]),
+          staged.map((converted, i) => [String(converted.entry.id), emitted[i]]),
         );
-        setResults(emitted.map(unifiedToGeocodingResult));
+        const bounds = useOsmPoiStore.getState().viewportBounds;
+        const anchor = bounds
+          ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
+          : userLocationRef.current;
+        const rows = preferNearbyResults(staged, anchor);
+        mergedRowsRef.current = rows;
+        setResults(orderForView(rows));
         useOsmPoiStore.getState().setIsCategorySearching(true);
         return;
       }
@@ -2102,7 +2071,12 @@ export function FloatingSearchPanel({
   // ── Render results list (search or history) ──
   const showResults =
     mode !== 'idle' &&
-    (isCategorySearching || results.length > 0 || (categorySearchResults?.length ?? 0) > 0);
+    (isCategorySearching ||
+      results.length > 0 ||
+      (categorySearchResults?.length ?? 0) > 0 ||
+      // Keep the list surface open for an empty final result so the
+      // "nothing nearby" state can render instead of silently collapsing.
+      query.trim().length >= 2);
   const showHistory = mode === 'searching' && query.length < 2 && history.length > 0;
 
   const renderResultItem = useCallback(
@@ -2927,6 +2901,15 @@ export function FloatingSearchPanel({
                             Clear filters
                           </Text>
                         </TouchableOpacity>
+                      </View>
+                    ) : !showHistory && query.trim().length >= 2 ? (
+                      <View style={styles.searchLoadingRow}>
+                        <Text style={[styles.searchLoadingText, { color: textColor }]}>
+                          No places match “{query.trim()}” nearby
+                        </Text>
+                        <Text style={{ color: subColor, fontSize: 12, textAlign: 'center' }}>
+                          Add a city to search elsewhere, e.g. “{query.trim()} boston”.
+                        </Text>
                       </View>
                     ) : null
                   }

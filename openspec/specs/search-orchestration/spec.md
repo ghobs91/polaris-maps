@@ -77,6 +77,21 @@ The system SHALL provide one shared search-session implementation that owns debo
 - **THEN** network search SHALL be debounced and superseded requests SHALL be aborted
 - **AND** local results SHALL still render immediately
 
+### Requirement: Commercial POI coverage source
+
+On platforms where Apple MapKit is available, the system SHALL include a MapKit nearby-POI source in the unified pipeline, scoped to the same search anchor as every other local source, cached, abort-aware, and time-bounded. MapKit results SHALL participate in the shared ranking and deduplication rather than being appended by a single consumer. On platforms without MapKit the source SHALL yield no results without error.
+
+#### Scenario: MapKit fills a chain gap in open data
+
+- **WHEN** OSM and Overture lack a nearby branch of a chain that Apple Maps knows
+- **THEN** the MapKit result SHALL appear in the ranked candidate set for `unifiedSearch`
+
+#### Scenario: Platform without MapKit
+
+- **WHEN** the app runs on Android
+- **THEN** the MapKit source SHALL return an empty list
+- **AND** the remaining sources SHALL answer normally
+
 ### Requirement: Nominatim request policy compliance
 
 The system SHALL enforce a shared minimum 1,000 ms interval between Nominatim requests across all call sites, including category fallback searches, and SHALL make the throttle abort-aware.

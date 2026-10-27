@@ -93,9 +93,10 @@ export function kmBetween(
 export const NEARBY_RESULT_KM = 50;
 
 /**
- * Results farther than this are dropped when at least one local match exists.
- * Sources that rank by text alone (Photon, Nominatim) can otherwise answer a
- * New York search with a 300 km Boston cluster, burying the local branches.
+ * Results farther than this are dropped from the merged list. Sources that
+ * rank by text alone (Photon, Nominatim) can otherwise answer a New York
+ * search with a 300 km Boston cluster, burying the local branches — or, when
+ * nothing local matched, presenting that cluster as the answer.
  */
 export const DISTANT_RESULT_KM = 120;
 
@@ -105,11 +106,9 @@ export const DISTANT_RESULT_KM = 120;
  * The list mixes sources with different notions of distance: the unified
  * pipeline ranks by relevance (text match can outweigh a 300 km distance) and
  * MapKit's nearby results arrive as a plain fill. Partitioning on proximity
- * keeps every local match above the distant tail while preserving each
- * bucket's existing order. Distant matches are dropped entirely once a local
- * one exists — a search made while looking at a place should not lead with
- * another metro. Address results are explicit destinations and are never
- * dropped, even in another city.
+ * keeps every local match above the distant tail and drops that tail
+ * entirely. Address results and named cities are explicit destinations and are
+ * never dropped, even in another city.
  */
 /**
  * Results the user named explicitly — an address, a city, a landmark — as
@@ -141,10 +140,13 @@ export function preferNearbyResults(
       isLocal: isExplicitDestination(result) || distanceKm <= NEARBY_RESULT_KM,
     };
   });
-  const hasNearby = withDistance.some((entry) => entry.isLocal);
-  const kept = hasNearby
-    ? withDistance.filter((entry) => entry.isLocal || entry.distanceKm <= DISTANT_RESULT_KM)
-    : withDistance;
+
+  // Drop the distant tail even when nothing local matched. Keeping it is how
+  // a Manhattan search for a Boston-only name ended up listing cafés 300 km
+  // away as if they were answers; an empty local list is the honest answer.
+  const kept = withDistance.filter(
+    (entry) => isExplicitDestination(entry.result) || entry.distanceKm <= DISTANT_RESULT_KM,
+  );
 
   return kept
     .sort((a, b) => Number(b.isLocal) - Number(a.isLocal) || a.index - b.index)

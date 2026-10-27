@@ -20,6 +20,27 @@ The system SHALL produce relevance scores in the inclusive range 0–100, where 
 - **WHEN** two results have equal scores
 - **THEN** the nearer result SHALL rank first
 
+### Requirement: Area-of-interest results
+
+Search results SHALL answer the area the user is looking at. For a local-intent query, the system SHALL exclude candidates farther than the configured search-area radius (75 km) from the search anchor, which is the live camera centre or the user's location. The system SHALL exempt explicit destinations from that gate: structured address queries, city results, and queries whose trailing token is a known city name ("tatte boston"). When no candidate is inside the area, the system SHALL return an empty local result set rather than a distant match.
+
+#### Scenario: Another metro's text-perfect match is excluded
+
+- **WHEN** the user in Manhattan searches "tatte"
+- **AND** the only text matches are Boston cafés ~300 km away
+- **THEN** those results SHALL NOT be returned
+- **AND** the UI SHALL be able to show that nothing nearby matched
+
+#### Scenario: Named destination keeps distant matches
+
+- **WHEN** the user searches "tatte boston"
+- **THEN** the Boston matches SHALL remain eligible even though they are outside the radius
+
+#### Scenario: City results survive the gate
+
+- **WHEN** the user searches "paris" from New York
+- **THEN** the offline GeoNames city result SHALL be returned
+
 ### Requirement: Open-now intent
 
 When the query requests places that are open now, the system SHALL demote or exclude results whose stored opening hours prove them closed at the current time. Results without parseable hours SHALL be treated as unknown and SHALL NOT be excluded.

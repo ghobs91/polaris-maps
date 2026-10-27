@@ -10,7 +10,7 @@ import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
 import type { Place, PlaceCategory } from '../../models/poi';
 import type { OverturePlace, OverturePlaceCollection } from '../../types/overture';
-import type { SQLiteBindValue } from 'expo-sqlite';
+import type { SQLiteBindValue, SQLiteDatabase } from 'expo-sqlite';
 import { throwIfAborted, withSourceTimeout, withTimeout } from '../search/abortUtils';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
 import { canonicalYelpListingUrl } from './externalRatings/yelpProvider';
@@ -41,6 +41,19 @@ const TILE_FETCH_CONCURRENCY = 6;
 
 /** Maximum features materialised from one tile (dense urban tiles hold 40k+). */
 const MAX_FEATURES_PER_TILE = 4_000;
+
+/**
+ * Features decoded between yields to the event loop. Decoding is synchronous
+ * CPU work; a dense tile otherwise blocks the JS thread long enough for a tap
+ * (e.g. selecting a search result while the camera loads a new viewport) to
+ * look like a freeze.
+ */
+const DECODE_YIELD_EVERY = 250;
+
+/** Resolve after the current event-loop turn, letting input handlers run. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 /**
  * Overall wall-clock budget for the tile phase of one Overture fetch (ms).
@@ -313,11 +326,16 @@ async function fetchTileFeatures(z: number, x: number, y: number): Promise<Overt
     // cost and retained cache memory bounded.
     const step = Math.max(1, Math.ceil(layer.length / MAX_FEATURES_PER_TILE));
     const features: OverturePlace[] = [];
+    let decoded = 0;
     for (let index = 0; index < layer.length; index += step) {
       const geojsonFeature = layer.feature(index).toGeoJSON(x, y, z) as GeoJSON.Feature;
       const overtureFeature = toOvertureFeature(geojsonFeature);
       if (overtureFeature) features.push(overtureFeature);
       if (features.length >= MAX_FEATURES_PER_TILE) break;
+      // A handful of dense tiles decode for hundreds of milliseconds each. Yield
+      // the JS thread periodically so touch/press handling still runs while a
+      // viewport (or a newly selected place) loads its POIs.
+      if (++decoded % DECODE_YIELD_EVERY === 0) await yieldToEventLoop();
     }
     return features;
   })();
@@ -508,6 +526,31 @@ function placeToInsertParams(p: Place): SQLiteBindValue[] {
 }
 
 /**
+ * Serialize exclusive place writes.
+ *
+ * An exclusive transaction opens a *second* SQLite connection to the same file.
+ * A search-driven Overture upsert and the viewport POI reload that selecting a
+ * result triggers can therefore both BEGIN on different connections and block
+ * on each other's write lock — the UI appears frozen while the lock wait ticks.
+ * Queue the writes so only one exclusive transaction is open at a time.
+ */
+let placeWriteChain: Promise<unknown> = Promise.resolve();
+
+async function withPlaceWriteTransaction(
+  task: (txn: SQLiteDatabase) => Promise<void>,
+): Promise<void> {
+  const run = placeWriteChain.then(async () => {
+    const db = await getDatabase();
+    await db.withExclusiveTransactionAsync(task);
+  });
+  placeWriteChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
  * Upsert places from an async source (e.g. a region SQLite bundle) in bounded
  * chunks. Runs one short transaction per yielded batch so other database work
  * is never blocked for the whole import, and leaves the `places_fts` triggers
@@ -522,7 +565,7 @@ export async function upsertPlacesInBatches(
 
   for await (const batch of batches) {
     if (batch.length === 0) continue;
-    await db.withExclusiveTransactionAsync(async (txn) => {
+    await withPlaceWriteTransaction(async (txn) => {
       for (let i = 0; i < batch.length; i += PLACES_INSERT_ROWS) {
         const chunk = batch.slice(i, i + PLACES_INSERT_ROWS);
         await txn.runAsync(
@@ -1339,7 +1382,6 @@ async function upsertOverturePlaces(
   opts?: { invalidateSearchCache?: boolean },
 ): Promise<void> {
   const db = await getDatabase();
-
   // SQLite variable limit is 999. With 26 columns per row, max ~38 rows per statement.
   // Use chunks of 30 rows to stay safely under the limit.
   const CHUNK_SIZE = PLACES_INSERT_ROWS;
@@ -1354,7 +1396,7 @@ async function upsertOverturePlaces(
     address_city: string | null;
   }
 
-  await db.withExclusiveTransactionAsync(async (txn) => {
+  await withPlaceWriteTransaction(async (txn) => {
     // Temporarily disable FTS triggers during the bulk upsert. Instead of a
     // full `rebuild` afterwards (O(table size) on every search that fetches
     // Overture tiles), FTS rows are maintained explicitly for exactly the

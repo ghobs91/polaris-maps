@@ -59,6 +59,7 @@ jest.mock('../../src/services/poi/osmFetcher', () => ({
 }));
 jest.mock('../../src/services/geocoding/globalGeocoderService', () => ({
   isGeonamesReady: jest.fn(() => false),
+  isKnownCityName: jest.fn(async () => false),
   searchGlobalPlaces: jest.fn(),
 }));
 

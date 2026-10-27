@@ -114,7 +114,7 @@ export default function SearchScreen() {
     setHistory(getSearchHistory());
   }, []);
 
-  const { query, setQuery, visibleResults, loadMore, hasMore, refetch } = usePlaceSearch({
+  const placeSearch = usePlaceSearch({
     limit: 30,
     getContext: useCallback(() => {
       // Anchor on the live camera, not `mapStore.viewport` — that store only
@@ -154,6 +154,7 @@ export default function SearchScreen() {
       [setViewport, setSelectedLocation],
     ),
   });
+  const { query, setQuery, visibleResults, loadMore, hasMore, isSearching, refetch } = placeSearch;
 
   const navigateToResult = useCallback(
     (result: GeocodingResult) => {
@@ -245,6 +246,15 @@ export default function SearchScreen() {
           onRemove={handleRemoveHistory}
           onClearAll={handleClearHistory}
         />
+      ) : query.trim().length >= 2 && !isSearching && visibleResults.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            No places match “{query.trim()}” nearby
+          </Text>
+          <Text style={[styles.emptyHint, { color: colors.textSecondary }]}>
+            Add a city to search elsewhere, e.g. “{query.trim()} boston”.
+          </Text>
+        </View>
       ) : (
         <SearchResults
           results={visibleResults}
@@ -288,5 +298,20 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     filterText: {
       fontSize: 13,
       fontWeight: '600',
+    },
+    empty: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.xl,
+      alignItems: 'center',
+      gap: spacing.xs,
+    },
+    emptyTitle: {
+      ...typography.body,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    emptyHint: {
+      ...typography.caption,
+      textAlign: 'center',
     },
   });

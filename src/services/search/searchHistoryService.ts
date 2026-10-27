@@ -39,19 +39,23 @@ export function clearSearchHistory(): void {
 }
 
 /**
- * Bounded personalization boost: the user previously selected this exact
- * place for the same (or a prefix of the) query. Local-only, no network.
+ * Every place name previously selected for this query prefix, lowercased.
+ *
+ * The ranker asks for a boost per candidate; computing that per candidate
+ * re-reads and re-parses the whole history on every staged emission. A search
+ * with hundreds of candidates therefore parsed the same ten-entry JSON
+ * hundreds of times. Read it once and test membership instead.
  */
-export function getPersonalizationBoost(query: string, placeName: string): number {
+export function getPersonalizedPlaceNames(query: string): Set<string> {
   const q = query.trim().toLowerCase();
-  const name = placeName.trim().toLowerCase();
-  if (!q || !name) return 0;
-
-  const hit = getSearchHistory().some(
-    (entry) =>
-      entry.entry.text.trim().toLowerCase() === name &&
-      !!entry.query &&
-      (q.startsWith(entry.query.toLowerCase()) || entry.query.toLowerCase().startsWith(q)),
-  );
-  return hit ? PERSONALIZATION_BOOST : 0;
+  if (!q) return new Set();
+  const names = new Set<string>();
+  for (const entry of getSearchHistory()) {
+    const entryQuery = entry.query?.toLowerCase();
+    if (!entryQuery) continue;
+    if (!q.startsWith(entryQuery) && !entryQuery.startsWith(q)) continue;
+    const name = entry.entry.text.trim().toLowerCase();
+    if (name) names.add(name);
+  }
+  return names;
 }

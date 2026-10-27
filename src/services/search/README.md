@@ -15,15 +15,19 @@ Search is a staged multi-source pipeline:
    - Overpass for category POIs and name matches (gated when local results suffice)
    - Nominatim for structured address geocoding (shared 1 req/s throttle)
    - Overture PMTiles for viewport/user-location place freshness
+   - Apple MapKit nearby POIs (iOS) for commercial place coverage that open data lacks
 4. **Result cache** (LRU + TTL) serves repeated/concurrent queries without re-hitting the network; local writes invalidate overlapping areas
 5. **Ranker v2** scores 0–100 using bm25 + text match, distance, category, popularity, viewport, active intent modifiers, and bounded personalization
 6. **Search history** persists the last 10 selections (with their query) in MMKV and drives the personalization boost
 
 ## Locality rules
 
+- A search answers **where the user is looking**. Candidates farther than 75 km from the camera (or the user's GPS fix) are dropped for local-intent queries. Text-first sources (Photon, Nominatim) rank on text and only bias by location, so without this gate a Manhattan search is answered by a Boston café 300 km away.
+- Explicit destinations bypass the area gate: a structured address query, a city result, or a query whose **last token is a known city** ("tatte boston"). That is a request to go there.
 - Category boxes are capped at ~0.25° (~28 km): a zoomed-out map must not turn "bagels" into a continental Overpass query.
 - Category candidates are anchored (user location, else map centre) and truncated **nearest-first** before ranking — Overpass returns features in arbitrary geographic order, so slicing first would let a dense far-away cluster bury nearby places.
 - On an explicit submit only a place/brand/address lookup may frame a distant match. Nearby-intent queries (category/cuisine/"near me") keep the camera where the user is when every match is > 20 km away; the list stays authoritative.
+- The floating panel applies the same rule to its merged rows (stations, ranked hits): distant non-destination rows are dropped, and an empty local list shows "no places nearby" instead of another metro's matches.
 
 ## Architecture
 
@@ -36,12 +40,14 @@ unifiedSearch.ts — staged emission
     │
     ├─ local stage  ── searchPlacesFts (bm25) + category (local) + address (local)
     ├─ cities stage ── globalGeocoderService (offline GeoNames)
-    │                  [cachedFetch: Photon | category+Overpass | address+Nominatim | Overture ×2 | Overpass name]
+    │                  [cachedFetch: Photon | category+Overpass | address+Nominatim | Overture ×2 | Overpass name | MapKit]
     ├─ photon stage
     ├─ category stage
     └─ remaining (final) stage
     ↓
 Deduplication (canonical id → fuzzy spatial) + ranking (searchRanker.ts)
+    ↓
+Area-of-interest gate (75 km unless the query names a destination)
     ↓
 SearchResults component  ←  usePlaceSearch (debounce/abort/staged updates)
     ↓
@@ -56,7 +62,8 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 
 | File                      | Description                                                                                                                                                                                                                        |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, merges/caches/deduplicates/ranks. Entry point for all search.                                                           |
+| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, applies the area-of-interest gate, merges/caches/deduplicates/ranks. Entry point for all search.                        |
+| `mapKitPlaceSource.ts`    | Apple MapKit (`MKLocalSearch`) nearby POIs adapted to `OsmPoi` — commercial place coverage for iOS, empty elsewhere.                                                                                                               |
 | `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                                                                                 |
 | `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                                                                                  |
 | `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                                                                                |
@@ -91,6 +98,7 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 | `SEARCH_CACHE_TTL_MS`          | 300,000 | Result cache TTL (non-empty results)                |
 | `SEARCH_CACHE_NEGATIVE_TTL_MS` | 60,000  | Negative cache TTL (empty results)                  |
 | `SUFFICIENT_LOCAL_MATCHES`     | 8       | Strong local matches before named sources are gated |
+| `SEARCH_AREA_RADIUS_KM`        | 75      | Area that answers a local-intent query (km)         |
 | `PERSONALIZATION_BOOST`        | 5       | Bounded boost for previously selected results       |
 | `MAX_HISTORY`                  | 10      | Maximum saved search history entries                |
 

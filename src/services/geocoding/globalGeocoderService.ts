@@ -95,6 +95,44 @@ export async function ensureGeonamesDb(): Promise<void> {
 }
 
 /**
+ * True when a single token is the name of a real city in the offline index.
+ *
+ * Used to tell a local lookup from a place lookup: "tatte boston" names a
+ * destination, so its matches may live outside the area the user is looking at,
+ * while "tatte" is answered by the area itself. Deliberately exact (a token,
+ * not a prefix) and population-bounded so ordinary words never qualify.
+ */
+export async function isKnownCityName(token: string): Promise<boolean> {
+  const normalized = token.trim().toLowerCase();
+  if (normalized.length < 3 || !isGeonamesReady()) return false;
+  const db = await openGeonamesDb();
+  if (!db) return false;
+
+  try {
+    const rows = await db.getAllAsync<{
+      name: string;
+      ascii_name: string | null;
+      population: number;
+    }>(
+      `SELECT g.name, g.ascii_name, g.population
+         FROM geonames_fts f
+         JOIN geonames g ON g.geoname_id = f.rowid
+        WHERE geonames_fts MATCH ?
+        LIMIT 25`,
+      [`"${normalized.replace(/"/g, '')}"*`],
+    );
+    return rows.some(
+      (row) =>
+        row.population >= 5000 &&
+        (row.name.toLowerCase() === normalized ||
+          (row.ascii_name ?? '').toLowerCase() === normalized),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Search the global GeoNames database for cities matching the query.
  *
  * Results are sorted by a combination of FTS rank, population, and

@@ -269,10 +269,10 @@ describe('floatingSearchPanelHelpers', () => {
       expect(ordered.map((r) => r.entry.id)).toContain(11);
     });
 
-    it('keeps distant results when nothing local matched', () => {
+    it('drops distant results when nothing local matched', () => {
       const ordered = preferNearbyResults([bostonTatte, arlingtonTatte], unionSquare);
 
-      expect(ordered.map((r) => r.entry.id)).toEqual([2, 3]);
+      expect(ordered).toEqual([]);
     });
 
     it('preserves the source order inside each proximity bucket', () => {

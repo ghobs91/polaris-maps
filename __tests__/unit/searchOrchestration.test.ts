@@ -63,6 +63,7 @@ jest.mock('../../src/services/regions/regionRepository', () => ({
 }));
 jest.mock('../../src/services/geocoding/globalGeocoderService', () => ({
   isGeonamesReady: jest.fn(() => false),
+  isKnownCityName: jest.fn(async () => false),
   searchGlobalPlaces: jest.fn(),
   ensureGeonamesDb: jest.fn(),
 }));
