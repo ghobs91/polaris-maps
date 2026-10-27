@@ -48,6 +48,7 @@ import {
 } from '../geocoding/globalGeocoderService';
 import { getPersonalizedPlaceNames, PERSONALIZATION_BOOST } from './searchHistoryService';
 import { searchMapKitPlaces } from './mapKitPlaceSource';
+import { createQueryPlan } from './queryPlan';
 
 // ---------------------------------------------------------------------------
 // Source gating
@@ -70,8 +71,11 @@ const SOURCE_TIMEOUT_MS = 8_000;
  * distance printed next to it. 75 km spans the metro and its exurban
  * destinations (Woodbury Common is ~62 km from Midtown) while excluding
  * another city. City results and explicit addresses are exempt.
+ *
+ * Owned by the shared query plan (`queryPlan.ts`); this alias keeps the
+ * engine-local wording short.
  */
-const SEARCH_AREA_RADIUS_KM = 75;
+const SEARCH_AREA_RADIUS_KM = createQueryPlan('').areaRadiusKm;
 
 /** Filter-sheet keys that differ from the canonical `PlaceCategory` value. */
 const FILTER_CATEGORY_ALIASES: Partial<Record<string, PlaceCategory>> = {
@@ -775,21 +779,11 @@ export async function unifiedSearch(
           SOURCE_TIMEOUT_MS,
         ).then((value) => value ?? []);
 
-  // Source 6: Overpass name search — finds POIs with the search term in their name
-  // Skip for address queries — catches "Knights of Columbus" for "columbus pkwy"
-  const osmNamePromise: Promise<OsmPoi[]> =
-    addressQuery || skipNameSearch
-      ? Promise.resolve([])
-      : cachedFetch(
-          cacheKey(['osm-name', parsed.coreQuery, boundsKey({ south, north, west, east }), limit]),
-          () => fetchOsmPoisByName(south, west, north, east, parsed.coreQuery, { signal }),
-          { bounds: { south, north, west, east }, signal },
-        );
-
-  // Source 7: Apple Maps nearby POIs (iOS). The only source here backed by a
+  // Source 6: Apple Maps nearby POIs (iOS). The only source here backed by a
   // commercial POI dataset: open data (OSM/Overture) routinely lacks everyday
   // chain branches, which is how "tatte" in Manhattan ends up answered by
-  // Boston. Scoped to the same anchor as every other local source.
+  // Boston. Scoped to the same anchor as every other local source, and one of
+  // the load-bearing name-search sources.
   const mapKitPromise: Promise<OsmPoi[]> =
     addressQuery || !parsed.isNameSearch || skipNameSearch
       ? Promise.resolve([])
@@ -806,6 +800,37 @@ export async function unifiedSearch(
           ),
           SOURCE_TIMEOUT_MS,
         ).then((value) => value ?? []);
+
+  // Source 7: Overpass name search — finds POIs with the search term in their
+  // name. DEMOTED (gap-filler): Overpass is routinely congested (HTTP 406/403,
+  // connection resets — from every mirror), so Photon + Overture + MapKit are
+  // load-bearing for name search and Overpass no longer is. The filler runs
+  // only after the faster name sources settle, and only when their candidates
+  // leave the query thin (≤1 strong match within 15 km of the camera), so a
+  // dense successful pass never waits on — or depends on — Overpass, and a
+  // "Turnpike Bagels Deli & Bakery"-type hit that tag-based/category search
+  // would miss is still added in sparse coverage.
+  const nameFetcherPrimaries: Promise<unknown>[] = [
+    photonPromise,
+    categoryPromise,
+    overturePromise,
+    overtureUserPromise,
+    mapKitPromise,
+  ];
+  const osmNamePromise: Promise<OsmPoi[]> = (async () => {
+    await Promise.allSettled(nameFetcherPrimaries);
+    throwIfAborted(signal);
+    if (addressQuery) return [];
+    // Decided on the camera anchor: the fetch box is camera-derived too, so
+    // the density of the candidates the search *looked at* is what matters.
+    const density = inferQueryDensity(allPois, parsed, lat, lng);
+    if (density !== 'sparse') return [];
+    return cachedFetch(
+      cacheKey(['osm-name', parsed.coreQuery, boundsKey({ south, north, west, east }), limit]),
+      () => fetchOsmPoisByName(south, west, north, east, parsed.coreQuery, { signal }),
+      { bounds: { south, north, west, east }, signal },
+    );
+  })();
 
   const sources: Promise<unknown>[] = [
     tracked('photon', photonPromise, applyPhotonResults),

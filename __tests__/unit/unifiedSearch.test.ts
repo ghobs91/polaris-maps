@@ -408,9 +408,10 @@ describe('unifiedSearch', () => {
     expect(results.find((r) => r.name === 'Island Black Friday')!.score).toBeGreaterThan(0);
   });
 
-  it('finds POIs via Overpass name search (source 6)', async () => {
+  it('finds POIs via the Overpass name-search gap-filler in sparse coverage', async () => {
     // The deli is tagged as a bakery in OSM, so category search won't find it.
     // But name search matches "deli" in "Turnpike Bagels Deli & Bakery".
+    // All faster sources answer empty (sparse coverage), so the gap-filler runs.
     (osmFetcher.fetchOsmPoisByName as jest.Mock).mockResolvedValue([
       {
         id: 999001,
@@ -430,6 +431,22 @@ describe('unifiedSearch', () => {
     });
 
     expect(results.some((r) => r.name === 'Turnpike Bagels Deli & Bakery')).toBe(true);
+  });
+
+  it('skips the Overpass name-search gap-filler when faster sources answer densely', async () => {
+    // Ten strong "deli" matches within 5 km of the camera (Photon here, but same
+    // for Overture/MapKit) leave nothing to fill: Overpass is not load-bearing
+    // for name search, so the query neither waits on nor depends on it.
+    (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) =>
+        makePhotonResult(`Deli Number ${i}`, true, 40.748 + i * 0.005, -73.985),
+      ),
+    );
+
+    const results = await unifiedSearch('deli', defaultOpts);
+
+    expect(osmFetcher.fetchOsmPoisByName).not.toHaveBeenCalled();
+    expect(results.some((r) => r.name === 'Deli Number 4')).toBe(true);
   });
 
   it('filters out street results from Photon for category searches', async () => {

@@ -12,13 +12,18 @@ Search is a staged multi-source pipeline:
    - Local FTS5 over Overture places (weighted bm25: name ≫ brand ≫ category ≫ city)
    - Offline GeoNames cities1000 (~140k cities) for instant city results
    - Photon (Komoot) for fuzzy, typo-tolerant address/POI search
-   - Overpass for category POIs and name matches (gated when local results suffice)
+   - Overpass for category POIs and, as a **gap-filler**, name matches: Overpass is
+     routinely congested (HTTP 406/403 from every mirror), so Photon + Overture +
+     MapKit are load-bearing for name search and Overpass runs only after they
+     settle — and only when their candidates leave the query thin (≤1 strong
+     match within 15 km of the camera)
    - Nominatim for structured address geocoding (shared 1 req/s throttle)
    - Overture PMTiles for viewport/user-location place freshness
    - Apple MapKit nearby POIs (iOS) for commercial place coverage that open data lacks
 4. **Result cache** (LRU + TTL) serves repeated/concurrent queries without re-hitting the network; local writes invalidate overlapping areas
 5. **Ranker v2** scores 0–100 using bm25 + text match, distance, category, popularity, viewport, active intent modifiers, and bounded personalization
-6. **Search history** persists the last 10 selections (with their query) in MMKV and drives the personalization boost
+6. **Query plan** (`queryPlan.ts`) owns the cross-layer result-governance policy: the area a query is answered in (75 km), the panel's distant-tail/pin/fit radii, and the intent classification (address / nearby / named-place) that decides camera framing. The engine and the floating panel read the same object instead of separate copies.
+7. **Search history** persists the last 10 selections (with their query) in MMKV and drives the personalization boost
 
 ## Locality rules
 
@@ -54,14 +59,14 @@ unifiedSearch.ts — staged emission
     │
     ├─ local stage  ── searchPlacesFts (bm25) + category (local) + address (local)
     ├─ cities stage ── globalGeocoderService (offline GeoNames)
-    │                  [cachedFetch: Photon | category+Overpass | address+Nominatim | Overture ×2 | Overpass name | MapKit]
+    │                  [cachedFetch: Photon | category+Overpass | address+Nominatim | Overture ×2 | MapKit | Overpass name (gap-filler)]
     ├─ photon stage
     ├─ category stage
     └─ remaining (final) stage
     ↓
 Deduplication (canonical id → fuzzy spatial) + ranking (searchRanker.ts)
     ↓
-Area-of-interest gate (75 km unless the query names a destination)
+Area-of-interest gate (75 km via queryPlan unless the query names a destination)
     ↓
 SearchResults component  ←  usePlaceSearch (debounce/abort/staged updates)
     ↓
@@ -74,21 +79,22 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 
 ### Search (`src/services/search/`)
 
-| File                      | Description                                                                                                                                                                                                                        |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, applies the area-of-interest gate, merges/caches/deduplicates/ranks. Entry point for all search.                        |
-| `mapKitPlaceSource.ts`    | Apple MapKit (`MKLocalSearch`) nearby POIs adapted to `OsmPoi` — commercial place coverage for iOS, empty elsewhere.                                                                                                               |
-| `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                                                                                 |
-| `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                                                                                  |
-| `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                                                                                |
-| `searchRanker.ts`         | Scores results 0–100: bm25 + text match, distance, category, popularity, viewport, intent modifiers (open now / quality / cheap), canonical dedup.                                                                                 |
-| `searchFilters.ts`        | Pure filter/sort view layer over ranked results: open-now, min rating, max price, max distance, categories; sorts by relevance/distance/rating/price; intent-seeded defaults with explicit override (unknown data passes through). |
-| `searchSession.ts`        | Keystroke lifecycle (debounce/abort/local-first). Reads `getCategoryFilters` at search time so a category-filter change is folded into the parsed intent and re-gates sources; non-category filters just re-apply locally.         |
-| `openingHours.ts`         | Minimal `parseOpenNow` for common OSM hours syntax; returns null (unknown) when unparseable.                                                                                                                                       |
-| `photonGeocoder.ts`       | Komoot Photon API client — fuzzy, typo-tolerant OSM-based geocoding.                                                                                                                                                               |
-| `requestThrottle.ts`      | Shared abort-aware request throttles (Nominatim 1 req/s across all call sites).                                                                                                                                                    |
-| `searchHistoryService.ts` | MMKV-persisted last 10 selections (query + result); personalization boost lookups.                                                                                                                                                 |
-| `abortUtils.ts`           | Abort helpers (`throwIfAborted`, `sleepWithAbort`, `withTimeout`, `withSourceTimeout`).                                                                                                                                            |
+| File                      | Description                                                                                                                                                                                                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, runs the Overpass name-search **gap-filler** after primaries settle, applies the area-of-interest gate, merges/caches/deduplicates/ranks. Entry point for all search. |
+| `mapKitPlaceSource.ts`    | Apple MapKit (`MKLocalSearch`) nearby POIs adapted to `OsmPoi` — commercial place coverage for iOS, empty elsewhere.                                                                                                                                                             |
+| `queryPlan.ts`            | Shared result-governance policy owned in one place: intent classification (address / nearby / named-place), the 75 km area gate, the panel's tail/pin/fit radii, and distant-framing permission.                                                                                 |
+| `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                                                                                                                               |
+| `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                                                                                                                                |
+| `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                                                                                                                              |
+| `searchRanker.ts`         | Scores results 0–100: bm25 + text match, distance, category, popularity, viewport, intent modifiers (open now / quality / cheap), canonical dedup.                                                                                                                               |
+| `searchFilters.ts`        | Pure filter/sort view layer over ranked results: open-now, min rating, max price, max distance, categories; sorts by relevance/distance/rating/price; intent-seeded defaults with explicit override (unknown data passes through).                                               |
+| `searchSession.ts`        | Keystroke lifecycle (debounce/abort/local-first). Reads `getCategoryFilters` at search time so a category-filter change is folded into the parsed intent and re-gates sources; non-category filters just re-apply locally.                                                       |
+| `openingHours.ts`         | Minimal `parseOpenNow` for common OSM hours syntax; returns null (unknown) when unparseable.                                                                                                                                                                                     |
+| `photonGeocoder.ts`       | Komoot Photon API client — fuzzy, typo-tolerant OSM-based geocoding.                                                                                                                                                                                                             |
+| `requestThrottle.ts`      | Shared abort-aware request throttles (Nominatim 1 req/s across all call sites).                                                                                                                                                                                                  |
+| `searchHistoryService.ts` | MMKV-persisted last 10 selections (query + result); personalization boost lookups.                                                                                                                                                                                               |
+| `abortUtils.ts`           | Abort helpers (`throwIfAborted`, `sleepWithAbort`, `withTimeout`, `withSourceTimeout`).                                                                                                                                                                                          |
 
 ### Geocoding (`src/services/geocoding/`)
 

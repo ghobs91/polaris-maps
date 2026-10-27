@@ -2,12 +2,12 @@ import {
   applySearchView,
   destinationToGeocodingResult,
   geocodingResultToSearchResult,
-  isGenericNearbyQuery,
   isSameDestination,
   preferNearbyResults,
   selectSearchPins,
   shouldFrameResults,
 } from '../../src/components/map/floatingSearchPanelHelpers';
+import { createQueryPlan } from '../../src/services/search/queryPlan';
 import { resolveSearchCamera } from '../../src/utils/searchCamera';
 import type { UnifiedSearchResult } from '../../src/services/search/unifiedSearch';
 import type { GeocodingResult } from '../../src/services/geocoding/geocodingService';
@@ -148,31 +148,21 @@ describe('floatingSearchPanelHelpers', () => {
     });
 
     it('frames nearby results for a nearby-intent query', () => {
-      expect(shouldFrameResults(westburyBagels, westbury, false)).toBe(true);
+      expect(shouldFrameResults(westburyBagels, westbury, createQueryPlan('bagels'))).toBe(true);
     });
 
     it('does not fly the map to a distant cluster for a nearby-intent query', () => {
-      expect(shouldFrameResults(manhattanBagels, westbury, false)).toBe(false);
+      expect(shouldFrameResults(manhattanBagels, westbury, createQueryPlan('bagels'))).toBe(false);
     });
 
     it('still frames a distant match for a place/brand/address search', () => {
-      expect(shouldFrameResults(manhattanBagels, westbury, true)).toBe(true);
+      expect(shouldFrameResults(manhattanBagels, westbury, createQueryPlan('starbucks'))).toBe(
+        true,
+      );
     });
 
     it('never frames an empty pin set', () => {
-      expect(shouldFrameResults([], westbury, true)).toBe(false);
-    });
-
-    it('treats bare category phrases as nearby intent', () => {
-      expect(isGenericNearbyQuery('bagels')).toBe(true);
-      expect(isGenericNearbyQuery('coffee near me')).toBe(true);
-      expect(isGenericNearbyQuery('pizza open now')).toBe(true);
-    });
-
-    it('treats proper-name tokens as a place lookup', () => {
-      expect(isGenericNearbyQuery('h&h bagels')).toBe(false);
-      expect(isGenericNearbyQuery('pizza palace')).toBe(false);
-      expect(isGenericNearbyQuery('starbucks')).toBe(false);
+      expect(shouldFrameResults([], westbury, createQueryPlan('starbucks'))).toBe(false);
     });
   });
 
