@@ -22,17 +22,13 @@ describe('isAddressQuery', () => {
     expect(isAddressQuery('3 Forest Path')).toBe(true);
   });
 
-  it('returns true for queries containing full street words', () => {
+  it('returns true for queries containing full street words with a number', () => {
     expect(isAddressQuery('123 Main Street')).toBe(true);
-    expect(isAddressQuery('Broadway Avenue')).toBe(true);
-    expect(isAddressQuery('Central Boulevard')).toBe(true);
     expect(isAddressQuery('Country Road 5')).toBe(true);
-    expect(isAddressQuery('Sunset Drive')).toBe(true);
-    expect(isAddressQuery('Willow Lane')).toBe(true);
-    expect(isAddressQuery('Rose Court')).toBe(true);
     expect(isAddressQuery('Route 66 Highway')).toBe(true);
     expect(isAddressQuery('Interstate Hwy 95')).toBe(true);
-    // Newly added full words
+    // Route numbers count as address evidence too
+    expect(isAddressQuery('highway 101')).toBe(true);
     expect(isAddressQuery('123 Park Way')).toBe(true);
     expect(isAddressQuery('50 Oak Circle')).toBe(true);
     expect(isAddressQuery('742 Evergreen Terrace')).toBe(true);
@@ -43,6 +39,37 @@ describe('isAddressQuery', () => {
     expect(isAddressQuery('3 Forest Path')).toBe(true);
     expect(isAddressQuery('7 Ridge Loop')).toBe(true);
     expect(isAddressQuery('1 Mountain Pass')).toBe(true);
+  });
+
+  it('does not treat a bare street word as an address', () => {
+    // Full street words are everyday nouns: "pizza place", "tennis court",
+    // "the loop" and "drive in movie" are POI searches, not addresses. The
+    // unrestricted Photon pass still finds a street with such a name.
+    expect(isAddressQuery('Broadway Avenue')).toBe(false);
+    expect(isAddressQuery('Central Boulevard')).toBe(false);
+    expect(isAddressQuery('Sunset Drive')).toBe(false);
+    expect(isAddressQuery('Willow Lane')).toBe(false);
+    expect(isAddressQuery('Rose Court')).toBe(false);
+  });
+
+  it('does not treat a leading honorific as a street', () => {
+    // "St", "Ave" and "Dr" are names at the start of a query.
+    expect(isAddressQuery('St Louis')).toBe(false);
+    expect(isAddressQuery('St Paul')).toBe(false);
+    expect(isAddressQuery('St Petersburg')).toBe(false);
+    expect(isAddressQuery('Ave Maria')).toBe(false);
+    // …but a street abbreviation after the first word still counts.
+    expect(isAddressQuery('Main St')).toBe(true);
+    expect(isAddressQuery('Union Sq')).toBe(true);
+  });
+
+  it('does not treat a place noun as an address', () => {
+    expect(isAddressQuery('pizza place')).toBe(false);
+    expect(isAddressQuery('thai place')).toBe(false);
+    expect(isAddressQuery('tennis court')).toBe(false);
+    expect(isAddressQuery('food court')).toBe(false);
+    expect(isAddressQuery('the loop')).toBe(false);
+    expect(isAddressQuery('drive in movie')).toBe(false);
   });
 
   it('returns true for leading-number + city/state pattern (comma)', () => {

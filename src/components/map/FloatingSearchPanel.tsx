@@ -34,7 +34,8 @@ import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { SearchFilterSheet } from '../search/SearchFilterSheet';
 import { SearchResultRow } from '../search/SearchResultRow';
 import { useSearchViewStore } from '../../stores/searchViewStore';
-import { isFilterEmpty } from '../../services/search/searchFilters';
+import { isFilterEmpty, mergeFilters } from '../../services/search/searchFilters';
+import { parseSearchQuery } from '../../services/search/queryParser';
 import type { SearchStageMeta } from '../../services/search/searchSession';
 import { usePlaceSearch } from '../../hooks/usePlaceSearch';
 import { useGtfsLoadingBanner } from '../../hooks/useGtfsLoadingBanner';
@@ -87,6 +88,7 @@ import {
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 import {
+  applySearchView,
   boundsForPois,
   destinationToGeocodingResult,
   geocodingResultToSearchResult,
@@ -96,16 +98,23 @@ import {
   selectSearchPins,
   shouldFrameResults,
 } from './floatingSearchPanelHelpers';
+import { resolveSearchCamera } from '../../utils/searchCamera';
 
 /** Cap on POIs a quick-category pill returns (list rows + map pins). */
 const CATEGORY_RESULT_LIMIT = 60;
+
+/** How long a GPS fix may be reused for search anchoring/promotion. */
+const USER_LOCATION_MAX_AGE_MS = 5 * 60 * 1000;
 
 /** Convert a UnifiedSearchResult into the GeocodingResult shape the results list expects. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
     // Deterministic id: a random one per emission breaks list identity and the
     // surface that lets rows show distance/rating from the ranked result.
-    id: r.poi?.id ?? Math.round(r.lat * 1e6 + r.lng * 1e3),
+    // Address rows get a synthetic negative id, the same space Overture/saved
+    // places use, so they can never collide with a real OSM node id (history
+    // dedupes by id).
+    id: r.poi?.id ?? -(Math.abs(Math.round(r.lat * 1e6 + r.lng * 1e3)) + 1),
     text: r.name,
     type: r.type === 'address' ? 'address' : 'place',
     housenumber: r.poi?.tags['addr:housenumber'] ?? null,
@@ -612,6 +621,20 @@ function FavChip({
   );
 }
 
+/**
+ * The camera the user is actually looking at.
+ *
+ * `mapStore.viewport` is a *command* channel for programmatic moves (locate,
+ * result select, fitBounds) — it is never written back when the user pans. The
+ * live camera only exists in the viewport bounds the map publishes on settle,
+ * so every search that should happen "where the user is looking" must read it
+ * here instead of from `mapStore.viewport`.
+ */
+function liveViewportContext(): { lat: number; lng: number; zoom: number } {
+  const { viewportBounds, currentZoom } = useOsmPoiStore.getState();
+  return resolveSearchCamera(useMapStore.getState().viewport, viewportBounds, currentZoom);
+}
+
 // ─────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────
@@ -671,6 +694,11 @@ export function FloatingSearchPanel({
   const [stopSearchResults, setStopSearchResults] = useState<UnifiedSearchResult[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const searchFilters = useSearchViewStore((s) => s.filters);
+  const searchSort = useSearchViewStore((s) => s.sort);
+  /** Unfiltered merge for the current query, so a filter change re-applies locally. */
+  const mergedRowsRef = useRef<GeocodingResult[]>([]);
+  /** Query the merged rows were built from (filters re-apply against it). */
+  const viewQueryRef = useRef('');
   const activeFilterCount =
     (searchFilters.openNow != null ? 1 : 0) +
     (searchFilters.minRating != null ? 1 : 0) +
@@ -686,8 +714,10 @@ export function FloatingSearchPanel({
   // Whether the next result emission should move the camera. Only an explicit
   // submit sets this; live autosuggest typing must leave the map where it is.
   const fitResultsOnEmitRef = useRef(false);
-  // Where the user was when they submitted, and how far the camera may travel:
-  // a "nearby" query (bagels, coffee…) must never fly to a far cluster.
+  // Where the user was looking when they submitted, and how far the camera may
+  // travel: a "nearby" query (bagels, coffee…) must never fly to a far cluster.
+  // The camera — not GPS — because a submit answers the area on screen; using
+  // the user's position picked pins from the map's old centre after a pan.
   const fitAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
   const fitAllowsFarRef = useRef(false);
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
@@ -701,7 +731,9 @@ export function FloatingSearchPanel({
   const inputRef = useRef<TextInput>(null);
   const stopSearchInputRef = useRef<TextInput>(null);
   const fadeAnim = useSharedValue(0);
-  const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const userLocationRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
+  /** Guards against overlapping GPS fixes while one is in flight. */
+  const userLocationPendingRef = useRef(false);
 
   // ── Unified search (shared session hook) ────────────────────────────────
   /** Latest staged unified results (local first, then the full merge). */
@@ -718,125 +750,158 @@ export function FloatingSearchPanel({
   /** Aborts the in-flight category-pill search when it is superseded. */
   const categoryAbortRef = useRef<AbortController | null>(null);
 
-  const applyMergedResults = useCallback((updateMap: boolean) => {
-    const unifiedResults = unifiedResultsRef.current.map(unifiedToGeocodingResult);
-    // Ranked payload per row id, so rows keep distance/rating/open-now.
-    searchMetaRef.current = new Map(
-      unifiedResults.map((converted, i) => [
-        String(converted.entry.id),
-        unifiedResultsRef.current[i],
-      ]),
-    );
-    const stationResults = stationResultsRef.current;
-    const appleGeoResults = appleResultsRef.current;
-    const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
-    const filteredUnified = unifiedResults.filter(
-      (r) => !stationNames.has(r.entry.text.toLowerCase()),
-    );
-
-    const filteredApple = appleGeoResults.filter((ar) => {
-      return !filteredUnified.some(
-        (ur) =>
-          Math.abs(ur.entry.lat - ar.entry.lat) < 0.0005 &&
-          Math.abs(ur.entry.lng - ar.entry.lng) < 0.0005 &&
-          ur.entry.text.toLowerCase() === ar.entry.text.toLowerCase(),
-      );
-    });
-
-    // Ranked order, best first: transit stations are a deliberate boost, then
-    // the place rows ordered around where the user is looking. The unified
-    // pipeline ranks by relevance, so a text-perfect match from another metro
-    // can otherwise lead; MapKit's nearby rows arrive as an unordered fill.
-    // Proximity ordering puts the local branches first and drops the distant
-    // tail once something local matched.
+  /**
+   * Apply the search filter/sort view to merged rows — the same layer
+   * `usePlaceSearch` applies for the Search tab. Without it the panel's filter
+   * sheet was cosmetic (only the category filter reached the engine).
+   */
+  const orderForView = useCallback((rows: GeocodingResult[]): GeocodingResult[] => {
+    if (rows.length === 0) return rows;
+    const { filters, sort } = useSearchViewStore.getState();
+    const effective = mergeFilters(parseSearchQuery(viewQueryRef.current), filters);
     const bounds = useOsmPoiStore.getState().viewportBounds;
     const anchor = bounds
       ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
       : userLocationRef.current;
-    const displayedResults = [
-      ...stationResults,
-      ...preferNearbyResults([...filteredUnified, ...filteredApple], anchor),
-    ];
-    setResults(displayedResults);
+    return applySearchView(rows, searchMetaRef.current, anchor, effective, sort);
+  }, []);
 
-    const mapPois: OsmPoi[] = displayedResults
-      .filter((result) => result.entry.type !== 'station')
-      .map(
-        (result) =>
-          result.poi ?? {
-            id: result.entry.id,
-            lat: result.entry.lat,
-            lng: result.entry.lng,
-            name: result.entry.text,
-            type: 'amenity',
-            subtype: 'place',
-            tags: {
-              ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
-              ...(result.entry.housenumber ? { 'addr:housenumber': result.entry.housenumber } : {}),
-              ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
-              ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
-              ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
-              ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
-            },
-          },
+  const applyMergedResults = useCallback(
+    (updateMap: boolean) => {
+      const unifiedResults = unifiedResultsRef.current.map(unifiedToGeocodingResult);
+      // Ranked payload per row id, so rows keep distance/rating/open-now.
+      searchMetaRef.current = new Map(
+        unifiedResults.map((converted, i) => [
+          String(converted.entry.id),
+          unifiedResultsRef.current[i],
+        ]),
+      );
+      const stationResults = stationResultsRef.current;
+      const appleGeoResults = appleResultsRef.current;
+      const stationNames = new Set(stationResults.map((s) => s.entry.text.toLowerCase()));
+      const filteredUnified = unifiedResults.filter(
+        (r) => !stationNames.has(r.entry.text.toLowerCase()),
       );
 
-    if (mapPois.length > 0) {
-      // Always refresh the suggestion pins so the list and map stay in sync.
-      // The camera only moves when the search was explicitly committed
-      // (`updateMap`); live autosuggest typing must never pan the map.
-      // On submit, pins are ordered nearest to where the user searched from so
-      // a dense far-away cluster can't take over the map.
-      const pinAnchor = updateMap ? fitAnchorRef.current : null;
-      const fitPois = selectSearchPins(mapPois, pinAnchor);
-      useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
+      const filteredApple = appleGeoResults.filter((ar) => {
+        return !filteredUnified.some(
+          (ur) =>
+            Math.abs(ur.entry.lat - ar.entry.lat) < 0.0005 &&
+            Math.abs(ur.entry.lng - ar.entry.lng) < 0.0005 &&
+            ur.entry.text.toLowerCase() === ar.entry.text.toLowerCase(),
+        );
+      });
 
-      const fitBounds = boundsForPois(fitPois);
-      // A nearby-intent query (category/cuisine) is answered by the places
-      // around the user: if every match is a long way off, keep the camera
-      // where it is instead of yanking the map to another city. Place/brand/
-      // address searches may still frame a distant result (that is the intent).
-      const mayFrame = shouldFrameResults(fitPois, fitAnchorRef.current, fitAllowsFarRef.current);
+      // Ranked order, best first: transit stations are a deliberate boost, then
+      // the place rows ordered around where the user is looking. The unified
+      // pipeline ranks by relevance, so a text-perfect match from another metro
+      // can otherwise lead; MapKit's nearby rows arrive as an unordered fill.
+      // Proximity ordering puts the local branches first and drops the distant
+      // tail once something local matched.
+      const bounds = useOsmPoiStore.getState().viewportBounds;
+      const anchor = bounds
+        ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
+        : userLocationRef.current;
+      const displayedResults = [
+        ...stationResults,
+        ...preferNearbyResults([...filteredUnified, ...filteredApple], anchor),
+      ];
+      // Keep the unfiltered merge: a filter/sort change re-applies locally (see
+      // the effect below) instead of re-running the search.
+      mergedRowsRef.current = displayedResults;
+      setResults(orderForView(displayedResults));
 
-      if (updateMap && fitBounds && mayFrame) {
-        const vp = useMapStore.getState().viewport;
-        useOsmPoiStore.getState().setZoomAndBounds(vp.zoom, fitBounds);
-        useMapStore
-          .getState()
-          .setFitBounds(
-            [fitBounds.minLng, fitBounds.minLat, fitBounds.maxLng, fitBounds.maxLat],
-            'search',
-          );
-        anchorPendingRef.current = true;
-      } else {
-        // No camera move: anchor "Search this area" to the current viewport so
-        // panning after an autosuggest search still offers a re-search.
-        anchorPendingRef.current = false;
-        const bounds = useOsmPoiStore.getState().viewportBounds;
-        if (bounds) {
-          searchAnchorRef.current = {
-            lat: (bounds.minLat + bounds.maxLat) / 2,
-            lng: (bounds.minLng + bounds.maxLng) / 2,
-          };
+      const mapPois: OsmPoi[] = displayedResults
+        .filter((result) => result.entry.type !== 'station')
+        .map(
+          (result) =>
+            result.poi ?? {
+              id: result.entry.id,
+              lat: result.entry.lat,
+              lng: result.entry.lng,
+              name: result.entry.text,
+              type: 'amenity',
+              subtype: 'place',
+              tags: {
+                ...(result.entry.street ? { 'addr:street': result.entry.street } : {}),
+                ...(result.entry.housenumber
+                  ? { 'addr:housenumber': result.entry.housenumber }
+                  : {}),
+                ...(result.entry.city ? { 'addr:city': result.entry.city } : {}),
+                ...(result.entry.state ? { 'addr:state': result.entry.state } : {}),
+                ...(result.entry.postcode ? { 'addr:postcode': result.entry.postcode } : {}),
+                ...(result.entry.country ? { 'addr:country': result.entry.country } : {}),
+              },
+            },
+        );
+
+      if (mapPois.length > 0) {
+        // Always refresh the suggestion pins so the list and map stay in sync.
+        // The camera only moves when the search was explicitly committed
+        // (`updateMap`); live autosuggest typing must never pan the map.
+        // On submit, pins are ordered nearest to where the user searched from so
+        // a dense far-away cluster can't take over the map.
+        const pinAnchor = updateMap ? fitAnchorRef.current : null;
+        const fitPois = selectSearchPins(mapPois, pinAnchor);
+        useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
+
+        const fitBounds = boundsForPois(fitPois);
+        // A nearby-intent query (category/cuisine) is answered by the places
+        // around the user: if every match is a long way off, keep the camera
+        // where it is instead of yanking the map to another city. Place/brand/
+        // address searches may still frame a distant result (that is the intent).
+        const mayFrame = shouldFrameResults(fitPois, fitAnchorRef.current, fitAllowsFarRef.current);
+
+        if (updateMap && fitBounds && mayFrame) {
+          const live = liveViewportContext();
+          useOsmPoiStore.getState().setZoomAndBounds(live.zoom, fitBounds);
+          useMapStore
+            .getState()
+            .setFitBounds(
+              [fitBounds.minLng, fitBounds.minLat, fitBounds.maxLng, fitBounds.maxLat],
+              'search',
+            );
+          anchorPendingRef.current = true;
+        } else {
+          // No camera move: anchor "Search this area" to the current viewport so
+          // panning after an autosuggest search still offers a re-search.
+          anchorPendingRef.current = false;
+          const bounds = useOsmPoiStore.getState().viewportBounds;
+          if (bounds) {
+            searchAnchorRef.current = {
+              lat: (bounds.minLat + bounds.maxLat) / 2,
+              lng: (bounds.minLng + bounds.maxLng) / 2,
+            };
+          }
         }
+      } else {
+        useOsmPoiStore.getState().clearCategorySearch();
       }
-    } else {
-      useOsmPoiStore.getState().clearCategorySearch();
-    }
-  }, []);
+    },
+    [orderForView],
+  );
+
+  // A filter/sort change re-applies to the rows already on screen, matching the
+  // Search tab (no search is re-run for rating/price/open-now/distance).
+  useEffect(() => {
+    if (mergedRowsRef.current.length === 0) return;
+    setResults(orderForView(mergedRowsRef.current));
+  }, [searchFilters, searchSort, orderForView]);
 
   const startAuxiliarySearch = useCallback(
     (text: string) => {
       auxAbortRef.current?.abort();
       const controller = new AbortController();
       auxAbortRef.current = controller;
-      const vp = useMapStore.getState().viewport;
+      // Transit stops and MapKit's nearby rows are viewport-dependent: query
+      // them around the camera, not the last programmatic move.
+      const { lat, lng } = liveViewportContext();
 
       void Promise.all([
-        searchOtpStops(text, vp.lat, vp.lng).catch(
+        searchOtpStops(text, lat, lng).catch(
           () => [] as Array<{ name: string; lat: number; lon: number; id: string }>,
         ),
-        searchNearby(text, vp.lat, vp.lng, 15000).catch(() => [] as NativeMapKitPoi[]),
+        searchNearby(text, lat, lng, 15000).catch(() => [] as NativeMapKitPoi[]),
       ]).then(([otpStops, appleResults]) => {
         if (auxAbortRef.current !== controller || controller.signal.aborted) return;
 
@@ -890,6 +955,8 @@ export function FloatingSearchPanel({
         stationResultsRef.current = [];
         appleResultsRef.current = [];
         auxQueryRef.current = '';
+        mergedRowsRef.current = [];
+        viewQueryRef.current = '';
         setResults([]);
         if (meta.final) applyMergedResults(fitResultsOnEmitRef.current);
         useOsmPoiStore.getState().setIsCategorySearching(false);
@@ -897,6 +964,7 @@ export function FloatingSearchPanel({
       }
 
       unifiedResultsRef.current = emitted;
+      viewQueryRef.current = text;
 
       // First emission for a new query starts the auxiliary transit/MapKit
       // search so it runs alongside the rest of the unified pipeline.
@@ -931,16 +999,17 @@ export function FloatingSearchPanel({
     query,
     setQuery,
     submit: submitSearch,
+    refetch,
     clear: clearSearch,
   } = usePlaceSearch({
     limit: 20,
     getContext: () => {
-      const vp = useMapStore.getState().viewport;
+      const live = liveViewportContext();
       const vb = useOsmPoiStore.getState().viewportBounds;
       return {
-        lat: vp.lat,
-        lng: vp.lng,
-        zoom: vp.zoom,
+        lat: live.lat,
+        lng: live.lng,
+        zoom: live.zoom,
         viewportBounds: vb
           ? { south: vb.minLat, north: vb.maxLat, west: vb.minLng, east: vb.maxLng }
           : undefined,
@@ -967,8 +1036,8 @@ export function FloatingSearchPanel({
   } = usePlaceSearch({
     limit: 8,
     getContext: () => {
-      const vp = useMapStore.getState().viewport;
-      return { lat: vp.lat, lng: vp.lng, zoom: vp.zoom };
+      const live = liveViewportContext();
+      return { lat: live.lat, lng: live.lng, zoom: live.zoom };
     },
     onResults: (emitted) => {
       // Sort by distance to the route polyline when a preview exists.
@@ -1092,9 +1161,18 @@ export function FloatingSearchPanel({
 
   // ── Search ──────────────────────────────────
 
-  /** Lazily resolve the user's location so nearby places can be promoted. */
+  /**
+   * Lazily resolve the user's location so nearby places can be promoted.
+   *
+   * Cached with an age limit: the ref used to be filled once for the panel's
+   * whole lifetime, so after a drive every "near me" ranking, density estimate
+   * and the 10 km Overture-nearby box were still centred on the old town.
+   */
   const ensureUserLocation = useCallback(() => {
-    if (userLocationRef.current) return;
+    const cached = userLocationRef.current;
+    if (cached && Date.now() - cached.at < USER_LOCATION_MAX_AGE_MS) return;
+    if (userLocationPendingRef.current) return;
+    userLocationPendingRef.current = true;
     void (async () => {
       try {
         const { status } = await Location.getForegroundPermissionsAsync();
@@ -1102,9 +1180,15 @@ export function FloatingSearchPanel({
         const pos = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        userLocationRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        userLocationRef.current = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          at: Date.now(),
+        };
       } catch {
         // Ignore GPS failures during search.
+      } finally {
+        userLocationPendingRef.current = false;
       }
     })();
   }, []);
@@ -1122,6 +1206,7 @@ export function FloatingSearchPanel({
 
       if (text.length < 2) {
         setResults([]);
+        mergedRowsRef.current = [];
         useOsmPoiStore.getState().clearCategorySearch();
         useOsmPoiStore.getState().setIsCategorySearching(false);
         setQuery(text);
@@ -1129,6 +1214,7 @@ export function FloatingSearchPanel({
       }
 
       setResults([]);
+      mergedRowsRef.current = [];
       useOsmPoiStore.getState().clearCategorySearch();
       useOsmPoiStore.getState().setIsCategorySearching(true);
       setQuery(text);
@@ -1162,8 +1248,10 @@ export function FloatingSearchPanel({
     // Only a place/brand/address lookup may move the camera to a distant
     // match; "bagels"/"coffee near me" are answered where the user is.
     fitAllowsFarRef.current = !isGenericNearbyQuery(text);
-    const vp = useMapStore.getState().viewport;
-    fitAnchorRef.current = userLocationRef.current ?? { lat: vp.lat, lng: vp.lng };
+    const live = liveViewportContext();
+    // Pins are ordered and framed around the area the user is searching, so a
+    // pan away from GPS must not pull the results back to the user's position.
+    fitAnchorRef.current = { lat: live.lat, lng: live.lng };
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
     useOsmPoiStore.getState().setIsCategorySearching(true);
@@ -1178,8 +1266,15 @@ export function FloatingSearchPanel({
     Keyboard.dismiss();
     setMode('idle');
     auxAbortRef.current?.abort();
+    // `handleUnifiedEmission` only re-runs the auxiliary (transit/MapKit) search
+    // when the query text changes. Clearing it here means searching the same
+    // words again after a dismiss fetches transit stops for the current viewport
+    // instead of reusing the ones from wherever the last search ran.
+    auxQueryRef.current = '';
     clearSearch();
     setResults([]);
+    mergedRowsRef.current = [];
+    viewQueryRef.current = '';
     setActiveCategory(null);
     searchAnchorRef.current = null;
     anchorPendingRef.current = false;
@@ -1188,7 +1283,8 @@ export function FloatingSearchPanel({
   }, [clearSearch]);
 
   // Runs (or re-runs) a quick-category POI search against the current viewport.
-  const runCategorySearch = useCallback((categoryId: string, categoryQuery: string) => {
+  // `fit` is false for "Search this area", which must keep the panned camera.
+  const runCategorySearch = useCallback((categoryId: string, categoryQuery: string, fit = true) => {
     setActiveCategory(categoryId);
     activeCategoryQueryRef.current = categoryQuery;
     const gen = ++categorySearchGenRef.current;
@@ -1258,6 +1354,19 @@ export function FloatingSearchPanel({
         useOsmPoiStore
           .getState()
           .setCategorySearch(categories, pois, categoryResult?.localPrimary ?? false);
+        if (!fit) {
+          // "Search this area": the camera stays exactly where the user panned
+          // and the anchor moves with it, so a further pan offers the button again.
+          anchorPendingRef.current = false;
+          const viewport = useOsmPoiStore.getState().viewportBounds;
+          if (viewport) {
+            searchAnchorRef.current = {
+              lat: (viewport.minLat + viewport.maxLat) / 2,
+              lng: (viewport.minLng + viewport.maxLng) / 2,
+            };
+          }
+          return;
+        }
         const fitPois = selectSearchPins(pois);
         const fb = boundsForPois(fitPois);
         if (fb && fitPois.length >= 2) {
@@ -1278,12 +1387,17 @@ export function FloatingSearchPanel({
     setShowSearchThisArea(false);
     searchAnchorRef.current = null;
     anchorPendingRef.current = false;
+    // Re-running the same query must not refit the camera (the user picked the
+    // area) and must invalidate the viewport-dependent auxiliary results
+    // (transit stops, MapKit nearby) instead of reusing the previous area's.
+    fitResultsOnEmitRef.current = false;
+    auxQueryRef.current = '';
     if (activeCategory && activeCategoryQueryRef.current) {
-      runCategorySearch(activeCategory, activeCategoryQueryRef.current);
+      runCategorySearch(activeCategory, activeCategoryQueryRef.current, false);
       return;
     }
-    handleQueryChange(query);
-  }, [query, handleQueryChange, activeCategory, runCategorySearch]);
+    refetch();
+  }, [refetch, activeCategory, runCategorySearch]);
 
   // ── Dismiss location / route view ────────────
   const dismissLocation = useCallback(() => {

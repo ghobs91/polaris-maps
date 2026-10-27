@@ -20,6 +20,7 @@ import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { spacing, typography } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePlaceSearch } from '@/hooks/usePlaceSearch';
+import { resolveSearchCamera, type SearchCamera } from '@/utils/searchCamera';
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import type { GeocodingEntry } from '@/models/geocoding';
 
@@ -62,7 +63,9 @@ async function detectCoordinateInput(input: string): Promise<{ lat: number; lng:
 /** Convert a UnifiedSearchResult into a GeocodingResult for the existing UI. */
 function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   const entry: GeocodingEntry = {
-    id: r.poi?.id ?? Math.round(r.lat * 1e6 + r.lng * 1e3),
+    // Address rows get a synthetic negative id so they cannot collide with a
+    // real OSM node id (search history dedupes by id).
+    id: r.poi?.id ?? -(Math.abs(Math.round(r.lat * 1e6 + r.lng * 1e3)) + 1),
     text: r.name,
     type: r.type === 'poi' ? 'place' : r.type === 'address' ? 'address' : 'place',
     housenumber: null,
@@ -77,6 +80,13 @@ function unifiedToGeocodingResult(r: UnifiedSearchResult): GeocodingResult {
   return { entry, rank: r.score };
 }
 
+/** Live camera centre — `mapStore.viewport` only tracks programmatic moves. */
+function liveCamera(): SearchCamera {
+  const { lat, lng, zoom } = useMapStore.getState().viewport;
+  const { viewportBounds, currentZoom } = useOsmPoiStore.getState();
+  return resolveSearchCamera({ lat, lng, zoom }, viewportBounds, currentZoom);
+}
+
 export default function SearchScreen() {
   const [history, setHistory] = useState<GeocodingResult[]>([]);
   const [showFilters, setShowFilters] = useState(false);
@@ -89,7 +99,9 @@ export default function SearchScreen() {
     ((searchFilters.categories?.length ?? 0) > 0 ? 1 : 0);
   const setViewport = useMapStore((s) => s.setViewport);
   const setSelectedLocation = useMapStore((s) => s.setSelectedLocation);
-  const viewport = useMapStore((s) => s.viewport);
+  // Subscribed so the viewport-shift refetch below re-runs when the map moves.
+  const liveViewportBounds = useOsmPoiStore((s) => s.viewportBounds);
+  const liveZoom = useOsmPoiStore((s) => s.currentZoom);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const lastBboxRef = useRef<{ south: number; north: number; west: number; east: number } | null>(
@@ -105,21 +117,24 @@ export default function SearchScreen() {
   const { query, setQuery, visibleResults, loadMore, hasMore, refetch } = usePlaceSearch({
     limit: 30,
     getContext: useCallback(() => {
-      // Capture the bbox used for this search so the viewport-shift effect can
-      // tell when the map has moved far enough to warrant a refetch.
-      const vp = useMapStore.getState().viewport;
-      const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, vp.zoom)) * 2));
+      // Anchor on the live camera, not `mapStore.viewport` — that store only
+      // tracks programmatic moves, so it still points at wherever the map was
+      // last told to go after the user pans.
+      const live = liveCamera();
+      const delta = Math.max(0.05, Math.min(2, (360 / Math.pow(2, live.zoom)) * 2));
+      // Capture the bbox this search used, so the viewport-shift effect can tell
+      // when the map has moved far enough to warrant a refetch.
       lastBboxRef.current = {
-        south: vp.lat - delta,
-        north: vp.lat + delta,
-        west: vp.lng - delta,
-        east: vp.lng + delta,
+        south: live.lat - delta,
+        north: live.lat + delta,
+        west: live.lng - delta,
+        east: live.lng + delta,
       };
       const bounds = useOsmPoiStore.getState().viewportBounds;
       return {
-        lat: vp.lat,
-        lng: vp.lng,
-        zoom: vp.zoom,
+        lat: live.lat,
+        lng: live.lng,
+        zoom: live.zoom,
         viewportBounds: bounds
           ? {
               south: bounds.minLat,
@@ -184,7 +199,8 @@ export default function SearchScreen() {
 
   const showHistory = query.length < 2 && history.length > 0;
 
-  // Viewport-shift triggered refetch (Fix G)
+  // Viewport-shift triggered refetch (Fix G): re-runs the query when the map
+  // has been panned more than ~30% of the searched box since the last run.
   useEffect(() => {
     if (query.length < 2 || !lastBboxRef.current || showHistory) return;
 
@@ -193,14 +209,15 @@ export default function SearchScreen() {
     const prevCenterLng = (prev.west + prev.east) / 2;
     const prevHeight = prev.north - prev.south;
     const prevWidth = prev.east - prev.west;
+    const live = liveCamera();
 
-    const latShift = Math.abs(viewport.lat - prevCenterLat);
-    const lngShift = Math.abs(viewport.lng - prevCenterLng);
+    const latShift = Math.abs(live.lat - prevCenterLat);
+    const lngShift = Math.abs(live.lng - prevCenterLng);
 
     if (latShift > prevHeight * 0.3 || lngShift > prevWidth * 0.3) {
       refetch();
     }
-  }, [viewport.lat, viewport.lng, viewport.zoom, query, showHistory, refetch]);
+  }, [liveViewportBounds, liveZoom, query, showHistory, refetch]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

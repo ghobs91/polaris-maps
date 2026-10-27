@@ -3,6 +3,13 @@ import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { normalizeSearchText } from '../../services/search/queryParser';
 import { resolveSearchCategories } from '../../services/poi/categoryResolver';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
+import {
+  applyFilters,
+  sortResults,
+  type FilterableSearchResult,
+  type SearchFilters,
+  type SortOption,
+} from '../../services/search/searchFilters';
 
 export interface DirectionsTarget {
   lat: number;
@@ -104,6 +111,18 @@ export const DISTANT_RESULT_KM = 120;
  * another metro. Address results are explicit destinations and are never
  * dropped, even in another city.
  */
+/**
+ * Results the user named explicitly — an address, a city, a landmark — as
+ * opposed to a generic match from a POI source.
+ */
+function isExplicitDestination(result: GeocodingResult): boolean {
+  return (
+    result.entry.type === 'address' ||
+    result.poi?.subtype === 'city' ||
+    result.poi?.type === 'place'
+  );
+}
+
 export function preferNearbyResults(
   results: GeocodingResult[],
   anchor: { lat: number; lng: number } | null | undefined,
@@ -116,9 +135,10 @@ export function preferNearbyResults(
       result,
       index,
       distanceKm,
-      // An address is an explicit destination: it always counts as local so an
-      // address lookup in another city is never dropped for a nearby namesake.
-      isLocal: result.entry.type === 'address' || distanceKm <= NEARBY_RESULT_KM,
+      // An address or a city the user named is an explicit destination: it
+      // always counts as local, so searching "Paris" from New York is not
+      // answered only by the café of the same name down the street.
+      isLocal: isExplicitDestination(result) || distanceKm <= NEARBY_RESULT_KM,
     };
   });
   const hasNearby = withDistance.some((entry) => entry.isLocal);
@@ -194,6 +214,42 @@ export function boundsForPois(mapPois: OsmPoi[]): {
     maxLat: maxLat + latPad,
     maxLng: maxLng + lngPad,
   };
+}
+
+/**
+ * Apply the user's filter/sort view to the merged result rows.
+ *
+ * The floating panel builds its list from its own merge (stations, MapKit
+ * nearby rows and ranked hits), which bypasses `usePlaceSearch`'s filtered
+ * view. Without this the filter sheet and sort option were cosmetic there:
+ * only the category filter reached the search, through source gating.
+ *
+ * Rows without a ranked payload (transit stations, MapKit fills) are scored as
+ * "unknown" for rating/price and get a real distance so distance sorting and
+ * the max-distance filter still work for them.
+ */
+export function applySearchView(
+  rows: GeocodingResult[],
+  rankedById: Map<string, UnifiedSearchResult>,
+  anchor: { lat: number; lng: number } | null,
+  filters: SearchFilters,
+  sort: SortOption,
+): GeocodingResult[] {
+  if (rows.length === 0) return rows;
+
+  const byFilterable = new Map<FilterableSearchResult, GeocodingResult>();
+  const filterables = rows.map((row) => {
+    const ranked = rankedById.get(String(row.entry.id));
+    const base: FilterableSearchResult = ranked ?? geocodingResultToSearchResult(row);
+    const distanceKm = base.distanceKm || (anchor ? kmBetween(anchor, row.entry) : 0);
+    const filterable = { ...base, distanceKm };
+    byFilterable.set(filterable, row);
+    return filterable;
+  });
+
+  return sortResults(applyFilters(filterables, filters), sort).map(
+    (filterable) => byFilterable.get(filterable)!,
+  );
 }
 
 /**

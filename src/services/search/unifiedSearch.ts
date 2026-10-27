@@ -583,47 +583,56 @@ export async function unifiedSearch(
   // Ask for a deeper candidate pool than the display limit: category sources
   // (Overpass especially) return features in arbitrary geographic order, so
   // truncating to `limit` before ranking lets one dense far-away cluster crowd
-  // out the places actually near the user. Candidates are anchored so the
-  // nearest features survive the cut; the final list is still scored/limited
-  // by `assembleResults`.
-  const categoryAnchor = options.userLocation ?? { lat, lng };
+  // out the places actually near the user. Candidates are anchored on the
+  // search centre — the same point the results are scored against — so the cut
+  // and the ranking agree after a pan.
+  const categoryAnchor = { lat, lng };
   const categoryCandidateLimit = Math.max(limit * 4, 120);
   const categoryPromise: Promise<CategorySearchResult | null> = !parsed.categories
     ? Promise.resolve(null)
     : skipCategoryFallback
       ? // Sufficient local matches — reuse the local category pass, skip Overpass.
         Promise.resolve(localCategoryResult)
-      : cachedFetch(
-          cacheKey([
-            'category',
-            parsed.originalQuery,
-            boundsKey({ south, north, west, east }),
-            categoryCandidateLimit,
-          ]),
-          () =>
-            searchByCategory(
+      : // Bounded like every other network source: the category chain can run a
+        // cuisine retry plus two throttled Nominatim fallbacks, far past the
+        // search budget, and the `final` stage waits for it.
+        withSourceTimeout(
+          cachedFetch(
+            cacheKey([
+              'category',
               parsed.originalQuery,
-              south,
-              west,
-              north,
-              east,
+              boundsKey({ south, north, west, east }),
               categoryCandidateLimit,
-              {
-                signal,
-                anchor: categoryAnchor,
-              },
-            ),
-          { bounds: { south, north, west, east }, signal },
+            ]),
+            () =>
+              searchByCategory(
+                parsed.originalQuery,
+                south,
+                west,
+                north,
+                east,
+                categoryCandidateLimit,
+                {
+                  signal,
+                  anchor: categoryAnchor,
+                },
+              ),
+            { bounds: { south, north, west, east }, signal },
+          ),
+          SOURCE_TIMEOUT_MS,
         );
 
   // Source 4 (full): Address geocoding (local FTS + Nominatim)
   //
   // The local structured/trigram pass already runs for name searches. The
   // network fallback is only worth its cost (Nominatim is throttled to 1 req/s
-  // and can take up to 8 s) when the text actually looks like an address:
-  // a street-address heuristic, a house number, or a comma-separated address.
-  // Photon, Overpass and Overture already cover plain place-name queries.
-  const looksLikeAddress = addressQuery || /\d/.test(query) || query.includes(',');
+  // and can take up to 8 s) when the text looks like a house number: a bare
+  // digit used to be enough, which made every "7 eleven" / "5 guys" / "76 gas"
+  // query queue a throttled request. Photon, Overpass and Overture already
+  // cover plain place-name queries.
+  const leadingHouseNumber = /^\s*\d+[a-z]?\s+[a-z]/i.test(query);
+  const looksLikeAddress =
+    addressQuery || (leadingHouseNumber && !parsed.brand && !parsed.categories);
   const isAddressPass =
     addressQuery || (parsed.isNameSearch && !parsed.categories && looksLikeAddress);
   const addressQueryText = addressQuery ? parsed.originalQuery : parsed.coreQuery;

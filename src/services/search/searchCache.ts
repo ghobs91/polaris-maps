@@ -11,6 +11,8 @@
  * and must reflect fresh local writes.
  */
 
+import { isAbortError } from './abortUtils';
+
 export interface CacheBounds {
   south: number;
   north: number;
@@ -99,9 +101,12 @@ export function cacheSet<T>(
 
 /**
  * Return a cached value, or run `fn` once and cache its result. Concurrent
- * callers for the same key await the same in-flight promise — unless that
- * promise belongs to a superseded search (its signal is already aborted), in
- * which case it can only reject as "aborted" and a fresh request is started.
+ * callers for the same key await the same in-flight promise.
+ *
+ * A shared promise is bound to the signal of the search that started it. If
+ * that search is superseded, the promise only rejects with AbortError — so a
+ * caller that is still live retries under its own signal instead of silently
+ * losing that source, and a promise that is already aborted is never handed out.
  */
 export function cachedFetch<T>(
   key: string,
@@ -113,10 +118,20 @@ export function cachedFetch<T>(
 
   const pending = inFlight.get(key);
   if (pending) {
-    if (!pending.signal?.aborted) return pending.promise as Promise<T>;
-    // Stale in-flight request from a superseded search: don't hand its dead
-    // signal to this search.
-    inFlight.delete(key);
+    if (pending.signal?.aborted) {
+      // Stale in-flight request from a superseded search: don't hand its dead
+      // signal to this search.
+      inFlight.delete(key);
+    } else {
+      // Same request owner → share it. Another live search joining must not
+      // inherit the owner's abort (it cannot tell whose keystroke aborted).
+      const shared = pending.promise as Promise<T>;
+      if (!opts?.signal || opts.signal === pending.signal) return shared;
+      return shared.catch((err: unknown) => {
+        if (isAbortError(err) && !opts.signal?.aborted) return cachedFetch(key, fn, opts);
+        throw err;
+      });
+    }
   }
 
   const promise = fn()

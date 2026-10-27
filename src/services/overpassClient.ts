@@ -52,31 +52,56 @@ export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Prom
   }
   _lastOverpassRequestAt = Date.now();
 
-  const attempts = OVERPASS_INSTANCES.map(async (base) => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+  // Hedged requests: the first response wins and the rest are cancelled.
+  // Without the cancel the losing instances keep streaming full payloads for a
+  // query that is already answered — three times the bandwidth and battery per
+  // search, and needless load on the public instances.
+  const controllers: AbortController[] = [];
+  const attempts = OVERPASS_INSTANCES.map(
+    (base) =>
+      new Promise<T>((resolve, reject) => {
+        const ctrl = new AbortController();
+        controllers.push(ctrl);
+        const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
 
-    // If the caller passed an external signal, abort our controller when it fires.
-    const onExternalAbort = () => ctrl.abort();
-    opts.signal?.addEventListener('abort', onExternalAbort);
+        // If the caller passed an external signal, abort our controller when it fires.
+        const onExternalAbort = () => ctrl.abort();
+        opts.signal?.addEventListener('abort', onExternalAbort);
 
-    try {
-      const res = await fetch(base, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(opts.query)}`,
-        signal: ctrl.signal,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return (await res.json()) as T;
-    } finally {
-      clearTimeout(timer);
-      opts.signal?.removeEventListener('abort', onExternalAbort);
-    }
-  });
+        const cleanup = () => {
+          clearTimeout(timer);
+          opts.signal?.removeEventListener('abort', onExternalAbort);
+        };
+
+        fetch(base, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `data=${encodeURIComponent(opts.query)}`,
+          signal: ctrl.signal,
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json() as Promise<T>;
+          })
+          .then(
+            (value) => {
+              cleanup();
+              resolve(value);
+            },
+            (err) => {
+              cleanup();
+              reject(err);
+            },
+          );
+      }),
+  );
 
   try {
-    return await Promise.any(attempts);
+    const winner = await Promise.any(attempts);
+    // The winner already settled, so aborting it is a no-op; this only stops
+    // the hedge requests that are still downloading.
+    controllers.forEach((ctrl) => ctrl.abort());
+    return winner;
   } catch (err) {
     // `Promise.any` reports an aborted caller as an AggregateError, which
     // `isAbortError` cannot recognise — that made a superseded search look like

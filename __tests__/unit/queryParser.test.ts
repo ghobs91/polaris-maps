@@ -124,6 +124,23 @@ describe('parseSearchQuery', () => {
     expect(result.isNameSearch).toBe(true);
     expect(result.brand).toBeNull();
   });
+
+  it('does not match a brand key inside a longer word', () => {
+    // "mobil" must not match "mobile", "ups" must not match "upscale".
+    expect(parseSearchQuery('mobile phone repair').brand).toBeNull();
+    expect(parseSearchQuery('upscale bar').brand).toBeNull();
+    expect(parseSearchQuery('groups near me').brand).toBeNull();
+    // …but the brand itself still matches as a word.
+    expect(parseSearchQuery('mobil').brand).toBe('Mobil');
+  });
+
+  it('does not read a modifier that is part of a brand name as intent', () => {
+    const best = parseSearchQuery('best buy');
+    expect(best.brand).toBe('Best Buy');
+    expect(best.wantsQuality).toBe(false);
+    // A real quality word still applies.
+    expect(parseSearchQuery('best coffee').wantsQuality).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
