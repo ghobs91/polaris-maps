@@ -375,24 +375,39 @@ function PanoramaxInstancePicker({
           keyExtractor={(item) => item.url}
           style={styles.list}
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [styles.instanceRow, pressed ? styles.pressed : null]}
-              onPress={() => onSelect(item)}
-              accessibilityRole="button"
-              accessibilityLabel={`Use ${item.name}`}
-            >
-              <View style={styles.instanceText}>
-                <Text style={styles.instanceName}>{item.name}</Text>
-                <Text style={styles.instanceUrl} numberOfLines={1}>
-                  {item.url.replace(/^https:\/\//, '')}
-                </Text>
-              </View>
-              {selectedUrl === item.url ? (
-                <Ionicons name="checkmark" size={20} color={colors.primary} />
-              ) : null}
-            </Pressable>
-          )}
+          renderItem={({ item }) => {
+            const unavailable = !item.authEnabled;
+            return (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.instanceRow,
+                  pressed && !unavailable ? styles.pressed : null,
+                  unavailable ? styles.instanceRowDisabled : null,
+                ]}
+                onPress={() => onSelect(item)}
+                disabled={unavailable}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: unavailable }}
+                accessibilityLabel={
+                  unavailable ? `${item.name}, sign-in not available` : `Use ${item.name}`
+                }
+              >
+                <View style={styles.instanceText}>
+                  <Text style={styles.instanceName}>{item.name}</Text>
+                  <Text style={styles.instanceUrl} numberOfLines={1}>
+                    {unavailable
+                      ? 'Accounts are disabled on this instance'
+                      : item.url.replace(/^https:\/\//, '')}
+                  </Text>
+                </View>
+                {unavailable ? (
+                  <Ionicons name="lock-closed-outline" size={18} color={colors.textSecondary} />
+                ) : selectedUrl === item.url ? (
+                  <Ionicons name="checkmark" size={20} color={colors.primary} />
+                ) : null}
+              </Pressable>
+            );
+          }}
           ListEmptyComponent={<Text style={styles.muted}>No instances match “{query}”.</Text>}
         />
       )}
@@ -426,6 +441,7 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors'], isDark: boo
       borderBottomColor: colors.border,
     },
     pressed: { opacity: 0.7 },
+    instanceRowDisabled: { opacity: 0.55 },
     instanceText: { flex: 1 },
     instanceName: { ...typography.body, color: colors.text, fontSize: 15, fontWeight: '600' },
     instanceUrl: { ...typography.caption, color: colors.textSecondary, fontSize: 11 },

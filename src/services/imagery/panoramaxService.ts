@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import NetInfo from '@react-native-community/netinfo';
+import { AppState, Linking } from 'react-native';
 import type { StreetViewCapture, StreetViewDriveSummary } from '../../models/streetViewCapture';
 import {
   getOrCreateUploadBatch,
@@ -17,6 +18,8 @@ const FETCH_TIMEOUT_MS = 20_000;
 export interface PanoramaxInstance {
   name: string;
   url: string;
+  /** Instances with sign-in disabled cannot mint the upload token this app needs. */
+  authEnabled: boolean;
 }
 
 export interface PanoramaxUser {
@@ -105,7 +108,14 @@ export async function fetchPanoramaxInstances(force = false): Promise<PanoramaxI
     throw new Error(`Could not load Panoramax instances (${response.status})`);
   }
   const payload = await readJson<{
-    instances?: Array<{ name?: string; url?: string }>;
+    instances?: Array<{
+      name?: string;
+      url?: string;
+      configuration?: {
+        auth?: { enabled?: boolean };
+        name?: { label?: string };
+      };
+    }>;
   }>(response);
 
   const seen = new Set<string>();
@@ -120,7 +130,14 @@ export async function fetchPanoramaxInstances(force = false): Promise<PanoramaxI
     }
     if (seen.has(url)) continue;
     seen.add(url);
-    items.push({ name: entry.name?.trim() || url.replace(/^https:\/\//, ''), url });
+    const label = entry.configuration?.name?.label?.trim();
+    items.push({
+      name: label || entry.name?.trim() || url.replace(/^https:\/\//, ''),
+      url,
+      // Missing configuration is treated as "sign-in available": the catalog is
+      // additive, and generate-token still reports a clear failure if not.
+      authEnabled: entry.configuration?.auth?.enabled !== false,
+    });
   }
   items.sort((a, b) => a.name.localeCompare(b.name));
   instanceCache = { at: Date.now(), items };
@@ -169,18 +186,45 @@ export async function generatePanoramaxToken(instanceUrl: string): Promise<Gener
     method: 'POST',
     headers: { Accept: 'application/json' },
   });
+  if (response.status === 404 || response.status === 501) {
+    throw new Error(
+      'This Panoramax instance does not support account sign-in, so uploads cannot be authorised here. Pick another instance.',
+    );
+  }
   if (!response.ok) {
     throw new Error(`Could not start Panoramax sign-in (${response.status})`);
   }
   return readJson<GeneratedToken>(response);
 }
 
+interface PanoramaxErrorBody {
+  message?: string;
+  details?: { error?: string };
+}
+
+/**
+ * Reads the account behind a JWT.
+ *
+ * An unclaimed token answers 403 "Token not yet claimed" (that is the claim
+ * flow still waiting on the browser), while any other rejection — a revoked
+ * token, an instance that refuses the account — must abort instead of polling.
+ */
 export async function getPanoramaxMe(instanceUrl: string, jwt: string): Promise<PanoramaxUser> {
   const response = await request(apiUrl(instanceUrl, '/users/me'), {
     headers: { Accept: 'application/json', Authorization: `Bearer ${jwt}` },
   });
-  if (response.status === 401 || response.status === 403) {
+  if (response.status === 401) {
     throw new PanoramaxAuthError();
+  }
+  if (response.status === 403) {
+    const body = await readJson<PanoramaxErrorBody>(response).catch(() => null);
+    const detail = body?.details?.error ?? body?.message ?? '';
+    if (/not yet claimed/i.test(detail)) {
+      throw new PanoramaxAuthError('Panoramax token is not claimed yet');
+    }
+    throw new Error(
+      detail ? `Panoramax rejected the sign-in: ${detail}` : 'Panoramax rejected the sign-in',
+    );
   }
   if (!response.ok) {
     throw new Error(`Panoramax account check failed (${response.status})`);
@@ -192,9 +236,26 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The app only polls while it is in front; a backgrounded app is suspended. */
+function appIsActive(): boolean {
+  const state = AppState.currentState;
+  return state !== 'background' && state !== 'inactive';
+}
+
+/** How long the user has to finish the browser login before we stop waiting. */
+const CLAIM_WINDOW_MS = 10 * 60 * 1000;
+const CLAIM_POLL_MS = 2000;
+
 /**
  * Token-claim flow: generate an unclaimed token, open the instance's claim URL
- * in the browser, then poll `/users/me` until the account is attached.
+ * in the system browser, then poll `/users/me` until the account is attached.
+ *
+ * The claim URL must be opened in the *system* browser. The instance keeps the
+ * OAuth `state`/`next_url` in a Flask session cookie; inside an in-app
+ * `SFSafariViewController` (`WebBrowser.openBrowserAsync`) that cookie is not
+ * preserved across the identity-provider redirect, so the instance ends on
+ * "Impossible to finish authentication flow" right after the OpenStreetMap
+ * login. The system browser is also the context the Panoramax CLI documents.
  */
 export async function connectPanoramax(
   instanceUrl: string,
@@ -206,7 +267,15 @@ export async function connectPanoramax(
     throw new Error('Panoramax did not return a claimable token');
   }
 
-  void WebBrowser.openBrowserAsync(claimUrl, { showTitle: true }).catch(() => {});
+  let openedInApp = false;
+  try {
+    await Linking.openURL(claimUrl);
+  } catch {
+    // No system browser handler: fall back to the in-app browser. The claim
+    // may still complete if the instance keeps its OAuth state server-side.
+    openedInApp = true;
+    void WebBrowser.openBrowserAsync(claimUrl, { showTitle: true }).catch(() => {});
+  }
 
   const auth: PanoramaxAuth = {
     instanceUrl: instance,
@@ -214,19 +283,34 @@ export async function connectPanoramax(
     tokenId: generated.id ?? null,
   };
 
-  for (let attempt = 0; attempt < 90; attempt += 1) {
+  let waitedMs = 0;
+  while (waitedMs < CLAIM_WINDOW_MS) {
+    if (!appIsActive()) {
+      // Suspended while the browser is in front: wait, but do not spend the
+      // claim window on time the user could not see the app.
+      await delay(1000);
+      continue;
+    }
     try {
       const user = await getPanoramaxMe(instance, auth.jwt);
       await savePanoramaxAuth(auth);
-      void WebBrowser.dismissBrowser().catch(() => {});
+      if (openedInApp) void WebBrowser.dismissBrowser().catch(() => {});
       return { auth, user };
     } catch (error) {
-      if (!(error instanceof PanoramaxAuthError)) throw error;
+      // Only "not claimed yet" is retryable; a real rejection stops here.
+      if (!(error instanceof PanoramaxAuthError)) {
+        if (openedInApp) void WebBrowser.dismissBrowser().catch(() => {});
+        throw error;
+      }
     }
-    await delay(2000);
+    await delay(CLAIM_POLL_MS);
+    waitedMs += CLAIM_POLL_MS;
   }
 
-  throw new Error('Panoramax sign-in timed out. Try again from Settings.');
+  if (openedInApp) void WebBrowser.dismissBrowser().catch(() => {});
+  throw new Error(
+    'Panoramax sign-in was not completed. Finish the login in the browser page, then return to Polaris and tap Connect again.',
+  );
 }
 
 export async function disconnectPanoramax(instanceUrl: string): Promise<void> {

@@ -191,6 +191,7 @@ function RootLayoutInner() {
           options={{ title: 'Street View 3D', gestureEnabled: false }}
         />
         <Stack.Screen name="imagery/capture" options={{ title: 'Capture' }} />
+        <Stack.Screen name="dashcam/index" options={{ title: 'Dash cam' }} />
         <Stack.Screen name="settings/index" options={{ title: '' }} />
         <Stack.Screen name="places/list" options={{ headerShown: false }} />
       </Stack>

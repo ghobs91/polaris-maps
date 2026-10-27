@@ -263,6 +263,8 @@ PODS:
     - RNScreens
   - ExpoSecureStore (57.0.4):
     - ExpoModulesCore
+  - ExpoSharing (57.0.24):
+    - ExpoModulesCore
   - ExpoSpeech (57.0.3):
     - ExpoModulesCore
   - ExpoSpeechRecognition (56.0.1):
@@ -282,6 +284,8 @@ PODS:
     - ExpoModulesCore
     - ExpoModulesWorklets
     - React-RCTFabric
+  - ExpoVideo (57.0.5):
+    - ExpoModulesCore
   - ExpoWebBrowser (57.0.3):
     - ExpoModulesCore
   - EXUpdatesInterface (57.0.2):
@@ -315,6 +319,53 @@ PODS:
   - maplibre-react-native/DynamicLibrary (10.4.2):
     - React
     - React-Core
+  - NitroImage (0.15.2):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - NitroModules (0.37.1):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - RCTDeprecation (0.86.3)
   - RCTRequired (0.86.3)
   - RCTSwiftUI (0.86.3)
@@ -2634,6 +2685,56 @@ PODS:
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
   - UMAppLoader (57.0.2)
+  - VisionCamera (5.2.3):
+    - hermes-engine
+    - NitroImage
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - VisionCameraLocation (5.2.3):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - VisionCamera
+    - Yoga
   - Yoga (0.0.0)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
@@ -2674,6 +2775,7 @@ DEPENDENCIES:
   - "ExpoModulesWorkletsAdapter (from `../node_modules/.pnpm/expo-modules-core@57.0.24_react-native-worklets@0.10.1_@babel+core@7.29.0_@react-native_af967d6db7ff022c83505d24b0c95ea3/node_modules/expo-modules-core`)"
   - "ExpoRouter (from `../node_modules/.pnpm/expo-router@57.0.29_4cfdf8a29382680259f8bbe945e81db4/node_modules/expo-router/ios`)"
   - "ExpoSecureStore (from `../node_modules/.pnpm/expo-secure-store@57.0.4_expo@57.0.31/node_modules/expo-secure-store/ios`)"
+  - "ExpoSharing (from `../node_modules/.pnpm/expo-sharing@57.0.24_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-_b6b81b16408aabf9c6ce76653bae1850/node_modules/expo-sharing/ios`)"
   - "ExpoSpeech (from `../node_modules/.pnpm/expo-speech@57.0.3_expo@57.0.31/node_modules/expo-speech/ios`)"
   - "ExpoSpeechRecognition (from `../node_modules/.pnpm/expo-speech-recognition@56.0.1_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@rea_717156f6bcb9cce01a31bbde491d39bb/node_modules/expo-speech-recognition/ios`)"
   - "ExpoSplashScreen (from `../node_modules/.pnpm/expo-splash-screen@57.0.10_expo@57.0.31_typescript@6.0.3/node_modules/expo-splash-screen/ios`)"
@@ -2682,11 +2784,14 @@ DEPENDENCIES:
   - "ExpoSystemUI (from `../node_modules/.pnpm/expo-system-ui@57.0.4_expo@57.0.31_react-native-web@0.21.2_encoding@0.1.13_react-dom@19_65ad5a974a98df61eed4e1e2abb99ec5/node_modules/expo-system-ui/ios`)"
   - "ExpoTaskManager (from `../node_modules/.pnpm/expo-task-manager@57.0.21_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-na_37d316eec61653ed1d10e4c0de85af3d/node_modules/expo-task-manager/ios`)"
   - "ExpoUI (from `../node_modules/.pnpm/@expo+ui@57.0.26_@babel+core@7.29.0_@types+react@19.2.17_expo@57.0.31_react-dom@19.2.3__e34e909c692c46aa977f730379449044/node_modules/@expo/ui/ios`)"
+  - "ExpoVideo (from `../node_modules/.pnpm/expo-video@57.0.5_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-com_0f761fa544e95d90597801f443e48b7b/node_modules/expo-video/ios`)"
   - "ExpoWebBrowser (from `../node_modules/.pnpm/expo-web-browser@57.0.3_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-nati_ba3df7d138482b94420036bd14da57ed/node_modules/expo-web-browser/ios`)"
   - "EXUpdatesInterface (from `../node_modules/.pnpm/expo-updates-interface@57.0.2_expo@57.0.31/node_modules/expo-updates-interface/ios`)"
   - "FBLazyVector (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/Libraries/FBLazyVector`)"
   - "hermes-engine (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)"
   - "maplibre-react-native (from `../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=b4a396491372ba6281405e0330120a54aa518_e0fb5df4e248197087ac99ac1ee45415/node_modules/@maplibre/maplibre-react-native`)"
+  - "NitroImage (from `../node_modules/.pnpm/react-native-nitro-image@0.15.2_react-native-nitro-modules@0.37.1_react-native@0.86.3_@_58b9657fbf3ff59d1298207805a83a29/node_modules/react-native-nitro-image`)"
+  - "NitroModules (from `../node_modules/.pnpm/react-native-nitro-modules@0.37.1_react-native@0.86.3_@babel+core@7.29.0_@react-native-_9620538580cd6cb28848a337c76c95af/node_modules/react-native-nitro-modules`)"
   - "RCTDeprecation (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)"
   - "RCTRequired (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/Libraries/Required`)"
   - "RCTSwiftUI (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactApple/RCTSwiftUI`)"
@@ -2774,6 +2879,8 @@ DEPENDENCIES:
   - "RNScreens (from `../node_modules/.pnpm/react-native-screens@4.26.2_react-native@0.86.3_@babel+core@7.29.0_@react-native-commun_ffadd986fc9c81f8cf5a74b0ddb1d07b/node_modules/react-native-screens`)"
   - "RNWorklets (from `../node_modules/.pnpm/react-native-worklets@0.10.1_@babel+core@7.29.0_@react-native+metro-config@0.86.3_@babe_93abca437ba0fb0164fafab711b246a7/node_modules/react-native-worklets`)"
   - "UMAppLoader (from `../node_modules/.pnpm/unimodules-app-loader@57.0.2/node_modules/unimodules-app-loader/ios`)"
+  - "VisionCamera (from `../node_modules/.pnpm/react-native-vision-camera@5.2.3_c0f2e2705754c5b39e58e3cd0bc35b47/node_modules/react-native-vision-camera`)"
+  - "VisionCameraLocation (from `../node_modules/.pnpm/react-native-vision-camera-location@5.2.3_react-native-nitro-modules@0.37.1_react-nativ_2fa393ea872d45597343ed695470dba5/node_modules/react-native-vision-camera-location`)"
   - "Yoga (from `../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactCommon/yoga`)"
 
 SPEC REPOS:
@@ -2853,6 +2960,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-router@57.0.29_4cfdf8a29382680259f8bbe945e81db4/node_modules/expo-router/ios"
   ExpoSecureStore:
     :path: "../node_modules/.pnpm/expo-secure-store@57.0.4_expo@57.0.31/node_modules/expo-secure-store/ios"
+  ExpoSharing:
+    :path: "../node_modules/.pnpm/expo-sharing@57.0.24_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-_b6b81b16408aabf9c6ce76653bae1850/node_modules/expo-sharing/ios"
   ExpoSpeech:
     :path: "../node_modules/.pnpm/expo-speech@57.0.3_expo@57.0.31/node_modules/expo-speech/ios"
   ExpoSpeechRecognition:
@@ -2869,6 +2978,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/expo-task-manager@57.0.21_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-na_37d316eec61653ed1d10e4c0de85af3d/node_modules/expo-task-manager/ios"
   ExpoUI:
     :path: "../node_modules/.pnpm/@expo+ui@57.0.26_@babel+core@7.29.0_@types+react@19.2.17_expo@57.0.31_react-dom@19.2.3__e34e909c692c46aa977f730379449044/node_modules/@expo/ui/ios"
+  ExpoVideo:
+    :path: "../node_modules/.pnpm/expo-video@57.0.5_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-native-com_0f761fa544e95d90597801f443e48b7b/node_modules/expo-video/ios"
   ExpoWebBrowser:
     :path: "../node_modules/.pnpm/expo-web-browser@57.0.3_expo@57.0.31_react-native@0.86.3_@babel+core@7.29.0_@react-nati_ba3df7d138482b94420036bd14da57ed/node_modules/expo-web-browser/ios"
   EXUpdatesInterface:
@@ -2880,6 +2991,10 @@ EXTERNAL SOURCES:
     :tag: hermes-v250829098.0.17
   maplibre-react-native:
     :path: "../node_modules/.pnpm/@maplibre+maplibre-react-native@10.4.2_patch_hash=b4a396491372ba6281405e0330120a54aa518_e0fb5df4e248197087ac99ac1ee45415/node_modules/@maplibre/maplibre-react-native"
+  NitroImage:
+    :path: "../node_modules/.pnpm/react-native-nitro-image@0.15.2_react-native-nitro-modules@0.37.1_react-native@0.86.3_@_58b9657fbf3ff59d1298207805a83a29/node_modules/react-native-nitro-image"
+  NitroModules:
+    :path: "../node_modules/.pnpm/react-native-nitro-modules@0.37.1_react-native@0.86.3_@babel+core@7.29.0_@react-native-_9620538580cd6cb28848a337c76c95af/node_modules/react-native-nitro-modules"
   RCTDeprecation:
     :path: "../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -3052,6 +3167,10 @@ EXTERNAL SOURCES:
     :path: "../node_modules/.pnpm/react-native-worklets@0.10.1_@babel+core@7.29.0_@react-native+metro-config@0.86.3_@babe_93abca437ba0fb0164fafab711b246a7/node_modules/react-native-worklets"
   UMAppLoader:
     :path: "../node_modules/.pnpm/unimodules-app-loader@57.0.2/node_modules/unimodules-app-loader/ios"
+  VisionCamera:
+    :path: "../node_modules/.pnpm/react-native-vision-camera@5.2.3_c0f2e2705754c5b39e58e3cd0bc35b47/node_modules/react-native-vision-camera"
+  VisionCameraLocation:
+    :path: "../node_modules/.pnpm/react-native-vision-camera-location@5.2.3_react-native-nitro-modules@0.37.1_react-nativ_2fa393ea872d45597343ed695470dba5/node_modules/react-native-vision-camera-location"
   Yoga:
     :path: "../node_modules/.pnpm/react-native@0.86.3_@babel+core@7.29.0_@react-native-community+cli@20.2.0_typescript@6._bf5e630325cd9973d0cf865debd4fbe8/node_modules/react-native/ReactCommon/yoga"
 
@@ -3088,6 +3207,7 @@ SPEC CHECKSUMS:
   ExpoModulesWorkletsAdapter: 584685dcb1d21f560c9ab1b482f57fc8a74af1d6
   ExpoRouter: 7e81d46cec8d324f07fb13c764d89f1664cc2fef
   ExpoSecureStore: ff1fd5e073957417ba8f9dec0bebcbd55a60e747
+  ExpoSharing: 4f0529a876e307b0dc5463f80dd318e4c1457c77
   ExpoSpeech: ab83f97ede99c65a23fd4c228122deadc430de01
   ExpoSpeechRecognition: 119acf84448579e53f841d040aad76982f945e2d
   ExpoSplashScreen: 856060f5724dc4fca4d69a2d18a161e3baa37019
@@ -3096,6 +3216,7 @@ SPEC CHECKSUMS:
   ExpoSystemUI: 05ee8d4aaba1b6af330f3621e19b39ff9f21e718
   ExpoTaskManager: ede265f5b4a6e075b422eb4d45c8cb393b0dc465
   ExpoUI: 162ba2d970e9fba2d53d819945c41ed6b529a73f
+  ExpoVideo: 31d5dc617d913808aeba05c3ab900712637b0e47
   ExpoWebBrowser: a4d7c382116fbe33c1ec7f60293f02b7e97042e4
   EXUpdatesInterface: 4c96533f11c8cefe879bd506564cc2d537f56804
   FBLazyVector: 2138c6c2ab66c31bf5754dc18097fbc498a49c7f
@@ -3105,6 +3226,8 @@ SPEC CHECKSUMS:
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: af5937a13536ef73f3784d69cc342b98961acf33
   maplibre-react-native: 37d86b5b7b04dedaceebc577644e67acd7b5f437
+  NitroImage: 5daf897d2f37ed419186278d6b0fcdd8aab313b0
+  NitroModules: 38f8754287858ff1294e43fd43f614a664e54050
   RCTDeprecation: 96f68ebf33f8762466b01d57d6e873c4f30efb07
   RCTRequired: 166eed8ad6d8440e73e56d09a9090366609823d2
   RCTSwiftUI: e818198d11928a78c2b2afe281d072171dab617f
@@ -3195,6 +3318,8 @@ SPEC CHECKSUMS:
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   UMAppLoader: d69910810f31d2e2cfd49706e89ad372161b0561
+  VisionCamera: f84550cffbbf23f3cac7a3d1d2e66e5098a4e8eb
+  VisionCameraLocation: 8b23e0c80d722a090590d99b738d2fcc78e5ef3e
   Yoga: 18b74b3ade30bebc1904004dfaceae1dd02a330a
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
