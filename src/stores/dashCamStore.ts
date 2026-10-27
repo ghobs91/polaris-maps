@@ -5,6 +5,11 @@ interface DashCamState {
   recording: boolean;
   /** Epoch ms of the first clip in the current run. */
   startedAt: number | null;
+  /**
+   * What started this run. An auto-started run belongs to its navigation and
+   * ends with it; a manually started one runs until stopped.
+   */
+  startedBy: 'manual' | 'auto' | null;
   /** Segments written during this run. */
   clipCount: number;
   /** Bytes written during this run (all-time totals live in the DB). */
@@ -12,7 +17,7 @@ interface DashCamState {
   /** Recording suspended because the app is not in the foreground. */
   paused: boolean;
   error: string | null;
-  start: () => void;
+  start: (startedBy?: 'manual' | 'auto') => void;
   stop: () => void;
   recordClip: (bytes: number) => void;
   setPaused: (paused: boolean) => void;
@@ -23,6 +28,7 @@ interface DashCamState {
 const INITIAL = {
   recording: false,
   startedAt: null as number | null,
+  startedBy: null as 'manual' | 'auto' | null,
   clipCount: 0,
   bytes: 0,
   paused: false,
@@ -31,10 +37,11 @@ const INITIAL = {
 
 export const useDashCamStore = create<DashCamState>()((set) => ({
   ...INITIAL,
-  start: () =>
+  start: (startedBy = 'manual') =>
     set({
       recording: true,
       startedAt: Date.now(),
+      startedBy,
       clipCount: 0,
       bytes: 0,
       paused: false,

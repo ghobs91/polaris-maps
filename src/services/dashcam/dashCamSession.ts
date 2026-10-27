@@ -9,12 +9,12 @@ import { pruneDashCamClips } from './dashCamQueue';
  * previous run. Stills and video use separate VisionCamera outputs, so the
  * dash cam can run alongside street-imagery capture.
  */
-export async function requestDashCamStart(): Promise<void> {
+export async function requestDashCamStart(startedBy: 'manual' | 'auto' = 'manual'): Promise<void> {
   const store = useDashCamStore.getState();
   if (store.recording) return;
   const { maxMinutes, maxBytes } = useSettingsStore.getState().dashCam;
   await pruneDashCamClips({ maxMinutes, maxBytes }).catch(() => 0);
-  store.start();
+  store.start(startedBy);
 }
 
 export function stopDashCam(): void {

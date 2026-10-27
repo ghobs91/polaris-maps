@@ -81,7 +81,7 @@ export function DashCamSettings() {
   return (
     <SettingsGroup
       header="Dash cam"
-      footer="Records muted video in segments while you drive and keeps only the most recent footage: once either the time or the storage limit is reached, the oldest clips are deleted automatically. Recording stops when the app is backgrounded or the phone is locked. Street-imagery photos can be captured at the same time as the dash cam."
+      footer="Records muted video in segments while you drive and keeps only the most recent footage: once either the time or the storage limit is reached, the oldest clips are deleted automatically. Recording stops when the app is backgrounded or the phone is locked. With Start on every drive, recording begins when active navigation begins and stops with it. Street-imagery photos can be captured at the same time as the dash cam."
     >
       <SettingsRow
         title="Dash cam"
@@ -89,6 +89,20 @@ export function DashCamSettings() {
           <Switch
             value={dashCam.enabled}
             onValueChange={toggleEnabled}
+            trackColor={{
+              false: isDark ? '#39393D' : '#E5E5EA',
+              true: colors.primary + 'CC',
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        title="Start on every drive"
+        rightAdornment={
+          <Switch
+            value={dashCam.autoStart}
+            disabled={!dashCam.enabled}
+            onValueChange={(autoStart) => setDashCam({ autoStart })}
             trackColor={{
               false: isDark ? '#39393D' : '#E5E5EA',
               true: colors.primary + 'CC',
