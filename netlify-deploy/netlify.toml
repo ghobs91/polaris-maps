@@ -17,6 +17,13 @@
   to = "/terms/index.html"
   status = 200
 
+# Mapillary's OAuth callback (it only accepts https URLs). This page hands the
+# authorization code back to the app's scheme.
+[[redirects]]
+  from = "/mapillary-callback"
+  to = "/mapillary-callback/index.html"
+  status = 200
+
 [[headers]]
   for = "/.well-known/apple-app-site-association"
   [headers.values]
