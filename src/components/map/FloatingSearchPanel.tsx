@@ -240,7 +240,7 @@ type PanelMode =
 interface FloatingSearchPanelProps {
   /** Extra bottom offset so it doesn't overlap the locate button */
   bottomInsetExtra?: number;
-  /** Called when the user taps the profile/node-dashboard icon */
+  /** Called when the user taps the settings icon */
   onProfilePress?: () => void;
   /** Called when the user taps the locate/find-me button */
   onLocatePress?: () => void;
@@ -2654,13 +2654,13 @@ export function FloatingSearchPanel({
                 <TouchableOpacity
                   onPress={(e) => {
                     e.stopPropagation?.();
-                    (onProfilePress ?? (() => router.push('/(tabs)/profile')))();
+                    (onProfilePress ?? (() => router.push('/settings')))();
                   }}
                   activeOpacity={0.7}
                   style={styles.miniProfileBtn}
                 >
                   <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
-                    <Ionicons name="person" size={16} color="#EBEBF0" />
+                    <Ionicons name="settings-outline" size={16} color="#EBEBF0" />
                   </GlassView>
                 </TouchableOpacity>
                 <TouchableOpacity

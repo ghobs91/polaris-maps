@@ -3,18 +3,19 @@ import { View, StyleSheet, Dimensions, TouchableOpacity, useWindowDimensions } f
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { useRouter } from 'expo-router';
 import { MapView } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
 import { FloatingSearchPanel, MapControlsColumn } from '@/components/map/FloatingSearchPanel';
 import { ParkingSpotCard } from '@/components/map/ParkingSpotCard';
 import { FloatingMenuPanel } from '@/components/map/FloatingMenuPanel';
-import { NodeDashboardDrawer } from '@/components/map/NodeDashboardDrawer';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
 import { StreetViewThumbOverlay } from '@/components/map/StreetViewThumbOverlay';
 import { TrafficCoverageBadge } from '@/components/map/TrafficCoverageBadge';
 import { TransitStopCard } from '@/components/map/TransitStopCard';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { useOsmPoiStore } from '@/stores/osmPoiStore';
 import { useTransitStops } from '@/hooks/useTransitStops';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
@@ -49,6 +50,8 @@ export default function MapScreen() {
   const contentLeft = largeMapContentLeft(windowWidth);
   const screenHeight = Dimensions.get('window').height;
   const streetViewBottom = Math.round(screenHeight * POI_SHEET_PEEK_FRACTION) + spacing.md;
+  const router = useRouter();
+  const devMode = useSettingsStore((s) => s.devMode);
   const setViewport = useMapStore((s) => s.setViewport);
   const activeRouteGeometry = useNavigationStore((s) => s.activeRoute?.geometry);
   const previewRouteGeometry = useNavigationStore((s) => s.routePreview?.geometry);
@@ -66,7 +69,6 @@ export default function MapScreen() {
       ),
     [isNavigating, activeAlternateRoutes, routePreviewAlternates],
   );
-  const [showNodeDrawer, setShowNodeDrawer] = useState(false);
   const [showMenuPanel, setShowMenuPanel] = useState(false);
 
   // Fetch transit stops when transit layer is toggled on
@@ -195,7 +197,7 @@ export default function MapScreen() {
               style={styles.profileBtnLarge}
             >
               <View style={styles.profileBtnCircle}>
-                <Ionicons name="person" size={20} color="#EBEBF0" />
+                <Ionicons name="settings-outline" size={20} color="#EBEBF0" />
               </View>
             </TouchableOpacity>
 
@@ -204,18 +206,20 @@ export default function MapScreen() {
             </View>
           </View>
 
-          <View
-            pointerEvents="box-none"
-            style={[
-              styles.coverageBadgeMount,
-              {
-                top: insets.top + spacing.sm,
-                left: contentLeft,
-              },
-            ]}
-          >
-            <TrafficCoverageBadge />
-          </View>
+          {devMode ? (
+            <View
+              pointerEvents="box-none"
+              style={[
+                styles.coverageBadgeMount,
+                {
+                  top: insets.top + spacing.sm,
+                  left: contentLeft,
+                },
+              ]}
+            >
+              <TrafficCoverageBadge />
+            </View>
+          ) : null}
 
           <StreetViewThumbOverlay bottom={streetViewBottom} left={contentLeft} />
 
@@ -252,17 +256,18 @@ export default function MapScreen() {
           onMapLongPress={handleMapLongPress}
         />
         <FloatingSearchPanel
-          onProfilePress={() => setShowNodeDrawer(true)}
+          onProfilePress={() => router.push('/settings')}
           onLocatePress={handleLocate}
         />
-        <View
-          pointerEvents="box-none"
-          style={[styles.coverageBadgeMount, { top: insets.top + spacing.sm, left: spacing.md }]}
-        >
-          <TrafficCoverageBadge />
-        </View>
+        {devMode ? (
+          <View
+            pointerEvents="box-none"
+            style={[styles.coverageBadgeMount, { top: insets.top + spacing.sm, left: spacing.md }]}
+          >
+            <TrafficCoverageBadge />
+          </View>
+        ) : null}
         <StreetViewThumbOverlay bottom={streetViewBottom} left={spacing.md} />
-        <NodeDashboardDrawer visible={showNodeDrawer} onClose={() => setShowNodeDrawer(false)} />
         <POIInfoCard />
         <TransitStopCard />
         <ParkingSpotCard />

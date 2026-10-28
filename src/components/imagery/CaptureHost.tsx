@@ -34,6 +34,7 @@ import { dashCamElapsedSeconds, useDashCamStore } from '../../stores/dashCamStor
 import {
   captureConfigForMode,
   detailZoomForDevice,
+  resolveCaptureMode,
   shouldCapture,
   shouldCaptureDetail,
   type LastCapture,
@@ -108,7 +109,6 @@ export function CaptureHost() {
   const session = useStreetViewCaptureStore((s) => s.session);
   const recordCapture = useStreetViewCaptureStore((s) => s.recordCapture);
   const setSessionError = useStreetViewCaptureStore((s) => s.setSessionError);
-  const mode = useSettingsStore((s) => s.streetView.mode);
   const dashRecording = useDashCamStore((s) => s.recording);
   const dashPaused = useDashCamStore((s) => s.paused);
   const recordClip = useDashCamStore((s) => s.recordClip);
@@ -120,17 +120,21 @@ export function CaptureHost() {
   const pathname = usePathname();
   const cameraRef = useRef<CameraRef>(null);
   const { hasPermission, canRequestPermission, requestPermission } = useCameraPermission();
-  // 3D mode asks for the ultra-wide lens; the filter falls back to the closest
-  // match (the wide lens) when the device has no ultra-wide.
-  const device = useCameraDevice(
-    'back',
-    mode === 'threeD' ? { physicalDevices: ['ultra-wide-angle'] } : undefined,
-  );
-  const config = captureConfigForMode(mode);
   const detailStreamEnabled = useSettingsStore((s) => s.streetView.detailStream);
+  const backDevice = useCameraDevice('back');
+  // The filter returns the closest match, so inspect the device it yields for a
+  // real ultra-wide lens rather than trusting the filter alone.
+  const ultraWideDevice = useCameraDevice('back', { physicalDevices: ['ultra-wide-angle'] });
+  const hasUltraWide = Boolean(
+    ultraWideDevice?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'),
+  );
+  // Capture quality is chosen for the device; there is no user-facing mode.
+  const mode = resolveCaptureMode({ hasUltraWide, detailStream: detailStreamEnabled });
+  const device = mode === 'threeD' ? ultraWideDevice : backDevice;
+  const config = captureConfigForMode(mode);
   // Null on devices without a telephoto lens — zooming a wide-only camera
   // would just crop the frame the wide stream already has.
-  const detailZoom = detailZoomForDevice(device);
+  const detailZoom = detailZoomForDevice(backDevice);
   const photoOutput = usePhotoOutput({
     targetResolution: mode === 'standard' ? CommonResolutions.FHD_16_9 : CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',

@@ -10,7 +10,7 @@ import {
 } from '../../services/places/placeDetailCache';
 import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
-import { Button, SettingsGroup, SettingsRow, SFSymbol, SegmentedControl } from '../common';
+import { Button, SettingsChoiceRow, SettingsGroup, SettingsRow, SFSymbol } from '../common';
 import { StreetViewSettings } from './StreetViewSettings';
 import { DashCamSettings } from './DashCamSettings';
 import { spacing, typography, iosListGroup } from '../../constants/theme';
@@ -23,15 +23,23 @@ const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
 ];
 
 const UNIT_OPTIONS: { label: string; metric: boolean }[] = [
-  { label: 'Miles & feet', metric: false },
+  { label: 'Miles', metric: false },
   { label: 'Kilometres', metric: true },
 ];
 
 interface SettingsContentProps {
   showHeading?: boolean;
+  /** Opens the regions manager in-place (floating panel); falls back to a route. */
+  onOpenRegions?: () => void;
+  /** Opens the node dashboard in-place (floating panel); falls back to a route. */
+  onOpenNodeDashboard?: () => void;
 }
 
-export function SettingsContent({ showHeading = true }: SettingsContentProps) {
+export function SettingsContent({
+  showHeading = true,
+  onOpenRegions,
+  onOpenNodeDashboard,
+}: SettingsContentProps) {
   const permissions = useSettingsStore((s) => s.permissions);
   const themeMode = useSettingsStore((s) => s.themeMode);
   const useMetric = useSettingsStore((s) => s.useMetric);
@@ -44,11 +52,15 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const setVoiceGuidanceEnabled = useSettingsStore((s) => s.setVoiceGuidanceEnabled);
   const showOnboardingOnLaunch = useSettingsStore((s) => s.showOnboardingOnLaunch);
   const setShowOnboardingOnLaunch = useSettingsStore((s) => s.setShowOnboardingOnLaunch);
+  const devMode = useSettingsStore((s) => s.devMode);
+  const setDevMode = useSettingsStore((s) => s.setDevMode);
   const { colors, isDark } = useTheme();
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
   const [cachedPlaceCount, setCachedPlaceCount] = useState<number | null>(null);
   const [identityPubkey, setIdentityPubkey] = useState<string | null>(null);
+
+  const diagnosticsVisible = devMode || __DEV__;
 
   useEffect(() => {
     countPlaceDetailCache()
@@ -57,10 +69,9 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   }, []);
 
   // Dev-only: surface the app identity public key so it can be added to the
-  // trusted region-manifest publisher allowlist. Lazy-imported so it never
-  // affects the normal render path (or tests that don't expect SecureStore).
+  // trusted region-manifest publisher allowlist.
   useEffect(() => {
-    if (!__DEV__) return;
+    if (!diagnosticsVisible) return;
     let cancelled = false;
     import('../../services/identity/keypair')
       .then((identity) => identity.getOrCreateKeypair())
@@ -71,7 +82,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [diagnosticsVisible]);
+
   const bskySession = useAtprotoAuthStore((s) => s.session);
   const bskyError = useAtprotoAuthStore((s) => s.error);
   const bskyIsLoading = useAtprotoAuthStore((s) => s.isLoading);
@@ -88,72 +100,76 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
   const nostrRelayCount = useTrafficStore((s) => s.nostrRelayCount);
   const trafficMode = useTrafficStore((s) => s.trafficMode);
   const isCollectingProbes = useTrafficStore((s) => s.isCollectingProbes);
+
+  const trackColor = {
+    false: isDark ? '#39393D' : '#E5E5EA',
+    true: colors.primary + 'CC',
+  };
+  const rowIcon = (name: React.ComponentProps<typeof Ionicons>['name']) => (
+    <Ionicons name={name} size={15} color={colors.textSecondary} />
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {showHeading && <Text style={styles.heading}>Settings</Text>}
 
-      <SettingsGroup header="Appearance" footer="Choose how Polaris Maps looks on this device.">
-        <SegmentedControl
+      <SettingsGroup header="Display" icon={rowIcon('color-palette-outline')}>
+        <SettingsChoiceRow
+          title="Theme"
           options={THEME_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
           value={themeMode}
           onChange={setThemeMode}
-          label="Appearance theme"
         />
-      </SettingsGroup>
-
-      <SettingsGroup
-        header="Units"
-        footer="Distance and speed displays use this unit system throughout the app."
-      >
-        <SegmentedControl
+        <SettingsChoiceRow
+          title="Units"
           options={UNIT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.metric }))}
           value={useMetric}
           onChange={setUseMetric}
-          label="Units"
         />
       </SettingsGroup>
 
-      <SettingsGroup header="Navigation">
+      <SettingsGroup header="Navigation" icon={rowIcon('navigate-outline')}>
         <SettingsRow
-          title="Voice Guidance"
+          title="Voice guidance"
           rightAdornment={
             <Switch
               value={voiceGuidanceEnabled}
               onValueChange={setVoiceGuidanceEnabled}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
         <SettingsRow
-          title="Avoid Tolls"
+          title="Avoid tolls"
           rightAdornment={
             <Switch
               value={routePreferences.avoidTolls}
               onValueChange={(v) => setRoutePreferences({ avoidTolls: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
         <SettingsRow
-          title="Avoid Highways"
+          title="Avoid highways"
           rightAdornment={
             <Switch
               value={routePreferences.avoidHighways}
               onValueChange={(v) => setRoutePreferences({ avoidHighways: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
         <SettingsRow
-          title="Avoid Ferries"
+          title="Avoid ferries"
           rightAdornment={
             <Switch
               value={routePreferences.avoidFerries}
               onValueChange={(v) => setRoutePreferences({ avoidFerries: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
+        <SettingsRow title="CarPlay" value="Automatic when connected" />
       </SettingsGroup>
 
       <StreetViewSettings />
@@ -162,7 +178,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
 
       <SettingsGroup
         header="Accounts"
-        footer="OpenStreetMap signs you in to edit map data. Bluesky is used only to leave place reviews."
+        icon={rowIcon('person-circle-outline')}
+        footer="Sign in to edit map data or leave reviews."
       >
         <View style={styles.accountCard}>
           {osmAccessToken && osmUser ? (
@@ -256,7 +273,8 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
 
       <SettingsGroup
         header="Privacy"
-        footer="Telemetry shares anonymous speed probes on geohash channels to build live traffic with nearby peers. Contributions pause offline and queue (max 500) for replay."
+        icon={rowIcon('shield-checkmark-outline')}
+        footer="What this device shares with the network."
       >
         <SettingsRow
           title="Location Access"
@@ -264,7 +282,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             <Switch
               value={permissions.locationEnabled}
               onValueChange={(v) => setPermissions({ locationEnabled: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
@@ -274,7 +292,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             <Switch
               value={permissions.trafficTelemetryEnabled}
               onValueChange={(v) => setPermissions({ trafficTelemetryEnabled: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
@@ -284,7 +302,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             <Switch
               value={permissions.poiContributionsEnabled}
               onValueChange={(v) => setPermissions({ poiContributionsEnabled: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
@@ -294,7 +312,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             <Switch
               value={permissions.imagerySharingEnabled}
               onValueChange={(v) => setPermissions({ imagerySharingEnabled: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
@@ -304,7 +322,7 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
             <Switch
               value={permissions.reviewPhotoSharingEnabled}
               onValueChange={(v) => setPermissions({ reviewPhotoSharingEnabled: v })}
-              trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
+              trackColor={trackColor}
             />
           }
         />
@@ -317,37 +335,12 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup
-        header="P2P Network"
-        footer="Peer-to-peer traffic mesh status. Your device contributes anonymous speed probes when Traffic Telemetry is on and the app is in the foreground."
-      >
+      <SettingsGroup header="Offline maps" icon={rowIcon('cloud-download-outline')}>
         <SettingsRow
-          title="Transport"
-          value={trafficMode === 'hyperswarm' ? 'Hyperswarm' : 'Nostr fallback'}
+          title="Manage Regions"
+          value="Download offline maps"
+          onPress={onOpenRegions ?? (() => router.push('/regions'))}
         />
-        <SettingsRow title="Peers" value={String(swarmPeerCount)} />
-        <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
-        <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
-        <SettingsRow title="Nostr Relays" value={String(nostrRelayCount)} />
-        <SettingsRow
-          title="Contributing Probes"
-          value={
-            isCollectingProbes ? 'Yes' : permissions.trafficTelemetryEnabled ? 'Paused' : 'Off'
-          }
-        />
-      </SettingsGroup>
-
-      <SettingsGroup
-        header="CarPlay"
-        footer="Navigation state, maneuvers, and search forward to CarPlay automatically when connected. No setup needed."
-      >
-        <SettingsRow title="CarPlay Mirroring" value="Automatic when connected" />
-      </SettingsGroup>
-
-      <SettingsGroup
-        header="Storage"
-        footer="Place details you've viewed are cached for offline use."
-      >
         <SettingsRow
           title="Clear Cached Place Details"
           value={cachedPlaceCount != null ? `${cachedPlaceCount} cached` : undefined}
@@ -362,7 +355,109 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup header="About">
+      <SettingsGroup
+        header="Developer"
+        icon={rowIcon('construct-outline')}
+        footer="Diagnostics and test toggles."
+      >
+        <SettingsRow
+          title="Dev mode"
+          rightAdornment={
+            <Switch value={devMode} onValueChange={setDevMode} trackColor={trackColor} />
+          }
+        />
+        {diagnosticsVisible ? (
+          <>
+            <SettingsRow
+              title="Node Dashboard"
+              value="Peers, feeds, network"
+              onPress={onOpenNodeDashboard ?? (() => router.push('/(tabs)/profile'))}
+            />
+            <SettingsRow
+              title="Transport"
+              value={trafficMode === 'hyperswarm' ? 'Hyperswarm' : 'Nostr fallback'}
+            />
+            <SettingsRow title="Peers" value={String(swarmPeerCount)} />
+            <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
+            <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
+            <SettingsRow title="Nostr Relays" value={String(nostrRelayCount)} />
+            <SettingsRow
+              title="Contributing Probes"
+              value={
+                isCollectingProbes ? 'Yes' : permissions.trafficTelemetryEnabled ? 'Paused' : 'Off'
+              }
+            />
+            <SettingsRow
+              title="Identity Public Key"
+              value={identityPubkey ? `${identityPubkey.slice(0, 12)}…` : 'Unavailable'}
+              onPress={() =>
+                identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
+              }
+            />
+            <SettingsRow
+              title="Show Onboarding on Launch"
+              rightAdornment={
+                <Switch
+                  value={showOnboardingOnLaunch}
+                  onValueChange={(enabled) => {
+                    setShowOnboardingOnLaunch(enabled);
+                    if (enabled) {
+                      Alert.alert(
+                        'Onboarding will replay',
+                        'It will appear the next time the app is cold started.',
+                      );
+                    }
+                  }}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Publish Region Manifest"
+              value="latest downloaded region"
+              onPress={() => {
+                void (async () => {
+                  try {
+                    const [fs, { publishRegionPack }, { getDownloadedRegions }] = await Promise.all(
+                      [
+                        import('expo-file-system/legacy'),
+                        import('../../services/regions/regionManifestPublisher'),
+                        import('../../services/regions/regionRepository'),
+                      ],
+                    );
+
+                    const regions = await getDownloadedRegions();
+                    if (regions.length === 0) {
+                      Alert.alert(
+                        'No downloaded region',
+                        'Download a region first, then publish its manifest.',
+                      );
+                      return;
+                    }
+
+                    const region = regions[0];
+                    const manifest = await publishRegionPack({
+                      regionId: region.id,
+                      filesDir: `${fs.documentDirectory}regions/${region.id}/`,
+                      version: region.version ?? '1.0',
+                      overtureRelease: null,
+                    });
+                    console.log(`[region-manifest] ${JSON.stringify(manifest)}`);
+                    Alert.alert(
+                      `Region manifest (${region.id})`,
+                      JSON.stringify(manifest, null, 2),
+                    );
+                  } catch (err) {
+                    Alert.alert('Publish failed', err instanceof Error ? err.message : String(err));
+                  }
+                })();
+              }}
+            />
+          </>
+        ) : null}
+      </SettingsGroup>
+
+      <SettingsGroup header="About" icon={rowIcon('information-circle-outline')}>
         <SettingsRow
           title="Map Data & Attributions"
           rightAdornment={
@@ -393,76 +488,6 @@ export function SettingsContent({ showHeading = true }: SettingsContentProps) {
           onPress={() => Linking.openURL('https://app.polarismaps.app/terms')}
         />
       </SettingsGroup>
-
-      {__DEV__ && (
-        <SettingsGroup
-          header="Developer"
-          footer="Show onboarding on launch replays the first-run flow on every cold start. The app identity public key can be added to the trusted region-manifest publisher allowlist to publish signed regional packs."
-        >
-          <SettingsRow
-            title="Show Onboarding on Launch"
-            rightAdornment={
-              <Switch
-                value={showOnboardingOnLaunch}
-                onValueChange={(enabled) => {
-                  setShowOnboardingOnLaunch(enabled);
-                  if (enabled) {
-                    Alert.alert(
-                      'Onboarding will replay',
-                      'It will appear the next time the app is cold started.',
-                    );
-                  }
-                }}
-                trackColor={{ false: isDark ? '#39393D' : '#E5E5EA', true: colors.primary + 'CC' }}
-              />
-            }
-          />
-          <SettingsRow
-            title="Identity Public Key"
-            value={identityPubkey ? `${identityPubkey.slice(0, 12)}…` : 'Unavailable'}
-            onPress={() =>
-              identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
-            }
-          />
-          <SettingsRow
-            title="Publish Region Manifest"
-            value="latest downloaded region"
-            onPress={() => {
-              void (async () => {
-                try {
-                  const [fs, { publishRegionPack }, { getDownloadedRegions }] = await Promise.all([
-                    import('expo-file-system/legacy'),
-                    import('../../services/regions/regionManifestPublisher'),
-                    import('../../services/regions/regionRepository'),
-                  ]);
-
-                  const regions = await getDownloadedRegions();
-                  if (regions.length === 0) {
-                    Alert.alert(
-                      'No downloaded region',
-                      'Download a region first, then publish its manifest.',
-                    );
-                    return;
-                  }
-
-                  const region = regions[0];
-                  const manifest = await publishRegionPack({
-                    regionId: region.id,
-                    filesDir: `${fs.documentDirectory}regions/${region.id}/`,
-                    version: region.version ?? '1.0',
-                    overtureRelease: null,
-                  });
-                  // Single-line log so the exact JSON can be copied verbatim.
-                  console.log(`[region-manifest] ${JSON.stringify(manifest)}`);
-                  Alert.alert(`Region manifest (${region.id})`, JSON.stringify(manifest, null, 2));
-                } catch (err) {
-                  Alert.alert('Publish failed', err instanceof Error ? err.message : String(err));
-                }
-              })();
-            }}
-          />
-        </SettingsGroup>
-      )}
     </ScrollView>
   );
 }

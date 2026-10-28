@@ -77,6 +77,8 @@ jest.mock('../../src/stores/settingsStore', () => ({
       setPermissions: jest.fn(),
       setRoutePreferences: jest.fn(),
       setStreetView: jest.fn(),
+      devMode: false,
+      setDevMode: jest.fn(),
       setDashCam: jest.fn(),
       setThemeMode: jest.fn(),
       setUseMetric: jest.fn(),
@@ -105,6 +107,7 @@ jest.mock('../../src/components/common', () => {
     SettingsGroup: ({ children }: { children: React.ReactNode }) =>
       mockReact.createElement(View, null, children),
     SettingsRow: () => null,
+    SettingsChoiceRow: () => null,
     SFSymbol: () => null,
     SegmentedControl: () => null,
     Modal: ({ children }: { children: React.ReactNode }) =>

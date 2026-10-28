@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,9 +22,14 @@ import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const PANEL_WIDTH = 360;
-const PANEL_GAP = spacing.md;
 
-type PanelLayer = 'menu' | 'settings' | 'dashboard' | 'regions';
+type PanelLayer = 'settings' | 'dashboard' | 'regions';
+
+const LAYER_TITLES: Record<PanelLayer, string> = {
+  settings: 'Settings',
+  dashboard: 'Node Dashboard',
+  regions: 'Manage Regions',
+};
 
 interface FloatingMenuPanelProps {
   visible: boolean;
@@ -34,6 +39,12 @@ interface FloatingMenuPanelProps {
   bottomInset?: number;
 }
 
+/**
+ * The single panel behind the map's settings button.
+ *
+ * Settings is the root layer; the node dashboard and the offline region
+ * manager open from rows inside it instead of a separate launcher menu.
+ */
 export function FloatingMenuPanel({
   visible,
   onClose,
@@ -41,13 +52,12 @@ export function FloatingMenuPanel({
   topInset,
   bottomInset,
 }: FloatingMenuPanelProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const [layer, setLayer] = useState<PanelLayer>('menu');
+  const [layer, setLayer] = useState<PanelLayer>('settings');
   const [show, setShow] = useState(false);
-  const menuSlideAnim = useRef(new Animated.Value(-PANEL_WIDTH - PANEL_GAP)).current;
-  const detailSlideAnim = useRef(new Animated.Value(-PANEL_WIDTH - PANEL_GAP)).current;
+  const slideAnim = useRef(new Animated.Value(-PANEL_WIDTH - spacing.md)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
   const localNode = usePeerStore((s) => s.localNode);
@@ -79,107 +89,69 @@ export function FloatingMenuPanel({
 
   const close = useCallback(() => {
     Animated.parallel([
-      Animated.timing(menuSlideAnim, {
-        toValue: -PANEL_WIDTH - PANEL_GAP,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.timing(detailSlideAnim, {
-        toValue: -PANEL_WIDTH - PANEL_GAP,
-        duration: 250,
+      Animated.timing(slideAnim, {
+        toValue: -PANEL_WIDTH - spacing.md,
+        duration: 220,
         useNativeDriver: true,
       }),
       Animated.timing(backdropAnim, {
         toValue: 0,
-        duration: 250,
+        duration: 220,
         useNativeDriver: true,
       }),
     ]).start(() => {
       setShow(false);
-      setLayer('menu');
+      setLayer('settings');
       onClose();
     });
-  }, [menuSlideAnim, detailSlideAnim, backdropAnim, onClose]);
+  }, [slideAnim, backdropAnim, onClose]);
 
-  const navigateToLayer = useCallback(
-    (nextLayer: PanelLayer) => {
-      setLayer(nextLayer);
-      detailSlideAnim.setValue(-PANEL_WIDTH - PANEL_GAP);
-      Animated.spring(detailSlideAnim, {
+  // Animate open and reset to the settings root each time.
+  useEffect(() => {
+    if (!visible) return;
+    setShow(true);
+    setLayer('settings');
+    slideAnim.setValue(-PANEL_WIDTH - spacing.md);
+    backdropAnim.setValue(0);
+    Animated.parallel([
+      Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
         bounciness: 2,
-        speed: 15,
-      }).start();
-    },
-    [detailSlideAnim],
-  );
+        speed: 16,
+      }),
+      Animated.timing(backdropAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [visible, slideAnim, backdropAnim]);
 
-  const goBackToMenu = useCallback(() => {
-    Animated.timing(detailSlideAnim, {
-      toValue: -PANEL_WIDTH - PANEL_GAP,
-      duration: 280,
-      useNativeDriver: true,
-    }).start(() => {
-      setLayer('menu');
-    });
-  }, [detailSlideAnim]);
-
-  // Animate open/close
+  // The peer monitor only has to run while the dashboard is on screen.
   useEffect(() => {
-    if (visible) {
-      setShow(true);
-      setLayer('menu');
-      menuSlideAnim.setValue(-PANEL_WIDTH - PANEL_GAP);
-      detailSlideAnim.setValue(-PANEL_WIDTH - PANEL_GAP);
-      backdropAnim.setValue(0);
-      loadNodeData();
-      startPeerMonitor();
-      Animated.parallel([
-        Animated.spring(menuSlideAnim, {
-          toValue: 0,
-          useNativeDriver: true,
-          bounciness: 3,
-          speed: 14,
-        }),
-        Animated.timing(backdropAnim, {
-          toValue: 1,
-          duration: 220,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
+    if (!show || layer !== 'dashboard') return;
+    loadNodeData();
+    startPeerMonitor();
+    return () => {
       stopPeerMonitor();
-    }
-  }, [visible, menuSlideAnim, detailSlideAnim, backdropAnim, loadNodeData]);
+    };
+  }, [show, layer, loadNodeData]);
 
   if (!show) return null;
 
-  const panelTop = topInset ?? insets.top + 50;
+  const panelTop = topInset ?? insets.top + spacing.md;
   const panelBottom = bottomInset ?? insets.bottom + spacing.md;
-  const showingDetailLayer = layer !== 'menu';
-
   const pubkeyShort = localNode
-    ? localNode.pubkey.slice(0, 8) + '\u2026' + localNode.pubkey.slice(-4)
-    : '\u2014';
+    ? `${localNode.pubkey.slice(0, 8)}…${localNode.pubkey.slice(-4)}`
+    : '—';
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.root]} pointerEvents="box-none">
-      {/* Backdrop */}
+    <View style={styles.root} pointerEvents="box-none">
       <TouchableWithoutFeedback onPress={close}>
-        <Animated.View
-          pointerEvents="auto"
-          style={[
-            styles.backdrop,
-            {
-              opacity: backdropAnim,
-              backgroundColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)',
-            },
-          ]}
-        />
+        <Animated.View style={[styles.backdrop, { opacity: backdropAnim }]} pointerEvents="auto" />
       </TouchableWithoutFeedback>
 
-      {/* Primary floating panel */}
       <Animated.View
         pointerEvents="auto"
         style={[
@@ -189,175 +161,69 @@ export function FloatingMenuPanel({
             bottom: panelBottom,
             width: PANEL_WIDTH,
             left: leftInset,
-            transform: [{ translateX: menuSlideAnim }],
+            transform: [{ translateX: slideAnim }],
           },
         ]}
       >
         <GlassView material="regular" style={styles.panelFill}>
           <View style={styles.layerHeader}>
-            <Text style={[styles.layerTitle, { color: colors.text }]}>Menu</Text>
-            <TouchableOpacity onPress={close} hitSlop={12} style={styles.layerCloseBtn}>
+            <View style={styles.headerLeft}>
+              {layer !== 'settings' ? (
+                <TouchableOpacity
+                  onPress={() => setLayer('settings')}
+                  hitSlop={12}
+                  style={styles.layerCloseBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to settings"
+                >
+                  <Ionicons name="chevron-back" size={20} color={colors.text} />
+                </TouchableOpacity>
+              ) : null}
+              <Text style={[styles.layerTitle, { color: colors.text }]}>{LAYER_TITLES[layer]}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={close}
+              hitSlop={12}
+              style={styles.layerCloseBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Close settings"
+            >
               <GlassView material="clear" isInteractive style={styles.closeCircle}>
                 <Ionicons name="close" size={18} color={colors.text} />
               </GlassView>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.menuContent}>
-            <TouchableOpacity
-              style={[
-                styles.menuBtn,
-                { backgroundColor: isDark ? 'rgba(255,255,255,0.09)' : colors.primary + '14' },
-              ]}
-              onPress={() => navigateToLayer('settings')}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.menuIconCircle,
-                  { backgroundColor: isDark ? colors.primary + '35' : colors.primary + '20' },
-                ]}
-              >
-                <Ionicons name="settings-outline" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.menuBtnText}>
-                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Settings</Text>
-                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
-                  Resources, theme, permissions
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
+          {layer === 'settings' ? (
+            <SettingsContent
+              showHeading={false}
+              onOpenRegions={() => setLayer('regions')}
+              onOpenNodeDashboard={() => setLayer('dashboard')}
+            />
+          ) : null}
 
-            <TouchableOpacity
-              style={[
-                styles.menuBtn,
-                { backgroundColor: isDark ? 'rgba(255,255,255,0.09)' : colors.primary + '14' },
-              ]}
-              onPress={() => {
-                loadNodeData();
-                navigateToLayer('dashboard');
-              }}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.menuIconCircle,
-                  { backgroundColor: isDark ? colors.primary + '35' : colors.primary + '20' },
-                ]}
+          {layer === 'dashboard' ? (
+            <>
+              <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
+              <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+                showsVerticalScrollIndicator={false}
               >
-                <Ionicons name="pulse-outline" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.menuBtnText}>
-                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Node Dashboard</Text>
-                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
-                  Peers, feeds, network status
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
+                <NodeDashboard
+                  node={localNode}
+                  activePeers={activePeers}
+                  syncingFeeds={syncingFeeds}
+                  isOnline={isOnline}
+                />
+              </ScrollView>
+            </>
+          ) : null}
 
-            <TouchableOpacity
-              style={[
-                styles.menuBtn,
-                { backgroundColor: isDark ? 'rgba(255,255,255,0.09)' : colors.primary + '14' },
-              ]}
-              onPress={() => navigateToLayer('regions')}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.menuIconCircle,
-                  { backgroundColor: isDark ? colors.primary + '35' : colors.primary + '20' },
-                ]}
-              >
-                <Ionicons name="map-outline" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.menuBtnText}>
-                <Text style={[styles.menuBtnTitle, { color: colors.text }]}>Manage Regions</Text>
-                <Text style={[styles.menuBtnSub, { color: colors.textSecondary }]}>
-                  Download offline maps & routing
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
+          {layer === 'regions' ? <RegionsContent showHeading={false} /> : null}
         </GlassView>
       </Animated.View>
-
-      {/* Secondary floating panel */}
-      {showingDetailLayer && (
-        <Animated.View
-          pointerEvents="auto"
-          style={[
-            styles.panel,
-            styles.panelSecondary,
-            {
-              top: panelTop,
-              bottom: panelBottom,
-              width: PANEL_WIDTH,
-              left: leftInset + PANEL_WIDTH + PANEL_GAP,
-              transform: [{ translateX: detailSlideAnim }],
-            },
-          ]}
-        >
-          <GlassView material="regular" style={styles.panelFill}>
-            {layer === 'dashboard' && (
-              <>
-                <View style={styles.layerHeader}>
-                  <Text style={[styles.layerTitle, { color: colors.text }]}>Node Dashboard</Text>
-                  <TouchableOpacity
-                    onPress={goBackToMenu}
-                    hitSlop={12}
-                    style={styles.layerCloseBtn}
-                  >
-                    <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                      <Ionicons name="close" size={18} color={colors.text} />
-                    </GlassView>
-                  </TouchableOpacity>
-                </View>
-                <Text style={[styles.pubkey, { color: colors.textSecondary }]}>{pubkeyShort}</Text>
-                <ScrollView
-                  style={styles.scroll}
-                  contentContainerStyle={styles.scrollContent}
-                  refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-                  showsVerticalScrollIndicator={false}
-                >
-                  <NodeDashboard
-                    node={localNode}
-                    activePeers={activePeers}
-                    syncingFeeds={syncingFeeds}
-                    isOnline={isOnline}
-                  />
-                </ScrollView>
-              </>
-            )}
-            {(layer === 'settings' || layer === 'regions') && (
-              <>
-                <View style={styles.layerHeader}>
-                  <Text style={[styles.layerTitle, { color: colors.text }]}>
-                    {layer === 'settings' ? 'Settings' : 'Manage Regions'}
-                  </Text>
-                  <TouchableOpacity
-                    onPress={goBackToMenu}
-                    hitSlop={12}
-                    style={styles.layerCloseBtn}
-                  >
-                    <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                      <Ionicons name="close" size={18} color={colors.text} />
-                    </GlassView>
-                  </TouchableOpacity>
-                </View>
-                {layer === 'settings' ? (
-                  <SettingsContent showHeading={false} />
-                ) : (
-                  <RegionsContent showHeading={false} />
-                )}
-              </>
-            )}
-          </GlassView>
-        </Animated.View>
-      )}
     </View>
   );
 }
@@ -376,9 +242,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
   },
-  panelSecondary: {
-    zIndex: 31,
-  },
   panelFill: {
     flex: 1,
     borderRadius: borderRadius.xl,
@@ -392,6 +255,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.sm,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexShrink: 1,
   },
   layerTitle: {
     ...typography.h2,
@@ -413,39 +282,6 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
-  },
-  menuContent: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    gap: spacing.sm,
-  },
-  menuBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.lg,
-    borderCurve: 'continuous',
-  },
-  menuIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    borderCurve: 'continuous',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menuBtnText: {
-    flex: 1,
-  },
-  menuBtnTitle: {
-    ...typography.body,
-    fontWeight: '600',
-  },
-  menuBtnSub: {
-    ...typography.caption,
-    marginTop: 1,
   },
   scroll: {
     flex: 1,

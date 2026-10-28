@@ -29,6 +29,26 @@ export function captureConfigForMode(mode: StreetViewCaptureMode): StreetViewCap
   return STREET_VIEW_MODE_CONFIG[mode] ?? STREET_VIEW_MODE_CONFIG.standard;
 }
 
+export interface CaptureModeCapabilities {
+  /** The back camera exposes an ultra-wide lens. */
+  hasUltraWide: boolean;
+  /** The user enabled paired telephoto detail frames. */
+  detailStream: boolean;
+}
+
+/**
+ * Picks the capture cadence without asking the user.
+ *
+ * Standard (20 m, 1080p, wide lens) is what the paired telephoto detail stream
+ * needs, so it wins whenever that is enabled. Otherwise the denser 3D cadence
+ * runs on devices that expose an ultra-wide lens, and standard is the best a
+ * wide-only camera can do.
+ */
+export function resolveCaptureMode(capabilities: CaptureModeCapabilities): StreetViewCaptureMode {
+  if (capabilities.detailStream) return 'standard';
+  return capabilities.hasUltraWide ? 'threeD' : 'standard';
+}
+
 /** The subset of a VisionCamera `CameraDevice` the detail stream needs. */
 export interface DetailCapableDevice {
   maxZoom: number;

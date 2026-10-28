@@ -2,6 +2,7 @@ import {
   buildCaptureExif,
   captureConfigForMode,
   detailZoomForDevice,
+  resolveCaptureMode,
   formatExifDate,
   formatExifDateTime,
   formatExifTime,
@@ -194,5 +195,19 @@ describe('formatExifDateTime', () => {
     expect(formatExifDateTime(Date.UTC(2026, 0, 2, 3, 4, 5))).toMatch(
       /^\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}$/,
     );
+  });
+});
+
+describe('resolveCaptureMode', () => {
+  it('uses the denser mode when the device has an ultra-wide lens', () => {
+    expect(resolveCaptureMode({ hasUltraWide: true, detailStream: false })).toBe('threeD');
+  });
+
+  it('falls back to standard on a wide-only device', () => {
+    expect(resolveCaptureMode({ hasUltraWide: false, detailStream: false })).toBe('standard');
+  });
+
+  it('keeps standard when telephoto detail frames are enabled', () => {
+    expect(resolveCaptureMode({ hasUltraWide: true, detailStream: true })).toBe('standard');
   });
 });

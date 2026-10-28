@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, StyleSheet, Switch, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, StyleSheet, Switch, Text } from 'react-native';
 import { useRouter } from 'expo-router';
-import { SegmentedControl, SettingsGroup, SettingsRow } from '../common';
+import { Ionicons } from '@expo/vector-icons';
+import { SettingsChoiceRow, SettingsGroup, SettingsRow } from '../common';
 import { useTheme } from '../../contexts/ThemeContext';
 import { spacing, typography } from '../../constants/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -36,16 +37,16 @@ const SIZE_OPTIONS = [
   { label: '8 GB', value: 8 * GIGABYTE },
 ];
 
+/** Rolling dash-cam buffer: recording, segment length, and both retention caps. */
 export function DashCamSettings() {
   const { colors, isDark } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const dashCam = useSettingsStore((s) => s.dashCam);
   const setDashCam = useSettingsStore((s) => s.setDashCam);
   const recording = useDashCamStore((s) => s.recording);
   const [totals, setTotals] = useState<DashCamTotals>({ clips: 0, bytes: 0, durationMs: 0 });
 
-  const refresh = React.useCallback(() => {
+  const refresh = useCallback(() => {
     void reconcileDashCamClips()
       .catch(() => 0)
       .then(() => getDashCamTotals())
@@ -62,7 +63,7 @@ export function DashCamSettings() {
     if (!enabled && recording) stopDashCam();
   };
 
-  /** Changing a cap should take effect immediately, not on the next clip. */
+  /** Changing a cap takes effect immediately, not on the next clip. */
   const applyRetention = (patch: { maxMinutes?: number; maxBytes?: number }) => {
     setDashCam(patch);
     const next = { maxMinutes: dashCam.maxMinutes, maxBytes: dashCam.maxBytes, ...patch };
@@ -77,23 +78,21 @@ export function DashCamSettings() {
   };
 
   const keptMinutes = Math.round(totals.durationMs / 60_000);
+  const trackColor = {
+    false: isDark ? '#39393D' : '#E5E5EA',
+    true: colors.primary + 'CC',
+  };
 
   return (
     <SettingsGroup
       header="Dash cam"
-      footer="Records muted video in segments while you drive and keeps only the most recent footage: once either the time or the storage limit is reached, the oldest clips are deleted automatically. Recording stops when the app is backgrounded or the phone is locked. With Start on every drive, recording begins when active navigation begins and stops with it. Street-imagery photos can be captured at the same time as the dash cam."
+      icon={<Ionicons name="videocam-outline" size={15} color={colors.textSecondary} />}
+      footer="Muted rolling video. The oldest clips are deleted when either limit is reached."
     >
       <SettingsRow
         title="Dash cam"
         rightAdornment={
-          <Switch
-            value={dashCam.enabled}
-            onValueChange={toggleEnabled}
-            trackColor={{
-              false: isDark ? '#39393D' : '#E5E5EA',
-              true: colors.primary + 'CC',
-            }}
-          />
+          <Switch value={dashCam.enabled} onValueChange={toggleEnabled} trackColor={trackColor} />
         }
       />
       <SettingsRow
@@ -103,76 +102,49 @@ export function DashCamSettings() {
             value={dashCam.autoStart}
             disabled={!dashCam.enabled}
             onValueChange={(autoStart) => setDashCam({ autoStart })}
-            trackColor={{
-              false: isDark ? '#39393D' : '#E5E5EA',
-              true: colors.primary + 'CC',
-            }}
+            trackColor={trackColor}
           />
         }
       />
-      <SettingsRow
+      <SettingsChoiceRow
         title="Clip length"
-        rightAdornment={
-          <View style={styles.segment}>
-            <SegmentedControl
-              options={CLIP_OPTIONS}
-              value={dashCam.clipSeconds}
-              onChange={(clipSeconds) => setDashCam({ clipSeconds })}
-              label="Dash cam clip length"
-            />
-          </View>
-        }
+        options={CLIP_OPTIONS}
+        value={dashCam.clipSeconds}
+        onChange={(clipSeconds) => setDashCam({ clipSeconds })}
       />
-      <SettingsRow
+      <SettingsChoiceRow
         title="Keep footage"
-        value={`${keptMinutes} of ${dashCam.maxMinutes} min`}
-        rightAdornment={
-          <View style={styles.segment}>
-            <SegmentedControl
-              options={KEEP_OPTIONS}
-              value={dashCam.maxMinutes}
-              onChange={(maxMinutes) => applyRetention({ maxMinutes })}
-              label="Dash cam retention time"
-            />
-          </View>
-        }
+        detail={`${keptMinutes} of ${dashCam.maxMinutes} min`}
+        options={KEEP_OPTIONS}
+        value={dashCam.maxMinutes}
+        onChange={(maxMinutes) => applyRetention({ maxMinutes })}
       />
-      <SettingsRow
+      <SettingsChoiceRow
         title="Storage limit"
-        rightAdornment={
-          <View style={styles.segment}>
-            <SegmentedControl
-              options={SIZE_OPTIONS}
-              value={dashCam.maxBytes}
-              onChange={(maxBytes) => applyRetention({ maxBytes })}
-              label="Dash cam storage limit"
-            />
-          </View>
-        }
+        detail={`${formatBytes(totals.bytes)} used`}
+        options={SIZE_OPTIONS}
+        value={dashCam.maxBytes}
+        onChange={(maxBytes) => applyRetention({ maxBytes })}
       />
       <SettingsRow
         title="Recordings"
-        value={
-          totals.clips > 0
-            ? `${totals.clips} clip${totals.clips === 1 ? '' : 's'} · ${formatBytes(totals.bytes)}`
-            : 'None'
-        }
+        value={totals.clips > 0 ? `${totals.clips} clip${totals.clips === 1 ? '' : 's'}` : 'None'}
         onPress={() => router.push('/dashcam')}
       />
       {recording ? (
-        <Text style={styles.recordingHint}>Recording now — stop from the map.</Text>
+        <Text style={[styles.recordingHint, { color: colors.textSecondary }]}>
+          Recording now — stop from the map.
+        </Text>
       ) : null}
     </SettingsGroup>
   );
 }
 
-const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
-  StyleSheet.create({
-    segment: { maxWidth: 220 },
-    recordingHint: {
-      ...typography.caption,
-      color: colors.textSecondary,
-      fontSize: 12,
-      paddingTop: spacing.xs,
-    },
-  });
+const styles = StyleSheet.create({
+  recordingHint: {
+    ...typography.caption,
+    fontSize: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+});

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Switch, View } from 'react-native';
-import { SegmentedControl, SettingsGroup, SettingsRow } from '../common';
+import { Alert, Switch } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { SettingsGroup, SettingsRow } from '../common';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
@@ -11,11 +12,10 @@ import { isMapillaryUploadConfigured } from '../../constants/config';
 import { getPendingTotals, listPendingDrives } from '../../services/imagery/streetViewQueue';
 import { formatBytes } from '../../utils/formatBytes';
 
-const MODE_OPTIONS = [
-  { label: 'Standard', value: 'standard' as const },
-  { label: '3D', value: 'threeD' as const },
-];
-
+/**
+ * Street-imagery capture and the Mapillary account it uploads to. Kept as one
+ * section so the destination of the photos sits next to the capture controls.
+ */
 export function StreetViewSettings() {
   const { colors, isDark } = useTheme();
   const streetView = useSettingsStore((s) => s.streetView);
@@ -83,127 +83,83 @@ export function StreetViewSettings() {
     ]);
   };
 
-  return (
-    <>
-      <SettingsGroup
-        header="Street Imagery"
-        footer="Opt-in capture while navigating. Photos include GPS, heading and capture time. Mapillary blurs faces and plates on its servers. Standard captures every 20 m; 3D uses denser spacing and the iPhone ultra-wide lens when available (much more storage). Detail frames add a telephoto frame every fifth capture on iPhones with a tele lens (standard mode only) and upload as a separate Mapillary cluster."
-      >
-        <SettingsRow
-          title="Capture while navigating"
-          rightAdornment={
-            <Switch
-              value={streetView.enabled}
-              onValueChange={(value) => void toggleEnabled(value)}
-              trackColor={{
-                false: isDark ? '#39393D' : '#E5E5EA',
-                true: colors.primary + 'CC',
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          title="Capture mode"
-          rightAdornment={
-            <View style={styles.segment}>
-              <SegmentedControl
-                options={MODE_OPTIONS}
-                value={streetView.mode}
-                onChange={(mode) => setStreetView({ mode })}
-                label="Street imagery capture mode"
-              />
-            </View>
-          }
-        />
-        <SettingsRow
-          title="Detail frames (telephoto)"
-          rightAdornment={
-            <Switch
-              value={streetView.detailStream}
-              disabled={!streetView.enabled}
-              onValueChange={(detailStream) => setStreetView({ detailStream })}
-              trackColor={{
-                false: isDark ? '#39393D' : '#E5E5EA',
-                true: colors.primary + 'CC',
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          title="Auto-start on drives"
-          rightAdornment={
-            <Switch
-              value={streetView.autoStart}
-              disabled={!streetView.enabled}
-              onValueChange={(autoStart) => setStreetView({ autoStart })}
-              trackColor={{
-                false: isDark ? '#39393D' : '#E5E5EA',
-                true: colors.primary + 'CC',
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          title="Upload on Wi-Fi only"
-          rightAdornment={
-            <Switch
-              value={streetView.wifiOnly}
-              onValueChange={(wifiOnly) => setStreetView({ wifiOnly })}
-              trackColor={{
-                false: isDark ? '#39393D' : '#E5E5EA',
-                true: colors.primary + 'CC',
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          title="Pending street imagery"
-          value={
-            pending.drives > 0
-              ? `${pending.drives} drive${pending.drives === 1 ? '' : 's'} · ${formatBytes(pending.bytes)}`
-              : 'None'
-          }
-          onPress={pending.drives > 0 ? () => void openPending() : undefined}
-        />
-      </SettingsGroup>
+  const switchRow = (value: boolean, onChange: (value: boolean) => void, disabled = false) => (
+    <Switch
+      value={value}
+      disabled={disabled}
+      onValueChange={onChange}
+      trackColor={{
+        false: isDark ? '#39393D' : '#E5E5EA',
+        true: colors.primary + 'CC',
+      }}
+    />
+  );
 
-      <SettingsGroup
-        header="Mapillary"
-        footer="Mapillary is a Meta-owned street-level imagery platform. Uploads use a dedicated upload-scoped app credential embedded in this build; published photos are public. Processing and face/plate blurring happen on Mapillary's servers and can take 24–48 hours."
-      >
-        {isMapillaryUploadConfigured() ? (
-          <>
-            <SettingsRow
-              title="Account"
-              value={
-                mapillaryConnecting
-                  ? 'Connecting…'
-                  : (streetView.mapillaryUsername ?? 'Connect Mapillary')
-              }
-              onPress={
-                mapillaryConnecting
-                  ? undefined
-                  : streetView.mapillaryUsername
-                    ? disconnectMapillaryAccount
-                    : () => void connectMapillaryAccount()
-              }
-            />
-            {streetView.mapillaryUsername ? (
-              <SettingsRow
-                title="Sign out of Mapillary"
-                destructive
-                onPress={disconnectMapillaryAccount}
-              />
-            ) : null}
-          </>
-        ) : (
-          <SettingsRow title="Mapillary upload" value="Not configured in this build" />
+  return (
+    <SettingsGroup
+      header="Street imagery"
+      icon={<Ionicons name="camera-outline" size={15} color={colors.textSecondary} />}
+      footer="Photos are public on Mapillary, which blurs faces and plates on its servers."
+    >
+      <SettingsRow
+        title="Capture while navigating"
+        rightAdornment={switchRow(streetView.enabled, (value) => void toggleEnabled(value))}
+      />
+      <SettingsRow
+        title="Auto-start on drives"
+        rightAdornment={switchRow(
+          streetView.autoStart,
+          (autoStart) => setStreetView({ autoStart }),
+          !streetView.enabled,
         )}
-      </SettingsGroup>
-    </>
+      />
+      <SettingsRow
+        title="Telephoto detail frames"
+        rightAdornment={switchRow(
+          streetView.detailStream,
+          (detailStream) => setStreetView({ detailStream }),
+          !streetView.enabled,
+        )}
+      />
+      <SettingsRow
+        title="Wi-Fi-only uploads"
+        rightAdornment={switchRow(streetView.wifiOnly, (wifiOnly) => setStreetView({ wifiOnly }))}
+      />
+      {isMapillaryUploadConfigured() ? (
+        <>
+          <SettingsRow
+            title="Mapillary account"
+            value={
+              mapillaryConnecting ? 'Connecting…' : (streetView.mapillaryUsername ?? 'Connect')
+            }
+            onPress={
+              mapillaryConnecting
+                ? undefined
+                : streetView.mapillaryUsername
+                  ? disconnectMapillaryAccount
+                  : () => void connectMapillaryAccount()
+            }
+          />
+          {streetView.mapillaryUsername ? (
+            <SettingsRow
+              title="Disconnect Mapillary"
+              destructive
+              onPress={disconnectMapillaryAccount}
+            />
+          ) : null}
+        </>
+      ) : (
+        <SettingsRow title="Mapillary account" value="Unavailable in this build" />
+      )}
+      <SettingsRow
+        title="Pending uploads"
+        value={
+          pending.drives > 0
+            ? `${pending.drives} drive${pending.drives === 1 ? '' : 's'} · ${formatBytes(pending.bytes)}`
+            : 'None'
+        }
+        onPress={pending.drives > 0 ? () => void openPending() : undefined}
+      />
+    </SettingsGroup>
   );
 }
-
-const styles = StyleSheet.create({
-  segment: { width: 150 },
-});

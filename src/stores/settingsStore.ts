@@ -23,8 +23,6 @@ export type PlaceSortMode = 'recent' | 'name' | 'distance';
 /** Sort order for the saved-lists screen. */
 export type SavedListsSortMode = 'recent' | 'name';
 
-export type StreetViewCaptureModePreference = 'standard' | 'threeD';
-
 export interface StreetViewPreferences {
   /** Master opt-in for contributing street imagery during navigation. */
   enabled: boolean;
@@ -32,7 +30,6 @@ export interface StreetViewPreferences {
   consentAccepted: boolean;
   /** Start a capture session automatically on driving routes (set in Settings only). */
   autoStart: boolean;
-  mode: StreetViewCaptureModePreference;
   /**
    * Capture a paired telephoto frame every few wide frames. Needs a device
    * with a tele lens; ignored otherwise.
@@ -84,6 +81,8 @@ interface PersistedSettings {
   savedListsSort: SavedListsSortMode;
   /** Developer tool: replay onboarding on the next cold start. */
   showOnboardingOnLaunch: boolean;
+  /** Show diagnostics: node dashboard, P2P stats, traffic coverage badge. */
+  devMode: boolean;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -99,6 +98,7 @@ interface SettingsState extends PersistedSettings {
   setPlaceSort: (mode: PlaceSortMode) => void;
   setSavedListsSort: (mode: SavedListsSortMode) => void;
   setShowOnboardingOnLaunch: (enabled: boolean) => void;
+  setDevMode: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -120,7 +120,6 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     enabled: false,
     consentAccepted: false,
     autoStart: false,
-    mode: 'standard',
     detailStream: false,
     wifiOnly: true,
     autoUpload: false,
@@ -143,6 +142,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   placeSort: 'recent',
   savedListsSort: 'recent',
   showOnboardingOnLaunch: false,
+  devMode: false,
 };
 
 function loadSettings(): PersistedSettings {
@@ -190,6 +190,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       placeSort: state.placeSort,
       savedListsSort: state.savedListsSort,
       showOnboardingOnLaunch: state.showOnboardingOnLaunch,
+      devMode: state.devMode,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -242,6 +243,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setShowOnboardingOnLaunch: (showOnboardingOnLaunch) => {
       set({ showOnboardingOnLaunch });
+      persist();
+    },
+    setDevMode: (devMode) => {
+      set({ devMode });
       persist();
     },
   };

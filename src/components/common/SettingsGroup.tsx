@@ -6,6 +6,8 @@ import { spacing, typography, borderRadius, iosListGroup } from '../../constants
 interface SettingsGroupProps {
   /** Optional uppercase section title (e.g. "ACCOUNTS"). */
   header?: string;
+  /** Optional icon rendered before the header text. */
+  icon?: ReactNode;
   /** Optional footer text shown below the section (e.g. a privacy disclaimer). */
   footer?: string;
   children: ReactNode;
@@ -20,14 +22,19 @@ interface SettingsGroupProps {
  * - 10pt rounded corners with hairline internal separators between rows.
  * - Page background shows through the gap between sections.
  */
-export function SettingsGroup({ header, footer, children, style }: SettingsGroupProps) {
+export function SettingsGroup({ header, icon, footer, children, style }: SettingsGroupProps) {
   const { isDark } = useTheme();
   const styles = isDark ? darkStyles : lightStyles;
   const childArray = React.Children.toArray(children).filter(Boolean);
 
   return (
     <View style={styles.outer}>
-      {header ? <Text style={styles.header}>{header}</Text> : null}
+      {header ? (
+        <View style={styles.headerRow}>
+          {icon ? <View style={styles.headerIcon}>{icon}</View> : null}
+          <Text style={styles.header}>{header}</Text>
+        </View>
+      ) : null}
       <View style={[styles.section, style]}>
         {childArray.map((child, idx) => (
           <View key={idx}>
@@ -47,14 +54,26 @@ const baseSection: ViewStyle = {
   overflow: 'hidden',
 };
 
+const baseHeaderRow: ViewStyle = {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+  marginBottom: spacing.sm,
+  marginLeft: spacing.md,
+};
+
+const baseHeaderIcon: ViewStyle = {
+  width: 18,
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
 const baseHeader: TextStyle = {
   ...typography.caption,
   fontSize: 13,
   fontWeight: '400',
   letterSpacing: 0.4,
   textTransform: 'uppercase',
-  marginBottom: spacing.sm,
-  marginLeft: spacing.md,
 };
 
 const baseFooter: TextStyle = {
@@ -73,6 +92,8 @@ const darkStyles = StyleSheet.create({
     backgroundColor: iosListGroup.separator,
     marginLeft: spacing.md,
   },
+  headerRow: baseHeaderRow,
+  headerIcon: baseHeaderIcon,
   header: { ...baseHeader, color: iosListGroup.sectionHeader },
   footer: { ...baseFooter, color: iosListGroup.sectionHeader },
 });
@@ -85,6 +106,8 @@ const lightStyles = StyleSheet.create({
     backgroundColor: 'rgba(60,60,67,0.18)',
     marginLeft: spacing.md,
   },
+  headerRow: baseHeaderRow,
+  headerIcon: baseHeaderIcon,
   header: { ...baseHeader, color: '#6C6C70' },
   footer: { ...baseFooter, color: '#6C6C70' },
 });
