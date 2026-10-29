@@ -42,10 +42,20 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 > (navigation HUD), 06 (place details) and 07 (offline regions) now come from
 > current captures; 03 (satellite) and 04 (street level) still use Oct 15 raws.
 >
-> Two capture constraints worth knowing: satellite tiles for Manhattan render
-> low-resolution, and enumerating the map's accessibility tree while a satellite
-> style is active aborts the app inside MapLibre (reproduced 3×). Capture the
-> satellite card by coordinates only, or from a region with sharp imagery.
+> **Blocked captures (Oct 29):**
+>
+> - **03 satellite / 04 street level** — driving the map through accessibility
+>   aborts the app inside MapLibre (`__cxa_throw` during
+>   `accessibilityEnumerateContainerElements`), reproduced 4×. The satellite style
+>   on Manhattan also serves visibly low-resolution tiles. Recapture on a build
+>   where that crash is fixed, or capture manually.
+> - **08 CarPlay** — `install-carplay-simulator.sh` builds and installs, but the
+>   profile-signed binary fails to spawn (`FBSOpenApplicationServiceErrorDomain`
+>   code 3, "launchd job spawn failed"); the ad-hoc fallback launches with empty
+>   entitlements, and `doctor-carplay-simulator.sh` then reports
+>   "installed app is missing CarPlay entitlement". A simulator cannot exec a
+>   binary carrying `com.apple.developer.carplay-*`, so this needs a physical
+>   device / CarPlay unit or a screenshot from one.
 
 ---
 
