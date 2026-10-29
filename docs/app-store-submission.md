@@ -23,24 +23,29 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 | Policy/terms date + contact + copyright | Live: October 18, 2026 · support@polarismaps.app · © Andrew Ghobrial  |
 | App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                        |
 | Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
-| Screenshots — iPhone 6.9" (7 of 8)      | `screenshots/out/01..07` (CarPlay card pending)                       |
-| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752)                     |
+| Screenshots — iPhone 6.9" (6 of 8)      | 01, 02, 05, 06, 07 recaptured on build 350; 03/04 stale; 08 missing   |
+| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752, build 350)          |
 
 ### Remaining
 
-| #   | Item                                                  | Owner            | Status                   |
-| --- | ----------------------------------------------------- | ---------------- | ------------------------ |
-| 1   | CarPlay screenshot + card 8                           | you → me compose | Paused (UI work)         |
-| 2   | iPad 13" screenshots (required)                       | you → me compose | Paused (UI work)         |
-| 3   | Enter App Privacy answers in App Store Connect        | you              | Drafted                  |
-| 4   | Legal review of policy + terms                        | you              | Review pending           |
-| 5   | Associated Domains capability + profile + entitlement | done             | Verified in exported IPA |
-| 6   | Run `fastlane ios release` → submit                   | you              | Lane unblocked           |
-| 7   | Housekeeping: commit working tree                     | you              | Not started              |
+| #   | Item                                                  | Owner            | Status                    |
+| --- | ----------------------------------------------------- | ---------------- | ------------------------- |
+| 1   | CarPlay screenshot + card 8                           | you → me compose | Blocked: no CarPlay run   |
+| 2   | iPad 13" screenshots (required)                       | you → me compose | 1 card, panel looks empty |
+| 3   | Enter App Privacy answers in App Store Connect        | you              | Drafted                   |
+| 4   | Legal review of policy + terms                        | you              | Review pending            |
+| 5   | Associated Domains capability + profile + entitlement | done             | Verified in exported IPA  |
+| 6   | Run `fastlane ios release` → submit                   | you              | Lane unblocked            |
+| 7   | Housekeeping: commit working tree                     | you              | Not started               |
 
-> Screenshots are **paused** while iPad/macOS layout improvements land in a
-> separate worktree. Re-capture iPhone + iPad and re-render the cards after that
-> work merges; the existing iPad card reflects the old layout.
+> Refreshed on build 350 (Oct 29). Cards 01 (live traffic), 02 (transit), 05
+> (navigation HUD), 06 (place details) and 07 (offline regions) now come from
+> current captures; 03 (satellite) and 04 (street level) still use Oct 15 raws.
+>
+> Two capture constraints worth knowing: satellite tiles for Manhattan render
+> low-resolution, and enumerating the map's accessibility tree while a satellite
+> style is active aborts the app inside MapLibre (reproduced 3×). Capture the
+> satellite card by coordinates only, or from a region with sharp imagery.
 
 ---
 
