@@ -367,21 +367,38 @@ platform :ios do
     bump_build
 
     # Ensure distribution certificate + provisioning profile exist.
+    # Same fallback as `beta`: without MATCH_PASSWORD the encrypted match repo
+    # cannot be decrypted, so let Xcode automatic signing provision through the
+    # App Store Connect API key instead.
     UI.header("Step 5/7: Ensuring distribution certificate and provisioning profile")
-    match(
-      app_identifier: ["com.polarismaps.app"],
-      type: "appstore",
-      git_url: "https://github.com/ghobs91/polaris-maps.git",
-      git_branch: "match",
-      readonly: false,
-      api_key: app_store_connect_api_key(
-        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
-        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
-        key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
-      ),
-    )
+    skip_match = ENV["SKIP_MATCH"] == "1" || ENV["MATCH_PASSWORD"].to_s.empty?
+    if skip_match
+      UI.important("Skipping fastlane match — relying on Xcode automatic signing")
+    else
+      match(
+        app_identifier: ["com.polarismaps.app"],
+        type: "appstore",
+        git_url: "https://github.com/ghobs91/polaris-maps.git",
+        git_branch: "match",
+        readonly: false,
+        api_key: app_store_connect_api_key(
+          key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+          issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+          key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
+        ),
+      )
+    end
 
     UI.header("Step 6/7: Building release archive")
+    auth_xcargs = [
+      "-allowProvisioningUpdates",
+      "-authenticationKeyPath '#{ENV["APP_STORE_CONNECT_KEY_PATH"]}'",
+      "-authenticationKeyID #{ENV["APP_STORE_CONNECT_KEY_ID"]}",
+      "-authenticationKeyIssuerID #{ENV["APP_STORE_CONNECT_ISSUER_ID"]}",
+    ].join(" ")
+
+    export_options = { manageAppVersionAndBuildNumber: false }
+    export_options[:signingStyle] = "automatic" if skip_match
     build_app(
       workspace: "ios/PolarisMaps.xcworkspace",
       scheme: "PolarisMaps",
@@ -390,8 +407,10 @@ platform :ios do
       output_directory: "build_derived_data",
       output_name: "PolarisMaps.ipa",
       export_team_id: "XTXZ3CYRPX",
-      xcargs: "-allowProvisioningUpdates",
-      export_xcargs: "-allowProvisioningUpdates",
+      export_options: export_options,
+      # gym appends xcargs to -exportArchive too; repeating the auth flags via
+      # export_xcargs makes Xcode 27 reject the duplicate option.
+      xcargs: auth_xcargs,
       silent: false,
     )
 

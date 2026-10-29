@@ -28,15 +28,15 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 ### Remaining
 
-| #   | Item                                                  | Owner                        | Status                               |
-| --- | ----------------------------------------------------- | ---------------------------- | ------------------------------------ |
-| 1   | CarPlay screenshot + card 8                           | you → me compose             | Paused (UI work)                     |
-| 2   | iPad 13" screenshots (required)                       | you → me compose             | Paused (UI work)                     |
-| 3   | Enter App Privacy answers in App Store Connect        | you                          | Drafted                              |
-| 4   | Legal review of policy + terms                        | you                          | Review pending                       |
-| 5   | Associated Domains capability + profile + entitlement | you (Apple Developer portal) | Entitlement applied; profile pending |
-| 6   | Run `fastlane ios release` → submit                   | you                          | Lane unblocked                       |
-| 7   | Housekeeping: commit working tree                     | you                          | Not started                          |
+| #   | Item                                                  | Owner            | Status                   |
+| --- | ----------------------------------------------------- | ---------------- | ------------------------ |
+| 1   | CarPlay screenshot + card 8                           | you → me compose | Paused (UI work)         |
+| 2   | iPad 13" screenshots (required)                       | you → me compose | Paused (UI work)         |
+| 3   | Enter App Privacy answers in App Store Connect        | you              | Drafted                  |
+| 4   | Legal review of policy + terms                        | you              | Review pending           |
+| 5   | Associated Domains capability + profile + entitlement | done             | Verified in exported IPA |
+| 6   | Run `fastlane ios release` → submit                   | you              | Lane unblocked           |
+| 7   | Housekeeping: commit working tree                     | you              | Not started              |
 
 > Screenshots are **paused** while iPad/macOS layout improvements land in a
 > separate worktree. Re-capture iPhone + iPad and re-render the cards after that
@@ -122,10 +122,15 @@ Source and hosting are ready; only the Apple-side steps remain.
    `https://app.polarismaps.app/.well-known/apple-app-site-association` → 200
    `application/json` (already verified).
 
-> The entitlement is now applied to `PolarisMaps.entitlements` and
-> `PolarisMaps.Debug.entitlements`. The profile on this Mac still predates the
-> capability, so regenerate/install it (or let Xcode auto-provision with
-> `-allowProvisioningUpdates`) before the release build; otherwise signing fails.
+> **Verified (Oct 29, 2026):** no manual profile download is needed. An archive +
+> `-exportArchive` with `-allowProvisioningUpdates` and the ASC API key produced an
+> IPA signed by `Apple Distribution: Andrew Ghobrial (XTXZ3CYRPX)` using
+> `iOS Team Store Provisioning Profile: com.polarismaps.app`, with
+> `get-task-allow=false` and `beta-reports-active=true`. The shipped entitlements
+> include `applinks:app.polarismaps.app` and `com.apple.developer.carplay-maps`.
+> The stale profile in `~/Library/MobileDevice/Provisioning Profiles` and the
+> repo-root `AppStore_com.polarismaps.app.mobileprovision` are unused by the lane
+> and can stay as-is.
 
 ### 6. Build and submit
 
