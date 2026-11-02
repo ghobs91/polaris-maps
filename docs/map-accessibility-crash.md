@@ -99,7 +99,13 @@ This matches the observed trigger pattern: every crash followed content churn
   reports crashing on iOS 10.x; it was fixed for MLRN 11.0.0-alpha.16, but the
   accessibility container in MapLibre native itself is unchanged through 6.20.0.
 
-## Options (need a decision)
+## Options considered
+
+The shipped mitigation is a narrowed version of option 3: replace the container
+instead of hiding the whole map, so VoiceOver still gets a named map element
+plus the compass and attribution. Options 1 and 2 remain the path to restoring
+per-place labels; option 4 was rejected because the crash only needs a
+screen-reader user to pan once.
 
 1. **Upgrade `@maplibre/maplibre-react-native` 10.4.2 → 11.x.**
    Fixes the JS-facing `queryRenderedFeatures` crash (#1118), which is the tap
@@ -116,8 +122,8 @@ This matches the observed trigger pattern: every crash followed content churn
 4. **Do nothing.** Crash surface is VoiceOver/automation-only; sighted users are
    unaffected. Cheapest, but leaves a likely crash for screen-reader users.
 
-Recommendation: 2 for correctness, with 3 as a stopgap only if a release has to
-ship before 2 lands. Option 1 alone does not fix this crash.
+Recommendation: 2 for correctness, with the shipped container replacement as the
+stopgap until 2 lands. Option 1 alone does not fix this crash.
 
 ## Reproducing
 

@@ -11,51 +11,58 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 ### Done
 
-| Item                                    | Evidence                                                              |
-| --------------------------------------- | --------------------------------------------------------------------- |
-| Release quality gate (`pnpm check`)     | Jest config fixed; 0 lint warnings; 2,045 tests pass                  |
-| `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added              |
-| Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false` |
-| Privacy policy + terms + landing page   | Live: https://app.polarismaps.app/privacy, `/terms`, `/`              |
-| Support & marketing URLs                | Point at https://app.polarismaps.app (resolve 200)                    |
-| Store listing copy                      | `fastlane/metadata/en-US/`                                            |
-| Review contact fields                   | `fastlane/metadata/review_information/` (name, email, phone)          |
-| Policy/terms date + contact + copyright | Live: October 18, 2026 · support@polarismaps.app · © Andrew Ghobrial  |
-| App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                        |
-| Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON   |
-| Screenshots — iPhone 6.9" (6 of 8)      | 01, 02, 05, 06, 07 recaptured on build 350; 03/04 stale; 08 missing   |
-| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752, build 350)          |
+| Item                                    | Evidence                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------- |
+| Release quality gate (`pnpm check`)     | `tsc`, `eslint`, `prettier` clean; Jest 2,339 pass / 1 skip / 0 fail (Nov 2) |
+| `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added                     |
+| Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false`        |
+| Privacy policy + terms + landing page   | Live: https://app.polarismaps.app/privacy, `/terms`, `/`                     |
+| Support & marketing URLs                | Point at https://app.polarismaps.app (resolve 200)                           |
+| Store listing copy                      | `fastlane/metadata/en-US/`                                                   |
+| Review contact fields                   | `fastlane/metadata/review_information/` (name, email, phone)                 |
+| Policy/terms date + contact + copyright | Live: October 18, 2026 · support@polarismaps.app · © Andrew Ghobrial         |
+| App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                               |
+| Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON          |
+| Screenshots — iPhone 6.9" (7 of 8)      | 01, 02, 05, 06, 07 recaptured on build 350; 03/04 stale; 08 missing          |
+| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752, build 350)                 |
 
 ### Remaining
 
-| #   | Item                                                  | Owner            | Status                    |
-| --- | ----------------------------------------------------- | ---------------- | ------------------------- |
-| 1   | CarPlay screenshot + card 8                           | you → me compose | Blocked: no CarPlay run   |
-| 2   | iPad 13" screenshots (required)                       | you → me compose | 1 card, panel looks empty |
-| 3   | Enter App Privacy answers in App Store Connect        | you              | Drafted                   |
-| 4   | Legal review of policy + terms                        | you              | Review pending            |
-| 5   | Associated Domains capability + profile + entitlement | done             | Verified in exported IPA  |
-| 6   | Run `fastlane ios release` → submit                   | you              | Lane unblocked            |
-| 7   | Housekeeping: commit working tree                     | you              | Not started               |
+| #   | Item                                                  | Owner            | Status                                                                  |
+| --- | ----------------------------------------------------- | ---------------- | ----------------------------------------------------------------------- |
+| 1   | CarPlay screenshot + card 8                           | you → me compose | Blocked: no CarPlay run                                                 |
+| 2   | iPad 13" screenshots (required)                       | you → me compose | 1 card; Places panel renders empty                                      |
+| 3   | Enter App Privacy answers in App Store Connect        | you              | Drafted                                                                 |
+| 4   | Legal review of policy + terms                        | you              | Review pending                                                          |
+| 5   | Associated Domains capability + profile + entitlement | done             | Verified in exported IPA                                                |
+| 6   | Run `fastlane ios release` → submit                   | you              | Lane unblocked                                                          |
+| 7   | Housekeeping: commit working tree                     | done             | CarPlay add-stop work committed; only lane-owned build artifacts remain |
 
-> Refreshed on build 350 (Oct 29). Cards 01 (live traffic), 02 (transit), 05
-> (navigation HUD), 06 (place details) and 07 (offline regions) now come from
-> current captures; 03 (satellite) and 04 (street level) still use Oct 15 raws.
+> Refreshed on build 350 (Oct 29); capture status re-checked Nov 2. Cards 01
+> (live traffic), 02 (transit), 05 (navigation HUD), 06 (place details) and 07
+> (offline regions) come from current captures; 03 (satellite) and 04 (street
+> level) still use Oct 29 renders.
 >
-> **Blocked captures (Oct 29):**
+> **Capture status (Nov 2):**
 >
-> - **03 satellite / 04 street level** — driving the map through accessibility
->   aborts the app inside MapLibre (`__cxa_throw` during
->   `accessibilityEnumerateContainerElements`), reproduced 4×. The satellite style
->   on Manhattan also serves visibly low-resolution tiles. Recapture on a build
->   where that crash is fixed, or capture manually.
-> - **08 CarPlay** — `install-carplay-simulator.sh` builds and installs, but the
->   profile-signed binary fails to spawn (`FBSOpenApplicationServiceErrorDomain`
->   code 3, "launchd job spawn failed"); the ad-hoc fallback launches with empty
->   entitlements, and `doctor-carplay-simulator.sh` then reports
->   "installed app is missing CarPlay entitlement". A simulator cannot exec a
->   binary carrying `com.apple.developer.carplay-*`, so this needs a physical
->   device / CarPlay unit or a screenshot from one.
+> - **03 satellite / 04 street level** — the accessibility abort that blocked
+>   recapture is fixed (`docs/map-accessibility-crash.md`: the map's AX container
+>   is now replaced, no rendered-feature queries). They can be recaptured now;
+>   both cards still use the Oct 29 renders. The satellite style on Manhattan
+>   also served visibly low-resolution tiles, so check that before reusing it.
+> - **08 CarPlay** — unchanged, still blocked: `install-carplay-simulator.sh`
+>   builds and installs, but the profile-signed binary fails to spawn
+>   (`FBSOpenApplicationServiceErrorDomain` code 3, "launchd job spawn failed"); the
+>   ad-hoc fallback launches with empty entitlements, and
+>   `doctor-carplay-simulator.sh` then reports "installed app is missing CarPlay
+>   entitlement". A simulator cannot exec a binary carrying
+>   `com.apple.developer.carplay-*`, so this needs a physical device / CarPlay unit
+>   or a screenshot from one.
+> - **iPad 13"** — not a composition problem: `ipad-map.png` itself shows the
+>   full-height "Places" drawer empty below Home / Work / Add Place, so
+>   recomposing cannot fix the card. Either capture a screen that fills an iPad
+>   frame (navigation HUD, place details, regions) or fix the iPad panel layout
+>   first.
 
 ---
 
@@ -95,8 +102,13 @@ screenshots (2064×2752 for iPad Pro 13").
    xcrun simctl status_bar "$IPAD" override --time "09:41" --batteryState charged --batteryLevel 100
    # capture:  xcrun simctl io "$IPAD" screenshot --type=png screenshots/raw/ipad-<name>.png
    ```
-2. Provide the raw captures and I'll add an iPad variant to `compose.py`
-   (2064×2752 canvas + iPad frame, same card style).
+2. Drop the raw capture in `screenshots/raw/` and add it to `IPAD_CARDS` in
+   `screenshots/compose.py` (2064×2752 canvas + iPad frame, same card style),
+   then run `python3 screenshots/compose.py`.
+3. Pick a screen that fills the frame. The idle map does not: the "Places"
+   drawer is full-height on iPad and empty below Home / Work / Add Place (see
+   `screenshots/raw/ipad-map.png`), which is what made `ipad-01-explore.png`
+   look unfinished. Navigation, place details or the regions list work better.
 
 ### 3. Enter App Privacy answers in App Store Connect
 
@@ -164,6 +176,13 @@ Source and hosting are ready; only the Apple-side steps remain.
 
 ### 7. Housekeeping
 
-The working tree has two uncommitted files: `ios/PolarisMaps.xcodeproj/project.pbxproj`
-and `ios/PolarisMaps/Info.plist` (build-number/version edits). Reconcile or
-commit them before the release build.
+The CarPlay add-stop work is committed (`e01e939`). The only uncommitted files
+left are build-generated and exempt from the release lane's dirty check:
+`ios/PolarisMaps/Info.plist` (build number 342 → 350), `ios/Podfile.lock`,
+`ios/Pods/`, and the two generated `Pods-PolarisMaps.*.xcconfig` files. The lane
+rewrites these itself, so they do not block archiving.
+
+Note: `pnpm` is currently a dangling symlink in the local shell
+(`/opt/homebrew/bin/pnpm`), so `pnpm check`, `pnpm ios:release` and the
+pre-commit hook cannot run until it is reinstalled (`brew reinstall pnpm` or
+enable corepack). The Nov 2 gate was run directly from `node_modules/.bin`.
