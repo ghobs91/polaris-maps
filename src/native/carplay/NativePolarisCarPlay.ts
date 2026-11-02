@@ -110,6 +110,16 @@ export interface CarPlaySearchResult {
   section?: 'pinned' | 'recent';
 }
 
+/** One pre-search shortcut row (Gas / EV charging / Fast food / Coffee). */
+export interface CarPlaySearchShortcut {
+  /** Row title, e.g. "Gas Stations". */
+  name: string;
+  /** Category query run through the unified search when the row is tapped. */
+  query: string;
+  /** Row icon kind (`fuel` / `charging_station` / `fast_food` / `cafe`). */
+  kind: string;
+}
+
 /** One CarPlay Dashboard shortcut card button, mirroring a phone favorite. */
 export interface CarPlayDashboardShortcut {
   /** Favorite storage id (`home` / `work` / `pin-…`); returned on tap. */
@@ -141,6 +151,7 @@ export interface Spec extends TurboModule {
   hideNavigationAlert(): void;
   pushSearchResults(results: Array<object>, query: string, final: boolean): void;
   updateHomeSuggestions(items: Array<object>): void;
+  updateSearchShortcuts(shortcuts: Array<CarPlaySearchShortcut>): void;
   updateDashboardShortcuts(items: Array<CarPlayDashboardShortcut>): void;
   updateMapCenter(lat: number, lng: number, heading: number, speedMps: number): void;
   updateMapStyle(styleJson: string): void;

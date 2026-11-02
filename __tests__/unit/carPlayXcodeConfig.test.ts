@@ -328,10 +328,14 @@ describe('CarPlay iOS configuration', () => {
       // A duration-based alert that auto-dismisses must clear the manager's
       // record, or it suppresses every later incident/reroute alert.
       expect(nativeModule).toContain('didDismiss navigationAlert: CPNavigationAlert');
-      // Empty search field shows Pinned/Recents, the only pre-search surface on
-      // iOS < 27 where the floating map panel doesn't exist.
+      // Empty search field shows the add-stop shortcuts above Pinned/Recents,
+      // the only pre-search surface on iOS < 27 where the floating map panel
+      // doesn't exist.
       expect(nativeModule).toContain(
-        'completionHandler(makeSearchListItems(from: homeSuggestions))',
+        'let shortcutRows = searchShortcuts.map { makeShortcutListItem(from: $0) }',
+      );
+      expect(nativeModule).toContain(
+        'completionHandler(shortcutRows + makeSearchListItems(from: homeSuggestions))',
       );
     }
   });

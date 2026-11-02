@@ -38,6 +38,7 @@ import { decodePolyline } from '../../utils/polyline';
 import { getFavorites, subscribeFavorites } from '../favorites/favoritesService';
 import type { FavoriteKind, FavoriteLocation } from '../favorites/favoritesService';
 import { getSearchHistory } from '../search/searchHistoryService';
+import { ADD_STOP_SHORTCUTS } from '../../constants/searchCategories';
 import { useCarPlayStore } from '../../stores/carPlayStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
@@ -47,6 +48,7 @@ import { haversineMeters } from '../../utils/routeSnap';
 import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
 import type {
   CarPlayDashboardShortcut,
+  CarPlaySearchShortcut,
   CarPlaySearchResult,
   CarPlayIncidentMarker,
 } from '../../native/carplay';
@@ -223,7 +225,10 @@ function onConnected() {
   syncNavigationState(useNavigationStore.getState());
 
   // Pre-search suggestions for the floating map panel, plus the Dashboard
-  // shortcut card (both mirror the same favorites).
+  // shortcut card (both mirror the same favorites). Shortcuts are pushed
+  // first so the single panel render (iOS 27 shows it once, then only on
+  // change) already has them.
+  pushSearchShortcuts();
   pushHomeSuggestions();
   pushDashboardShortcuts();
 
@@ -1198,6 +1203,33 @@ function ensureSearchUserLocation(): void {
       // Ignore GPS failures during search.
     }
   })();
+}
+
+/**
+ * Native row-icon kinds for the add-stop shortcuts (see the native
+ * `searchIcon(for:)` mapping). The shared category ids are UI ids, not POI
+ * subtypes, so they are translated here instead of in the constants module.
+ */
+const SHORTCUT_ICON_KINDS: Record<string, string> = {
+  gas_stations: 'fuel',
+  ev_charging: 'charging_station',
+  fast_food: 'fast_food',
+  coffee: 'cafe',
+};
+
+/** Add-stop shortcut rows: Gas / EV charging / Fast food / Coffee. */
+function searchShortcutItems(): CarPlaySearchShortcut[] {
+  return ADD_STOP_SHORTCUTS.map((shortcut) => ({
+    name: shortcut.label,
+    query: shortcut.searchQuery,
+    kind: SHORTCUT_ICON_KINDS[shortcut.id] ?? '',
+  }));
+}
+
+/** Pushes the add-stop shortcut rows the native search list renders first. */
+function pushSearchShortcuts(): void {
+  if (!connected) return;
+  CarPlay.updateSearchShortcuts(searchShortcutItems());
 }
 
 /** Pushes the Pinned/Recents suggestions for the floating CarPlay map panel. */

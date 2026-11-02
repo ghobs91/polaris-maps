@@ -354,6 +354,27 @@ class PolarisCarPlay: RCTEventEmitter {
     DispatchQueue.main.async { Self.mapTemplateManager.updateHomeSuggestions(items) }
   }
 
+  private static func parseSearchShortcuts(_ shortcuts: NSArray) -> [CarPlaySearchShortcut] {
+    shortcuts.compactMap { element -> CarPlaySearchShortcut? in
+      guard let dict = element as? NSDictionary,
+        let name = dict["name"] as? String,
+        let query = dict["query"] as? String
+      else { return nil }
+      return CarPlaySearchShortcut(
+        name: name,
+        query: query,
+        kind: dict["kind"] as? String ?? ""
+      )
+    }
+  }
+
+  /// Add-stop shortcuts (Gas / EV charging / Fast food / Coffee) shown at the
+  /// top of the empty search list and in the floating map panel.
+  @objc func updateSearchShortcuts(_ shortcuts: NSArray) {
+    let items = Self.parseSearchShortcuts(shortcuts)
+    DispatchQueue.main.async { Self.mapTemplateManager.updateSearchShortcuts(items) }
+  }
+
   /// Dashboard shortcut buttons (Home / Work / first custom place) pushed from
   /// JS so the split-view card mirrors the app's favorites instead of a fixed
   /// pair. CarPlay shows at most two, so JS sends at most two.
@@ -428,6 +449,17 @@ struct CarPlaySearchItem {
   let kind: String
   /// Section the row belongs to ("pinned" / "recent"); "" for typed results.
   let section: String
+}
+
+/// One pre-search shortcut row (Gas / EV charging / Fast food / Coffee).
+/// Tapping it runs `query` through the same unified search as typed text.
+struct CarPlaySearchShortcut {
+  /// Row title, e.g. "Gas Stations".
+  let name: String
+  /// Category query run through the unified search on tap.
+  let query: String
+  /// Row icon kind ("fuel" / "charging_station" / "fast_food" / "cafe").
+  let kind: String
 }
 
 /// One CarPlay Dashboard shortcut button, mirroring a phone favorite. The `id`
@@ -704,6 +736,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private var lastNonEmptySearchItems: [CarPlaySearchItem] = []
   /// Pre-search suggestions (Pinned + Recents) shown in the floating map panel.
   private var homeSuggestions: [CarPlaySearchItem] = []
+  /// Add-stop shortcuts (Gas / Charging / Fast food / Coffee), pushed by JS.
+  /// Static config: rendered above the Pinned/Recents rows.
+  private var searchShortcuts: [CarPlaySearchShortcut] = []
   private var activeSearchText = ""
   private var pendingSearchCompletion: (([CPListItem]) -> Void)?
   /// The results list pushed when the driver taps the keyboard's search button
@@ -1995,11 +2030,53 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     refreshHomePanel()
   }
 
+  /// Add-stop shortcut rows pushed from JS (static: refreshed on connect).
+  /// The floating panel is rendered by the following home-suggestions push, so
+  /// both sections land in the same panel render.
+  func updateSearchShortcuts(_ shortcuts: [CarPlaySearchShortcut]) {
+    searchShortcuts = shortcuts
+  }
+
   private func makeListItem(from item: CarPlaySearchItem) -> CPListItem {
     let listItem = CPListItem(text: item.name, detailText: item.subtitle)
     listItem.setImage(Self.searchIcon(for: item.kind))
     listItem.userInfo = ["lat": item.lat, "lng": item.lng, "name": item.name]
     return listItem
+  }
+
+  /// A shortcut row carries the category query instead of a coordinate: the
+  /// selection handler runs it as if the driver had typed it.
+  private func makeShortcutListItem(from shortcut: CarPlaySearchShortcut) -> CPListItem {
+    let listItem = CPListItem(text: shortcut.name, detailText: nil)
+    listItem.setImage(Self.searchIcon(for: shortcut.kind))
+    listItem.userInfo = ["shortcutQuery": shortcut.query, "name": shortcut.name]
+    return listItem
+  }
+
+  /// Runs a pre-search shortcut (Gas / Charging / Fast food / Coffee): push the
+  /// results list and ask JS for rows for this query. Batches tagged with the
+  /// same query update that list in place.
+  private func runSearchShortcut(_ query: String) {
+    activeSearchText = query
+    searchItems = []
+    lastNonEmptySearchItems = []
+    pendingSearchCompletion = nil
+    searchDeadlineTimer?.invalidate()
+    searchDeadlineTimer = nil
+    showSearchResultsList()
+    PolarisCarPlay.emitSearchQuery(query)
+    // Same resilience as a typed query: a locked phone can freeze the JS
+    // debounce timer, so ask once more when nothing answered. A repeat makes
+    // JS run the full pipeline immediately.
+    searchReaskTimer?.invalidate()
+    searchReaskTimer = Timer.scheduledTimer(withTimeInterval: 0.9, repeats: false) {
+      [weak self] _ in
+      guard let self, self.searchItems.isEmpty else { return }
+      guard self.normalizedSearchText(self.activeSearchText) == self.normalizedSearchText(query)
+      else { return }
+      self.searchReaskTimer = nil
+      PolarisCarPlay.emitSearchQuery(self.activeSearchText)
+    }
   }
 
   /// Rows for the search template, preserving the JS relevance order. Results
@@ -2038,7 +2115,8 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   private var shouldShowHomePanel: Bool {
-    guard mapTemplate != nil, !navigationActive, previewTrip == nil, !homeSuggestions.isEmpty
+    guard mapTemplate != nil, !navigationActive, previewTrip == nil,
+      !homeSuggestions.isEmpty || !searchShortcuts.isEmpty
     else { return false }
     // Only overlay the map when the map template is actually on screen.
     return interfaceController?.topTemplate === mapTemplate
@@ -2047,6 +2125,17 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   @available(iOS 27.0, *)
   private func makeHomePanel() -> CPMapPanel {
     var sections: [CPMapPanelSection] = []
+    if !searchShortcuts.isEmpty {
+      let rows: [CPMapPanelItem] = searchShortcuts.prefix(4).map { shortcut in
+        let listItem = makeShortcutListItem(from: shortcut)
+        listItem.handler = { [weak self] _, done in
+          self?.runSearchShortcut(shortcut.query)
+          done()
+        }
+        return CPMapPanelItem(listItem: listItem)
+      }
+      sections.append(CPMapPanelSection(title: "Nearby", items: rows))
+    }
     for (section, items) in Self.groupedSections(homeSuggestions) {
       let rows: [CPMapPanelItem] = items.prefix(6).map { item in
         let listItem = makeListItem(from: item)
@@ -2244,12 +2333,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchItems = []
     pendingSearchCompletion = completionHandler
     NSLog("[PolarisCarPlay] search text '%@'", searchText)
-    // An empty field has no query to run: show the Pinned/Recents suggestions
-    // instead. They are the only pre-search surface on iOS < 27 (the floating
-    // map panel is 27+), and Apple/Google Maps show saved places here too.
+    // An empty field has no query to run: show the add-stop shortcuts and the
+    // Pinned/Recents suggestions instead. They are the only pre-search surface
+    // on iOS < 27 (the floating map panel is 27+), and Apple/Google Maps show
+    // saved places here too.
     guard !normalizedSearchText(searchText).isEmpty else {
       pendingSearchCompletion = nil
-      completionHandler(makeSearchListItems(from: homeSuggestions))
+      let shortcutRows = searchShortcuts.map { makeShortcutListItem(from: $0) }
+      completionHandler(shortcutRows + makeSearchListItems(from: homeSuggestions))
       return
     }
     PolarisCarPlay.emitSearchQuery(searchText)
@@ -2282,6 +2373,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   func searchTemplate(_ searchTemplate: CPSearchTemplate, selectedResult item: CPListItem, completionHandler: @escaping () -> Void) {
     completionHandler()
+    // Add-stop shortcut row: run its category query instead of opening a
+    // destination sheet (there is no place to show yet).
+    if let userInfo = item.userInfo as? [String: Any],
+      let shortcutQuery = userInfo["shortcutQuery"] as? String
+    {
+      runSearchShortcut(shortcutQuery)
+      return
+    }
     // Show a detail sheet mirroring the phone's place card: navigate now or add
     // as a stop on the active drive (JS falls back to fresh navigation when
     // idle).

@@ -28,6 +28,7 @@ jest.mock('react-native', () => {
         hideNavigationAlert: jest.fn(),
         pushSearchResults: jest.fn(),
         updateHomeSuggestions: jest.fn(),
+        updateSearchShortcuts: jest.fn(),
         updateDashboardShortcuts: jest.fn(),
         updateMapCenter: jest.fn(),
         updateMapStyle: jest.fn(),
@@ -1227,6 +1228,19 @@ describe('CarPlayManager', () => {
     const nav = useNavigationStore.getState();
     expect(nav.isNavigating).toBe(true);
     expect(nav.destination).toEqual({ lat: 41.1, lng: -73.2, name: 'Gym' });
+  });
+
+  it('pushes add-stop shortcuts for the CarPlay search list on connect', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(NativeModules.PolarisCarPlay.updateSearchShortcuts).toHaveBeenCalledWith([
+      { name: 'Gas Stations', query: 'gas stations', kind: 'fuel' },
+      { name: 'EV Charging', query: 'ev charging', kind: 'charging_station' },
+      { name: 'Fast Food', query: 'fast food', kind: 'fast_food' },
+      { name: 'Coffee', query: 'coffee', kind: 'cafe' },
+    ]);
   });
 
   it('pushes saved places as home suggestions on connect', async () => {

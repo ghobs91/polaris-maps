@@ -4,6 +4,7 @@ import type {
   CarPlayNavigationData,
   CarPlayStartNavigationData,
   CarPlaySearchResult,
+  CarPlaySearchShortcut,
   CarPlayDashboardShortcut,
   CarPlayTrafficRange,
   CarPlayTripPreviewData,
@@ -18,6 +19,7 @@ export type {
   CarPlayNavigationData,
   CarPlayStartNavigationData,
   CarPlaySearchResult,
+  CarPlaySearchShortcut,
   CarPlayDashboardShortcut,
   CarPlayTrafficRange,
   CarPlayTripPreviewData,
@@ -94,6 +96,11 @@ export function pushSearchResults(
 /** Pre-search Pinned/Recents suggestions for the floating CarPlay map panel. */
 export function updateHomeSuggestions(items: CarPlaySearchResult[]): void {
   (NativeModule as any)?.updateHomeSuggestions?.(items);
+}
+
+/** Add-stop shortcut rows (Gas / Charging / Fast food / Coffee) for the search list. */
+export function updateSearchShortcuts(shortcuts: CarPlaySearchShortcut[]): void {
+  (NativeModule as any)?.updateSearchShortcuts?.(shortcuts);
 }
 
 /** Favorite shortcut buttons (Home / Work / first custom) for the Dashboard card. */

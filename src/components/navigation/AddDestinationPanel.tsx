@@ -5,6 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
+  ScrollView,
   StyleSheet,
   Animated,
   Platform,
@@ -18,6 +19,7 @@ import { GlassView } from '../common/GlassView';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { usePlaceSearch } from '../../hooks/usePlaceSearch';
+import { ADD_STOP_SHORTCUTS } from '../../constants/searchCategories';
 import { computeRoute } from '../../services/routing/routingService';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -215,38 +217,54 @@ export function AddDestinationPanel({
 
   // User hit search/submit: keep the list visible, drop pins for every result
   // on the map, and zoom out to the full route so they can pick a stop.
-  const handleSearchSubmit = useCallback(async () => {
-    const searchResults = await submitSearch(query);
-    if (searchResults.length === 0) return;
-    Keyboard.dismiss();
-    setSubmitted(true);
-    // Freeze the origin for detour math — see submittedOriginRef.
-    submittedOriginRef.current = { lat: searchCenter.lat, lng: searchCenter.lng };
-    useMapStore
-      .getState()
-      .setStopSearchMarkers(searchResults.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })));
-    // Fit the camera to the route + all results (MapView applies bottom
-    // padding for the "search" mode so the sheet doesn't cover the pins).
-    const coords: Array<[number, number]> = [];
-    if (activeRoute?.geometry) {
-      coords.push(...decodePolyline(activeRoute.geometry));
-    }
-    for (const r of searchResults) coords.push([r.lng, r.lat]);
-    if (coords.length > 0) {
-      let minLng = Infinity;
-      let minLat = Infinity;
-      let maxLng = -Infinity;
-      let maxLat = -Infinity;
-      for (const [lng, lat] of coords) {
-        if (lng < minLng) minLng = lng;
-        if (lat < minLat) minLat = lat;
-        if (lng > maxLng) maxLng = lng;
-        if (lat > maxLat) maxLat = lat;
+  const runSubmittedSearch = useCallback(
+    async (searchQuery: string) => {
+      const searchResults = await submitSearch(searchQuery);
+      if (searchResults.length === 0) return;
+      Keyboard.dismiss();
+      setSubmitted(true);
+      // Freeze the origin for detour math — see submittedOriginRef.
+      submittedOriginRef.current = { lat: searchCenter.lat, lng: searchCenter.lng };
+      useMapStore
+        .getState()
+        .setStopSearchMarkers(searchResults.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })));
+      // Fit the camera to the route + all results (MapView applies bottom
+      // padding for the "search" mode so the sheet doesn't cover the pins).
+      const coords: Array<[number, number]> = [];
+      if (activeRoute?.geometry) {
+        coords.push(...decodePolyline(activeRoute.geometry));
       }
-      useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat]);
-    }
-    onShowOnMap?.();
-  }, [query, submitSearch, activeRoute, onShowOnMap, searchCenter]);
+      for (const r of searchResults) coords.push([r.lng, r.lat]);
+      if (coords.length > 0) {
+        let minLng = Infinity;
+        let minLat = Infinity;
+        let maxLng = -Infinity;
+        let maxLat = -Infinity;
+        for (const [lng, lat] of coords) {
+          if (lng < minLng) minLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lng > maxLng) maxLng = lng;
+          if (lat > maxLat) maxLat = lat;
+        }
+        useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat]);
+      }
+      onShowOnMap?.();
+    },
+    [submitSearch, activeRoute, onShowOnMap, searchCenter],
+  );
+
+  const handleSearchSubmit = useCallback(() => {
+    void runSubmittedSearch(query);
+  }, [runSubmittedSearch, query]);
+
+  // Shortcut chips run their category query straight away, so the driver sees
+  // nearby stops with detour times without typing.
+  const handleShortcut = useCallback(
+    (shortcutQuery: string) => {
+      void runSubmittedSearch(shortcutQuery);
+    },
+    [runSubmittedSearch],
+  );
 
   // Compute the added drive time for each submitted result by routing through
   // it (inserted after the current target, same as onSelect) vs. the current
@@ -444,6 +462,31 @@ export function AddDestinationPanel({
             </TouchableOpacity>
           </View>
 
+          {!submitted && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.shortcutRow}
+              keyboardShouldPersistTaps="handled"
+              accessibilityRole="toolbar"
+              accessibilityLabel="Add a nearby stop"
+            >
+              {ADD_STOP_SHORTCUTS.map((shortcut) => (
+                <TouchableOpacity
+                  key={shortcut.id}
+                  style={styles.shortcutChip}
+                  onPress={() => handleShortcut(shortcut.searchQuery)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Find ${shortcut.label.toLowerCase()} along the route`}
+                >
+                  <Ionicons name={shortcut.icon} size={15} color={nav.accent} />
+                  <Text style={styles.shortcutLabel}>{shortcut.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
           {submitted && results.length > 0 && (
             <TouchableOpacity
               style={styles.foundRow}
@@ -570,6 +613,25 @@ const styles = StyleSheet.create({
   cancelText: {
     color: nav.accent,
     fontSize: 16,
+    fontWeight: '500',
+  },
+  shortcutRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingBottom: 12,
+  },
+  shortcutChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  shortcutLabel: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '500',
   },
   listeningBanner: {
