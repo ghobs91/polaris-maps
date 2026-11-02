@@ -36,12 +36,29 @@
 #import <objc/runtime.h>
 
 static NSString *const PMMapAccessibilityClassName = @"MLNMapView";
+static const void *PMMapElementKey = &PMMapElementKey;
 
 static UIAccessibilityElement *PMMakeMapElement(UIView *mapView) {
   UIAccessibilityElement *element =
       [[UIAccessibilityElement alloc] initWithAccessibilityContainer:mapView];
   element.accessibilityLabel = @"Map";
   element.accessibilityTraits = UIAccessibilityTraitNone;
+  element.accessibilityHint = @"Use the map controls to zoom and change layers.";
+  return element;
+}
+
+/**
+ One stable instance per map view: UIKit matches elements by identity when it
+ restores focus, so rebuilding the element on every call would make
+ `indexOfAccessibilityElement:` answer NSNotFound and drop VoiceOver's place.
+ */
+static UIAccessibilityElement *PMMapElement(UIView *mapView) {
+  UIAccessibilityElement *element = objc_getAssociatedObject(mapView, PMMapElementKey);
+  if (!element) {
+    element = PMMakeMapElement(mapView);
+    objc_setAssociatedObject(mapView, PMMapElementKey, element, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
+
   element.accessibilityFrameInContainerSpace = mapView.bounds;
 
   NSString *value = nil;
@@ -54,13 +71,13 @@ static UIAccessibilityElement *PMMakeMapElement(UIView *mapView) {
     // Property is absent in a future MapLibre release; the element still works.
   }
   element.accessibilityValue = value;
-  element.accessibilityHint = @"Use the map controls to zoom and change layers.";
+
   return element;
 }
 
 static NSArray<id> *PMMapAccessibilityElements(UIView *mapView) {
   NSMutableArray<id> *elements = [NSMutableArray arrayWithCapacity:3];
-  [elements addObject:PMMakeMapElement(mapView)];
+  [elements addObject:PMMapElement(mapView)];
 
   @try {
     id compass = [mapView valueForKey:@"compassView"];
