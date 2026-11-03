@@ -528,15 +528,19 @@ export function POIInfoCard() {
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
 
   // Gate the two heavy sections (hidden WebViews + page fetches) until the
-  // sheet's opening spring has settled. Keyed on the selected POI object so
-  // switching places closes the gate again in the same render.
-  const [readyPoi, setReadyPoi] = useState<typeof poi>(null);
+  // sheet's opening spring has settled. Keyed on the POI id, not the object:
+  // enrichment replaces the object with an equal place, and an identity-keyed
+  // gate would restart its timer forever and never start the ratings pass.
+  const [readyPoiId, setReadyPoiId] = useState<string | number | null>(null);
   useEffect(() => {
-    if (!poi) return;
-    const timer = setTimeout(() => setReadyPoi(poi), HEAVY_SECTIONS_DELAY_MS);
+    if (!poi) {
+      setReadyPoiId(null);
+      return;
+    }
+    const timer = setTimeout(() => setReadyPoiId(poi.id), HEAVY_SECTIONS_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [poi]);
-  const heavySectionsEnabled = !!poi && readyPoi === poi;
+  }, [poi?.id]);
+  const heavySectionsEnabled = !!poi && readyPoiId === poi.id;
 
   // Trigger Apple Maps enrichment when a POI is selected. When offline, fall
   // back to the cached place-detail snapshot and flag it as cached.

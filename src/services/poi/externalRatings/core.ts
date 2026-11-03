@@ -17,6 +17,7 @@ import type {
   RawExternalRating,
   RatingSearchCandidate,
 } from './types';
+import { Platform } from 'react-native';
 
 // ---------------------------------------------------------------------------
 // Anti-bot challenge detection
@@ -321,21 +322,41 @@ export function validateExternalRating(
 // ---------------------------------------------------------------------------
 
 /**
- * Fixed mobile Safari user agent for the external-ratings surface.
+ * Fixed mobile-browser user agent for the external-ratings surface.
  *
  * The collectors parse the providers' mobile pages. On iOS the platform WebView
  * already presents mobile Safari, but an iPad app running on macOS gets
  * WebKit's desktop Macintosh UA — and TripAdvisor answers that with a DataDome
- * 403 instead of results. Pinning one real mobile Safari UA keeps both
- * platforms on the same provider markup.
+ * 403 instead of results. Pinning a mobile UA keeps both platforms on the same
+ * provider markup.
  *
+ * The OS/Safari tokens track the actual runtime version instead of a frozen
+ * one: DataDome treats a UA that is years behind the WebView's real engine as a
+ * bot signature, which is the recurring "ratings stopped working" failure.
  * This is the only browser-facing override: TLS/WebGL/canvas fingerprints,
- * `navigator.webdriver`, and permission state are untouched. Bump the OS and
- * Safari tokens when the providers start rejecting this UA.
+ * `navigator.webdriver`, and permission state are untouched.
  */
-export const EXTERNAL_RATINGS_USER_AGENT =
-  'Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 ' +
-  '(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
+function buildExternalRatingsUserAgent(): string {
+  if (Platform.OS === 'ios') {
+    const version =
+      typeof Platform.Version === 'string' && Platform.Version.length > 0
+        ? Platform.Version
+        : '26.0';
+    const osVersion = version.replace(/\./g, '_');
+    const device = Platform.isPad ? 'iPad' : 'iPhone';
+    return (
+      `Mozilla/5.0 (${device}; CPU OS ${osVersion} like Mac OS X) ` +
+      `AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${version} Mobile/15E148 Safari/604.1`
+    );
+  }
+  // Android WebView is Chromium; present a current mobile Chrome, not Safari.
+  return (
+    'Mozilla/5.0 (Linux; Android 16; Pixel 8) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'
+  );
+}
+
+export const EXTERNAL_RATINGS_USER_AGENT = buildExternalRatingsUserAgent();
 
 /** Fetch HTML with an abort timeout, capped at 500 KB of parse work. */
 export async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | null> {

@@ -234,10 +234,13 @@ describe('isAllowedExternalRatingUrl', () => {
 });
 
 describe('EXTERNAL_RATINGS_USER_AGENT', () => {
-  it('is a real mobile Safari UA so providers serve mobile markup on every platform', () => {
-    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('iPad');
+  it('is a real mobile browser UA so providers serve mobile markup on every platform', () => {
+    expect(EXTERNAL_RATINGS_USER_AGENT).toMatch(/\((iPhone|iPad|Linux); /);
     expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Mobile/');
-    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Safari/');
     expect(EXTERNAL_RATINGS_USER_AGENT).not.toContain('Macintosh');
+    if (EXTERNAL_RATINGS_USER_AGENT.includes('Safari/604.1')) {
+      expect(EXTERNAL_RATINGS_USER_AGENT).toMatch(/CPU OS \d+_\d+/);
+      expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Safari/');
+    }
   });
 });
