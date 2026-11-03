@@ -30,11 +30,16 @@ export interface StreetViewPreferences {
   consentAccepted: boolean;
   /** Start a capture session automatically on driving routes (set in Settings only). */
   autoStart: boolean;
-  /**
-   * Capture a paired telephoto frame every few wide frames. Needs a device
+  /** Capture a paired telephoto frame every few wide frames. Needs a device
    * with a tele lens; ignored otherwise.
    */
   detailStream: boolean;
+  /**
+   * Capture crop/zoom relative to the current lens. 1.5x is the default so a
+   * dash-mounted phone shows the road instead of the dashboard; 1x restores the
+   * full field of view. See CAPTURE_ZOOM_PRESETS.
+   */
+  zoom: number;
   /** Default to Wi-Fi for uploads. */
   wifiOnly: boolean;
   /** Reserved for automatic end-of-drive upload (MVP uses the confirmation sheet). */
@@ -124,6 +129,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     consentAccepted: false,
     autoStart: false,
     detailStream: false,
+    zoom: 1.5,
     wifiOnly: true,
     autoUpload: false,
     maxStorageBytes: 8 * 1024 * 1024 * 1024,

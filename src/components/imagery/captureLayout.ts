@@ -6,6 +6,30 @@
  */
 export const CAPTURE_SPLIT_LEFT_PERCENT = '30%' as const;
 
+/**
+ * Zoom presets offered on the camera. Zooming crops the frame, which is the
+ * only way to remove the dashboard/hood from a phone mounted low on the glass.
+ * Values are relative to the current lens (1x = the lens's native field of
+ * view), and 3x is the densest crop offered before digital zoom degrades.
+ */
+export const CAPTURE_ZOOM_PRESETS = [1, 1.5, 2, 3] as const;
+
+/** Snap an arbitrary persisted value to the nearest supported preset. */
+export function clampCaptureZoom(value: number): number {
+  if (!Number.isFinite(value)) return CAPTURE_ZOOM_PRESETS[0];
+  return CAPTURE_ZOOM_PRESETS.reduce((best, preset) =>
+    Math.abs(preset - value) < Math.abs(best - value) ? preset : best,
+  );
+}
+
+/** Next preset in the cycle, wrapping from the densest crop back to 1x. */
+export function nextCaptureZoom(current: number): number {
+  const index = CAPTURE_ZOOM_PRESETS.indexOf(
+    clampCaptureZoom(current) as (typeof CAPTURE_ZOOM_PRESETS)[number],
+  );
+  return CAPTURE_ZOOM_PRESETS[(index + 1) % CAPTURE_ZOOM_PRESETS.length];
+}
+
 export interface SplitCaptureInput {
   /** Window width in points. */
   width: number;

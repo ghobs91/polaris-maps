@@ -28,7 +28,13 @@ import {
 } from 'react-native-vision-camera';
 import { createLocation } from 'react-native-vision-camera-location';
 import { captureBandHeight } from './captureBand';
-import { CAPTURE_SPLIT_LEFT_PERCENT, shouldUseSplitCapture } from './captureLayout';
+import {
+  CAPTURE_SPLIT_LEFT_PERCENT,
+  CAPTURE_ZOOM_PRESETS,
+  clampCaptureZoom,
+  nextCaptureZoom,
+  shouldUseSplitCapture,
+} from './captureLayout';
 import { spacing, typography } from '../../constants/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
@@ -165,6 +171,8 @@ export function CaptureHost() {
   const cameraRef = useRef<CameraRef>(null);
   const { hasPermission, canRequestPermission, requestPermission } = useCameraPermission();
   const detailStreamEnabled = useSettingsStore((s) => s.streetView.detailStream);
+  const zoom = clampCaptureZoom(useSettingsStore((s) => s.streetView.zoom));
+  const setStreetView = useSettingsStore((s) => s.setStreetView);
   const backDevice = useCameraDevice('back');
   // The filter returns the closest match, so inspect the device it yields for a
   // real ultra-wide lens rather than trusting the filter alone.
@@ -179,6 +187,9 @@ export function CaptureHost() {
   // Null on devices without a telephoto lens — zooming a wide-only camera
   // would just crop the frame the wide stream already has.
   const detailZoom = detailZoomForDevice(backDevice);
+  // A user crop at or past the telephoto switch already gives the detail
+  // stream's field of view; the paired frame would add nothing.
+  const effectiveDetailZoom = detailZoom != null && zoom >= detailZoom ? null : detailZoom;
   const photoOutput = usePhotoOutput({
     // Mapillary's app captures 4:3 full-sensor stills. A 16:9 crop loses
     // detail at the edges and moves the aspect ratio towards 2:1, which
@@ -186,7 +197,9 @@ export function CaptureHost() {
     targetResolution: CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',
     quality: config.quality,
-    qualityPrioritization: 'balanced',
+    // Prefer a shorter capture over a lower-noise one: the camera is moving,
+    // so a slow shutter turns the road into light trails (especially at night).
+    qualityPrioritization: device?.supportsSpeedQualityPrioritization ? 'speed' : 'balanced',
   });
   const videoOutput = useVideoOutput({
     targetResolution: CommonResolutions.FHD_16_9,
@@ -233,10 +246,44 @@ export function CaptureHost() {
   // screen keeps the compact pill so the map and lists are not covered.
   const expanded = captureActive && onNavigation && !splitCapture;
   const bandHeight = captureBandHeight(windowHeight);
-  const usingUltraWide =
-    mode === 'threeD' &&
-    Boolean(device?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'));
-  const lensLabel = usingUltraWide ? '0.5×' : '1×';
+  const zoomLabel = `${Number.isInteger(zoom) ? zoom.toFixed(0) : zoom.toFixed(1)}×`;
+  const setCaptureZoom = (value: number) => setStreetView({ zoom: clampCaptureZoom(value) });
+  const zoomChips = (
+    <View style={styles.zoomRow}>
+      {CAPTURE_ZOOM_PRESETS.map((preset) => {
+        const active = preset === zoom;
+        return (
+          <Pressable
+            key={preset}
+            onPress={() => setCaptureZoom(preset)}
+            style={({ pressed }) => [
+              styles.zoomChip,
+              active && styles.zoomChipActive,
+              { opacity: pressed ? 0.75 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Set camera zoom to ${preset} times`}
+            accessibilityState={{ selected: active }}
+          >
+            <Text style={[styles.zoomChipText, active && styles.zoomChipTextActive]}>
+              {Number.isInteger(preset) ? preset.toFixed(0) : preset.toFixed(1)}×
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+  const zoomCycleChip = (
+    <Pressable
+      onPress={() => setCaptureZoom(nextCaptureZoom(zoom))}
+      style={({ pressed }) => [styles.zoomCycleChip, { opacity: pressed ? 0.75 : 1 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`Camera zoom ${zoom} times`}
+      accessibilityHint="Cycles through 1, 1.5, 2 and 3 times zoom"
+    >
+      <Text style={styles.zoomCycleText}>{zoomLabel}</Text>
+    </Pressable>
+  );
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -294,12 +341,28 @@ export function CaptureHost() {
   const syncInfinityFocus = useCallback(async (speedMps: number, force = false) => {
     const controller = cameraRef.current?.controller;
     if (!controller) return;
-    const lock = shouldLockInfinityFocus(speedMps);
+    // Capture is a road-facing task: hold infinity for the whole session, not
+    // only above 10 mph. Otherwise a stop lets AF settle on the dashboard.
+    const capturing =
+      useStreetViewCaptureStore.getState().session != null || useDashCamStore.getState().recording;
+    const lock = capturing || shouldLockInfinityFocus(speedMps);
     if (!force && lock === focusLockedRef.current) return;
-    if (lock && !controller.device.supportsFocusLocking) return;
     try {
       if (lock) {
-        await controller.setFocusLocked(1);
+        if (controller.device.supportsFocusLocking) {
+          await controller.setFocusLocked(1);
+        } else if (controller.device.supportsFocusMetering) {
+          // Android has no lens-position lock. Meter a point above center (the
+          // road) and hold it instead of letting AF settle on the dash.
+          const point = VisionCamera.createNormalizedMeteringPoint(0.5, 0.35);
+          await controller.focusTo(point, {
+            modes: ['AF'],
+            responsiveness: 'snappy',
+            adaptiveness: 'locked',
+          });
+        } else {
+          return;
+        }
       } else if (focusLockedRef.current) {
         await controller.resetFocus();
       }
@@ -308,6 +371,16 @@ export function CaptureHost() {
       // Leave the previous state; the next fix retries.
     }
   }, []);
+
+  // Apply the user's crop to the preview and to both the still and video
+  // outputs. A zoom change can reset focus, so re-assert the infinity lock.
+  useEffect(() => {
+    if (!ready) return;
+    const controller = cameraRef.current?.controller;
+    if (!controller) return;
+    void controller.setZoom(zoom).catch(() => {});
+    void syncInfinityFocus(0, true);
+  }, [device?.id, ready, syncInfinityFocus, zoom]);
 
   /**
    * Captures the telephoto half of a pair from the same session.
@@ -368,14 +441,14 @@ export function CaptureHost() {
         // A missed detail frame must never abort the wide stream.
         setSessionError(error instanceof Error ? error.message : String(error));
       } finally {
-        await controller.setZoom(1).catch(() => {});
-        // Returning to the wide lens resets focus; restore the high-speed lock.
+        await controller.setZoom(zoom).catch(() => {});
+        // Returning to the wide lens resets focus; restore the infinity lock.
         if (focusLockedRef.current) {
           await syncInfinityFocus(input.fix.speedMps, true);
         }
       }
     },
-    [photoOutput, recordCapture, setSessionError, syncInfinityFocus],
+    [photoOutput, recordCapture, setSessionError, syncInfinityFocus, zoom],
   );
 
   const takePicture = useCallback(async () => {
@@ -464,17 +537,17 @@ export function CaptureHost() {
       wideFrameCountRef.current += 1;
       const detail = shouldCaptureDetail({
         enabled: detailStreamEnabled,
-        detailZoom,
+        detailZoom: effectiveDetailZoom,
         everyNth: STREET_VIEW_DETAIL_EVERY_NTH,
         wideFrameCount: wideFrameCountRef.current,
         dashCamRecording: useDashCamStore.getState().recording,
       });
-      if (detail.capture && detailZoom != null) {
+      if (detail.capture && effectiveDetailZoom != null) {
         await captureDetailFrame({
           driveId: currentSession.driveId,
           fix,
           pairId: id,
-          zoom: detailZoom,
+          zoom: effectiveDetailZoom,
         });
       }
     } catch (error) {
@@ -486,7 +559,7 @@ export function CaptureHost() {
     captureDetailFrame,
     config,
     detailStreamEnabled,
-    detailZoom,
+    effectiveDetailZoom,
     photoOutput,
     portrait,
     ready,
@@ -838,10 +911,10 @@ export function CaptureHost() {
             ]}
             pointerEvents="box-none"
           >
-            <View style={styles.splitTopRow} pointerEvents="none">
+            <View style={styles.splitTopRow} pointerEvents="box-none">
               {modePills}
               <View style={styles.flexSpacer} />
-              <Text style={styles.bandChip}>{lensLabel}</Text>
+              {zoomChips}
             </View>
             <View style={styles.splitBottomRow} pointerEvents="box-none">
               {mountError ? (
@@ -859,10 +932,10 @@ export function CaptureHost() {
             style={[styles.bandOverlay, { paddingBottom: insets.bottom }]}
             pointerEvents="box-none"
           >
-            <View style={styles.bandTopRow} pointerEvents="none">
+            <View style={styles.bandTopRow} pointerEvents="box-none">
               {modePills}
               <View style={styles.flexSpacer} />
-              <Text style={styles.bandChip}>{lensLabel}</Text>
+              {zoomCycleChip}
             </View>
             <View style={styles.bandBottomRow} pointerEvents="box-none">
               {mountError ? (
@@ -890,7 +963,7 @@ export function CaptureHost() {
                   <Text style={styles.count}>{session?.captureCount ?? ''}</Text>
                 </>
               )}
-              <Text style={styles.lens}>{lensLabel}</Text>
+              <Text style={styles.lens}>{zoomLabel}</Text>
             </View>
             {mountError ? (
               <View style={styles.errorOverlay} pointerEvents="none">
@@ -946,16 +1019,48 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.8)',
     textShadowRadius: 3,
   },
-  bandChip: {
+  zoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  zoomChip: {
+    minWidth: 34,
+    height: 24,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
+  zoomChipActive: {
+    backgroundColor: '#fff',
+    borderColor: '#fff',
+  },
+  zoomChipText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    overflow: 'hidden',
+    fontVariant: ['tabular-nums'],
+  },
+  zoomChipTextActive: {
+    color: '#000',
+  },
+  zoomCycleChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  zoomCycleText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   bandHint: {
     ...typography.caption,

@@ -1,4 +1,9 @@
-import { shouldUseSplitCapture } from '../../src/components/imagery/captureLayout';
+import {
+  CAPTURE_ZOOM_PRESETS,
+  clampCaptureZoom,
+  nextCaptureZoom,
+  shouldUseSplitCapture,
+} from '../../src/components/imagery/captureLayout';
 
 describe('shouldUseSplitCapture', () => {
   it('uses the split only on a landscape window with an active capture', () => {
@@ -16,5 +21,26 @@ describe('shouldUseSplitCapture', () => {
   it('rejects unmeasured window dimensions', () => {
     expect(shouldUseSplitCapture({ width: Number.NaN, height: 390, capturing: true })).toBe(false);
     expect(shouldUseSplitCapture({ width: 844, height: Number.NaN, capturing: true })).toBe(false);
+  });
+});
+
+describe('capture zoom', () => {
+  it('offers 1x through 3x crops', () => {
+    expect(CAPTURE_ZOOM_PRESETS).toEqual([1, 1.5, 2, 3]);
+  });
+
+  it('snaps persisted values to the nearest preset', () => {
+    expect(clampCaptureZoom(1.24)).toBe(1);
+    expect(clampCaptureZoom(1.26)).toBe(1.5);
+    expect(clampCaptureZoom(2.7)).toBe(3);
+    expect(clampCaptureZoom(99)).toBe(3);
+    expect(clampCaptureZoom(Number.NaN)).toBe(1);
+  });
+
+  it('cycles through every preset and wraps', () => {
+    expect(nextCaptureZoom(1)).toBe(1.5);
+    expect(nextCaptureZoom(1.5)).toBe(2);
+    expect(nextCaptureZoom(2)).toBe(3);
+    expect(nextCaptureZoom(3)).toBe(1);
   });
 });
