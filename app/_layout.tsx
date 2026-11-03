@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { hideAsync, preventAutoHideAsync } from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -54,6 +55,8 @@ function RootLayoutInner() {
   useICloudSync();
 
   useEffect(() => {
+    // Portrait-first app: only the navigation screen unlocks landscape.
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     useAtprotoAuthStore.getState().restore();
     // Restore the persisted OSM session so a signed-in user is recognized
     // app-wide (auto-seeding gates on it) instead of only on the edit screen.

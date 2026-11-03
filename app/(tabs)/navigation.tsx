@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView, NAVIGATION_PUCK_SCREEN_FRACTION } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
@@ -26,8 +27,13 @@ import { ArrivalSummary } from '@/components/navigation/ArrivalSummary';
 import { SpeedCluster } from '@/components/navigation/SpeedCluster';
 import { CurrentRoadPill } from '@/components/navigation/CurrentRoadPill';
 import { NavigationStepsList } from '@/components/navigation/NavigationStepsList';
+import { NavigationDirectionsFeed } from '@/components/navigation/NavigationDirectionsFeed';
 import { CarPlayNavigationCompanion } from '@/components/navigation/CarPlayNavigationCompanion';
 import { captureBandHeight } from '@/components/imagery/captureBand';
+import {
+  CAPTURE_SPLIT_LEFT_PERCENT,
+  shouldUseSplitCapture,
+} from '@/components/imagery/captureLayout';
 import { useCarPlayStore } from '@/stores/carPlayStore';
 import { OverSpeedMonitor, resolveSpeedLimitMph } from '@/services/navigation/speedAlerts';
 import { useSpeedLimitSignFallback } from '@/hooks/useSpeedLimitSignFallback';
@@ -55,7 +61,7 @@ import { useTrafficEta } from '@/hooks/useTrafficEta';
 import { useNavigationTrafficRefresh } from '@/hooks/useNavigationTrafficRefresh';
 import { useLiveActivity } from '@/hooks/useLiveActivity';
 import { repeatLastAnnouncement, stopNavigationSpeech } from '@/services/tts';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { GlassView } from '@/components/common/GlassView';
 import * as Haptics from 'expo-haptics';
 
@@ -89,10 +95,17 @@ export default function NavigationScreen() {
   const streetViewSession = useStreetViewCaptureStore((s) => s.session);
   const dashRecording = useDashCamStore((s) => s.recording);
   const dashCamEnabled = useSettingsStore((s) => s.dashCam.enabled);
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const capturing = Boolean(streetViewSession) || dashRecording;
+  // Landscape + a live capture replaces the map with the directions/camera split.
+  const splitCapture = shouldUseSplitCapture({
+    width: windowWidth,
+    height: windowHeight,
+    capturing,
+  });
   // While the live camera owns the bottom quarter of the screen, the driving
   // HUD moves above it instead of being covered.
-  const bandHeight = streetViewSession || dashRecording ? captureBandHeight(windowHeight) : 0;
+  const bandHeight = capturing ? captureBandHeight(windowHeight) : 0;
   const bottomAnchor = bandHeight > 0 ? bandHeight : insets.bottom;
   // The rail is 52pt per action; the full stack would reach into the turn
   // banner once the camera band lifts it. While capturing, keep the two camera
@@ -114,6 +127,20 @@ export default function NavigationScreen() {
       deactivateKeepAwake('navigation');
     };
   }, [isNavigating]);
+
+  // The navigation screen is the only surface allowed to rotate; the root
+  // layout keeps the rest of the app portrait. Both portrait and landscape are
+  // allowed here so the driver can turn the phone sideways for capture.
+  useFocusEffect(
+    useCallback(() => {
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.DEFAULT).catch(() => {});
+      return () => {
+        void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(
+          () => {},
+        );
+      };
+    }, []),
+  );
 
   // Track previous navigation state so we can detect when it ends
   const wasNavigating = useRef(false);
@@ -635,22 +662,43 @@ export default function NavigationScreen() {
   if (isNavigating && carPlayConnected) {
     return (
       <View style={styles.container}>
-        <View
-          style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}
-          pointerEvents="box-none"
-        >
-          <FasterRouteBanner />
-        </View>
-        <CarPlayNavigationCompanion
-          route={activeRoute}
-          currentStepIndex={guidanceIdx}
-          etaSeconds={etaSeconds}
-          remainingDistanceMeters={remainingDistanceMeters}
-          destinationName={destination?.name}
-          bottomInset={bandHeight}
-          onAddStop={handleOpenAddDestination}
-          onEnd={stopNavigation}
-        />
+        {!splitCapture ? (
+          <View
+            style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}
+            pointerEvents="box-none"
+          >
+            <FasterRouteBanner />
+          </View>
+        ) : null}
+        {splitCapture ? (
+          <View style={styles.captureSplit}>
+            <View style={styles.captureSplitLeft}>
+              <CarPlayNavigationCompanion
+                route={activeRoute}
+                currentStepIndex={guidanceIdx}
+                etaSeconds={etaSeconds}
+                remainingDistanceMeters={remainingDistanceMeters}
+                destinationName={destination?.name}
+                split
+                bottomInset={0}
+                onAddStop={handleOpenAddDestination}
+                onEnd={stopNavigation}
+              />
+            </View>
+            <View style={styles.captureSplitRight} />
+          </View>
+        ) : (
+          <CarPlayNavigationCompanion
+            route={activeRoute}
+            currentStepIndex={guidanceIdx}
+            etaSeconds={etaSeconds}
+            remainingDistanceMeters={remainingDistanceMeters}
+            destinationName={destination?.name}
+            bottomInset={bandHeight}
+            onAddStop={handleOpenAddDestination}
+            onEnd={stopNavigation}
+          />
+        )}
 
         <AddDestinationPanel
           visible={showAddDestination}
@@ -679,6 +727,75 @@ export default function NavigationScreen() {
             }}
           />
         )}
+      </View>
+    );
+  }
+
+  // Landscape capture surface: directions feed on the left, live camera on the
+  // right. CaptureHost draws the camera pane; the map and HUD are hidden so the
+  // camera owns the capture surface, matching Mapillary's capture screen.
+  if (splitCapture) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.captureSplit}>
+          <View
+            style={[
+              styles.captureSplitLeft,
+              {
+                paddingTop: insets.top,
+                paddingBottom: insets.bottom,
+                paddingLeft: insets.left + 12,
+              },
+            ]}
+          >
+            <NavigationDirectionsFeed
+              route={activeRoute}
+              currentStepIndex={guidanceIdx}
+              etaSeconds={etaSeconds}
+              remainingDistanceMeters={remainingDistanceMeters}
+              destinationName={destination?.name}
+              onAddStop={handleOpenAddDestination}
+              onEnd={stopNavigation}
+              compact
+            />
+          </View>
+          <View style={styles.captureSplitRight} />
+        </View>
+
+        <AddDestinationPanel
+          visible={showAddDestination}
+          onClose={handleCloseAddDestination}
+          onSelect={handleSelectDestination}
+          onShowOnMap={handleShowSearchResultsOnMap}
+          searchCenter={searchCenter}
+        />
+
+        <IncidentReportPanel
+          visible={showIncidentReport}
+          onClose={() => setShowIncidentReport(false)}
+          position={navPosition ?? [0, 0]}
+        />
+
+        {showArrival && destination && (
+          <ArrivalSummary
+            destinationName={destination.name}
+            elapsedSeconds={
+              startedAtRef.current ? Math.floor((Date.now() - startedAtRef.current) / 1000) : 0
+            }
+            distanceMeters={activeRoute?.summary.distanceMeters ?? 0}
+            onDismiss={() => {
+              setShowArrival(false);
+              stopNavigation();
+            }}
+          />
+        )}
+
+        <NavigationStepsList
+          visible={showSteps}
+          route={activeRoute}
+          currentStepIndex={guidanceIdx}
+          onClose={() => setShowSteps(false)}
+        />
       </View>
     );
   }
@@ -837,12 +954,13 @@ export default function NavigationScreen() {
             accessibilityRole="button"
           >
             <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-              <Ionicons
-                name={streetViewSession ? 'stop-circle' : 'camera-outline'}
+              <MaterialCommunityIcons
+                name="camera-marker"
                 size={22}
                 color={streetViewSession ? '#FF453A' : '#fff'}
               />
             </GlassView>
+            {streetViewSession ? <View style={styles.fabActiveDot} /> : null}
           </Pressable>
           {dashCamEnabled ? (
             <Pressable
@@ -868,12 +986,9 @@ export default function NavigationScreen() {
               accessibilityRole="button"
             >
               <GlassView material="regular" isInteractive style={styles.actionFabInner}>
-                <Ionicons
-                  name={dashRecording ? 'stop-circle' : 'videocam-outline'}
-                  size={22}
-                  color={dashRecording ? '#FF453A' : '#fff'}
-                />
+                <Ionicons name="videocam" size={22} color={dashRecording ? '#FF453A' : '#fff'} />
               </GlassView>
+              {dashRecording ? <View style={styles.fabActiveDot} /> : null}
             </Pressable>
           ) : null}
           <Pressable
@@ -1060,6 +1175,31 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       borderRadius: 26,
       overflow: 'hidden',
       borderCurve: 'continuous',
+    },
+    fabActiveDot: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      width: 9,
+      height: 9,
+      borderRadius: 5,
+      backgroundColor: '#FF453A',
+      borderWidth: 1,
+      borderColor: '#000',
+    },
+    captureSplit: {
+      flex: 1,
+      flexDirection: 'row',
+      backgroundColor: '#000',
+    },
+    captureSplitLeft: {
+      width: CAPTURE_SPLIT_LEFT_PERCENT,
+      paddingRight: 12,
+      backgroundColor: colors.backgroundDark,
+    },
+    captureSplitRight: {
+      flex: 1,
+      backgroundColor: '#000',
     },
     rerouteBanner: {
       backgroundColor: 'rgba(64,156,255,0.95)',

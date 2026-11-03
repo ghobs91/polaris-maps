@@ -90,6 +90,13 @@ interval:
   tiers the Mapillary app uses. Capture continues in stop-and-go traffic above
   ~1.5 m/s and pauses when parked. The camera-busy latch, not the clock, sets
   the real cadence; `minIntervalMs` only debounces duplicate GPS ticks.
+- **Landscape interface.** The navigation screen unlocks portrait + landscape
+  (the rest of the app stays portrait). In landscape with an active capture,
+  the map is replaced by a 30% directions feed on the left and a 70% camera pane
+  on the right; in portrait the map stays and the camera is a bottom band with a
+  full-cover "Rotate to landscape" prompt while street imagery is paused.
+  Dash cam is always the `videocam` icon; street imagery is the
+  `camera-marker` (camera + map pin) icon.
 - **4:3 full-sensor stills** at JPEG quality 0.7 (0.9 in 3D mode). A 16:9 crop
   loses detail and approaches the 2:1 aspect ratio Mapillary renders as an
   equirectangular panorama.

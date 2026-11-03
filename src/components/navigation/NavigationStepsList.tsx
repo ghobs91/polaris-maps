@@ -22,6 +22,8 @@ interface NavigationStepsContentProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   /** Style for the list itself. */
   style?: StyleProp<ViewStyle>;
+  /** Denser rows for the narrow 30% landscape feed. */
+  compact?: boolean;
 }
 
 /**
@@ -33,11 +35,13 @@ export function NavigationStepsContent({
   currentStepIndex,
   contentContainerStyle,
   style,
+  compact = false,
 }: NavigationStepsContentProps) {
   const maneuvers = useMemo<ValhallaManeuver[]>(
     () => route?.legs.flatMap((leg) => leg.maneuvers) ?? [],
     [route],
   );
+  const rowHeight = compact ? 48 : 56;
 
   if (maneuvers.length === 0) {
     return <Text style={styles.empty}>No steps available</Text>;
@@ -50,26 +54,44 @@ export function NavigationStepsContent({
       keyExtractor={(_, index) => String(index)}
       showsVerticalScrollIndicator={false}
       initialScrollIndex={Math.max(0, currentStepIndex - 1)}
-      getItemLayout={(_, index) => ({ length: 56, offset: 56 * index, index })}
+      getItemLayout={(_, index) => ({ length: rowHeight, offset: rowHeight * index, index })}
       contentContainerStyle={contentContainerStyle}
       renderItem={({ item, index }) => {
         const isCurrent = index === currentStepIndex;
         return (
-          <View style={[styles.row, isCurrent && styles.rowCurrent]}>
-            <View style={[styles.index, isCurrent && styles.indexCurrent]}>
-              <Text style={[styles.indexText, isCurrent && styles.indexTextCurrent]}>
+          <View style={[styles.row, compact && styles.rowCompact, isCurrent && styles.rowCurrent]}>
+            <View
+              style={[
+                styles.index,
+                compact && styles.indexCompact,
+                isCurrent && styles.indexCurrent,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.indexText,
+                  compact && styles.indexTextCompact,
+                  isCurrent && styles.indexTextCurrent,
+                ]}
+              >
                 {index + 1}
               </Text>
             </View>
             <View style={styles.body}>
               <Text
-                style={[styles.instruction, isCurrent && styles.instructionCurrent]}
+                style={[
+                  styles.instruction,
+                  compact && styles.instructionCompact,
+                  isCurrent && styles.instructionCurrent,
+                ]}
                 numberOfLines={2}
               >
                 {item.instruction || item.verbalPreTransition || 'Continue'}
               </Text>
               {typeof item.distanceMeters === 'number' && item.distanceMeters > 0 ? (
-                <Text style={styles.distance}>{formatDistance(item.distanceMeters)}</Text>
+                <Text style={[styles.distance, compact && styles.distanceCompact]}>
+                  {formatDistance(item.distanceMeters)}
+                </Text>
               ) : null}
             </View>
           </View>
@@ -148,6 +170,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   rowCurrent: { backgroundColor: nav.accentWash },
+  rowCompact: { height: 48, gap: 8, paddingHorizontal: 4 },
   index: {
     width: 26,
     height: 26,
@@ -156,11 +179,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  indexCompact: { width: 22, height: 22, borderRadius: 11 },
   indexCurrent: { backgroundColor: nav.accent },
   indexText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '700' },
+  indexTextCompact: { fontSize: 11 },
   indexTextCurrent: { color: '#fff' },
   body: { flex: 1 },
   instruction: { color: 'rgba(255,255,255,0.85)', fontSize: 15 },
+  instructionCompact: { fontSize: 13 },
   instructionCurrent: { color: '#fff', fontWeight: '700' },
   distance: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 2 },
+  distanceCompact: { fontSize: 11, marginTop: 1 },
 });

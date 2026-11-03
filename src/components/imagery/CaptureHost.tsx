@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -28,6 +28,7 @@ import {
 } from 'react-native-vision-camera';
 import { createLocation } from 'react-native-vision-camera-location';
 import { captureBandHeight } from './captureBand';
+import { CAPTURE_SPLIT_LEFT_PERCENT, shouldUseSplitCapture } from './captureLayout';
 import { spacing, typography } from '../../constants/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
@@ -158,7 +159,7 @@ export function CaptureHost() {
   const setDashCamPaused = useDashCamStore((s) => s.setPaused);
   const setDashCamError = useDashCamStore((s) => s.setError);
   const clipSeconds = useSettingsStore((s) => s.dashCam.clipSeconds);
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const cameraRef = useRef<CameraRef>(null);
@@ -217,11 +218,20 @@ export function CaptureHost() {
   const captureActive = Boolean(session) || dashRecording;
   const deviceOrientation = useCaptureOrientation(session != null);
   const portrait = isPortraitOrientation(deviceOrientation);
+  const onNavigation = Boolean(pathname?.includes('navigation'));
+  // Landscape navigation with a live capture: the camera becomes the right 70%
+  // pane and the navigation screen renders the directions feed on the left.
+  const splitCapture =
+    onNavigation &&
+    shouldUseSplitCapture({
+      width: windowWidth,
+      height: windowHeight,
+      capturing: captureActive,
+    });
 
-  // Only the navigation screen splits into "directions on top, live camera in
-  // the bottom quarter"; every other screen keeps the compact pill so the map
-  // and lists are not covered while a drive is running.
-  const expanded = captureActive && Boolean(pathname?.includes('navigation'));
+  // Only the navigation screen splits into "directions + camera"; every other
+  // screen keeps the compact pill so the map and lists are not covered.
+  const expanded = captureActive && onNavigation && !splitCapture;
   const bandHeight = captureBandHeight(windowHeight);
   const usingUltraWide =
     mode === 'threeD' &&
@@ -617,47 +627,146 @@ export function CaptureHost() {
     void recorderRef.current?.stopRecording().catch(() => {});
   };
 
-  const stopButton = (kind: 'streetview' | 'dashcam') => (
-    <Pressable
-      onPress={kind === 'dashcam' ? stopDashCam : stopStreetView}
-      style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
-      accessibilityRole="button"
-      accessibilityLabel={
-        kind === 'dashcam' ? 'Stop dash cam recording' : 'Stop street imagery capture'
-      }
-      accessibilityHint={
-        kind === 'dashcam'
-          ? 'Stops recording and keeps the footage already captured'
-          : 'Stops capture and opens the upload summary'
-      }
-    >
-      <Ionicons name={kind === 'dashcam' ? 'videocam-off' : 'stop'} size={16} color="#fff" />
-    </Pressable>
+  const modePills = (
+    <>
+      <View style={[styles.modePill, session && styles.modePillActive]}>
+        <MaterialCommunityIcons
+          name="camera-marker"
+          size={13}
+          color={session ? (portrait ? '#FFD60A' : '#fff') : 'rgba(255,255,255,0.5)'}
+        />
+        <Text style={[styles.modePillLabel, !session && styles.modePillLabelMuted]}>
+          Street imagery
+        </Text>
+        <Text style={styles.modePillValue}>
+          {session ? (portrait ? 'Rotate' : session.captureCount) : 'Off'}
+        </Text>
+      </View>
+      <View style={[styles.modePill, dashRecording && styles.modePillActive]}>
+        <Ionicons
+          name="videocam"
+          size={13}
+          color={dashRecording ? '#FF453A' : 'rgba(255,255,255,0.5)'}
+        />
+        <Text style={[styles.modePillLabel, !dashRecording && styles.modePillLabelMuted]}>
+          Dash cam
+        </Text>
+        <Text style={styles.modePillValue}>
+          {dashRecording ? (dashPaused ? 'Paused' : formatClock(elapsed)) : 'Off'}
+        </Text>
+      </View>
+    </>
   );
 
-  const stopControls = (
-    <View style={styles.stopRow}>
-      {session ? stopButton('streetview') : null}
-      {dashRecording ? stopButton('dashcam') : null}
+  const modeControls = (
+    <View style={styles.modeControlRow}>
+      {session ? (
+        <Pressable
+          onPress={stopStreetView}
+          style={({ pressed }) => [styles.modeControl, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop street imagery capture"
+          accessibilityHint="Stops capture and opens the upload summary"
+        >
+          <MaterialCommunityIcons name="camera-marker" size={16} color="#FF453A" />
+          <Text style={styles.modeControlText}>Stop street</Text>
+        </Pressable>
+      ) : null}
+      {dashRecording ? (
+        <Pressable
+          onPress={stopDashCam}
+          style={({ pressed }) => [styles.modeControl, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop dash cam recording"
+          accessibilityHint="Stops recording and keeps the footage already captured"
+        >
+          <Ionicons name="videocam" size={16} color="#FF453A" />
+          <Text style={styles.modeControlText}>Stop dash</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 
-  // Street stills pause in portrait, matching the Mapillary app; the band says
-  // why the counter has stopped instead of silently dropping frames.
-  const rotateHint = session != null && portrait;
-  const bandHintText = rotateHint
-    ? 'Rotate phone to landscape to capture'
-    : dashRecording && session
-      ? 'Footage stays on this device · photos upload later'
+  const compactModeControls = (
+    <View style={styles.stopRow}>
+      {session ? (
+        <Pressable
+          onPress={stopStreetView}
+          style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop street imagery capture"
+        >
+          <MaterialCommunityIcons name="camera-marker" size={18} color="#FF453A" />
+        </Pressable>
+      ) : null}
+      {dashRecording ? (
+        <Pressable
+          onPress={stopDashCam}
+          style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop dash cam recording"
+        >
+          <Ionicons name="videocam" size={18} color="#FF453A" />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
+  const bandHintText =
+    dashRecording && session
+      ? 'Dash cam stays on this device · street photos upload later'
       : dashRecording
-        ? 'Footage stays on this device'
-        : 'Street imagery · tap stop to review';
+        ? 'Dash cam stays on this device'
+        : 'Street imagery uploads to Mapillary';
+
+  const rotateOverlay = (
+    <View style={styles.rotateOverlay} accessibilityRole="alert">
+      <View style={styles.rotateCard}>
+        <View style={styles.rotateIconWrap}>
+          <Ionicons name="phone-landscape-outline" size={28} color="#FFD60A" />
+        </View>
+        <View style={styles.rotateText}>
+          <Text style={styles.rotateTitle}>Rotate to landscape</Text>
+          <Text style={styles.rotateBody}>
+            Street imagery needs a sideways camera. Turn your phone to start capturing.
+          </Text>
+          {dashRecording ? <Text style={styles.rotateSub}>Dash cam keeps recording.</Text> : null}
+          <View style={styles.rotateActions}>
+            <Pressable
+              onPress={stopStreetView}
+              style={({ pressed }) => [styles.rotateAction, { opacity: pressed ? 0.8 : 1 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Stop street imagery capture"
+            >
+              <MaterialCommunityIcons name="camera-marker" size={14} color="#fff" />
+              <Text style={styles.rotateActionText}>Stop street imagery</Text>
+            </Pressable>
+            {dashRecording ? (
+              <Pressable
+                onPress={stopDashCam}
+                style={({ pressed }) => [styles.rotateAction, { opacity: pressed ? 0.8 : 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Stop dash cam recording"
+              >
+                <Ionicons name="videocam" size={14} color="#fff" />
+                <Text style={styles.rotateActionText}>Stop dash cam</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
 
   if (!hasPermission) {
     return (
       <View
         style={[
-          expanded ? styles.expandedPermissionPill : styles.permissionPill,
+          splitCapture
+            ? styles.splitPermission
+            : expanded
+              ? styles.expandedPermissionPill
+              : styles.permissionPill,
           expanded ? { height: bandHeight } : null,
         ]}
       >
@@ -670,15 +779,21 @@ export function CaptureHost() {
     );
   }
 
-  // One camera tree for both layouts: only the outer/inner styles change, so
-  // switching tabs (expanded band ↔ compact pill) never remounts the camera
-  // and never interrupts a recording.
+  // One camera tree for every layout: only the outer/inner styles change, so
+  // switching between the compact pill, the portrait band, and the landscape
+  // pane never remounts the camera or interrupts a recording.
   return (
     <View
-      style={expanded ? [styles.band, { height: bandHeight }] : styles.wrap}
+      style={
+        splitCapture
+          ? styles.splitPane
+          : expanded
+            ? [styles.band, { height: bandHeight }]
+            : styles.wrap
+      }
       pointerEvents="box-none"
     >
-      <View style={expanded ? styles.bandInner : styles.preview}>
+      <View style={splitCapture ? styles.splitInner : expanded ? styles.bandInner : styles.preview}>
         <Camera
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
@@ -710,29 +825,44 @@ export function CaptureHost() {
             }
           }}
         />
-        {expanded ? (
+        {splitCapture ? (
+          <View
+            style={[
+              styles.splitOverlay,
+              {
+                paddingTop: insets.top + spacing.sm,
+                paddingRight: insets.right + spacing.md,
+                paddingBottom: insets.bottom + spacing.md,
+                paddingLeft: spacing.md,
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.splitTopRow} pointerEvents="none">
+              {modePills}
+              <View style={styles.flexSpacer} />
+              <Text style={styles.bandChip}>{lensLabel}</Text>
+            </View>
+            <View style={styles.splitBottomRow} pointerEvents="box-none">
+              {mountError ? (
+                <Text style={styles.bandError}>Camera unavailable</Text>
+              ) : (
+                <Text style={styles.splitHint} numberOfLines={2}>
+                  {bandHintText}
+                </Text>
+              )}
+              <View style={styles.bandStop}>{modeControls}</View>
+            </View>
+          </View>
+        ) : expanded ? (
           <View
             style={[styles.bandOverlay, { paddingBottom: insets.bottom }]}
             pointerEvents="box-none"
           >
             <View style={styles.bandTopRow} pointerEvents="none">
-              {dashRecording || session ? <View style={styles.recordingDot} /> : null}
-              {dashRecording ? (
-                <Text style={styles.bandCounter}>{formatClock(elapsed)}</Text>
-              ) : null}
-              {session ? <Text style={styles.bandCounter}>{session.captureCount}</Text> : null}
-              <Text style={styles.bandChip}>
-                {rotateHint
-                  ? 'ROTATE'
-                  : dashRecording && session
-                    ? 'DASH CAM + PHOTOS'
-                    : dashRecording
-                      ? 'DASH CAM'
-                      : lensLabel}
-              </Text>
-              {dashRecording ? (
-                <Text style={styles.bandHint}>{dashPaused ? 'Paused' : 'Recording'}</Text>
-              ) : null}
+              {modePills}
+              <View style={styles.flexSpacer} />
+              <Text style={styles.bandChip}>{lensLabel}</Text>
             </View>
             <View style={styles.bandBottomRow} pointerEvents="box-none">
               {mountError ? (
@@ -742,25 +872,25 @@ export function CaptureHost() {
                   {bandHintText}
                 </Text>
               )}
-              <View style={styles.bandStop}>{stopControls}</View>
+              <View style={styles.bandStop}>{modeControls}</View>
             </View>
           </View>
         ) : (
           <>
             <View style={styles.topRow} pointerEvents="none">
               <View style={styles.recordingDot} />
-              <Text style={styles.count}>
-                {dashRecording ? formatClock(elapsed) : session?.captureCount}
-              </Text>
-              <Text style={styles.lens}>
-                {rotateHint
-                  ? 'ROTATE'
-                  : dashRecording && session
-                    ? 'REC+IMG'
-                    : dashRecording
-                      ? 'REC'
-                      : lensLabel}
-              </Text>
+              {dashRecording ? (
+                <>
+                  <Ionicons name="videocam" size={9} color="#fff" />
+                  <Text style={styles.count}>{formatClock(elapsed)}</Text>
+                </>
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="camera-marker" size={9} color="#fff" />
+                  <Text style={styles.count}>{session?.captureCount ?? ''}</Text>
+                </>
+              )}
+              <Text style={styles.lens}>{lensLabel}</Text>
             </View>
             {mountError ? (
               <View style={styles.errorOverlay} pointerEvents="none">
@@ -769,8 +899,9 @@ export function CaptureHost() {
             ) : null}
           </>
         )}
+        {expanded && session && portrait ? rotateOverlay : null}
       </View>
-      {!expanded ? stopControls : null}
+      {!expanded && !splitCapture ? compactModeControls : null}
     </View>
   );
 }
@@ -830,6 +961,7 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: 'rgba(255,255,255,0.85)',
     fontSize: 11,
+    flexShrink: 1,
   },
   bandError: {
     ...typography.caption,
@@ -959,5 +1091,174 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: '#fff',
     fontSize: 12,
+  },
+  splitPane: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    left: CAPTURE_SPLIT_LEFT_PERCENT,
+    backgroundColor: '#000',
+    zIndex: 30,
+  },
+  splitInner: { flex: 1 },
+  splitOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+  },
+  splitTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  splitBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  splitHint: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 11,
+    flex: 1,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 3,
+  },
+  splitPermission: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    left: CAPTURE_SPLIT_LEFT_PERCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(28,28,30,0.95)',
+    zIndex: 30,
+  },
+  flexSpacer: { flex: 1 },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+    flexShrink: 1,
+  },
+  modePillActive: {
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderColor: 'rgba(255,255,255,0.5)',
+  },
+  modePillLabel: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  modePillLabelMuted: {
+    color: 'rgba(255,255,255,0.55)',
+  },
+  modePillValue: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 10,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  modeControlRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  modeControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 17,
+    backgroundColor: 'rgba(28,28,30,0.9)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  modeControlText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rotateOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.84)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    zIndex: 40,
+  },
+  rotateCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 380,
+  },
+  rotateIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,214,10,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,214,10,0.55)',
+    flexShrink: 0,
+  },
+  rotateText: { flexShrink: 1 },
+  rotateTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  rotateBody: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  rotateSub: {
+    color: '#FFD60A',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
+  },
+  rotateActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  rotateAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  rotateActionText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
