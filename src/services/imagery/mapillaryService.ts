@@ -14,6 +14,7 @@ import {
   isMapillaryUploadConfigured,
 } from '../../constants/config';
 import type { StreetViewCapture, StreetViewDriveSummary } from '../../models/streetViewCapture';
+import { haversineMeters } from '../../utils/routeSnap';
 import { useSettingsStore } from '../../stores/settingsStore';
 import {
   getOrCreateUploadBatch,
@@ -75,6 +76,8 @@ class MapillaryTransientError extends Error {
 const MAX_IMAGES_PER_CLUSTER = 1000;
 /** A long stop (parking, a break) starts a new sequence on Mapillary. */
 const MAX_CLUSTER_GAP_MS = 10 * 60 * 1000;
+/** Mapillary splits a sequence when consecutive images are more than 100 m apart. */
+const MAX_CLUSTER_GAP_METERS = 100;
 const TRANSIENT_ATTEMPTS = 4;
 const RETRY_BASE_DELAY_MS = 700;
 const MAX_RETRY_DELAY_MS = 15_000;
@@ -483,26 +486,34 @@ export interface MapillaryUploadResult {
 
 /**
  * Splits a drive into Mapillary "sequence"-sized segments: a new cluster after
- * a long stop (a break, parking) or once a manifest grows past
- * `MAX_IMAGES_PER_CLUSTER`. One giant manifest for a multi-hour drive is the
- * case that tends to fail server-side, so bound it here.
+ * a long stop (a break, parking), after a GPS gap wider than Mapillary's 100 m
+ * sequence cutoff, or once a manifest grows past `MAX_IMAGES_PER_CLUSTER`. One
+ * giant manifest for a multi-hour drive is the case that tends to fail
+ * server-side, so bound it here.
  */
 export function segmentCaptures(captures: StreetViewCapture[]): StreetViewCapture[][] {
   const sorted = [...captures].sort((a, b) => a.capturedAt - b.capturedAt);
   const segments: StreetViewCapture[][] = [];
   let current: StreetViewCapture[] = [];
-  let previousAt: number | null = null;
+  let previous: StreetViewCapture | null = null;
 
   for (const capture of sorted) {
-    const gap = previousAt == null ? 0 : capture.capturedAt - previousAt;
+    const gapMs = previous == null ? 0 : capture.capturedAt - previous.capturedAt;
+    const gapMeters =
+      previous == null
+        ? 0
+        : haversineMeters([previous.lng, previous.lat], [capture.lng, capture.lat]);
     const shouldSplit =
-      current.length > 0 && (gap > MAX_CLUSTER_GAP_MS || current.length >= MAX_IMAGES_PER_CLUSTER);
+      current.length > 0 &&
+      (gapMs > MAX_CLUSTER_GAP_MS ||
+        gapMeters > MAX_CLUSTER_GAP_METERS ||
+        current.length >= MAX_IMAGES_PER_CLUSTER);
     if (shouldSplit) {
       segments.push(current);
       current = [];
     }
     current.push(capture);
-    previousAt = capture.capturedAt;
+    previous = capture;
   }
   if (current.length > 0) segments.push(current);
   return segments;

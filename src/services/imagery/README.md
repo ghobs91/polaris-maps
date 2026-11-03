@@ -47,10 +47,10 @@ the P2P `street_imagery` feed above.
 
 | File                                                  | Description                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `streetViewCaptureLogic.ts`                           | Pure capture gating (distance/speed/interval/accuracy) and EXIF payload builder for a raw GPS fix.                                                                                                                                                                                                                                   |
+| `streetViewCaptureLogic.ts`                           | Pure capture gating (adaptive 3 m urban / 20 m highway spacing, speed, interval, accuracy, landscape, infinity focus) and EXIF payload builder for a raw GPS fix.                                                                                                                                                                    |
 | `streetViewQueue.ts`                                  | SQLite-backed per-drive capture queue, Mapillary upload status, upload batches, crash recovery, and local-file cleanup.                                                                                                                                                                                                              |
 | `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                                                                                                                         |
-| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters, 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage.                                                                                                  |
+| `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters (10 min / 100 m gaps / 1,000 images), 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage.                                                             |
 | `streetViewConsent.ts`                                | One-time consent explainer for the street-imagery master switch and manual capture starts. Navigation start itself never prompts — street imagery is a Settings-only decision.                                                                                                                                                       |
 | `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills (wide + optional paired telephoto detail), and segmented dash-cam recording from one photo + video session.                                                                                                      |
 | `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, Mapillary upload, upload progress, Delete all, and deferred uploads.                                                                                                                                                                                                                                           |
@@ -61,15 +61,41 @@ Flow:
 
 ```
 Navigation raw GPS fix (trackingService)
-    ↓ distance/speed/interval gate
-CaptureHost (global 16:9 CameraView)
-    ↓ EXIF: GPS + heading + capture time
+    ↓ adaptive distance / speed / interval gate
+CaptureHost (global CameraView, 4:3 stills)
+    ↓ EXIF: GPS + capture time
 streetViewQueue (SQLite + document/streetview/<drive>/)
     ↓ navigation ends
 DriveUploadSheet (summary, consent, Delete all)
     └─ Mapillary raw upload + manifest + finish_upload
            → Mapillary cluster (processing)
 ```
+
+### Mapillary capture parity
+
+The stills pipeline follows the Mapillary mobile app rather than a fixed
+interval:
+
+- **Landscape only.** While the phone is portrait no frames are taken and the
+  capture band shows `ROTATE`. Orientation comes from the device accelerometer
+  (200 ms updates); on hardware without one, such as the iOS Simulator, capture
+  stays on. `mapillaryService` keeps its upload-time portrait skip as a safety
+  net for a phone rotated in the sub-second window before a shutter, and for
+  drives captured by older builds.
+- **Infinity focus above 10 mph.** The lens is locked at infinity
+  (`CameraController.setFocusLocked(1)`, iOS) while driving and handed back to
+  continuous autofocus below that speed, so the camera cannot hunt on the
+  windscreen. The lock is re-applied after the detail stream's lens switch.
+- **Adaptive spacing.** 3 m below 50 km/h and 20 m at or above it, the same
+  tiers the Mapillary app uses. Capture continues in stop-and-go traffic above
+  ~1.5 m/s and pauses when parked. The camera-busy latch, not the clock, sets
+  the real cadence; `minIntervalMs` only debounces duplicate GPS ticks.
+- **4:3 full-sensor stills** at JPEG quality 0.7 (0.9 in 3D mode). A 16:9 crop
+  loses detail and approaches the 2:1 aspect ratio Mapillary renders as an
+  equirectangular panorama.
+- **Storage.** The default capture cap is 8 GB because 3 m city spacing with
+  12 MP stills outgrows the old 2 GB default in minutes; the old default is
+  raised once on upgrade.
 
 The existing `captureService`/`uploadService`/`blurService` pipeline is **not**
 used here: it is P2P-specific, has no EXIF writing, and its placeholder blur
@@ -80,8 +106,8 @@ strips metadata. Mapillary blurs faces and plates server-side.
 `streetView.detailStream` adds a second, paired perspective to some capture
 points:
 
-- Every 5th wide frame (≈100 m in standard mode) the camera switches to the
-  telephoto lens — the lowest factor above 1× in
+- Every 5th wide frame (≈15 m in town, ≈100 m on the highway) the camera
+  switches to the telephoto lens — the lowest factor above 1× in
   `CameraDevice.zoomLensSwitchFactors` — captures one frame, then returns to
   1×. The detail row reuses the wide frame's GPS fix, speed and heading, and
   carries `stream = 'detail'` plus `pair_id` (the wide frame's id).
@@ -95,8 +121,10 @@ points:
   ultra-wide input has no tele constituent).
 
 Unverified: Mapillary may treat two frames captured ~0.5 s apart at the same
-fix as duplicates. Check the published cluster coverage after the first real
-drive before enabling detail upload by default.
+fix as duplicates. Its default duplicate distance is 3 m, so a telephoto frame
+shares the wide frame's position and is a likely drop; check the published
+cluster coverage after the first real drive before enabling detail upload by
+default.
 
 **Why not concurrent:** iOS lets one `AVCaptureSession` own the camera devices
 at a time, and VisionCamera owns the session that feeds the preview, the

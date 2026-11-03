@@ -21,7 +21,9 @@ import {
   useCameraPermission,
   usePhotoOutput,
   useVideoOutput,
+  VisionCamera,
   type CameraRef,
+  type OrientationManager,
   type Recorder,
 } from 'react-native-vision-camera';
 import { createLocation } from 'react-native-vision-camera-location';
@@ -34,9 +36,12 @@ import { dashCamElapsedSeconds, useDashCamStore } from '../../stores/dashCamStor
 import {
   captureConfigForMode,
   detailZoomForDevice,
+  isPortraitOrientation,
   resolveCaptureMode,
   shouldCapture,
   shouldCaptureDetail,
+  shouldLockInfinityFocus,
+  type CaptureOrientation,
   type LastCapture,
 } from '../../services/imagery/streetViewCaptureLogic';
 import { STREET_VIEW_DETAIL_EVERY_NTH, type StreetViewFix } from '../../models/streetViewCapture';
@@ -75,6 +80,44 @@ function getImageSize(uri: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
     Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
   });
+}
+
+/**
+ * Device orientation with a fallback for hardware that has no accelerometer
+ * (notably the iOS Simulator, where VisionCamera's `useOrientation` throws).
+ * An unknown orientation never blocks capture; the upload-time portrait check
+ * remains the final safety net.
+ */
+function useCaptureOrientation(enabled: boolean): CaptureOrientation | undefined {
+  const [orientation, setOrientation] = useState<CaptureOrientation | undefined>(undefined);
+
+  useEffect(() => {
+    if (!enabled) {
+      setOrientation(undefined);
+      return;
+    }
+
+    let manager: OrientationManager;
+    try {
+      manager = VisionCamera.createOrientationManager('device');
+      setOrientation(manager.currentOrientation);
+      manager.startOrientationUpdates(setOrientation);
+    } catch {
+      // No accelerometer: leave the orientation unknown.
+      setOrientation(undefined);
+      return;
+    }
+
+    return () => {
+      try {
+        manager.stopOrientationUpdates();
+      } catch {
+        // Already stopped.
+      }
+    };
+  }, [enabled]);
+
+  return orientation;
 }
 
 function formatClock(totalSeconds: number): string {
@@ -136,7 +179,10 @@ export function CaptureHost() {
   // would just crop the frame the wide stream already has.
   const detailZoom = detailZoomForDevice(backDevice);
   const photoOutput = usePhotoOutput({
-    targetResolution: mode === 'standard' ? CommonResolutions.FHD_16_9 : CommonResolutions.UHD_4_3,
+    // Mapillary's app captures 4:3 full-sensor stills. A 16:9 crop loses
+    // detail at the edges and moves the aspect ratio towards 2:1, which
+    // Mapillary treats as an equirectangular panorama.
+    targetResolution: CommonResolutions.UHD_4_3,
     containerFormat: 'jpeg',
     quality: config.quality,
     qualityPrioritization: 'balanced',
@@ -157,13 +203,21 @@ export function CaptureHost() {
   const lastCaptureRef = useRef<LastCapture | null>(null);
   /** Wide frames this drive, for the detail-stream cadence. */
   const wideFrameCountRef = useRef(0);
+  /** True while the lens is locked at infinity for high-speed capture. */
+  const focusLockedRef = useRef(false);
   const permissionRequestedRef = useRef(false);
   const lastStorageCheckRef = useRef(0);
   const activeRef = useRef(appActive);
   const recorderRef = useRef<Recorder | null>(null);
   activeRef.current = appActive;
 
+  // Mapillary only accepts landscape imagery; keep the navigation UI as-is but
+  // stop taking stills while the phone is portrait, exactly like their app.
+  // Only listen to the accelerometer while a capture is actually running.
   const captureActive = Boolean(session) || dashRecording;
+  const deviceOrientation = useCaptureOrientation(session != null);
+  const portrait = isPortraitOrientation(deviceOrientation);
+
   // Only the navigation screen splits into "directions on top, live camera in
   // the bottom quarter"; every other screen keeps the compact pill so the map
   // and lists are not covered while a drive is running.
@@ -222,6 +276,30 @@ export function CaptureHost() {
   }, [captureActive, hasPermission, canRequestPermission, requestPermission]);
 
   /**
+   * Match Mapillary's focus policy: lock the lens at infinity once the vehicle
+   * is moving faster than 10 mph, and hand control back to continuous
+   * autofocus when it slows down. Best-effort — a focus failure must never
+   * cost a frame.
+   */
+  const syncInfinityFocus = useCallback(async (speedMps: number, force = false) => {
+    const controller = cameraRef.current?.controller;
+    if (!controller) return;
+    const lock = shouldLockInfinityFocus(speedMps);
+    if (!force && lock === focusLockedRef.current) return;
+    if (lock && !controller.device.supportsFocusLocking) return;
+    try {
+      if (lock) {
+        await controller.setFocusLocked(1);
+      } else if (focusLockedRef.current) {
+        await controller.resetFocus();
+      }
+      focusLockedRef.current = lock;
+    } catch {
+      // Leave the previous state; the next fix retries.
+    }
+  }, []);
+
+  /**
    * Captures the telephoto half of a pair from the same session.
    *
    * This runs *after* the wide frame, not concurrently: iOS gives one capture
@@ -237,6 +315,9 @@ export function CaptureHost() {
       try {
         await controller.setZoom(input.zoom);
         await delay(DETAIL_ZOOM_SETTLE_MS);
+        // Switching to the telephoto constituent resets focus, so re-apply the
+        // infinity lock to the lens that will actually take this frame.
+        await syncInfinityFocus(input.fix.speedMps, true);
         const { filePath } = await photoOutput.capturePhotoToFile(
           {
             enableShutterSound: false,
@@ -278,15 +359,22 @@ export function CaptureHost() {
         setSessionError(error instanceof Error ? error.message : String(error));
       } finally {
         await controller.setZoom(1).catch(() => {});
+        // Returning to the wide lens resets focus; restore the high-speed lock.
+        if (focusLockedRef.current) {
+          await syncInfinityFocus(input.fix.speedMps, true);
+        }
       }
     },
-    [photoOutput, recordCapture, setSessionError],
+    [photoOutput, recordCapture, setSessionError, syncInfinityFocus],
   );
 
   const takePicture = useCallback(async () => {
     if (!ready || busyRef.current || !activeRef.current) return;
     const currentSession = useStreetViewCaptureStore.getState().session;
     if (!currentSession) return;
+    // Mapillary rejects portrait imagery; the band shows a rotate hint while
+    // this is true, so no frames are queued for a drive that cannot upload.
+    if (portrait) return;
 
     const settings = useSettingsStore.getState().streetView;
     const maxStorage = settings.maxStorageBytes;
@@ -390,6 +478,7 @@ export function CaptureHost() {
     detailStreamEnabled,
     detailZoom,
     photoOutput,
+    portrait,
     ready,
     recordCapture,
     setSessionError,
@@ -403,8 +492,13 @@ export function CaptureHost() {
   useEffect(() => {
     if (!rawFix || rawFix.timestamp === lastTriggeredFixRef.current) return;
     lastTriggeredFixRef.current = rawFix.timestamp;
-    void takePicture();
-  }, [rawFix, takePicture]);
+    // Re-evaluate focus on every fix, even when no frame is due: slowing below
+    // 10 mph must hand focus back to autofocus so the dash cam stays sharp.
+    void (async () => {
+      await syncInfinityFocus(rawFix.speedMps);
+      await takePicture();
+    })();
+  }, [rawFix, syncInfinityFocus, takePicture]);
 
   /** Records one segment straight into the documents directory. */
   const recordSegment = useCallback(
@@ -548,6 +642,17 @@ export function CaptureHost() {
     </View>
   );
 
+  // Street stills pause in portrait, matching the Mapillary app; the band says
+  // why the counter has stopped instead of silently dropping frames.
+  const rotateHint = session != null && portrait;
+  const bandHintText = rotateHint
+    ? 'Rotate phone to landscape to capture'
+    : dashRecording && session
+      ? 'Footage stays on this device · photos upload later'
+      : dashRecording
+        ? 'Footage stays on this device'
+        : 'Street imagery · tap stop to review';
+
   if (!hasPermission) {
     return (
       <View
@@ -585,7 +690,11 @@ export function CaptureHost() {
             setReady(true);
             setMountError(null);
           }}
-          onStopped={() => setReady(false)}
+          onStopped={() => {
+            setReady(false);
+            // A new session starts with autofocus until the next fix re-locks.
+            focusLockedRef.current = false;
+          }}
           onError={(error) => {
             setMountError(error.message);
             Alert.alert(
@@ -613,11 +722,13 @@ export function CaptureHost() {
               ) : null}
               {session ? <Text style={styles.bandCounter}>{session.captureCount}</Text> : null}
               <Text style={styles.bandChip}>
-                {dashRecording && session
-                  ? 'DASH CAM + PHOTOS'
-                  : dashRecording
-                    ? 'DASH CAM'
-                    : lensLabel}
+                {rotateHint
+                  ? 'ROTATE'
+                  : dashRecording && session
+                    ? 'DASH CAM + PHOTOS'
+                    : dashRecording
+                      ? 'DASH CAM'
+                      : lensLabel}
               </Text>
               {dashRecording ? (
                 <Text style={styles.bandHint}>{dashPaused ? 'Paused' : 'Recording'}</Text>
@@ -628,11 +739,7 @@ export function CaptureHost() {
                 <Text style={styles.bandError}>Camera unavailable</Text>
               ) : (
                 <Text style={styles.bandHint} numberOfLines={1}>
-                  {dashRecording && session
-                    ? 'Footage stays on this device · photos upload later'
-                    : dashRecording
-                      ? 'Footage stays on this device'
-                      : 'Street imagery · tap stop to review'}
+                  {bandHintText}
                 </Text>
               )}
               <View style={styles.bandStop}>{stopControls}</View>
@@ -646,7 +753,13 @@ export function CaptureHost() {
                 {dashRecording ? formatClock(elapsed) : session?.captureCount}
               </Text>
               <Text style={styles.lens}>
-                {dashRecording && session ? 'REC+IMG' : dashRecording ? 'REC' : lensLabel}
+                {rotateHint
+                  ? 'ROTATE'
+                  : dashRecording && session
+                    ? 'REC+IMG'
+                    : dashRecording
+                      ? 'REC'
+                      : lensLabel}
               </Text>
             </View>
             {mountError ? (

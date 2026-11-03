@@ -429,6 +429,27 @@ describe('segmentCaptures', () => {
     ]);
   });
 
+  it('starts a new segment after a GPS gap wider than 100 m', () => {
+    const first = capture('a', 1920, 1080);
+    const nearby = {
+      ...capture('b', 1920, 1080),
+      lat: first.lat + 0.0005, // ~55 m
+      capturedAt: first.capturedAt + 5_000,
+    };
+    const far = {
+      ...capture('c', 1920, 1080),
+      lat: first.lat + 0.002, // ~220 m from nearby
+      capturedAt: first.capturedAt + 10_000,
+    };
+
+    const segments = segmentCaptures([first, nearby, far]);
+
+    expect(segments.map((segment) => segment.map((entry) => entry.id))).toEqual([
+      ['a', 'b'],
+      ['c'],
+    ]);
+  });
+
   it('caps a single segment at 1,000 images', () => {
     const captures = Array.from({ length: 1_001 }, (_, index) => ({
       ...capture(`c${index}`, 1920, 1080),

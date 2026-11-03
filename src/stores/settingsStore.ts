@@ -103,6 +103,9 @@ interface SettingsState extends PersistedSettings {
 
 const STORAGE_KEY = 'settings';
 
+/** The pre-parity capture cap; raised once because 3 m / 4:3 stills outgrow it. */
+const LEGACY_STREET_VIEW_MAX_STORAGE_BYTES = 2 * 1024 * 1024 * 1024;
+
 const DEFAULT_SETTINGS: PersistedSettings = {
   permissions: {
     locationEnabled: true,
@@ -123,7 +126,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     detailStream: false,
     wifiOnly: true,
     autoUpload: false,
-    maxStorageBytes: 2 * 1024 * 1024 * 1024,
+    maxStorageBytes: 8 * 1024 * 1024 * 1024,
     mapillaryUsername: null,
   },
   dashCam: {
@@ -150,6 +153,16 @@ function loadSettings(): PersistedSettings {
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+      const streetView = {
+        ...DEFAULT_SETTINGS.streetView,
+        ...(parsed.streetView ?? {}),
+      };
+      // The old 2 GB cap was sized for 1080p frames every 20 m. The
+      // Mapillary-parity cadence fills it in minutes, so raise that exact
+      // legacy default once; any other value is left alone.
+      if (streetView.maxStorageBytes === LEGACY_STREET_VIEW_MAX_STORAGE_BYTES) {
+        streetView.maxStorageBytes = DEFAULT_SETTINGS.streetView.maxStorageBytes;
+      }
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
@@ -158,10 +171,7 @@ function loadSettings(): PersistedSettings {
           ...DEFAULT_SETTINGS.routePreferences,
           ...(parsed.routePreferences ?? {}),
         },
-        streetView: {
-          ...DEFAULT_SETTINGS.streetView,
-          ...(parsed.streetView ?? {}),
-        },
+        streetView,
         dashCam: {
           ...DEFAULT_SETTINGS.dashCam,
           ...(parsed.dashCam ?? {}),
