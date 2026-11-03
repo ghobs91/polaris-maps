@@ -1384,11 +1384,12 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
     const route = rankedRoutes[0];
     if (!route) return;
 
-    // Show the phone's route preview; the driver compares options and taps Go,
-    // which native reports back via `carPlayRouteStart`.
+    // Start at once: a destination picked on the head unit is the trip. A
+    // route preview would leave the driver waiting on a Go tap they cannot
+    // make from CarPlay.
     useNavigationStore
       .getState()
-      .setRoutePreview(route, rankedRoutes.slice(1), { lat, lng, name }, 'auto');
+      .startNavigation(route, rankedRoutes.slice(1), { lat, lng, name }, 'auto');
   } catch {
     // Route computation failed — silently ignore on CarPlay
   }

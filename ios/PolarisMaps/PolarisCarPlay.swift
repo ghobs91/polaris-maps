@@ -2126,15 +2126,19 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   private func makeHomePanel() -> CPMapPanel {
     var sections: [CPMapPanelSection] = []
     if !searchShortcuts.isEmpty {
-      let rows: [CPMapPanelItem] = searchShortcuts.prefix(4).map { shortcut in
-        let listItem = makeShortcutListItem(from: shortcut)
-        listItem.handler = { [weak self] _, done in
+      // A grid item is CarPlay's horizontal shortcut row (there is no
+      // horizontal CPListSection). Four buttons keep Pinned immediately below
+      // instead of pushing it down by one row per shortcut.
+      let buttons: [CPGridButton] = searchShortcuts.prefix(4).map { shortcut in
+        CPGridButton(
+          titleVariants: [shortcut.name],
+          image: Self.searchIcon(for: shortcut.kind) ?? UIImage()
+        ) { [weak self] _ in
           self?.runSearchShortcut(shortcut.query)
-          done()
         }
-        return CPMapPanelItem(listItem: listItem)
       }
-      sections.append(CPMapPanelSection(title: "Nearby", items: rows))
+      sections.append(
+        CPMapPanelSection(title: "Nearby", items: [CPMapPanelItem(gridButtons: buttons)]))
     }
     for (section, items) in Self.groupedSections(homeSuggestions) {
       let rows: [CPMapPanelItem] = items.prefix(6).map { item in
@@ -2193,6 +2197,15 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   /// Start/Add Stop chooser mirroring the phone's place card.
   private func presentDestinationActions(name: String?, lat: Double, lng: Double) {
+    // Idle: selecting a destination *is* the trip. Start it directly instead of
+    // asking Start vs Add stop and then waiting for a Go tap on the phone.
+    if !navigationActive {
+      PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
+      interfaceController?.popToRootTemplate(animated: true, completion: nil)
+      return
+    }
+
+    // An active drive keeps the choice: replace the trip or add a stop to it.
     let startItem = CPListItem(
       text: "Start Navigation",
       detailText: name,
@@ -2340,7 +2353,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     guard !normalizedSearchText(searchText).isEmpty else {
       pendingSearchCompletion = nil
       let shortcutRows = searchShortcuts.map { makeShortcutListItem(from: $0) }
-      completionHandler(shortcutRows + makeSearchListItems(from: homeSuggestions))
+      // CPSearchTemplate only accepts CPListItem, so it cannot render the map
+      // panel's horizontal shortcut row. Put Pinned/Recents first so the saved
+      // places are never pushed off-screen by the shortcuts; the shortcuts stay
+      // one scroll below and remain the only pre-search surface on iOS < 27.
+      completionHandler(makeSearchListItems(from: homeSuggestions) + shortcutRows)
       return
     }
     PolarisCarPlay.emitSearchQuery(searchText)

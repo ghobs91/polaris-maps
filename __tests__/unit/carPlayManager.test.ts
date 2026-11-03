@@ -832,7 +832,7 @@ describe('CarPlayManager', () => {
     expect(useNavigationStore.getState().waypoints[0]).toMatchObject({ name: 'Coffee Shop' });
   });
 
-  it('shows a preview when adding a stop while idle', async () => {
+  it('starts navigation when adding a stop while idle', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
 
@@ -843,10 +843,10 @@ describe('CarPlayManager', () => {
     fireEvent('searchResultAddStop', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
-      expect.objectContaining({ destinationName: 'Coffee Shop' }),
-    );
-    expect(useNavigationStore.getState().routePreview).not.toBeNull();
+    expect(useNavigationStore.getState().isNavigating).toBe(true);
+    expect(useNavigationStore.getState().destination).toMatchObject({ name: 'Coffee Shop' });
+    expect(useNavigationStore.getState().routePreview).toBeNull();
+    expect(NativeModules.PolarisCarPlay.showTripPreview).not.toHaveBeenCalled();
   });
 
   it('shows and hides the rerouting alert on transitions only', () => {
@@ -1343,7 +1343,7 @@ describe('CarPlayManager', () => {
     expect(unifiedSearch).not.toHaveBeenCalled();
   });
 
-  it('shows a trip preview when a search result is selected', async () => {
+  it('starts navigation immediately when a search result is selected', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
 
@@ -1361,20 +1361,12 @@ describe('CarPlayManager', () => {
       'auto',
       expect.objectContaining({ alternates: 2 }),
     );
-    // Preview, not navigation: the driver picks a route and taps Go.
-    expect(useNavigationStore.getState().routePreview).not.toBeNull();
-    expect(useNavigationStore.getState().isNavigating).toBe(false);
-    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        destinationName: 'Coffee Shop',
-        destinationLat: 40.75,
-        destinationLng: -73.98,
-        routes: expect.arrayContaining([
-          expect.objectContaining({ encodedPolyline: route.geometry }),
-        ]),
-      }),
-    );
-    expect(NativeModules.PolarisCarPlay.startNavigation).not.toHaveBeenCalled();
+    // No preview and no phone-side Go: the head unit destination starts.
+    expect(useNavigationStore.getState().isNavigating).toBe(true);
+    expect(useNavigationStore.getState().destination).toMatchObject({ name: 'Coffee Shop' });
+    expect(useNavigationStore.getState().routePreview).toBeNull();
+    expect(NativeModules.PolarisCarPlay.showTripPreview).not.toHaveBeenCalled();
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalled();
   });
 
   it('previews the traffic-adjusted ETA on the primary route like the phone header', () => {
@@ -1398,18 +1390,25 @@ describe('CarPlayManager', () => {
     );
   });
 
-  it('starts the selected route when the driver taps Go in the preview', async () => {
+  it('starts the selected alternate when CarPlay reports a route pick from a phone preview', async () => {
     const route = makeRoute();
     const alternate = {
       ...makeRoute(),
       geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`B',
     };
-    (computeRoute as jest.Mock).mockResolvedValue([route, alternate]);
 
     initCarPlay();
     fireEvent('carPlayConnected');
-    fireEvent('searchResultSelected', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
-    await new Promise((r) => setTimeout(r, 10));
+    // A phone-side preview (not a CarPlay destination pick) still mirrors to the
+    // head unit and can be started from its route picker.
+    useNavigationStore
+      .getState()
+      .setRoutePreview(
+        route,
+        [alternate],
+        { lat: 40.75, lng: -73.98, name: 'Coffee Shop' },
+        'auto',
+      );
     jest.clearAllMocks();
 
     fireEvent('carPlayRouteStart', { index: 1 });
