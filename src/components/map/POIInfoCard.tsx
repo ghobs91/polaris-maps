@@ -67,6 +67,12 @@ import {
 } from '../../services/poi/openChargeMapService';
 // Two sheet snap points: peek (55%) and expanded (85%).
 const POI_SHEET_SNAPS = [0.55, 0.85] as const;
+/**
+ * Delay before the reviews/photos sections start loading. Both mount a hidden
+ * WebView and parse fetched HTML on the JS thread, which used to compete with
+ * the sheet's opening spring (settles in ~0.4 s) and made the card stutter.
+ */
+const HEAVY_SECTIONS_DELAY_MS = 450;
 /** Apples-Maps-style: at most this many action pills visible, rest scroll. */
 const VISIBLE_ACTION_PILLS = 4;
 
@@ -521,6 +527,17 @@ export function POIInfoCard() {
   const [communityRating, setCommunityRating] = useState<MergedRating | null>(null);
   const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
 
+  // Gate the two heavy sections (hidden WebViews + page fetches) until the
+  // sheet's opening spring has settled. Keyed on the selected POI object so
+  // switching places closes the gate again in the same render.
+  const [readyPoi, setReadyPoi] = useState<typeof poi>(null);
+  useEffect(() => {
+    if (!poi) return;
+    const timer = setTimeout(() => setReadyPoi(poi), HEAVY_SECTIONS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [poi]);
+  const heavySectionsEnabled = !!poi && readyPoi === poi;
+
   // Trigger Apple Maps enrichment when a POI is selected. When offline, fall
   // back to the cached place-detail snapshot and flag it as cached.
   useEffect(() => {
@@ -690,10 +707,13 @@ export function POIInfoCard() {
     };
   }, [poi, isOnline]);
 
+  // The two website detectors below re-parse the venue homepage on the JS
+  // thread. They are extras (action pills, cuisine chip), so they wait on the
+  // same gate as the reviews/photos sections instead of racing the sheet open.
   useEffect(() => {
     setWebsiteActions([]);
     const website = parsed?.website ? normalizeWebsiteUrl(parsed.website) : null;
-    if (!website || !isOnline) return;
+    if (!website || !isOnline || !heavySectionsEnabled) return;
     let cancelled = false;
     fetchWebsiteActions(website)
       .then((actions) => {
@@ -703,12 +723,12 @@ export function POIInfoCard() {
     return () => {
       cancelled = true;
     };
-  }, [parsed?.website, isOnline]);
+  }, [parsed?.website, isOnline, heavySectionsEnabled]);
 
   useEffect(() => {
     setCuisineOrigins([]);
     const website = parsed?.website ? normalizeWebsiteUrl(parsed.website) : null;
-    if (!website || !isOnline || !isFoodVenue(poi?.subtype)) return;
+    if (!website || !isOnline || !isFoodVenue(poi?.subtype) || !heavySectionsEnabled) return;
     let cancelled = false;
     fetchCuisineOrigins(website)
       .then((origins) => {
@@ -718,7 +738,7 @@ export function POIInfoCard() {
     return () => {
       cancelled = true;
     };
-  }, [parsed?.website, isOnline, poi?.subtype]);
+  }, [parsed?.website, isOnline, poi?.subtype, heavySectionsEnabled]);
 
   const openActionUrl = useCallback((url: string, label: string) => {
     void openInAppBrowser(url).then((opened) => {
@@ -1436,6 +1456,7 @@ export function POIInfoCard() {
               enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
               website={parsed.website}
               onWriteReview={handleWriteReview}
+              enabled={heavySectionsEnabled}
             />
 
             {/* ── Photos: POI website + open-licensed supplements (Wikimedia) ── */}
@@ -1448,6 +1469,7 @@ export function POIInfoCard() {
               tags={poi.tags}
               resetKey={poi.id}
               online={isOnline}
+              enabled={heavySectionsEnabled}
               onWebsiteResolved={handleWebsiteResolved}
             />
 

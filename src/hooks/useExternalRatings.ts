@@ -173,10 +173,26 @@ function paceFetch<T>(url: string, task: () => Promise<T>): Promise<T> {
 export function useExternalRatings(
   query: ExternalRatingQuery,
   resetKey: string | number,
+  /**
+   * Hold the pipeline until the host surface has finished opening. Resolution
+   * starts a hidden WebView plus page fetches, which is exactly the work that
+   * made the place card stutter while its sheet animated in.
+   */
+  enabled = true,
 ): UseExternalRatingsResult {
   const [states, setStates] = useState<InternalState[]>(() =>
     EXTERNAL_RATING_PROVIDERS.map((p) => blankState(p.id)),
   );
+
+  // A new place must never render the previous place's rating — not even for
+  // the frame before the resolution effect runs (the card can hold the pass
+  // back until its sheet settles). Reset during render, the React-sanctioned
+  // "adjust state when a prop changes" pattern.
+  const [statesKey, setStatesKey] = useState(resetKey);
+  if (statesKey !== resetKey) {
+    setStatesKey(resetKey);
+    setStates(EXTERNAL_RATING_PROVIDERS.map((p) => blankState(p.id)));
+  }
 
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -286,6 +302,7 @@ export function useExternalRatings(
   );
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const q = queryRef.current;
 
@@ -409,8 +426,9 @@ export function useExternalRatings(
       Object.values(budgetRef.current).forEach((t) => t && clearTimeout(t));
     };
     // Resolution is keyed to the place (`resetKey`), not to every query field,
-    // so late enrichment can't reset an already-loaded rating.
-  }, [resetKey, update, clearTimer, clearBudget, fail, blockProvider]);
+    // so late enrichment can't reset an already-loaded rating. `enabled` only
+    // gates when the pass starts.
+  }, [enabled, resetKey, update, clearTimer, clearBudget, fail, blockProvider]);
 
   // The section mounts at most one hidden WebView at a time — the first provider
   // (registry order) exposing a stage. A stage's clock must start when its
@@ -419,12 +437,13 @@ export function useExternalRatings(
   // screen and can time out before its page ever loads.
   const activeProvider = states.find((s) => s.webView)?.provider ?? null;
   useEffect(() => {
-    if (activeProvider == null) return;
+    // While the gate is closed nothing is mounted, so no stage clock may run.
+    if (!enabled || activeProvider == null) return;
     log(activeProvider, 'stage active — clock started');
     armBudget(activeProvider);
     armTimeout(activeProvider);
     return () => clearTimer(activeProvider);
-  }, [activeProvider, armBudget, armTimeout, clearTimer]);
+  }, [enabled, activeProvider, armBudget, armTimeout, clearTimer]);
 
   const handleMessage = useCallback(
     (id: ExternalRatingProviderId, data: string) => {

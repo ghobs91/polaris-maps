@@ -332,6 +332,30 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
     expect(isExternalRatingMiss(missKey('tripadvisor'))).toBe(false);
   });
 
+  it('holds the pass until enabled, so the card can finish opening first', async () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useExternalRatings(QUERY, 'place-1', enabled),
+      { initialProps: { enabled: false } },
+    );
+
+    await act(async () => {
+      await flush();
+    });
+
+    expect(mockResolveKnownListing).not.toHaveBeenCalled();
+    expect(result.current.states.every((s) => s.status === 'idle' && s.webView === null)).toBe(
+      true,
+    );
+
+    rerender({ enabled: true });
+
+    await act(async () => {
+      await flush();
+    });
+
+    expect(mockResolveKnownListing).toHaveBeenCalled();
+  });
+
   it('memoizes a real verdict so reopening the card does not repeat it', async () => {
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING : null),

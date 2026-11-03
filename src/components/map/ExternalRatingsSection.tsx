@@ -13,6 +13,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from '../common/GlassView';
 import {
   useExternalRatings,
+  type ExternalRatingProviderState,
   type ExternalRatingWebViewStage,
 } from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
@@ -57,11 +58,15 @@ const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
   yelp: 'Yelp',
 };
 
+/** No provider state while the gate is closed (avoids stale ratings flashing). */
+const NO_STATES: ExternalRatingProviderState[] = [];
+
 export function ExternalRatingsSection({
   poi,
   enrichedFormattedAddress,
   website,
   onWriteReview,
+  enabled = true,
 }: {
   poi: OsmPoi;
   enrichedFormattedAddress?: string | null;
@@ -69,6 +74,12 @@ export function ExternalRatingsSection({
   website?: string | null;
   /** Opens the write-a-review surface when no external rating is found. */
   onWriteReview?: () => void;
+  /**
+   * False while the card is still opening: the section renders its loading
+   * placeholder but starts no fetch and mounts no hidden WebView, so the
+   * sheet's spring animation is not competing with a page load.
+   */
+  enabled?: boolean;
 }) {
   const { colors } = useTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -86,24 +97,34 @@ export function ExternalRatingsSection({
     [poi, enrichedFormattedAddress, website],
   );
 
-  const { states, handleMessage, handleError } = useExternalRatings(query, poi.id);
+  const { states, handleMessage, handleError } = useExternalRatings(query, poi.id, enabled);
+
+  // Ignore any state left over from a previous place while the gate is closed,
+  // so a stale rating can't flash before the new pass starts.
+  const activeStates = enabled ? states : NO_STATES;
 
   // Serialize hidden browsing: at most one stage is active at a time, in
   // registry order. The WebView itself is kept mounted (with its warmed cookie
   // store) across stages and providers while the card is open, so a cleared
   // DataDome session is not lost to a cold remount.
-  const activeWebView = states.find((s) => s.webView)?.webView ?? null;
-  const lastWebViewRef = useRef<ExternalRatingWebViewStage | null>(null);
+  const activeWebView = activeStates.find((s) => s.webView)?.webView ?? null;
+  const lastWebViewRef = useRef<{
+    placeId: string | number;
+    stage: ExternalRatingWebViewStage;
+  } | null>(null);
   useEffect(() => {
-    if (activeWebView) lastWebViewRef.current = activeWebView;
-  }, [activeWebView]);
-  const mountedWebView = activeWebView ?? lastWebViewRef.current;
+    if (activeWebView) lastWebViewRef.current = { placeId: poi.id, stage: activeWebView };
+  }, [activeWebView, poi.id]);
+  // Only remount the kept-alive view for the place it came from.
+  const rememberedWebView =
+    lastWebViewRef.current?.placeId === poi.id ? lastWebViewRef.current.stage : null;
+  const mountedWebView = enabled ? (activeWebView ?? rememberedWebView) : null;
   const loaded = useMemo(
     () =>
-      states
+      activeStates
         .filter((s) => s.status === 'loaded' && s.summary)
         .map((s) => s.summary as ExternalRatingSummary),
-    [states],
+    [activeStates],
   );
   const combined = useMemo(() => combineExternalRatings(loaded), [loaded]);
 
@@ -120,11 +141,14 @@ export function ExternalRatingsSection({
   }, [combined, poi]);
 
   // Idle counts as resolving too, so the empty state never flashes before the
-  // first resolution pass starts.
-  const resolving = states.some(
-    (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
-  );
-  const blockedState = states.find((s) => s.status === 'blocked') ?? null;
+  // first resolution pass starts. A closed gate also counts as resolving: the
+  // section shows its loading placeholder while it waits for the sheet.
+  const resolving =
+    !enabled ||
+    activeStates.some(
+      (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
+    );
+  const blockedState = activeStates.find((s) => s.status === 'blocked') ?? null;
 
   // A real browser viewport, not a 0×0 frame: `innerWidth`/`innerHeight` are
   // part of every bot-detection fingerprint, and a zero-size viewport is an
