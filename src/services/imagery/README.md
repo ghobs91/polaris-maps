@@ -94,9 +94,10 @@ interval:
   a low-mounted phone's dashboard out of the frame. The still resolution target
   tracks the crop region's native pixels, so a zoomed still is stored without
   the ISP interpolating it back to 12 MP — the uniform softness that made
-  digitally zoomed imagery unusable. The preview/dash-cam stream runs at 4K so
-  the large landscape pane is not upscaled from a 1080p buffer. (The live preview
-  pane is still a screen-scale render and can look softer than the stored photo.)
+  digitally zoomed imagery unusable. The preview/dash-cam stream uses the same
+  idea: 4K at 1x, then QHD/FHD/HD as the crop tightens, so the stream is
+  downscaled to the pane rather than the ISP upscaling the crop to a fixed 4K
+  buffer.
 - **Physical road camera.** The capture device is selected by
   `type === 'wide-angle' && !isVirtualDevice`, not by VisionCamera's
   `physicalDevices` filter — a physical lens has no constituent list, so that

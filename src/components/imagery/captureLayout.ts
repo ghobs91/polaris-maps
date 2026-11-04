@@ -53,6 +53,25 @@ export function capturePhotoTargetForZoom(zoom: number): { width: number; height
   return CAPTURE_PHOTO_TARGETS[clamped] ?? CAPTURE_PHOTO_TARGETS[1];
 }
 
+/**
+ * Video/preview target for a zoom preset, on the same principle as the still
+ * tiers: the stream is fed from the cropped sensor region, so a target larger
+ * than that region makes the ISP upscale it (soft preview), while a target at
+ * or below the region keeps real pixels. 4K is only correct at 1x.
+ */
+export const CAPTURE_VIDEO_TARGETS: Readonly<Record<number, { width: number; height: number }>> = {
+  1: { width: 2160, height: 3840 }, // 4K, source is the full sensor
+  1.5: { width: 1440, height: 2560 }, // QHD, source crop ~2688x1512
+  2: { width: 1080, height: 1920 }, // FHD, source crop ~2016x1134
+  3: { width: 720, height: 1280 }, // HD, source crop ~1344x756
+};
+
+/** The video/preview resolution tier whose pixel budget matches a zoomed crop. */
+export function captureVideoTargetForZoom(zoom: number): { width: number; height: number } {
+  const clamped = clampCaptureZoom(zoom);
+  return CAPTURE_VIDEO_TARGETS[clamped] ?? CAPTURE_VIDEO_TARGETS[1];
+}
+
 /** The subset of a VisionCamera device needed to find the road camera. */
 export interface RoadCameraDeviceLike {
   position: string;

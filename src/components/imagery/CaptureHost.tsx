@@ -16,7 +16,6 @@ import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera,
-  CommonResolutions,
   useCameraDevice,
   useCameraDevices,
   useCameraPermission,
@@ -33,6 +32,7 @@ import {
   CAPTURE_SPLIT_LEFT_PERCENT,
   CAPTURE_ZOOM_PRESETS,
   capturePhotoTargetForZoom,
+  captureVideoTargetForZoom,
   clampCaptureZoom,
   nextCaptureZoom,
   pickRoadCameraDevice,
@@ -193,6 +193,7 @@ export function CaptureHost() {
   const device = backDevice;
   const config = captureConfigForMode('standard');
   const photoTargetResolution = capturePhotoTargetForZoom(zoom);
+  const videoTargetResolution = captureVideoTargetForZoom(zoom);
   // The physical wide lens has no telephoto constituent; the paired detail
   // stream stays off. (Legacy captures keep their `detail` rows.)
   const detailZoom = detailZoomForDevice(backDevice);
@@ -214,10 +215,10 @@ export function CaptureHost() {
     qualityPrioritization: device?.supportsSpeedQualityPrioritization ? 'speed' : 'balanced',
   });
   const videoOutput = useVideoOutput({
-    // 4K, not 1080p: the split-screen preview pane is nearly the size of the
-    // sensor, and a 1080p stream upscaled to it is what made the live view look
-    // soft regardless of focus. 4K also keeps the dash-cam crop sharp.
-    targetResolution: CommonResolutions.UHD_16_9,
+    // Match the stream to the crop's native pixels. A fixed 4K target at 1.5x
+    // makes the ISP upscale the ~2688x1512 crop back to 3840x2160, which is
+    // what kept the preview soft no matter how focus was locked.
+    targetResolution: videoTargetResolution,
     // No police-report audio: clips stay muted, which also avoids needing the
     // microphone permission.
     enableAudio: false,

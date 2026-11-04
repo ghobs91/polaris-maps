@@ -1,6 +1,7 @@
 import {
   CAPTURE_ZOOM_PRESETS,
   capturePhotoTargetForZoom,
+  captureVideoTargetForZoom,
   clampCaptureZoom,
   nextCaptureZoom,
   pickRoadCameraDevice,
@@ -67,6 +68,26 @@ describe('capturePhotoTargetForZoom', () => {
     for (const zoom of CAPTURE_ZOOM_PRESETS) {
       const target = capturePhotoTargetForZoom(zoom);
       expect(target.width * target.height).toBeLessThanOrEqual(3024 * 4032);
+    }
+  });
+});
+
+describe('captureVideoTargetForZoom', () => {
+  it('uses 4K only at 1x, where the source is the full sensor', () => {
+    expect(captureVideoTargetForZoom(1)).toEqual({ width: 2160, height: 3840 });
+  });
+
+  it('steps the stream down with the crop so it is not upscaled', () => {
+    expect(captureVideoTargetForZoom(1.5)).toEqual({ width: 1440, height: 2560 });
+    expect(captureVideoTargetForZoom(2)).toEqual({ width: 1080, height: 1920 });
+    expect(captureVideoTargetForZoom(3)).toEqual({ width: 720, height: 1280 });
+  });
+
+  it('never exceeds the pixel budget of the zoomed region', () => {
+    for (const zoom of CAPTURE_ZOOM_PRESETS) {
+      const target = captureVideoTargetForZoom(zoom);
+      const cropPixels = (3024 * 4032) / (zoom * zoom);
+      expect(target.width * target.height).toBeLessThanOrEqual(cropPixels * 1.05);
     }
   });
 });
