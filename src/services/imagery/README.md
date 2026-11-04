@@ -52,7 +52,7 @@ the P2P `street_imagery` feed above.
 | `streetViewSession.ts`                                | Start/finalize/discard a drive session; consent gate is applied by `requestStreetViewStart`.                                                                                                                                                                                                                                         |
 | `mapillaryService.ts`                                 | Mapillary embedded-secret OAuth, token refresh, raw JPEG upload + manifest + `finish_upload`, portrait exclusion, drive segmentation into clusters (10 min / 100 m gaps / 1,000 images), 429/5xx retry with backoff, refresh-and-retry on 401, and secure token storage.                                                             |
 | `streetViewConsent.ts`                                | One-time consent explainer for the street-imagery master switch and manual capture starts. Navigation start itself never prompts — street imagery is a Settings-only decision.                                                                                                                                                       |
-| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills (wide + optional paired telephoto detail), and segmented dash-cam recording from one photo + video session.                                                                                                      |
+| `../../components/imagery/CaptureHost.tsx`            | Global VisionCamera host: bottom-quarter live band on the navigation screen (compact pill elsewhere), street stills on the physical wide lens with a user zoom crop, and segmented dash-cam recording from one photo + video session.                                                                                                |
 | `../../components/imagery/DriveUploadSheet.tsx`       | End-of-drive summary, Mapillary upload, upload progress, Delete all, and deferred uploads.                                                                                                                                                                                                                                           |
 | `../../components/imagery/StreetViewContribution.tsx` | Root-mounted coordinator for navigation start/end and crash recovery. Dash cam first: the first-ever navigation start asks once whether to record every drive ("Not now" keeps the record button and never asks again); an auto-started run stops with its navigation. Street imagery auto-starts silently when enabled in Settings. |
 | `../../components/settings/StreetViewSettings.tsx`    | Settings section: master opt-in, mode (Standard/3D), detail frames, auto-start, Wi-Fi-only, pending drives, Mapillary account.                                                                                                                                                                                                       |
@@ -82,10 +82,17 @@ interval:
   stays on. `mapillaryService` keeps its upload-time portrait skip as a safety
   net for a phone rotated in the sub-second window before a shutter, and for
   drives captured by older builds.
-- **Infinity focus above 10 mph.** The lens is locked at infinity
-  (`CameraController.setFocusLocked(1)`, iOS) while driving and handed back to
-  continuous autofocus below that speed, so the camera cannot hunt on the
-  windscreen. The lock is re-applied after the detail stream's lens switch.
+- **Infinity focus for the whole capture.** Capture uses the _physical_
+  wide-angle lens, not VisionCamera's virtual multi-camera device; the virtual
+  device often reports no custom lens-position support, so an infinity lock is
+  silently skipped and AF can settle on the dashboard. The physical lens locks
+  at infinity for the entire session, including while stopped, and hands focus
+  back to autofocus when capture ends. Devices without a lens-position lock
+  meter the road above center instead.
+- **User zoom.** 1x / 1.5x / 2x / 3x crops (default 1.5x) are persisted and
+  applied to the preview, stills and dash-cam video. Zooming is the way to crop
+  a low-mounted phone's dashboard out of the frame; the zoomed frame is also
+  sharper per pixel than the retired ultra-wide path.
 - **Adaptive spacing.** 3 m below 50 km/h and 20 m at or above it, the same
   tiers the Mapillary app uses. Capture continues in stop-and-go traffic above
   ~1.5 m/s and pauses when parked. The camera-busy latch, not the clock, sets
@@ -97,9 +104,10 @@ interval:
   full-cover "Rotate to landscape" prompt while street imagery is paused.
   Dash cam is always the `videocam` icon; street imagery is the
   `camera-marker` (camera + map pin) icon.
-- **4:3 full-sensor stills** at JPEG quality 0.7 (0.9 in 3D mode). A 16:9 crop
-  loses detail and approaches the 2:1 aspect ratio Mapillary renders as an
-  equirectangular panorama.
+- **4:3 full-sensor stills** at JPEG quality 0.7. A 16:9 crop loses detail and
+  approaches the 2:1 aspect ratio Mapillary renders as an equirectangular
+  panorama. Moving captures prefer speed over quality to reduce night motion
+  blur.
 - **Storage.** The default capture cap is 8 GB because 3 m city spacing with
   12 MP stills outgrows the old 2 GB default in minutes; the old default is
   raised once on upgrade.
@@ -108,10 +116,15 @@ The existing `captureService`/`uploadService`/`blurService` pipeline is **not**
 used here: it is P2P-specific, has no EXIF writing, and its placeholder blur
 strips metadata. Mapillary blurs faces and plates server-side.
 
-### Detail stream (telephoto)
+### Detail stream (telephoto) — retired
 
-`streetView.detailStream` adds a second, paired perspective to some capture
-points:
+> **Retired for new drives.** The capture camera is now the physical wide-angle
+> lens so `setFocusLocked(1)` is available. That lens has no telephoto
+> constituent, so no new paired detail frames are captured. The rows, queue
+> columns and upload path below remain for legacy drives.
+
+`streetView.detailStream` previously added a second, paired perspective to some
+capture points:
 
 - Every 5th wide frame (≈15 m in town, ≈100 m on the highway) the camera
   switches to the telephoto lens — the lowest factor above 1× in

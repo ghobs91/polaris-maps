@@ -44,7 +44,6 @@ import {
   captureConfigForMode,
   detailZoomForDevice,
   isPortraitOrientation,
-  resolveCaptureMode,
   shouldCapture,
   shouldCaptureDetail,
   shouldLockInfinityFocus,
@@ -173,19 +172,17 @@ export function CaptureHost() {
   const detailStreamEnabled = useSettingsStore((s) => s.streetView.detailStream);
   const zoom = clampCaptureZoom(useSettingsStore((s) => s.streetView.zoom));
   const setStreetView = useSettingsStore((s) => s.setStreetView);
-  const backDevice = useCameraDevice('back');
-  // The filter returns the closest match, so inspect the device it yields for a
-  // real ultra-wide lens rather than trusting the filter alone.
-  const ultraWideDevice = useCameraDevice('back', { physicalDevices: ['ultra-wide-angle'] });
-  const hasUltraWide = Boolean(
-    ultraWideDevice?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'),
-  );
-  // Capture quality is chosen for the device; there is no user-facing mode.
-  const mode = resolveCaptureMode({ hasUltraWide, detailStream: detailStreamEnabled });
-  const device = mode === 'threeD' ? ultraWideDevice : backDevice;
-  const config = captureConfigForMode(mode);
-  // Null on devices without a telephoto lens — zooming a wide-only camera
-  // would just crop the frame the wide stream already has.
+  // Use the physical wide-angle lens, not the virtual multi-camera device.
+  // AVCaptureDevice's virtual device often reports
+  // `isLockingFocusWithCustomLensPositionSupported == false`, so
+  // `setFocusLocked(1)` is skipped and AF can settle on the dashboard. The
+  // physical wide lens supports manual infinity focus, which is what a
+  // road-facing capture needs. Zoom is a digital crop on top.
+  const backDevice = useCameraDevice('back', { physicalDevices: ['wide-angle'] });
+  const device = backDevice;
+  const config = captureConfigForMode('standard');
+  // The physical wide lens has no telephoto constituent; the paired detail
+  // stream stays off. (Legacy captures keep their `detail` rows.)
   const detailZoom = detailZoomForDevice(backDevice);
   // A user crop at or past the telephoto switch already gives the detail
   // stream's field of view; the paired frame would add nothing.
@@ -219,6 +216,8 @@ export function CaptureHost() {
   const wideFrameCountRef = useRef(0);
   /** True while the lens is locked at infinity for high-speed capture. */
   const focusLockedRef = useRef(false);
+  /** One-shot diagnostic so a device with no focus-lock support is visible. */
+  const focusLoggedRef = useRef(false);
   const permissionRequestedRef = useRef(false);
   const lastStorageCheckRef = useRef(0);
   const activeRef = useRef(appActive);
@@ -333,10 +332,12 @@ export function CaptureHost() {
   }, [captureActive, hasPermission, canRequestPermission, requestPermission]);
 
   /**
-   * Match Mapillary's focus policy: lock the lens at infinity once the vehicle
-   * is moving faster than 10 mph, and hand control back to continuous
-   * autofocus when it slows down. Best-effort — a focus failure must never
-   * cost a frame.
+   * Hold the lens at infinity for a road-facing capture. The physical wide
+   * lens supports a custom lens-position lock; a virtual multi-camera device
+   * often does not, which is why the previous "above 10 mph" lock could be
+   * skipped entirely and AF settled on the dashboard. Devices with no lock
+   * fall back to metering a point toward the road. Best-effort — a focus
+   * failure must never cost a frame.
    */
   const syncInfinityFocus = useCallback(async (speedMps: number, force = false) => {
     const controller = cameraRef.current?.controller;
@@ -349,20 +350,37 @@ export function CaptureHost() {
     if (!force && lock === focusLockedRef.current) return;
     try {
       if (lock) {
+        if (__DEV__ && !focusLoggedRef.current) {
+          focusLoggedRef.current = true;
+          console.log('[Capture] focus capabilities', {
+            device: controller.device.id,
+            physicalDevices: controller.device.physicalDevices?.map((entry) => entry.type),
+            supportsFocusLocking: controller.device.supportsFocusLocking,
+            supportsFocusMetering: controller.device.supportsFocusMetering,
+          });
+        }
+        let locked = false;
         if (controller.device.supportsFocusLocking) {
-          await controller.setFocusLocked(1);
-        } else if (controller.device.supportsFocusMetering) {
-          // Android has no lens-position lock. Meter a point above center (the
-          // road) and hold it instead of letting AF settle on the dash.
-          const point = VisionCamera.createNormalizedMeteringPoint(0.5, 0.35);
+          try {
+            await controller.setFocusLocked(1);
+            locked = controller.focusMode === 'locked';
+          } catch {
+            locked = false;
+          }
+        }
+        if (!locked && controller.device.supportsFocusMetering) {
+          // No usable lens-position lock (virtual camera/Android). Meter a
+          // point toward the road/horizon and hold it, rather than letting AF
+          // settle on the dashboard.
+          const point = VisionCamera.createNormalizedMeteringPoint(0.5, 0.32);
           await controller.focusTo(point, {
             modes: ['AF'],
             responsiveness: 'snappy',
             adaptiveness: 'locked',
           });
-        } else {
-          return;
+          locked = true;
         }
+        if (!locked) return;
       } else if (focusLockedRef.current) {
         await controller.resetFocus();
       }

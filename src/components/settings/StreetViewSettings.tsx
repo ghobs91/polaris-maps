@@ -100,7 +100,7 @@ export function StreetViewSettings() {
     <SettingsGroup
       header="Street imagery"
       icon={<Ionicons name="camera-outline" size={15} color={colors.textSecondary} />}
-      footer="Photos are public on Mapillary, which blurs faces and plates on its servers. Capture pauses while the phone is in portrait — Mapillary requires landscape photos. Zoom in to crop the dashboard out of the frame."
+      footer="Photos are public on Mapillary, which blurs faces and plates on its servers. Capture pauses while the phone is in portrait — Mapillary requires landscape photos. Zoom in to crop the dashboard out of the frame; focus stays on the road while capturing."
     >
       <SettingsRow
         title="Capture while navigating"
@@ -111,14 +111,6 @@ export function StreetViewSettings() {
         rightAdornment={switchRow(
           streetView.autoStart,
           (autoStart) => setStreetView({ autoStart }),
-          !streetView.enabled,
-        )}
-      />
-      <SettingsRow
-        title="Telephoto detail frames"
-        rightAdornment={switchRow(
-          streetView.detailStream,
-          (detailStream) => setStreetView({ detailStream }),
           !streetView.enabled,
         )}
       />
