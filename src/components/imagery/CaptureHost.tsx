@@ -40,6 +40,7 @@ import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { dashCamElapsedSeconds, useDashCamStore } from '../../stores/dashCamStore';
+import type { FocusMode } from 'react-native-vision-camera';
 import {
   captureConfigForMode,
   detailZoomForDevice,
@@ -209,6 +210,12 @@ export function CaptureHost() {
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [mountError, setMountError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  /** Live focus indicator: '∞' when locked, 'AF' while autofocus hunts. */
+  const [focusHud, setFocusHud] = useState<{
+    locked: boolean;
+    lensPosition: number | null;
+    mode: FocusMode | undefined;
+  }>({ locked: false, lensPosition: null, mode: undefined });
 
   const busyRef = useRef(false);
   const lastCaptureRef = useRef<LastCapture | null>(null);
@@ -247,6 +254,38 @@ export function CaptureHost() {
   const bandHeight = captureBandHeight(windowHeight);
   const zoomLabel = `${Number.isInteger(zoom) ? zoom.toFixed(0) : zoom.toFixed(1)}×`;
   const setCaptureZoom = (value: number) => setStreetView({ zoom: clampCaptureZoom(value) });
+  /**
+   * Tap-to-relock: the lens moves to infinity and the chip confirms it. This is
+   * the same behavior Mapillary's capture screen surfaces as a level indicator —
+   * the difference is that ours reads back the actual focus mode, so a silent
+   * AF-hunt inside the session cannot be mistaken for an infinity lock.
+   */
+  const focusChipPress = () => {
+    void applyFocusLock();
+  };
+  const focusChip = (
+    <Pressable
+      onPress={focusChipPress}
+      style={({ pressed }) => [
+        styles.zoomChip,
+        focusHud.locked && styles.focusChipLocked,
+        { opacity: pressed ? 0.75 : 1 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={focusHud.locked ? 'Focus locked at infinity' : 'Autofocus is active'}
+      accessibilityHint="Re-locks focus at infinity for the road"
+    >
+      <Text
+        style={[
+          styles.zoomChipText,
+          styles.focusChipText,
+          focusHud.locked ? styles.focusChipTextLocked : styles.focusChipTextAf,
+        ]}
+      >
+        {focusHud.locked ? '∞' : 'AF'}
+      </Text>
+    </Pressable>
+  );
   const zoomChips = (
     <View style={styles.zoomRow}>
       {CAPTURE_ZOOM_PRESETS.map((preset) => {
@@ -390,6 +429,25 @@ export function CaptureHost() {
     }
   }, []);
 
+  /** Reads the live focus state for the focus HUD; verifies the lens lock. */
+  const readFocusHud = useCallback(() => {
+    const controller = cameraRef.current?.controller;
+    if (!controller) return false;
+    const locked = controller.focusMode === 'locked';
+    setFocusHud({
+      locked,
+      lensPosition: controller.lensPosition,
+      mode: controller.focusMode,
+    });
+    return locked;
+  }, []);
+
+  /** Re-locks the lens at infinity from the UI and reports the outcome. */
+  const applyFocusLock = useCallback(async (): Promise<boolean> => {
+    await syncInfinityFocus(0, true);
+    return readFocusHud();
+  }, [readFocusHud, syncInfinityFocus]);
+
   // Apply the user's crop to the preview and to both the still and video
   // outputs. A zoom change can reset focus, so re-assert the infinity lock.
   useEffect(() => {
@@ -397,8 +455,8 @@ export function CaptureHost() {
     const controller = cameraRef.current?.controller;
     if (!controller) return;
     void controller.setZoom(zoom).catch(() => {});
-    void syncInfinityFocus(0, true);
-  }, [device?.id, ready, syncInfinityFocus, zoom]);
+    void syncInfinityFocus(0, true).then(readFocusHud);
+  }, [device?.id, readFocusHud, ready, syncInfinityFocus, zoom]);
 
   /**
    * Captures the telephoto half of a pair from the same session.
@@ -598,8 +656,9 @@ export function CaptureHost() {
     void (async () => {
       await syncInfinityFocus(rawFix.speedMps);
       await takePicture();
+      readFocusHud();
     })();
-  }, [rawFix, syncInfinityFocus, takePicture]);
+  }, [rawFix, syncInfinityFocus, takePicture, readFocusHud]);
 
   /** Records one segment straight into the documents directory. */
   const recordSegment = useCallback(
@@ -932,6 +991,7 @@ export function CaptureHost() {
             <View style={styles.splitTopRow} pointerEvents="box-none">
               {modePills}
               <View style={styles.flexSpacer} />
+              {focusChip}
               {zoomChips}
             </View>
             <View style={styles.splitBottomRow} pointerEvents="box-none">
@@ -953,6 +1013,7 @@ export function CaptureHost() {
             <View style={styles.bandTopRow} pointerEvents="box-none">
               {modePills}
               <View style={styles.flexSpacer} />
+              {focusChip}
               {zoomCycleChip}
             </View>
             <View style={styles.bandBottomRow} pointerEvents="box-none">
@@ -1065,6 +1126,20 @@ const styles = StyleSheet.create({
   },
   zoomChipTextActive: {
     color: '#000',
+  },
+  focusChipLocked: {
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderColor: 'rgba(73,229,106,0.75)',
+  },
+  focusChipText: {
+    fontSize: 13,
+    letterSpacing: 1,
+  },
+  focusChipTextLocked: {
+    color: '#49E56A',
+  },
+  focusChipTextAf: {
+    color: '#FFD60A',
   },
   zoomCycleChip: {
     paddingHorizontal: 8,
