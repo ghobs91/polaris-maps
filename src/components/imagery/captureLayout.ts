@@ -30,6 +30,29 @@ export function nextCaptureZoom(current: number): number {
   return CAPTURE_ZOOM_PRESETS[(index + 1) % CAPTURE_ZOOM_PRESETS.length];
 }
 
+/**
+ * Photo target resolution for a zoom preset.
+ *
+ * A sensor-level zoom crops the active region to about 1/zoom² of the full
+ * 12 MP sensor. Asking for a full-size buffer at that zoom makes the ISP
+ * upscale the crop back to 12 MP — the uniform softness of digitally zoomed
+ * street imagery. Asking for a buffer at the cropped region's native size (or
+ * slightly below, so the ISP downscales instead) keeps every stored still on
+ * real pixels while keeping the dash crop.
+ */
+export const CAPTURE_PHOTO_TARGETS: Readonly<Record<number, { width: number; height: number }>> = {
+  1: { width: 3024, height: 4032 }, // full 12 MP sensor
+  1.5: { width: 1944, height: 2592 }, // ~2016x2688 crop region
+  2: { width: 1440, height: 1920 }, // ~1512x2016 crop region
+  3: { width: 768, height: 1024 }, // ~1008x1344 crop region
+};
+
+/** The photo resolution tier whose pixel budget matches a zoomed sensor crop. */
+export function capturePhotoTargetForZoom(zoom: number): { width: number; height: number } {
+  const clamped = clampCaptureZoom(zoom);
+  return CAPTURE_PHOTO_TARGETS[clamped] ?? CAPTURE_PHOTO_TARGETS[1];
+}
+
 export interface SplitCaptureInput {
   /** Window width in points. */
   width: number;

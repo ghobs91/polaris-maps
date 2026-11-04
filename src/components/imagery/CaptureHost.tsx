@@ -31,6 +31,7 @@ import { captureBandHeight } from './captureBand';
 import {
   CAPTURE_SPLIT_LEFT_PERCENT,
   CAPTURE_ZOOM_PRESETS,
+  capturePhotoTargetForZoom,
   clampCaptureZoom,
   nextCaptureZoom,
   shouldUseSplitCapture,
@@ -182,6 +183,7 @@ export function CaptureHost() {
   const backDevice = useCameraDevice('back', { physicalDevices: ['wide-angle'] });
   const device = backDevice;
   const config = captureConfigForMode('standard');
+  const photoTargetResolution = capturePhotoTargetForZoom(zoom);
   // The physical wide lens has no telephoto constituent; the paired detail
   // stream stays off. (Legacy captures keep their `detail` rows.)
   const detailZoom = detailZoomForDevice(backDevice);
@@ -192,7 +194,10 @@ export function CaptureHost() {
     // Mapillary's app captures 4:3 full-sensor stills. A 16:9 crop loses
     // detail at the edges and moves the aspect ratio towards 2:1, which
     // Mapillary treats as an equirectangular panorama.
-    targetResolution: CommonResolutions.UHD_4_3,
+    // The resolution target tracks the zoom preset so a digitally zoomed crop
+    // is stored on its native pixels instead of being upscaled back to 12 MP
+    // (which is what made zoomed street imagery uniformly soft).
+    targetResolution: photoTargetResolution,
     containerFormat: 'jpeg',
     quality: config.quality,
     // Prefer a shorter capture over a lower-noise one: the camera is moving,

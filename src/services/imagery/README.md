@@ -91,8 +91,11 @@ interval:
   meter the road above center instead.
 - **User zoom.** 1x / 1.5x / 2x / 3x crops (default 1.5x) are persisted and
   applied to the preview, stills and dash-cam video. Zooming is the way to crop
-  a low-mounted phone's dashboard out of the frame; the zoomed frame is also
-  sharper per pixel than the retired ultra-wide path.
+  a low-mounted phone's dashboard out of the frame. The still resolution target
+  tracks the crop region's native pixels, so a zoomed still is stored without
+  the ISP interpolating it back to 12 MP — the uniform softness that made
+  digitally zoomed imagery unusable. (The live preview pane is a screen-scale
+  upscale and can look softer than the stored photo.)
 - **Adaptive spacing.** 3 m below 50 km/h and 20 m at or above it, the same
   tiers the Mapillary app uses. Capture continues in stop-and-go traffic above
   ~1.5 m/s and pauses when parked. The camera-busy latch, not the clock, sets
