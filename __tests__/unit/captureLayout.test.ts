@@ -3,6 +3,7 @@ import {
   capturePhotoTargetForZoom,
   clampCaptureZoom,
   nextCaptureZoom,
+  pickRoadCameraDevice,
   shouldUseSplitCapture,
 } from '../../src/components/imagery/captureLayout';
 
@@ -67,5 +68,36 @@ describe('capturePhotoTargetForZoom', () => {
       const target = capturePhotoTargetForZoom(zoom);
       expect(target.width * target.height).toBeLessThanOrEqual(3024 * 4032);
     }
+  });
+});
+
+describe('pickRoadCameraDevice', () => {
+  const physicalWide = {
+    id: 'physical-wide',
+    position: 'back',
+    type: 'wide-angle',
+    isVirtualDevice: false,
+  };
+
+  it('chooses the physical wide lens over virtual dual/triple cameras', () => {
+    const devices = [
+      { id: 'front', position: 'front', type: 'wide-angle', isVirtualDevice: false },
+      { id: 'triple', position: 'back', type: 'triple', isVirtualDevice: true },
+      { id: 'dual-wide', position: 'back', type: 'dual-wide', isVirtualDevice: true },
+      physicalWide,
+    ];
+    expect(pickRoadCameraDevice(devices)?.id).toBe('physical-wide');
+  });
+
+  it('ignores physical ultra-wide and telephoto lenses', () => {
+    const devices = [
+      { id: 'ultra', position: 'back', type: 'ultra-wide-angle', isVirtualDevice: false },
+      { id: 'tele', position: 'back', type: 'telephoto', isVirtualDevice: false },
+    ];
+    expect(pickRoadCameraDevice(devices)).toBeUndefined();
+  });
+
+  it('returns undefined when there is no back wide camera', () => {
+    expect(pickRoadCameraDevice([])).toBeUndefined();
   });
 });

@@ -94,8 +94,14 @@ interval:
   a low-mounted phone's dashboard out of the frame. The still resolution target
   tracks the crop region's native pixels, so a zoomed still is stored without
   the ISP interpolating it back to 12 MP — the uniform softness that made
-  digitally zoomed imagery unusable. (The live preview pane is a screen-scale
-  upscale and can look softer than the stored photo.)
+  digitally zoomed imagery unusable. The preview/dash-cam stream runs at 4K so
+  the large landscape pane is not upscaled from a 1080p buffer. (The live preview
+  pane is still a screen-scale render and can look softer than the stored photo.)
+- **Physical road camera.** The capture device is selected by
+  `type === 'wide-angle' && !isVirtualDevice`, not by VisionCamera's
+  `physicalDevices` filter — a physical lens has no constituent list, so that
+  filter can return a virtual dual-wide camera whose manual lens-position lock
+  is unavailable.
 - **Adaptive spacing.** 3 m below 50 km/h and 20 m at or above it, the same
   tiers the Mapillary app uses. Capture continues in stop-and-go traffic above
   ~1.5 m/s and pauses when parked. The camera-busy latch, not the clock, sets

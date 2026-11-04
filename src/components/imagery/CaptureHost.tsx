@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -18,6 +18,7 @@ import {
   Camera,
   CommonResolutions,
   useCameraDevice,
+  useCameraDevices,
   useCameraPermission,
   usePhotoOutput,
   useVideoOutput,
@@ -34,6 +35,7 @@ import {
   capturePhotoTargetForZoom,
   clampCaptureZoom,
   nextCaptureZoom,
+  pickRoadCameraDevice,
   shouldUseSplitCapture,
 } from './captureLayout';
 import { spacing, typography } from '../../constants/theme';
@@ -179,8 +181,15 @@ export function CaptureHost() {
   // `isLockingFocusWithCustomLensPositionSupported == false`, so
   // `setFocusLocked(1)` is skipped and AF can settle on the dashboard. The
   // physical wide lens supports manual infinity focus, which is what a
-  // road-facing capture needs. Zoom is a digital crop on top.
-  const backDevice = useCameraDevice('back', { physicalDevices: ['wide-angle'] });
+  // road-facing capture needs. Select by `type`/`isVirtualDevice`: the
+  // `physicalDevices` filter scores a physical lens and a virtual dual-wide
+  // equally, so it can silently return the virtual device.
+  const allDevices = useCameraDevices();
+  const fallbackBackDevice = useCameraDevice('back');
+  const backDevice = useMemo(
+    () => pickRoadCameraDevice(allDevices) ?? fallbackBackDevice,
+    [allDevices, fallbackBackDevice],
+  );
   const device = backDevice;
   const config = captureConfigForMode('standard');
   const photoTargetResolution = capturePhotoTargetForZoom(zoom);
@@ -205,7 +214,10 @@ export function CaptureHost() {
     qualityPrioritization: device?.supportsSpeedQualityPrioritization ? 'speed' : 'balanced',
   });
   const videoOutput = useVideoOutput({
-    targetResolution: CommonResolutions.FHD_16_9,
+    // 4K, not 1080p: the split-screen preview pane is nearly the size of the
+    // sensor, and a 1080p stream upscaled to it is what made the live view look
+    // soft regardless of focus. 4K also keeps the dash-cam crop sharp.
+    targetResolution: CommonResolutions.UHD_16_9,
     // No police-report audio: clips stay muted, which also avoids needing the
     // microphone permission.
     enableAudio: false,
@@ -277,7 +289,13 @@ export function CaptureHost() {
         { opacity: pressed ? 0.75 : 1 },
       ]}
       accessibilityRole="button"
-      accessibilityLabel={focusHud.locked ? 'Focus locked at infinity' : 'Autofocus is active'}
+      accessibilityLabel={
+        focusHud.locked
+          ? 'Focus locked at infinity'
+          : focusHud.mode === 'locked'
+            ? 'Focus locked near, not at infinity'
+            : 'Autofocus is active'
+      }
       accessibilityHint="Re-locks focus at infinity for the road"
     >
       <Text
@@ -287,7 +305,7 @@ export function CaptureHost() {
           focusHud.locked ? styles.focusChipTextLocked : styles.focusChipTextAf,
         ]}
       >
-        {focusHud.locked ? '∞' : 'AF'}
+        {focusHud.locked ? '∞' : focusHud.mode === 'locked' ? 'Near' : 'AF'}
       </Text>
     </Pressable>
   );
@@ -390,24 +408,38 @@ export function CaptureHost() {
     // only above 10 mph. Otherwise a stop lets AF settle on the dashboard.
     const capturing =
       useStreetViewCaptureStore.getState().session != null || useDashCamStore.getState().recording;
-    const lock = capturing || shouldLockInfinityFocus(speedMps);
-    if (!force && lock === focusLockedRef.current) return;
+    const wantLock = capturing || shouldLockInfinityFocus(speedMps);
+    // Compare against the *actual* lens state, not just our last request. A
+    // session reconfigure can quietly switch focus back to AF; the old
+    // ref-only check then skipped the re-lock forever.
+    const alreadyCorrect = wantLock
+      ? controller.focusMode === 'locked' && controller.lensPosition >= 0.98
+      : controller.focusMode !== 'locked';
+    if (!force && alreadyCorrect) {
+      focusLockedRef.current = wantLock;
+      return;
+    }
     try {
-      if (lock) {
+      if (wantLock) {
         if (__DEV__ && !focusLoggedRef.current) {
           focusLoggedRef.current = true;
           console.log('[Capture] focus capabilities', {
             device: controller.device.id,
-            physicalDevices: controller.device.physicalDevices?.map((entry) => entry.type),
+            type: controller.device.type,
+            isVirtualDevice: controller.device.isVirtualDevice,
             supportsFocusLocking: controller.device.supportsFocusLocking,
             supportsFocusMetering: controller.device.supportsFocusMetering,
+            focusMode: controller.focusMode,
+            lensPosition: controller.lensPosition,
           });
         }
         let locked = false;
         if (controller.device.supportsFocusLocking) {
           try {
             await controller.setFocusLocked(1);
-            locked = controller.focusMode === 'locked';
+            // `focusMode` can report 'locked' at a near position; require the
+            // lens to actually reach the far end before calling it infinity.
+            locked = controller.focusMode === 'locked' && controller.lensPosition >= 0.98;
           } catch {
             locked = false;
           }
@@ -422,13 +454,14 @@ export function CaptureHost() {
             responsiveness: 'snappy',
             adaptiveness: 'locked',
           });
-          locked = true;
+          locked = controller.focusMode === 'locked';
         }
+        focusLockedRef.current = locked;
         if (!locked) return;
-      } else if (focusLockedRef.current) {
+      } else if (focusLockedRef.current || controller.focusMode === 'locked') {
         await controller.resetFocus();
+        focusLockedRef.current = false;
       }
-      focusLockedRef.current = lock;
     } catch {
       // Leave the previous state; the next fix retries.
     }
@@ -438,12 +471,11 @@ export function CaptureHost() {
   const readFocusHud = useCallback(() => {
     const controller = cameraRef.current?.controller;
     if (!controller) return false;
-    const locked = controller.focusMode === 'locked';
-    setFocusHud({
-      locked,
-      lensPosition: controller.lensPosition,
-      mode: controller.focusMode,
-    });
+    // `focusMode === 'locked'` alone is not enough: the lock can be at a near
+    // position. A real infinity lock reports the lens at ~1.0 as well.
+    const atInfinity = controller.lensPosition >= 0.98;
+    const locked = controller.focusMode === 'locked' && atInfinity;
+    setFocusHud({ locked, lensPosition: controller.lensPosition, mode: controller.focusMode });
     return locked;
   }, []);
 

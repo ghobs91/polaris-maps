@@ -53,6 +53,31 @@ export function capturePhotoTargetForZoom(zoom: number): { width: number; height
   return CAPTURE_PHOTO_TARGETS[clamped] ?? CAPTURE_PHOTO_TARGETS[1];
 }
 
+/** The subset of a VisionCamera device needed to find the road camera. */
+export interface RoadCameraDeviceLike {
+  position: string;
+  type: string;
+  isVirtualDevice: boolean;
+}
+
+/**
+ * Pick the single physical wide-angle camera.
+ *
+ * VisionCamera's `physicalDevices` filter cannot express "physical only": a
+ * physical lens has an empty constituent list (score 0) and a virtual dual-wide
+ * scores 0 too, so the filter may still return a virtual camera — the exact
+ * device whose manual lens-position lock is unavailable. Filter on
+ * `type === 'wide-angle' && !isVirtualDevice` instead.
+ */
+export function pickRoadCameraDevice<T extends RoadCameraDeviceLike>(
+  devices: readonly T[],
+): T | undefined {
+  return devices.find(
+    (device) =>
+      device.position === 'back' && device.type === 'wide-angle' && !device.isVirtualDevice,
+  );
+}
+
 export interface SplitCaptureInput {
   /** Window width in points. */
   width: number;
