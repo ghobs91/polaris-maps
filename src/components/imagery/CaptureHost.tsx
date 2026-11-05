@@ -69,6 +69,7 @@ import {
   insertDashCamClip,
   pruneDashCamClips,
 } from '../../services/dashcam/dashCamQueue';
+import { toFilePath, toFileUri } from '../../utils/fileUri';
 
 const PREVIEW_WIDTH = 96;
 const PREVIEW_HEIGHT = 54;
@@ -80,10 +81,6 @@ const DETAIL_ZOOM_SETTLE_MS = 150;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function toFileUri(path: string): string {
-  return path.startsWith('file://') ? path : `file://${path}`;
 }
 
 function getImageSize(uri: string): Promise<{ width: number; height: number }> {
@@ -702,7 +699,11 @@ export function CaptureHost() {
   const recordSegment = useCallback(
     async (startedAt: number): Promise<{ uri: string; durationMs: number } | null> => {
       const dir = await ensureDashCamDir();
-      const destPath = `${dir}${Crypto.randomUUID()}.mp4`;
+      // VisionCamera wants a filesystem path here, not an Expo file:// URI.
+      // Passing the URI made the native recorder write outside the app's
+      // documents (or fail), so the clip was never found and reconcile removed
+      // its row — the settings list then always said "None".
+      const destPath = toFilePath(`${dir}${Crypto.randomUUID()}.mp4`);
       const fix = useNavigationTrackingStore.getState().rawFix;
       const recorder = await videoOutput.createRecorder({
         maxDuration: clipSeconds,
