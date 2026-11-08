@@ -311,11 +311,11 @@ describe('CarPlayManager', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Connect pushes the phone's position so the map isn't stuck at (0, 0).
-    // (4th arg: speed m/s — 0 for the idle locate, unknown/stationary.)
+    // (3rd arg: -1 = no valid GPS course yet; 4th: speed 0, stationary.)
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(
       40.7128,
       -74.006,
-      0,
+      -1,
       0,
     );
 
@@ -326,7 +326,7 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(
       40.7128,
       -74.006,
-      0,
+      -1,
       0,
     );
   });
@@ -339,6 +339,9 @@ describe('CarPlayManager', () => {
 
     const calls = (Location.watchPositionAsync as jest.Mock).mock.calls;
     expect(calls.length).toBeGreaterThan(0);
+    // iOS only honours distanceInterval, so it must be small enough to deliver
+    // the first moving fix promptly instead of after 25 m.
+    expect(calls[calls.length - 1][0]).toMatchObject({ distanceInterval: 5 });
     const onUpdate = calls[calls.length - 1][1] as (loc: unknown) => void;
     onUpdate({ coords: { latitude: 40.7, longitude: -74.0, heading: 90, speed: 10 } });
 
@@ -348,7 +351,7 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 90, 10);
   });
 
-  it('clamps invalid idle GPS heading and speed before pushing them', async () => {
+  it('forwards an unknown idle GPS heading as -1 and clamps its speed', async () => {
     initCarPlay();
     fireEvent('carPlayConnected');
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -356,10 +359,12 @@ describe('CarPlayManager', () => {
 
     const calls = (Location.watchPositionAsync as jest.Mock).mock.calls;
     const onUpdate = calls[calls.length - 1][1] as (loc: unknown) => void;
-    // expo-location reports -1 when course/speed are unavailable.
+    // expo-location reports -1 when course/speed are unavailable. The heading is
+    // kept as -1 so the native host knows there is no course yet instead of
+    // mistaking it for due north and holding the map north-up.
     onUpdate({ coords: { latitude: 40.7, longitude: -74.0, heading: -1, speed: -1 } });
 
-    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 0, 0);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, -1, 0);
   });
 
   it('pushes each fix to the CarPlay map immediately while the phone is locked', () => {

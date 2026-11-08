@@ -256,7 +256,12 @@ async function ensureIdleLocationUpdates(): Promise<void> {
       // Idle map: follow closely enough that the moving 3D view stays smooth
       // (the native follow glide bridges the gaps between fixes). High accuracy
       // because the puck/heading now drive a nav-style camera, not just a dot.
-      { accuracy: Location.Accuracy.High, distanceInterval: 25, timeInterval: 2000 },
+      //
+      // distanceInterval is the only spacing iOS honours (`timeInterval` is
+      // Android-only), so a large value delayed the first heading-up fix until
+      // the car had travelled that far — the map stayed north-up through a
+      // slow start. Keep it short; the native ticker smooths the extra pushes.
+      { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 1000 },
       (location) => {
         if (!connected || !locationPushAllowed()) return;
         carPlayUserLocation = {
@@ -265,19 +270,10 @@ async function ensureIdleLocationUpdates(): Promise<void> {
         };
         // Forward heading + speed so the native host can switch to the pitched
         // heading-up 3D view and nav puck while the car is moving with no
-        // active trip. GPS reports -1 for both when unavailable.
-        const heading =
-          location.coords.heading != null && location.coords.heading >= 0
-            ? location.coords.heading
-            : 0;
-        const speed =
-          location.coords.speed != null && location.coords.speed > 0 ? location.coords.speed : 0;
-        CarPlay.updateMapCenter(
-          location.coords.latitude,
-          location.coords.longitude,
-          heading,
-          speed,
-        );
+        // active trip. An unavailable course is forwarded as -1 so the native
+        // host can tell "no course yet" apart from a real due-north course and
+        // keep its last orientation.
+        pushLocationFix(location.coords);
       },
     );
     if (!connected) {
@@ -1005,6 +1001,22 @@ function onLocateRequest(): void {
 }
 
 /**
+ * Pushes a position to the CarPlay map, preserving a valid GPS course and
+ * speed. An unavailable course is sent as -1 so the native host keeps its last
+ * orientation instead of mistaking "unknown" for due north.
+ */
+function pushLocationFix(coords: {
+  latitude: number;
+  longitude: number;
+  heading?: number | null;
+  speed?: number | null;
+}): void {
+  const heading = coords.heading != null && coords.heading >= 0 ? coords.heading : -1;
+  const speed = coords.speed != null && coords.speed > 0 ? coords.speed : 0;
+  CarPlay.updateMapCenter(coords.latitude, coords.longitude, heading, speed);
+}
+
+/**
  * Centers the CarPlay map on the driver's live position. Runs on connect and
  * when the driver taps Locate/Recenter, since the native map host has no
  * position of its own outside navigation.
@@ -1026,7 +1038,7 @@ async function pushUserLocation(): Promise<void> {
     const last = await Location.getLastKnownPositionAsync();
     if (last && locationPushAllowed()) {
       carPlayUserLocation = { lat: last.coords.latitude, lng: last.coords.longitude };
-      CarPlay.updateMapCenter(last.coords.latitude, last.coords.longitude, 0);
+      pushLocationFix(last.coords);
       pushed = true;
     }
     const current = await Location.getCurrentPositionAsync({
@@ -1034,7 +1046,7 @@ async function pushUserLocation(): Promise<void> {
     });
     if (locationPushAllowed()) {
       carPlayUserLocation = { lat: current.coords.latitude, lng: current.coords.longitude };
-      CarPlay.updateMapCenter(current.coords.latitude, current.coords.longitude, 0);
+      pushLocationFix(current.coords);
       pushed = true;
     }
   } catch {
@@ -1058,7 +1070,7 @@ function locationPushAllowed(): boolean {
 function syncFallbackCenter(): void {
   const { viewport } = useMapStore.getState();
   if (!viewport || (viewport.lat === 0 && viewport.lng === 0)) return;
-  CarPlay.updateMapCenter(viewport.lat, viewport.lng, 0);
+  CarPlay.updateMapCenter(viewport.lat, viewport.lng, -1);
 }
 
 function getSearchSession(): SearchSession {

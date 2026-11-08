@@ -1040,14 +1040,29 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     let hadTarget = targetCoordinate != nil
     let elapsed = lastCameraPushTime > 0 ? now - lastCameraPushTime : 0
     lastCameraPushTime = now
+    // A negative course means CoreLocation has no valid heading yet (it reports
+    // -1 while stationary and before the first movement). Keep the last real
+    // course instead of snapping the camera to due north, and don't treat the
+    // unknown course as a reason to rotate.
+    let hasCourse = heading.isFinite && heading >= 0 && heading <= 360
+    let resolvedHeading = hasCourse ? heading : targetHeading
     targetCoordinate = coordinate
-    targetHeading = heading
+    targetHeading = resolvedHeading
     targetSpeedMps = max(speedMps, 0)
     hasCenter = true
     // Idle driving (moving, no active trip) mirrors the navigation map:
     // pitched heading-up 3D + nav puck instead of the flat north-up dot.
     // Stays false during a trip so navigation owns the camera/puck state.
-    isDriving = !isNavigating && targetSpeedMps > Self.drivingMinSpeedMps
+    //
+    // A real course flips the view as soon as the car is rolling instead of
+    // waiting to clear the higher speed gate: heading-up orientation used to
+    // lag through slow starts and stop-and-go traffic because it required
+    // ~7 km/h before the camera rotated. The flat north-up view is now only
+    // kept when there is no course yet.
+    isDriving =
+      !isNavigating
+      && (targetSpeedMps > Self.drivingMinSpeedMps
+        || (hasCourse && targetSpeedMps > Self.coastMinSpeedMps))
 
     if hadTarget, elapsed > 0 {
       // Track the push cadence with an EMA so a single burst or a single long
@@ -1082,7 +1097,7 @@ final class CarPlayMapViewHost: UIViewController, MLNMapViewDelegate {
     coasting = false
     if animationDuration <= 0.001 {
       stopFollowAnimation()
-      applyFollowFrame(coordinate: coordinate, heading: heading)
+      applyFollowFrame(coordinate: coordinate, heading: resolvedHeading)
     } else {
       startFollowAnimation()
     }

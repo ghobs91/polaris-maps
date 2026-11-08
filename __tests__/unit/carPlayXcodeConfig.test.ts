@@ -368,9 +368,16 @@ describe('CarPlay iOS configuration', () => {
         'guard navigationActive, dashboardHost == nil, let window = dashboardWindow',
       );
       // Idle driving (moving, no trip) uses the same pitched 3D camera and nav
-      // puck as navigation, derived from the pushed speed.
+      // puck as navigation, derived from the pushed speed. A valid course flips
+      // it as soon as the car rolls instead of waiting for ~7 km/h, and an
+      // unknown course (-1) keeps the previous orientation.
       expect(mapView).toContain('isDriving');
       expect(mapView).toContain('drivingMinSpeedMps');
+      expect(mapView).toContain('let hasCourse = heading.isFinite');
+      expect(mapView).toContain('hasCourse && targetSpeedMps > Self.coastMinSpeedMps');
+      expect(mapView).toContain(
+        'applyFollowFrame(coordinate: coordinate, heading: resolvedHeading)',
+      );
       expect(mapView).toContain('isNavigating || isDriving');
     }
   });
