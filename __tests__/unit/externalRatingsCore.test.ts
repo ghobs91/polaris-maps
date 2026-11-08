@@ -81,13 +81,72 @@ describe('buildCollectorScript', () => {
       }),
       {
         body: {
-          innerHTML: '',
+          innerHTML: 'You have been blocked. Why? Something about the behaviour of the browser.',
           innerText: 'You have been blocked. Why? Something about the behaviour of the browser.',
         },
       },
     );
 
     expect(JSON.parse(posted[0]!).blocked).toBe(true);
+  });
+
+  it('does not force a layout read when the page carries no anti-bot markers', () => {
+    let innerTextReads = 0;
+    const body = { innerHTML: '<div>ordinary listing</div>' } as Record<string, unknown>;
+    Object.defineProperty(body, 'innerText', {
+      get: () => {
+        innerTextReads += 1;
+        return 'ordinary listing';
+      },
+    });
+
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 2,
+      }),
+      { body },
+    );
+
+    jest.advanceTimersByTime(100);
+
+    expect(posted).toHaveLength(1);
+    expect(innerTextReads).toBe(0);
+    const msg = JSON.parse(posted[0]!);
+    expect(msg.challenge).toBe(false);
+    expect(msg.blocked).toBe(false);
+  });
+
+  it('skips the page scans entirely once data is available', () => {
+    let innerHtmlReads = 0;
+    const body = {} as Record<string, unknown>;
+    Object.defineProperty(body, 'innerHTML', {
+      get: () => {
+        innerHtmlReads += 1;
+        return '';
+      },
+    });
+
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'true',
+        collectBodyJs: '    out.ldRating = 4.2;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 3,
+      }),
+      { body },
+    );
+
+    expect(posted).toHaveLength(1);
+    expect(innerHtmlReads).toBe(0);
   });
 
   it('does not treat block copy inside inline scripts as a hard block', () => {

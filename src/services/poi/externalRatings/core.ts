@@ -655,24 +655,32 @@ export function buildCollectorScript(opts: {
   function collect() {
     var out = { type: TYPE, provider: PROVIDER };
 ${opts.collectBodyJs}
+    // A page that produced data needs no verdict: markers only fence off the
+    // no-data case, so the success path skips both full-document scans below.
+    var hasData = ${opts.hasDataJs};
+    if (hasData) { out.blocked = false; out.challenge = false; post(out); return; }
     var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot', 'you have been blocked', 'behaviour of the browser'];
     var BLOCK_MARKERS = ['you have been blocked', 'behaviour of the browser has caught our attention'];
     var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
-    // Block copy is checked against *visible* text: page bundles and inline
-    // scripts can contain the same phrases without the page being blocked.
-    var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
     var markerHit = false;
     for (var mi = 0; mi < MARKERS.length; mi++) {
       if (low.indexOf(MARKERS[mi]) !== -1) { markerHit = true; break; }
     }
+    // Block copy is checked against *visible* text: page bundles and inline
+    // scripts can contain the same phrases without the page being blocked.
+    // Reading innerText forces a layout pass on the provider's (often very
+    // heavy) page, so it is skipped unless a marker was actually found — the
+    // block markers are a subset of the marker list, so no block can exist
+    // without one.
     var blockHit = false;
-    for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
-      if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+    if (markerHit) {
+      var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
+      for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
+        if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+      }
     }
-    var hasData = ${opts.hasDataJs};
-    out.blocked = blockHit && !hasData;
-    out.challenge = markerHit && !hasData && !out.blocked;
-    if (hasData) { post(out); return; }
+    out.blocked = blockHit;
+    out.challenge = markerHit && !blockHit;
     ATTEMPTS -= 1;
     if (ATTEMPTS > 0) {
       var delay = INTERVAL;

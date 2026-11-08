@@ -75,9 +75,9 @@ export function ExternalRatingsSection({
   /** Opens the write-a-review surface when no external rating is found. */
   onWriteReview?: () => void;
   /**
-   * False while the card is still opening: the section renders its loading
-   * placeholder but starts no fetch and mounts no hidden WebView, so the
-   * sheet's spring animation is not competing with a page load.
+   * False while the card is still opening or already closing: the section
+   * renders its loading placeholder but starts no fetch and loads no provider
+   * page, so the sheet's spring animation is not competing with a page load.
    */
   enabled?: boolean;
 }) {
@@ -100,13 +100,27 @@ export function ExternalRatingsSection({
   const { states, handleMessage, handleError } = useExternalRatings(query, poi.id, enabled);
 
   // Ignore any state left over from a previous place while the gate is closed,
-  // so a stale rating can't flash before the new pass starts.
+  // so a stale rating can't flash before the new pass starts. While the same
+  // place is closing, keep showing what its pass last settled on, so the card
+  // does not flash "Loading ratings…" as the sheet slides away.
   const activeStates = enabled ? states : NO_STATES;
+  const lastShownRef = useRef<{
+    placeId: string | number;
+    states: ExternalRatingProviderState[];
+  } | null>(null);
+  useEffect(() => {
+    if (enabled) lastShownRef.current = { placeId: poi.id, states };
+  }, [enabled, states, poi.id]);
+  const shownStates = enabled
+    ? states
+    : lastShownRef.current?.placeId === poi.id
+      ? lastShownRef.current.states
+      : NO_STATES;
 
   // Serialize hidden browsing: at most one stage is active at a time, in
-  // registry order. The WebView itself is kept mounted (with its warmed cookie
-  // store) across stages and providers while the card is open, so a cleared
-  // DataDome session is not lost to a cold remount.
+  // registry order. The WebView instance is kept mounted (with its warmed
+  // cookie store) across stages and providers while the card is open, so a
+  // cleared DataDome session is not lost to a cold remount.
   const activeWebView = activeStates.find((s) => s.webView)?.webView ?? null;
   const lastWebViewRef = useRef<{
     placeId: string | number;
@@ -118,13 +132,20 @@ export function ExternalRatingsSection({
   // Only remount the kept-alive view for the place it came from.
   const rememberedWebView =
     lastWebViewRef.current?.placeId === poi.id ? lastWebViewRef.current.stage : null;
-  const mountedWebView = enabled ? (activeWebView ?? rememberedWebView) : null;
+  const mountedWebView = activeWebView ?? rememberedWebView;
+  // Load a provider page only while its stage is live. At every other moment —
+  // between providers, after the pass settles, and while the card is closing —
+  // the kept-alive browser points at a blank document instead. The WKWebView
+  // instance (and its cookie store) survives, but no third-party page keeps
+  // rendering and competing with the card for the main thread, and the card can
+  // slide away without a repeated 403/ad bundle still running behind it.
+  const mountedUri = activeWebView ? activeWebView.uri : 'about:blank';
   const loaded = useMemo(
     () =>
-      activeStates
+      shownStates
         .filter((s) => s.status === 'loaded' && s.summary)
         .map((s) => s.summary as ExternalRatingSummary),
-    [activeStates],
+    [shownStates],
   );
   const combined = useMemo(() => combineExternalRatings(loaded), [loaded]);
 
@@ -141,14 +162,15 @@ export function ExternalRatingsSection({
   }, [combined, poi]);
 
   // Idle counts as resolving too, so the empty state never flashes before the
-  // first resolution pass starts. A closed gate also counts as resolving: the
-  // section shows its loading placeholder while it waits for the sheet.
+  // first resolution pass starts. A closed gate with nothing remembered also
+  // counts as resolving: the section shows its loading placeholder while it
+  // waits for the sheet.
   const resolving =
-    !enabled ||
-    activeStates.some(
+    shownStates.length === 0 ||
+    shownStates.some(
       (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
     );
-  const blockedState = activeStates.find((s) => s.status === 'blocked') ?? null;
+  const blockedState = shownStates.find((s) => s.status === 'blocked') ?? null;
 
   // A real browser viewport, not a 0×0 frame: `innerWidth`/`innerHeight` are
   // part of every bot-detection fingerprint, and a zero-size viewport is an
@@ -212,10 +234,10 @@ export function ExternalRatingsSection({
       {mountedWebView ? (
         <View style={hiddenBrowserStyle} pointerEvents="none">
           <WebView
-            source={{ uri: mountedWebView.uri }}
+            source={{ uri: mountedUri }}
             style={hiddenBrowserStyle}
             userAgent={EXTERNAL_RATINGS_USER_AGENT}
-            injectedJavaScript={mountedWebView.injectedJavaScript}
+            injectedJavaScript={activeWebView ? activeWebView.injectedJavaScript : undefined}
             injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
             injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
             javaScriptEnabled

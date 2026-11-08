@@ -73,6 +73,13 @@ const POI_SHEET_SNAPS = [0.55, 0.85] as const;
  * the sheet's opening spring (settles in ~0.4 s) and made the card stutter.
  */
 const HEAVY_SECTIONS_DELAY_MS = 450;
+/**
+ * How long the last place keeps rendering after the card is dismissed. The
+ * sheet's close spring is ~0.4 s; unmounting the card in the same frame as the
+ * tap destroys the hidden reviews/photos WebViews while they are still loading,
+ * which stalls the main thread right when the user expects the next screen.
+ */
+const CARD_CLOSE_RETENTION_MS = 380;
 /** Apples-Maps-style: at most this many action pills visible, rest scroll. */
 const VISIBLE_ACTION_PILLS = 4;
 
@@ -515,9 +522,22 @@ export function POIInfoCard() {
   }, [selectedPoi, canAutoSeedOsm, osmAccessToken]);
 
   const poi = selectedPoi;
+  // Keep the last place on screen while the sheet animates closed. This also
+  // defers tearing down the hidden reviews/photos WebViews until after the
+  // dismissal has been registered, instead of inside the same frame as the tap.
+  const [retainedPoi, setRetainedPoi] = useState<OsmPoi | null>(selectedPoi);
+  useEffect(() => {
+    if (selectedPoi) {
+      setRetainedPoi(selectedPoi);
+      return;
+    }
+    const timer = setTimeout(() => setRetainedPoi(null), CARD_CLOSE_RETENTION_MS);
+    return () => clearTimeout(timer);
+  }, [selectedPoi]);
+  const cardPoi = selectedPoi ?? retainedPoi;
   // Charging stations are usually labelled generically ("Charging Station");
   // prefer the network/operator name (EVgo, ChargePoint, …) when OCM has it.
-  const poiDisplayName = chargingData?.operator ?? poi?.name ?? '';
+  const poiDisplayName = chargingData?.operator ?? cardPoi?.name ?? '';
   const enrichedData = useOsmPoiStore((s) => s.enrichedData);
   const setEnrichedData = useOsmPoiStore((s) => s.setEnrichedData);
   const setIsEnriching = useOsmPoiStore((s) => s.setIsEnriching);
@@ -525,7 +545,7 @@ export function POIInfoCard() {
   const isOnline = usePeerStore((s) => s.isOnline);
   const [cachedAt, setCachedAt] = useState<number | null>(null);
   const [communityRating, setCommunityRating] = useState<MergedRating | null>(null);
-  const rawParsed = useMemo(() => (poi ? parsePoi(poi) : null), [poi]);
+  const rawParsed = useMemo(() => (cardPoi ? parsePoi(cardPoi) : null), [cardPoi]);
 
   // Gate the two heavy sections (hidden WebViews + page fetches) until the
   // sheet's opening spring has settled. Keyed on the POI id, not the object:
@@ -663,7 +683,7 @@ export function POIInfoCard() {
     };
   }, [rawParsed, enrichedData, poi]);
 
-  const category = poi ? getPoiCategory(poi.type, poi.subtype) : null;
+  const category = cardPoi ? getPoiCategory(cardPoi.type, cardPoi.subtype) : null;
 
   // Theme shorthands
   const textColor = colors.text;
@@ -1306,7 +1326,7 @@ export function POIInfoCard() {
       <View style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
         {/* Share/close with the name centered between them (Apple Maps-style).
             The sheet's own handle sits above this row. */}
-        {poi && (
+        {cardPoi && (
           <View style={styles.actionRow}>
             <TouchableOpacity
               onPress={handleShare}
@@ -1354,8 +1374,8 @@ export function POIInfoCard() {
                 {category
                   ? enrichedData?.poiCategory
                     ? formatPoiCategory(enrichedData.poiCategory)
-                    : capitalise(poi.subtype)
-                  : capitalise(String(poi.type))}
+                    : capitalise(cardPoi.subtype)
+                  : capitalise(String(cardPoi.type))}
                 {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
                 {parsed?.stars ? ` · ${parsed.stars}` : ''}
               </Text>
@@ -1375,7 +1395,7 @@ export function POIInfoCard() {
 
         {/* Street-level preview now floats over the map (StreetViewThumbOverlay). */}
 
-        {poi && parsed && category && (
+        {cardPoi && parsed && category && (
           <ScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
@@ -1456,7 +1476,7 @@ export function POIInfoCard() {
 
             {/* ── Reviews: TripAdvisor + Yelp aggregate (on-device headless browse) ── */}
             <ExternalRatingsSection
-              poi={poi}
+              poi={cardPoi}
               enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
               website={parsed.website}
               onWriteReview={handleWriteReview}
@@ -1465,13 +1485,13 @@ export function POIInfoCard() {
 
             {/* ── Photos: POI website + open-licensed supplements (Wikimedia) ── */}
             <PlaceMediaCarousel
-              lat={poi.lat}
-              lng={poi.lng}
-              name={poi.name}
-              osmId={String(poi.id)}
+              lat={cardPoi.lat}
+              lng={cardPoi.lng}
+              name={cardPoi.name}
+              osmId={String(cardPoi.id)}
               websiteUrl={parsed.website}
-              tags={poi.tags}
-              resetKey={poi.id}
+              tags={cardPoi.tags}
+              resetKey={cardPoi.id}
               online={isOnline}
               enabled={heavySectionsEnabled}
               onWebsiteResolved={handleWebsiteResolved}
@@ -1483,14 +1503,14 @@ export function POIInfoCard() {
               presentationStyle="pageSheet"
               onRequestClose={() => setShowSaveSheet(false)}
             >
-              {poi && (
+              {cardPoi && (
                 <SaveToListSheet
-                  poiUuid={String(poi.id)}
-                  placeName={poi.name}
-                  lat={poi.lat}
-                  lng={poi.lng}
+                  poiUuid={String(cardPoi.id)}
+                  placeName={cardPoi.name}
+                  lat={cardPoi.lat}
+                  lng={cardPoi.lng}
                   address={parsed?.address ?? undefined}
-                  category={poi.subtype}
+                  category={cardPoi.subtype}
                   website={parsed?.website ?? undefined}
                   phone={parsed?.phone ?? undefined}
                   onDone={() => setShowSaveSheet(false)}
