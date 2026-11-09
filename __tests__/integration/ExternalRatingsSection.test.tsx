@@ -76,6 +76,18 @@ function webViewProps(): Record<string, unknown> {
   return (global as any).__lastWebViewProps as Record<string, unknown>;
 }
 
+/**
+ * The kept-alive browser must be blanked with an `html` source. A hostless
+ * `uri` (e.g. `about:blank`) is routed by react-native-webview's iOS
+ * `visitSource` to `WKWebView loadFileURL:`, which raises an ObjC exception for
+ * a non-file URL and terminates the app.
+ */
+function expectBlankBrowserSource(): void {
+  const source = webViewProps()?.source as { uri?: string; html?: string } | undefined;
+  expect(source?.uri).toBeUndefined();
+  expect(source?.html).toContain('<!doctype html>');
+}
+
 function onMessage(data: unknown): void {
   const handler = webViewProps().onMessage as (e: { nativeEvent: { data: string } }) => void;
   act(() => {
@@ -404,7 +416,7 @@ describe('ExternalRatingsSection', () => {
     // The kept-alive WKWebView stays for its warmed cookie store, but the
     // heavy provider document is released so it cannot keep rendering behind
     // the card.
-    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: 'about:blank' }));
+    await waitFor(expectBlankBrowserSource);
     expect(webViewProps().onMessage).toBeUndefined();
   });
 
@@ -418,7 +430,7 @@ describe('ExternalRatingsSection', () => {
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
 
     screen.rerender(<ExternalRatingsSection poi={poi} enabled={false} />);
-    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: 'about:blank' }));
+    await waitFor(expectBlankBrowserSource);
     expect(webViewProps().onMessage).toBeUndefined();
   });
 

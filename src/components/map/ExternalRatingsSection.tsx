@@ -61,6 +61,16 @@ const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
 /** No provider state while the gate is closed (avoids stale ratings flashing). */
 const NO_STATES: ExternalRatingProviderState[] = [];
 
+/**
+ * Static document used to unload a provider page without unmounting the hidden
+ * WKWebView (which would lose its warmed cookie/clearance store). Must be an
+ * `html` source: a hostless `uri` such as `about:blank` is routed by
+ * react-native-webview to `WKWebView loadFileURL:`, which throws for non-file
+ * URLs and terminates the app.
+ */
+const BLANK_BROWSER_DOCUMENT =
+  '<!doctype html><html><head><meta charset="utf-8"><title>about:blank</title></head><body></body></html>';
+
 export function ExternalRatingsSection({
   poi,
   enrichedFormattedAddress,
@@ -135,11 +145,19 @@ export function ExternalRatingsSection({
   const mountedWebView = activeWebView ?? rememberedWebView;
   // Load a provider page only while its stage is live. At every other moment —
   // between providers, after the pass settles, and while the card is closing —
-  // the kept-alive browser points at a blank document instead. The WKWebView
+  // the kept-alive browser is pointed at a blank document instead. The WKWebView
   // instance (and its cookie store) survives, but no third-party page keeps
   // rendering and competing with the card for the main thread, and the card can
   // slide away without a repeated 403/ad bundle still running behind it.
-  const mountedUri = activeWebView ? activeWebView.uri : 'about:blank';
+  //
+  // The blank must be an `html` source, never `{ uri: 'about:blank' }`:
+  // react-native-webview's iOS `visitSource` routes any URL without a host to
+  // `WKWebView loadFileURL:`, and WebKit raises (SIGTRAP in the app) for a
+  // non-file URL. A static HTML document takes the `loadHTMLString:` path and
+  // unloads the previous provider page just the same.
+  const browserSource = activeWebView
+    ? { uri: activeWebView.uri }
+    : { html: BLANK_BROWSER_DOCUMENT };
   const loaded = useMemo(
     () =>
       shownStates
@@ -234,7 +252,7 @@ export function ExternalRatingsSection({
       {mountedWebView ? (
         <View style={hiddenBrowserStyle} pointerEvents="none">
           <WebView
-            source={{ uri: mountedUri }}
+            source={browserSource}
             style={hiddenBrowserStyle}
             userAgent={EXTERNAL_RATINGS_USER_AGENT}
             injectedJavaScript={activeWebView ? activeWebView.injectedJavaScript : undefined}
