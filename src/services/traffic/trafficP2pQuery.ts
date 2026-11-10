@@ -78,6 +78,38 @@ export function queryPeersForConditions(
   });
 }
 
+/**
+ * Hybrid tier-3 condition query: ask the Hyperswarm mesh and the Nostr
+ * relay profile store in parallel and merge the answers.
+ *
+ * Nostr profile events are stored (parameterized-replaceable, kind 30110),
+ * so relays answer even when no live peers are online — this is what turns
+ * the weekly-history cache into a shared P2P asset instead of a per-device
+ * one. When the Nostr fallback sockets aren't connected (healthy swarm),
+ * the relay leg returns [] and this reduces to the swarm-only query.
+ *
+ * Entries are deduped per cell, keeping the answer with the larger sample
+ * count. Never rejects — transport failures resolve to no data.
+ */
+export async function queryConditionsHybrid(
+  cells: string[],
+  bucket: TimeBucket,
+  maxAgeSec: number = P2P_FRESH_SEC,
+  timeoutMs: number = P2P_QUERY_TIMEOUT_MS,
+): Promise<WireConditionEntry[]> {
+  // Lazy-required so the Nostr/WebSocket modules stay out of unit tests
+  // and environments without the relay stack.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const exchange = require('./nostrProfileExchange') as typeof import('./nostrProfileExchange');
+  const [swarmEntries, nostrEntries] = await Promise.all([
+    queryPeersForConditions(cells, bucket, maxAgeSec, timeoutMs),
+    exchange.queryNostrProfiles(cells, bucket, timeoutMs).catch(() => [] as WireConditionEntry[]),
+  ]);
+  if (nostrEntries.length === 0) return swarmEntries;
+
+  return exchange.mergeConditionEntries(swarmEntries, nostrEntries);
+}
+
 /** Wire the response collector into the bridge (called once at startup). */
 export function initP2pConditionQuery(): void {
   bridgeOnResponse((res) => {

@@ -1,4 +1,9 @@
-import type { TimeBucket, TrafficAreaCondition } from '../../models/trafficHistory';
+import type {
+  TimeBucket,
+  TrafficAreaCondition,
+  ConditionObservationSource,
+} from '../../models/trafficHistory';
+import { PROBE_DERIVED_SOURCES } from '../../models/trafficHistory';
 import {
   CURRENT_FRESH_SEC,
   EMA_ALPHA,
@@ -58,6 +63,7 @@ export function mergeConditionObservation(
   observation: { avgSpeedMph: number; avgCongestionRatio: number; freeFlowSpeedMph: number },
   nowSec: number,
   alpha: number = EMA_ALPHA,
+  probeDerived: boolean = false,
 ): TrafficAreaCondition {
   return {
     ...existing,
@@ -69,6 +75,7 @@ export function mergeConditionObservation(
     ),
     freeFlowSpeedMph: Math.max(existing.freeFlowSpeedMph, observation.freeFlowSpeedMph),
     sampleCount: Math.min(MAX_SAMPLE_COUNT, existing.sampleCount + 1),
+    probeSamples: Math.min(MAX_SAMPLE_COUNT, (existing.probeSamples ?? 0) + (probeDerived ? 1 : 0)),
     lastUpdated: nowSec,
   };
 }
@@ -78,6 +85,8 @@ export interface ConditionObservation {
   avgSpeedMph: number;
   avgCongestionRatio: number;
   freeFlowSpeedMph: number;
+  /** Provenance of this observation — drives the republish gate. Default 'tomtom'. */
+  source?: ConditionObservationSource;
 }
 
 export class TrafficHistoryService {
@@ -113,10 +122,13 @@ export class TrafficHistoryService {
   async recordObservation(bucket: TimeBucket, obs: ConditionObservation): Promise<void> {
     await this.init();
     const now = this.nowFn();
+    const probeDerived = PROBE_DERIVED_SOURCES.includes(obs.source ?? 'tomtom');
     const existing = (await this.backend.getByKey([obs.geohash5], bucket))[0];
 
     if (existing) {
-      await this.backend.update(mergeConditionObservation(existing, obs, now, this.emaAlpha));
+      await this.backend.update(
+        mergeConditionObservation(existing, obs, now, this.emaAlpha, probeDerived),
+      );
     } else {
       await this.backend.insert({
         geohash5: obs.geohash5,
@@ -126,6 +138,7 @@ export class TrafficHistoryService {
         avgCongestionRatio: clamp(obs.avgCongestionRatio, 0, 1),
         freeFlowSpeedMph: obs.freeFlowSpeedMph,
         sampleCount: 1,
+        probeSamples: probeDerived ? 1 : 0,
         lastUpdated: now,
       });
     }
@@ -135,10 +148,11 @@ export class TrafficHistoryService {
   async recordObservations(
     bucket: TimeBucket,
     observations: ConditionObservation[],
+    source?: ConditionObservationSource,
   ): Promise<void> {
     await this.init();
     for (const obs of observations) {
-      await this.recordObservation(bucket, obs);
+      await this.recordObservation(bucket, source ? { ...obs, source } : obs);
     }
   }
 

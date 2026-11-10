@@ -27,6 +27,8 @@ import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../constants/config';
 import { isTomTomConfigured } from './tomtomAccess';
 import { getTrafficHistory, geohash5For, geohash5CellsForBounds } from './trafficHistoryIndex';
+import type { ConditionObservationSource } from '../../models/trafficHistory';
+import { publishProfileConditions } from './nostrProfileExchange';
 import { currentTimeBucket, bucketLabel } from './trafficTimeBuckets';
 import {
   resolveTrafficConditions,
@@ -59,7 +61,10 @@ let lastRouteRefreshAt = 0;
  * current time bucket. Every source (TomTom seeds, P2P responses, probe
  * aggregates) funnels through here so the index accumulates over time.
  */
-async function indexSegmentsIntoHistory(segments: NormalizedTrafficSegment[]): Promise<void> {
+async function indexSegmentsIntoHistory(
+  segments: NormalizedTrafficSegment[],
+  source: ConditionObservationSource = 'probe',
+): Promise<void> {
   if (segments.length === 0) return;
   const bucket = currentTimeBucket();
   // Shares the cascade's aggregation so a zero "no speed" sentinel never
@@ -70,6 +75,16 @@ async function indexSegmentsIntoHistory(segments: NormalizedTrafficSegment[]): P
 
   await getTrafficHistory().recordObservations(bucket, observations);
   useTrafficStore.getState().setHistoryEntryCount(await getTrafficHistory().count());
+
+  // Probe-derived rows are shareable: offer the affected cells' profiles to
+  // the Nostr relay store (throttled + probe-share gated inside).
+  if (source === 'probe' && observations.length > 0) {
+    const cells = Array.from(new Set(observations.map((o) => o.geohash5)));
+    const shareable = await getTrafficHistory().getHistorical(cells, bucket);
+    if (shareable.length > 0) {
+      await publishProfileConditions(shareable);
+    }
+  }
 }
 
 /**
@@ -137,7 +152,7 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       // TomTom is the optional cold-start bridge: only the cells the earlier
       // tiers could not resolve are queried.
       seedFromTomTom: (missing) => fetchTomTomTraffic(viewport, missing),
-      indexObservations: (b, obs) => getTrafficHistory().recordObservations(b, obs),
+      indexObservations: (b, obs, source) => getTrafficHistory().recordObservations(b, obs, source),
     });
 
     const p2pSegments: NormalizedTrafficSegment[] = Object.values(
@@ -274,7 +289,7 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       // TomTom cold-start: query only route cells the earlier tiers missed.
       seedFromTomTom: (missing) =>
         isTomTomConfigured() ? sampleRouteTileColors(routeCoords, missing) : Promise.resolve([]),
-      indexObservations: (b, obs) => getTrafficHistory().recordObservations(b, obs),
+      indexObservations: (b, obs, source) => getTrafficHistory().recordObservations(b, obs, source),
     });
 
     if (__DEV__) {

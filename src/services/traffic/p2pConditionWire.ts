@@ -15,6 +15,8 @@ export interface WireConditionSource {
   freeFlowSpeedMph: number;
   sampleCount: number;
   lastUpdated: number;
+  /** Optional probe-sample share — forwarded as `p` on the wire. */
+  probeSamples?: number;
 }
 
 /** Serialize a local condition row into the compact P2P wire format. */
@@ -29,6 +31,7 @@ export function conditionToWire(entry: WireConditionSource, fresh: boolean): Wir
     n: entry.sampleCount,
     u: entry.lastUpdated,
     fr: fresh ? 1 : 0,
+    ...(entry.probeSamples !== undefined ? { p: entry.probeSamples } : {}),
   };
 }
 

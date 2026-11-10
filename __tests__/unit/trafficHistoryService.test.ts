@@ -30,6 +30,7 @@ describe('mergeConditionObservation', () => {
     avgCongestionRatio: 0.8,
     freeFlowSpeedMph: 50,
     sampleCount: 10,
+    probeSamples: 8,
     lastUpdated: 1000,
   };
 
@@ -195,5 +196,109 @@ describe('prune', () => {
     now.value += 22 * 86_400;
     expect(await service.prune()).toBe(2);
     expect(await service.count()).toBe(0);
+  });
+});
+
+describe('probe-sample provenance', () => {
+  it('counts probe/p2p/nostr sources toward probeSamples when inserting', async () => {
+    const { service } = makeHistory();
+    await service.recordObservation(BUCKET, {
+      geohash5: CELL,
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+      source: 'probe',
+    });
+    await service.recordObservation(BUCKET, {
+      geohash5: '9q8yz',
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+      source: 'p2p',
+    });
+    await service.recordObservation(BUCKET, {
+      geohash5: '9q8za',
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+      source: 'nostr',
+    });
+    const all = await service.getHistorical([CELL, '9q8yz', '9q8za'], BUCKET);
+    expect(all.every((r) => r.probeSamples === 1)).toBe(true);
+  });
+
+  it('does not count tomtom/open_feed sources toward probeSamples', async () => {
+    const { service } = makeHistory();
+    await service.recordObservation(BUCKET, {
+      geohash5: CELL,
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+      source: 'tomtom',
+    });
+    await service.recordObservation(BUCKET, {
+      geohash5: '9q8yz',
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+      source: 'open_feed',
+    });
+    await service.recordObservation(BUCKET, {
+      geohash5: '9q8zb',
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+    });
+    const all = await service.getHistorical([CELL, '9q8yz', '9q8zb'], BUCKET);
+    expect(all.every((r) => r.probeSamples === 0)).toBe(true);
+  });
+
+  it('increments probeSamples on merge only for probe-derived sources', async () => {
+    const { service } = makeHistory();
+    await service.recordObservation(BUCKET, {
+      geohash5: CELL,
+      avgSpeedMph: 30,
+      avgCongestionRatio: 0.6,
+      freeFlowSpeedMph: 50,
+      source: 'tomtom',
+    });
+    await service.recordObservation(BUCKET, {
+      geohash5: CELL,
+      avgSpeedMph: 32,
+      avgCongestionRatio: 0.62,
+      freeFlowSpeedMph: 50,
+      source: 'probe',
+    });
+    await service.recordObservation(BUCKET, {
+      geohash5: CELL,
+      avgSpeedMph: 31,
+      avgCongestionRatio: 0.61,
+      freeFlowSpeedMph: 50,
+      source: 'tomtom',
+    });
+    const rows = await service.getHistorical([CELL], BUCKET);
+    expect(rows[0]!.sampleCount).toBe(3);
+    expect(rows[0]!.probeSamples).toBe(1);
+  });
+
+  it('treats legacy rows without probeSamples as 0 (never NaN)', () => {
+    const legacy = {
+      geohash5: CELL,
+      dayOfWeek: 3,
+      halfHour: 30,
+      avgSpeedMph: 40,
+      avgCongestionRatio: 0.8,
+      freeFlowSpeedMph: 50,
+      sampleCount: 10,
+      lastUpdated: 1000,
+    } as unknown as TrafficAreaCondition;
+    const merged = mergeConditionObservation(
+      legacy,
+      { avgSpeedMph: 20, avgCongestionRatio: 0.4, freeFlowSpeedMph: 50 },
+      2000,
+      0.35,
+      true,
+    );
+    expect(merged.probeSamples).toBe(1);
   });
 });

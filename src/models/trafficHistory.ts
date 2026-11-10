@@ -27,6 +27,15 @@ export interface TrafficAreaCondition {
   sampleCount: number;
   /** Epoch seconds of the most recent observation. */
   lastUpdated: number;
+  /**
+   * How many of the merged observations came from probe-derived sources
+   * (own GPS probes, peer probes, peer profiles) rather than licensed
+   * upstream seeds (TomTom) or open feeds. Rows that do not meet the
+   * probe-share threshold are never republished through shared transports
+   * (Nostr relays / Hyperdrives) — upstream traffic content must not be
+   * redistributed.
+   */
+  probeSamples: number;
 }
 
 /**
@@ -44,7 +53,19 @@ export interface WireConditionEntry {
   u: number; // lastUpdated (epoch seconds)
   /** 1 = observed within the current-fresh window, 0 = historical average. */
   fr: number;
+  /** Optional: publisher's probe-sample share (see TrafficAreaCondition). */
+  p?: number;
 }
+
+/** Where a single condition observation came from. */
+export type ConditionObservationSource = 'probe' | 'p2p' | 'nostr' | 'open_feed' | 'tomtom';
+
+/** Observation sources that count toward a row's probe-sample share. */
+export const PROBE_DERIVED_SOURCES: readonly ConditionObservationSource[] = [
+  'probe',
+  'p2p',
+  'nostr',
+];
 
 /** Where resolved conditions ultimately came from (per request, highest tier used). */
 export type TrafficResolveSource =
@@ -77,6 +98,13 @@ export const EMA_ALPHA = 0.35;
 
 /** Cap on cumulative sample count to keep long-lived rows responsive. */
 export const MAX_SAMPLE_COUNT = 200;
+
+/**
+ * Minimum probe-derived observations before a historical row may be
+ * republished through shared transports (Nostr relays / Hyperdrives).
+ * Rows below this are treated as potentially upstream-seeded and stay local.
+ */
+export const MIN_PROBE_SAMPLES_FOR_PUBLISH = 5;
 
 /** Confidence values assigned to synthesized segments per source tier. */
 export const SOURCE_CONFIDENCE: Record<TrafficResolveSource, number> = {
