@@ -355,7 +355,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="map-data-$(date +%Y-%m)"
-          node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json
+          # Only advertise regions whose pack actually landed in this release.
+          ASSETS_JSON=""
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            ASSETS_JSON=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name]')
+          fi
+
+          if [ -n "$ASSETS_JSON" ]; then
+            printf '%s' "$ASSETS_JSON" > release-assets.json
+            node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json --assets release-assets.json
+          else
+            node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json
+          fi
 
           gh release view "$TAG" --repo "${{ github.repository }}" 2>/dev/null || \
             gh release create "$TAG" \

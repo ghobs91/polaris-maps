@@ -140,6 +140,46 @@ describe('update-region-asset-urls.mjs', () => {
     expect(catalog.include[1]!.searchIndexSizeBytes).toBeUndefined();
   });
 
+  it('drops regions whose pack is not in the release when assets are supplied', () => {
+    const assetsPath = join(dir, 'assets.json');
+    writeFileSync(assetsPath, JSON.stringify(['us-ny-new-york-routing.tar']));
+
+    execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        '--tag',
+        'map-data-2026-01',
+        '--catalog',
+        catalogPath,
+        '--out',
+        join(dir, 'catalog.json'),
+        '--assets',
+        assetsPath,
+      ],
+      { stdio: 'pipe' },
+    );
+
+    const published = JSON.parse(readFileSync(join(dir, 'catalog.json'), 'utf8')) as {
+      regions: Array<{ id: string }>;
+    };
+    expect(published.regions.map((region) => region.id)).toEqual(['us-ny-new-york']);
+  });
+
+  it('publishes the app catalog shape (regions, version, updated_at)', () => {
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--tag', 'map-data-2026-01', '--catalog', catalogPath, '--out', join(dir, 'c.json')],
+      { stdio: 'pipe' },
+    );
+    const published = JSON.parse(readFileSync(join(dir, 'c.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(published).sort()).toEqual(['regions', 'updated_at', 'version']);
+    expect((published.regions as unknown[]).length).toBe(2);
+  });
+
   it('honours a custom base origin and does not rewrite the file on --dry-run', () => {
     const before = readFileSync(catalogPath, 'utf8');
     const out = execFileSync(

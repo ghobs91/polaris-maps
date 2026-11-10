@@ -16,6 +16,7 @@
  *     [--sizes sizes.json] \
  *     [--catalog scripts/regions.json] \
  *     [--out catalog.json] \
+ *     [--assets assets.json] \
  *     [--dry-run]
  *
  * `sizes.json` maps region id → { searchIndexSizeBytes, transitIndexSizeBytes },
@@ -25,6 +26,11 @@
  * With `--out`, the stamped result is written to that path in the shape the app
  * reads (`{ version, updated_at, regions }`), so a CI job can publish it as a
  * release asset — GitHub is the origin, Polaris runs no CDN.
+ *
+ * `--assets` takes a JSON array of asset names already present in the release
+ * and drops regions whose pack is not there. Without it, a partial build (one
+ * region, or a matrix job that failed) would publish a catalog advertising packs
+ * that 404.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -43,6 +49,7 @@ function parseArgs(argv) {
     else if (arg === '--sizes') args.sizes = argv[++i];
     else if (arg === '--catalog') args.catalog = argv[++i];
     else if (arg === '--out') args.out = argv[++i];
+    else if (arg === '--assets') args.assets = argv[++i];
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (!args.tag) throw new Error('--tag is required (e.g. map-data-2026-01)');
@@ -85,9 +92,16 @@ export function stampCatalog(catalog, { tag, base, sizes = {} }) {
 /**
  * Shape the app reads (`catalogService.CatalogManifest`): `regions`, not the CI
  * matrix's `include`.
+ *
+ * `assets` (asset names present in the release) filters out regions whose pack
+ * was not built, so a partial run cannot advertise a pack that 404s.
  */
-export function toPublishedCatalog(stamped) {
-  const regions = stamped.regions ?? stamped.include ?? [];
+export function toPublishedCatalog(stamped, assets = null) {
+  let regions = stamped.regions ?? stamped.include ?? [];
+  if (assets) {
+    const present = new Set(assets);
+    regions = regions.filter((region) => present.has(`${region.id}-routing.tar`));
+  }
   return {
     version: '1',
     updated_at: new Date().toISOString(),
@@ -101,8 +115,11 @@ function main() {
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
   const sizes = args.sizes ? JSON.parse(readFileSync(resolve(args.sizes), 'utf8')) : {};
 
+  const assets = args.assets
+    ? JSON.parse(readFileSync(resolve(args.assets), 'utf8'))
+    : null;
   const stamped = stampCatalog(catalog, { tag: args.tag, base: args.base, sizes });
-  const updated = args.out ? toPublishedCatalog(stamped) : stamped;
+  const updated = args.out ? toPublishedCatalog(stamped, assets) : stamped;
   const serialised = `${JSON.stringify(updated, null, 2)}\n`;
 
   if (args.dryRun) {
