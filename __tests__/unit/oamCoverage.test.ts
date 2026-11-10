@@ -18,8 +18,11 @@ function jsonFetch(body: unknown, ok = true): { fetchImpl: typeof fetch; calls: 
   return { fetchImpl, calls: () => calls };
 }
 
-function featureCollection(bboxes: unknown[]): unknown {
-  return { type: 'FeatureCollection', features: bboxes.map((bbox) => ({ bbox })) };
+function featureCollection(features: unknown[]): unknown {
+  return {
+    type: 'FeatureCollection',
+    features: features.map((feature) => (Array.isArray(feature) ? { bbox: feature } : feature)),
+  };
 }
 
 describe('intersectBBox', () => {
@@ -65,6 +68,28 @@ describe('findOamCoverage', () => {
       featureCollection([null, 'nope', [1, 2, 3], [1, 2, 3, 'x'], [30, 30, 31, 31]]),
     );
     expect(await findOamCoverage([29, 29, 32, 32], { fetchImpl })).toEqual([30, 30, 31, 31]);
+  });
+
+  it('ignores footprints coarser than the base imagery', async () => {
+    // A city-wide Sentinel-2 COG (10 m/px) must not mask the ~2.4 m NAIP stack.
+    const { fetchImpl } = jsonFetch(
+      featureCollection([
+        { bbox: [-75, 40.5, -73.6, 41.6], properties: { gsd: 10 } },
+        { bbox: [-73.99, 40.7, -73.98, 40.71], properties: { gsd: 0.03 } },
+      ]),
+    );
+    expect(await findOamCoverage([-74.05, 40.68, -73.9, 40.82], { fetchImpl })).toEqual([
+      -73.99, 40.7, -73.98, 40.71,
+    ]);
+  });
+
+  it('keeps footprints whose resolution is unknown', async () => {
+    const { fetchImpl } = jsonFetch(
+      featureCollection([{ bbox: [-73.99, 40.7, -73.98, 40.71], properties: {} }]),
+    );
+    expect(await findOamCoverage([-74, 40.69, -73.97, 40.72], { fetchImpl })).toEqual([
+      -73.99, 40.7, -73.98, 40.71,
+    ]);
   });
 
   it('caches successful lookups for the same viewport', async () => {
