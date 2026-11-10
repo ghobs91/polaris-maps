@@ -264,14 +264,24 @@ describe('uploadDriveToMapillary', () => {
       .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
       .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
     mockFetch.mockReset();
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse(200, { access_token: 'fresh-token', expires_in: 9000 }))
-      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-1' }));
+    // The offset probe on rupload succeeds separately from the graph calls.
+    mockFetch.mockImplementation((url: RequestInfo | URL) => {
+      const href = String(url);
+      if (href.includes('rupload')) return Promise.resolve(jsonResponse(200, { offset: 0 }));
+      if (href.includes('/token')) {
+        return Promise.resolve(
+          jsonResponse(200, { access_token: 'fresh-token', expires_in: 9000 }),
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { cluster_id: 'cluster-1' }));
+    });
 
     const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
 
     expect(result.uploaded).toBe(1);
-    expect(mockFetch.mock.calls[0][0]).toBe('https://graph.mapillary.com/token');
+    expect(mockFetch.mock.calls.find(([url]) => String(url).includes('/token'))?.[0]).toBe(
+      'https://graph.mapillary.com/token',
+    );
     // The retry uses the refreshed token rather than the rejected one.
     expect(mockUploadAsync.mock.calls[1][2]).toEqual(
       expect.objectContaining({
@@ -311,6 +321,85 @@ describe('uploadDriveToMapillary', () => {
     expect(mockUploadAsync).toHaveBeenCalledTimes(3);
   });
 
+  it('resumes a stale-offset upload from the server offset instead of failing', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({
+        status: 412,
+        body: JSON.stringify({
+          debug_info: { retriable: true, type: 'OffsetInvalidError' },
+        }),
+      })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+    // The fresh-session probe reports 0; the resumable re-probe reports 100.
+    let probeIndex = 0;
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) => {
+      if (String(url).includes('rupload')) {
+        const offset = probeIndex === 0 ? 0 : 100;
+        probeIndex += 1;
+        return Promise.resolve(jsonResponse(200, { offset }));
+      }
+      return Promise.resolve(jsonResponse(200, { cluster_id: 'cluster-1' }));
+    });
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+    // The retry resumed at the server-reported offset.
+    expect(mockUploadAsync.mock.calls[1][2].headers).toEqual(
+      expect.objectContaining({ Offset: '100' }),
+    );
+  });
+
+  it('treats an rupload rate-limit body as transient and keeps the server reason', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({
+        status: 400,
+        body: JSON.stringify({
+          backoff: 10,
+          debug_info: {
+            retriable: false,
+            type: 'RequestRateLimitedError',
+            message: 'Request rate limit has been exceeded',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+  });
+
+  it('stores the server body when a capture permanently fails', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync.mockResolvedValue({
+      status: 400,
+      body: JSON.stringify({ error: 'Entity too large for this session' }),
+    });
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) =>
+      String(url).includes('rupload')
+        ? Promise.resolve(jsonResponse(200, { offset: 0 }))
+        : Promise.resolve('{"cluster_id":"never"}'),
+    );
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.failed).toBeGreaterThan(0);
+    expect(queue.setCaptureMapillaryStatus).toHaveBeenCalledWith(
+      LANDSCAPE.id,
+      'failed',
+      expect.objectContaining({
+        error: expect.stringContaining('Entity too large for this session'),
+      }),
+    );
+  });
+
   it('submits one cluster per drive segment across a long stop', async () => {
     const first = capture('first', 1920, 1080);
     const second = {
@@ -325,9 +414,15 @@ describe('uploadDriveToMapillary', () => {
       .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'handle-2' }) })
       .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-2' }) });
     mockFetch.mockReset();
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-1' }))
-      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-2' }));
+    // rupload offset probes answer separately from the graph finish calls.
+    const clusterIds = ['cluster-1', 'cluster-2'];
+    mockFetch.mockImplementation((url: RequestInfo | URL) => {
+      if (String(url).includes('rupload')) {
+        return Promise.resolve(jsonResponse(200, { offset: 0 }));
+      }
+      const cluster = clusterIds.shift() ?? 'missing-cluster';
+      return Promise.resolve(jsonResponse(200, { cluster_id: cluster }));
+    });
 
     const result = await uploadDriveToMapillary(
       { ...SUMMARY, captures: [first, second], allLandscape: true },
@@ -373,9 +468,15 @@ describe('uploadDriveToMapillary', () => {
       mockUploadAsync.mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: handle }) });
     }
     mockFetch.mockReset();
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-wide' }))
-      .mockResolvedValueOnce(jsonResponse(200, { cluster_id: 'cluster-detail' }));
+    // rupload offset probes answer separately from the graph finish calls.
+    const clusterIds = ['cluster-wide', 'cluster-detail'];
+    mockFetch.mockImplementation((url: RequestInfo | URL) => {
+      if (String(url).includes('rupload')) {
+        return Promise.resolve(jsonResponse(200, { offset: 0 }));
+      }
+      const cluster = clusterIds.shift() ?? 'missing-cluster';
+      return Promise.resolve(jsonResponse(200, { cluster_id: cluster }));
+    });
 
     const result = await uploadDriveToMapillary(
       { ...SUMMARY, captures: [wideOne, detailOne, wideTwo, detailTwo], allLandscape: true },
