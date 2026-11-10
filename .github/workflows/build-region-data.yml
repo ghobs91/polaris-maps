@@ -28,6 +28,10 @@ on:
         description: 'Bounding box for clip: minLon,minLat,maxLon,maxLat (e.g. 139.5,35.5,140.0,35.9)'
         required: false
         default: ''
+      skip_tiles:
+        description: 'Skip PMTiles generation (use during an upstream auxiliary-data outage, or for partial rebuilds)'
+        required: false
+        default: 'false'
   push:
     branches: [main]
     paths:
@@ -150,7 +154,12 @@ jobs:
           tar -cf "work/${{ matrix.id }}/search-shards.tar" \
             -C "work/${{ matrix.id }}" shards.json shards
 
+      # NOTE: planetiler downloads auxiliary sources (water polygons, natural
+      # earth) from osmdata.openstreetmap.de, which is intermittently unreachable
+      # from CI. Set skip_tiles=true to publish the rest of the pack while that
+      # host is down; scheduled builds intentionally still fail loudly.
       - name: Generate PMTiles
+        if: ${{ github.event.inputs.skip_tiles != 'true' }}
         run: |
           # Planetiler fetches auxiliary sources (water polygons, natural earth)
           # on first run; that download times out intermittently on CI runners and
