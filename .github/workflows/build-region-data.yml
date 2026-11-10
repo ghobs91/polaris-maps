@@ -310,11 +310,18 @@ jobs:
               --notes "Auto-generated map data from OpenStreetMap via Geofabrik. Built $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
               --prerelease
 
-          # Upload assets (overwrite if exists)
+          # Upload assets (overwrite if exists).
+          #
+          # The `path#label` syntax only sets a *label* — the asset name stays the
+          # basename, so every region would upload to the same name and clobber
+          # the previous one. Rename to `<region>-<file>` before uploading; the
+          # catalog's asset URLs (scripts/update-region-asset-urls.mjs) depend on
+          # exactly this naming.
           for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite search-shards.tar sizes.json; do
             if [ -f "work/${{ matrix.id }}/$file" ]; then
+              cp "work/${{ matrix.id }}/$file" "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}"
               gh release upload "$TAG" \
-                "work/${{ matrix.id }}/$file#${ASSET_PREFIX}-${file}" \
+                "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}" \
                 --repo "${{ github.repository }}" \
                 --clobber
             fi
