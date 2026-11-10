@@ -148,8 +148,10 @@ function formatClock(totalSeconds: number): string {
  *
  * It is mounted only while something is capturing, but lives at the app root
  * so tab changes and the CarPlay companion screen cannot unmount the camera
- * mid-drive. Frames are triggered by raw GPS fixes from the navigation
- * pipeline, not a timer.
+ * mid-drive. (The phone-display heartbeat below is the one thing that unmounts
+ * it: with CarPlay attached `AppState` never reports locked, so the session is
+ * torn down while the display is asleep instead.) Frames are triggered by raw
+ * GPS fixes from the navigation pipeline, not a timer.
  *
  * The dash cam records in fixed-length segments; each finished segment lands in
  * the documents directory and the oldest segments are pruned once either
@@ -223,6 +225,16 @@ export function CaptureHost() {
 
   const [ready, setReady] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  /**
+   * rAF heartbeat for the phone display. CarPlay keeps `AppState` `active`
+   * while the phone screen is locked (the CarPlay scene holds the process
+   * foreground), so `AppState` alone cannot gate camera work: the camera and
+   * recorder kept running against the locked phone and eventually starved the
+   * CarPlay render path. `requestAnimationFrame` stops the moment the phone
+   * display sleeps (the same signal `foregroundActivity.ts` uses), so the
+   * heartbeat only stays fresh while the screen is genuinely interactive.
+   */
+  const [displayBeat, setDisplayBeat] = useState(true);
   const [mountError, setMountError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   /** Live focus indicator: '∞' when locked, 'AF' while autofocus hunts. */
@@ -242,14 +254,45 @@ export function CaptureHost() {
   const focusLoggedRef = useRef(false);
   const permissionRequestedRef = useRef(false);
   const lastStorageCheckRef = useRef(0);
-  const activeRef = useRef(appActive);
   const recorderRef = useRef<Recorder | null>(null);
-  activeRef.current = appActive;
 
   // Mapillary only accepts landscape imagery; keep the navigation UI as-is but
   // stop taking stills while the phone is portrait, exactly like their app.
   // Only listen to the accelerometer while a capture is actually running.
   const captureActive = Boolean(session) || dashRecording;
+  // The camera pipeline runs on the phone display, not in the CarPlay scene.
+  const phoneActive = appActive && displayBeat;
+  const phoneActiveRef = useRef(phoneActive);
+  phoneActiveRef.current = phoneActive;
+
+  // Drive the display heartbeat while anything is capturing. The rAF callback
+  // does nothing itself; the interval only checks whether frames stopped
+  // arriving (phone display asleep), so it costs one state change per
+  // transition, not per frame.
+  useEffect(() => {
+    if (!captureActive || !appActive) {
+      setDisplayBeat(true);
+      return;
+    }
+    let nextFrame: number | null = null;
+    let lastFrameAt = 0;
+    let cancelled = false;
+    const beat = () => {
+      lastFrameAt = Date.now();
+      if (!cancelled) nextFrame = requestAnimationFrame(beat);
+    };
+    nextFrame = requestAnimationFrame(beat);
+    const timer = setInterval(() => {
+      const fresh = Date.now() - lastFrameAt < 1200;
+      setDisplayBeat((previous) => (previous === fresh ? previous : fresh));
+    }, 500);
+    return () => {
+      cancelled = true;
+      if (nextFrame != null) cancelAnimationFrame(nextFrame);
+      clearInterval(timer);
+    };
+  }, [captureActive, appActive]);
+
   const deviceOrientation = useCaptureOrientation(session != null);
   const portrait = isPortraitOrientation(deviceOrientation);
   const onNavigation = Boolean(pathname?.includes('navigation'));
@@ -563,7 +606,7 @@ export function CaptureHost() {
   );
 
   const takePicture = useCallback(async () => {
-    if (!ready || busyRef.current || !activeRef.current) return;
+    if (!ready || busyRef.current || !phoneActiveRef.current) return;
     const currentSession = useStreetViewCaptureStore.getState().session;
     if (!currentSession) return;
     // Mapillary rejects portrait imagery; the band shows a rotate hint while
@@ -758,7 +801,11 @@ export function CaptureHost() {
 
     const run = async () => {
       while (!cancelled) {
-        if (!activeRef.current) {
+        if (!phoneActiveRef.current) {
+          // The phone display is asleep (CarPlay keeps AppState `active`), so
+          // the camera should stand down exactly like when the app
+          // backgrounds: pause the buffer and wait for the display to come
+          // back before touching the recorder again.
           setDashCamPaused(true);
           await delay(500);
           continue;
@@ -806,7 +853,12 @@ export function CaptureHost() {
     };
   }, [dashRecording, ready, recordSegment, persistClip, setDashCamError, setDashCamPaused]);
 
-  if (!session && !dashRecording) return null;
+  // Tear the camera session down while the phone display is asleep, exactly
+  // like the app-backgrounded case: with CarPlay attached the process stays
+  // foreground even locked, so without this the camera session keeps running
+  // and starves the CarPlay UI. The session store survives; the next unlocked
+  // frame recreates the camera and the loop resumes at its next segment.
+  if ((!session && !dashRecording) || !phoneActive) return null;
 
   const stopStreetView = () => {
     void endStreetViewSession();

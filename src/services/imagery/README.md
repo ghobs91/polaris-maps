@@ -186,9 +186,11 @@ dashCamRetention.planDashCamPrune (time cap + size cap, oldest first)
 ```
 
 - **Opt-in and explicit**: recording only starts from the navigation action; it
-  stops when the navigation screen is gone or the app is backgrounded/locked
-  (the camera session ends, so the loop pauses and resumes with the next
-  segment).
+  stops when the navigation screen is gone or the phone display is asleep (the
+  camera session ends, so the loop pauses and resumes with the next segment).
+  With CarPlay attached the app stays `active` even while the phone is locked,
+  so the pause signal is the phone-display rAF heartbeat in `CaptureHost`, not
+  `AppState` — recording against a locked phone starved the CarPlay UI.
 - **Two caps, whichever binds first**: `dashCam.maxMinutes` and
   `dashCam.maxBytes`. Changing either in Settings prunes immediately.
 - **Muted**: `enableAudio: false`, so no microphone permission is requested.
