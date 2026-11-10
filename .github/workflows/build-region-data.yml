@@ -11,6 +11,11 @@ name: Build Region Map Data
 #   - On manual trigger (workflow_dispatch) with optional region filter
 #   - On push to main that modifies the catalog or CI config
 
+# Publishing to GitHub Releases needs a write-scoped token; the default token is
+# read-only, which made every release upload fail with HTTP 403.
+permissions:
+  contents: write
+
 on:
   schedule:
     - cron: '0 0 * * 0'
