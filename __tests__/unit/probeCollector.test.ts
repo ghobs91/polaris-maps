@@ -25,11 +25,10 @@ jest.mock('../../src/services/traffic/nostrFallback', () => ({
 }));
 
 import { selectProbeTransport } from '../../src/services/traffic/probeCollector';
-import { MIN_PEER_THRESHOLD } from '../../src/models/traffic';
 
 describe('selectProbeTransport', () => {
-  it('uses Hyperswarm when started with enough peers', () => {
-    expect(selectProbeTransport(true, MIN_PEER_THRESHOLD)).toBe('hyperswarm');
+  it('uses Hyperswarm while peers are connected', () => {
+    expect(selectProbeTransport(true, 1)).toBe('hyperswarm');
     expect(selectProbeTransport(true, 12)).toBe('hyperswarm');
   });
 
@@ -37,8 +36,10 @@ describe('selectProbeTransport', () => {
     expect(selectProbeTransport(false, 12)).toBe('nostr');
   });
 
-  it('falls back to Nostr below the peer threshold', () => {
-    expect(selectProbeTransport(true, MIN_PEER_THRESHOLD - 1)).toBe('nostr');
+  it('falls back to Nostr only when the swarm has no peers at all', () => {
+    // Scale-safe: one peer is still reachable over the mesh, so probes stay
+    // peer-to-peer instead of being broadcast to public relays.
+    expect(selectProbeTransport(true, 1)).toBe('hyperswarm');
     expect(selectProbeTransport(true, 0)).toBe('nostr');
   });
 });

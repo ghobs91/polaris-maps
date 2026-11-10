@@ -102,6 +102,7 @@ global.WebSocket = MockRelaySocket;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+import { __setBudgetStoreForTests } from '../../src/services/traffic/publishBudget';
 import {
   TRAFFIC_PROFILE_KIND,
   canPublishProfile,
@@ -124,6 +125,8 @@ function row(overrides: Partial<TrafficAreaCondition> = {}): TrafficAreaConditio
     freeFlowSpeedMph: 40,
     sampleCount: 40,
     probeSamples: 30,
+    observedSpanDays: 3,
+    lastObservedDay: Math.floor(Date.now() / 86_400_000),
     lastUpdated: Math.floor(Date.now() / 1000) - 3600,
     ...overrides,
   };
@@ -162,12 +165,16 @@ describe('canPublishProfile', () => {
   });
 
   it('rejects rows below the probe-sample threshold (upstream-seeded)', () => {
-    expect(canPublishProfile(row({ probeSamples: 4, sampleCount: 40 }), now)).toBe(false);
+    expect(canPublishProfile(row({ probeSamples: 19, sampleCount: 40 }), now)).toBe(false);
     expect(canPublishProfile(row({ probeSamples: 0, sampleCount: 40 }), now)).toBe(false);
   });
 
+  it('rejects rows observed on only one day (single drive past a cell)', () => {
+    expect(canPublishProfile(row({ observedSpanDays: 0 }), now)).toBe(false);
+  });
+
   it('rejects rows with too few total samples', () => {
-    expect(canPublishProfile(row({ probeSamples: 2, sampleCount: 2 }), now)).toBe(false);
+    expect(canPublishProfile(row({ probeSamples: 10, sampleCount: 10 }), now)).toBe(false);
   });
 
   it('rejects rows older than the retention window', () => {
@@ -179,11 +186,35 @@ describe('canPublishProfile', () => {
 // ── Event encode/parse roundtrip ─────────────────────────────────────
 
 describe('profile event roundtrip', () => {
-  it('builds tags with the parameterized-replaceable d key and g filter', () => {
-    expect(buildProfileTags(row())).toEqual([
-      ['d', 'dr72h:2:34'],
+  it('builds one replaceable event per cell per week', () => {
+    expect(buildProfileTags('dr72h')).toEqual([
+      ['d', 'dr72h:week'],
       ['g', 'dr72h'],
     ]);
+  });
+
+  it('batches a whole cell-week into one event (48x fewer stored events)', () => {
+    const week = Array.from({ length: 48 }, (_, h) => row({ halfHour: h }));
+    const event = signEvent(
+      TRAFFIC_PROFILE_KIND,
+      buildProfileContent(week),
+      buildProfileTags('dr72h'),
+      1,
+    );
+    expect(parseProfileEvent(event)).toHaveLength(48);
+  });
+
+  it('still reads v1 single-bucket events', () => {
+    const v1 = JSON.stringify({
+      v: 1,
+      p: 12,
+      e: { g: 'dr72h', d: 2, h: 34, s: 24.5, r: 0.62, f: 40, n: 20, u: 1_700_000_000 },
+    });
+    const event = signEvent(TRAFFIC_PROFILE_KIND, v1, buildProfileTags('dr72h'), 1);
+    const entries = parseProfileEvent(event);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.g).toBe('dr72h');
+    expect(entries[0]!.p).toBe(12);
   });
 
   it('builds a REQ filter scoped to kinds + #g + since + limit', () => {
@@ -200,32 +231,33 @@ describe('profile event roundtrip', () => {
     const r = row();
     const event = signEvent(
       TRAFFIC_PROFILE_KIND,
-      buildProfileContent(r),
-      buildProfileTags(r),
+      buildProfileContent([r]),
+      buildProfileTags('dr72h'),
       Math.floor(Date.now() / 1000),
     );
-    const entry = parseProfileEvent(event);
-    expect(entry).not.toBeNull();
-    expect(entry!.g).toBe('dr72h');
-    expect(entry!.d).toBe(2);
-    expect(entry!.h).toBe(34);
-    expect(entry!.s).toBe(24.5);
-    expect(entry!.r).toBe(0.62);
-    expect(entry!.n).toBe(40);
-    expect(entry!.p).toBe(30);
-    expect(entry!.fr).toBe(0);
+    const entries = parseProfileEvent(event);
+    expect(entries).toHaveLength(1);
+    const entry = entries[0]!;
+    expect(entry.g).toBe('dr72h');
+    expect(entry.d).toBe(2);
+    expect(entry.h).toBe(34);
+    expect(entry.s).toBe(24.5);
+    expect(entry.r).toBe(0.62);
+    expect(entry.n).toBe(40);
+    expect(entry.p).toBe(30);
+    expect(entry.fr).toBe(0);
   });
 
   it('rejects events with a tampered signature', () => {
     const r = row();
     const event = signEvent(
       TRAFFIC_PROFILE_KIND,
-      buildProfileContent(r),
-      buildProfileTags(r),
+      buildProfileContent([r]),
+      buildProfileTags('dr72h'),
       Math.floor(Date.now() / 1000),
     );
     const tampered = { ...event, content: event.content.replace('"s":24.5', '"s":5') };
-    expect(parseProfileEvent(tampered)).toBeNull();
+    expect(parseProfileEvent(tampered)).toEqual([]);
   });
 
   it('rejects events signed by an unknown key', () => {
@@ -233,8 +265,8 @@ describe('profile event roundtrip', () => {
     const other = bytesToHex(sha256(new TextEncoder().encode('attacker-key')));
     const event = signEvent(
       TRAFFIC_PROFILE_KIND,
-      buildProfileContent(r),
-      buildProfileTags(r),
+      buildProfileContent([r]),
+      buildProfileTags('dr72h'),
       Math.floor(Date.now() / 1000),
       other,
       schnorr.getPublicKey(hexToBytes(other)),
@@ -242,29 +274,29 @@ describe('profile event roundtrip', () => {
     // Valid signature, correct structure — but not the traffic identity.
     // Parsing succeeds structurally; trust policy (identity allowlists /
     // reputation) is applied by the history merge weights, not the parser.
-    expect(parseProfileEvent(event)).not.toBeNull();
+    expect(parseProfileEvent(event).length).toBeGreaterThan(0);
   });
 
   it('rejects out-of-range field values', () => {
     const bad = row({ avgCongestionRatio: 1.5 });
     const event = signEvent(
       TRAFFIC_PROFILE_KIND,
-      buildProfileContent(bad),
-      buildProfileTags(bad),
+      buildProfileContent([bad]),
+      buildProfileTags('dr72h'),
       Math.floor(Date.now() / 1000),
     );
-    expect(parseProfileEvent(event)).toBeNull();
+    expect(parseProfileEvent(event)).toEqual([]);
   });
 
   it('rejects non-profile kinds', () => {
     const r = row();
     const event = signEvent(
       20100,
-      buildProfileContent(r),
-      buildProfileTags(r),
+      buildProfileContent([r]),
+      buildProfileTags('dr72h'),
       Math.floor(Date.now() / 1000),
     );
-    expect(parseProfileEvent(event)).toBeNull();
+    expect(parseProfileEvent(event)).toEqual([]);
   });
 });
 
@@ -295,6 +327,14 @@ describe('mergeConditionEntries', () => {
 // ── Publishing ───────────────────────────────────────────────────────
 
 describe('publishProfileConditions', () => {
+  beforeEach(() => {
+    // Fresh budget store per test so the daily cap doesn't leak between cases.
+    __setBudgetStoreForTests({
+      read: () => null,
+      write: () => {},
+    });
+  });
+
   beforeAll(async () => {
     // Loads the identity key into nostrFallback's module state so
     // createSignedEvent can sign.
@@ -350,11 +390,11 @@ describe('queryNostrProfiles', () => {
     const good = row();
     const otherBucket = row({ halfHour: 0 });
     mockQueuedEvents.push(
-      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent(good), buildProfileTags(good), 1),
+      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent([good]), buildProfileTags('dr72h'), 1),
       signEvent(
         TRAFFIC_PROFILE_KIND,
-        buildProfileContent(otherBucket),
-        buildProfileTags(otherBucket),
+        buildProfileContent([otherBucket]),
+        buildProfileTags('dr72h'),
         2,
       ),
     );
@@ -373,8 +413,8 @@ describe('queryNostrProfiles', () => {
     const a = row();
     const b = row({ sampleCount: 90, probeSamples: 80 });
     mockQueuedEvents.push(
-      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent(a), buildProfileTags(a), 1),
-      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent(b), buildProfileTags(b), 2),
+      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent([a]), buildProfileTags('dr72h'), 1),
+      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent([b]), buildProfileTags('dr72h'), 2),
     );
 
     const entries = await queryNostrProfiles(['dr72h'], { dayOfWeek: 2, halfHour: 34 }, 500);
@@ -386,8 +426,8 @@ describe('queryNostrProfiles', () => {
     const good = row();
     const forged = signEvent(
       TRAFFIC_PROFILE_KIND,
-      buildProfileContent(good),
-      buildProfileTags(good),
+      buildProfileContent([good]),
+      buildProfileTags('dr72h'),
       1,
     );
     forged.sig = 'f'.repeat(128);

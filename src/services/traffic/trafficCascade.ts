@@ -209,7 +209,12 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
       // toward the row's probe share so locally-merged peer data can later
       // be republished.
       await req.history.recordObservation(req.bucket, { ...entry, source: 'p2p' });
-      conditions.set(entry.geohash5, { ...entry, probeSamples: w.p ?? 0 });
+      conditions.set(entry.geohash5, {
+        ...entry,
+        probeSamples: w.p ?? 0,
+        observedSpanDays: 0,
+        lastObservedDay: Math.floor(Date.now() / 86_400_000),
+      });
     }
     missing = missing.filter((c) => !conditions.has(c));
     // P2P is a lower tier than the open feed and TomTom cold-start bridge.
@@ -235,6 +240,8 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
             freeFlowSpeedMph: obs.freeFlowSpeedMph,
             sampleCount: 1,
             probeSamples: 0,
+            observedSpanDays: 0,
+            lastObservedDay: Math.floor(Date.now() / 86_400_000),
             lastUpdated: Math.floor(Date.now() / 1000),
           });
           resolvedAny = true;
@@ -268,6 +275,8 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
             freeFlowSpeedMph: obs.freeFlowSpeedMph,
             sampleCount: 1,
             probeSamples: 0,
+            observedSpanDays: 0,
+            lastObservedDay: Math.floor(Date.now() / 86_400_000),
             lastUpdated: Math.floor(Date.now() / 1000),
           });
         }

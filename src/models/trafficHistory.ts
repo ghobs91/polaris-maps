@@ -36,6 +36,14 @@ export interface TrafficAreaCondition {
    * redistributed.
    */
   probeSamples: number;
+  /**
+   * Days between the row's first and last observation (0 = only ever seen on
+   * one day). Publishing requires a span of at least one day so a single
+   * drive past a cell cannot be broadcast as a weekly pattern.
+   */
+  observedSpanDays: number;
+  /** UTC day index (epoch days) of the most recent observation. */
+  lastObservedDay: number;
 }
 
 /**

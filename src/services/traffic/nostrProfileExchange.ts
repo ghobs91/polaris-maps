@@ -3,11 +3,8 @@ import type {
   TrafficAreaCondition,
   WireConditionEntry,
 } from '../../models/trafficHistory';
-import {
-  HISTORICAL_MAX_AGE_DAYS,
-  MAX_SAMPLE_COUNT,
-  MIN_PROBE_SAMPLES_FOR_PUBLISH,
-} from '../../models/trafficHistory';
+import { HISTORICAL_MAX_AGE_DAYS, MAX_SAMPLE_COUNT } from '../../models/trafficHistory';
+import { consumePublishBudget, qualifiesForPublish } from './publishBudget';
 import type { NostrEvent } from './nostrFallback';
 import { createSignedEvent, publishStoredEvent, verifyEvent } from './nostrFallback';
 import { getActiveRelays } from './nostrRelayDirectory';
@@ -50,7 +47,16 @@ export const PROFILE_QUERY_LIMIT = 100;
 /** Default window to wait for relay answers. */
 export const PROFILE_QUERY_TIMEOUT_MS = 3_500;
 
-const PROFILE_CONTENT_VERSION = 1;
+/**
+ * Content version.
+ *
+ * v1: one bucket per event (`d` = `<cell>:<dow>:<hh>`).
+ * v2: the whole week for one cell per event (`d` = `<cell>:week`). This is the
+ *     scale-safe shape: stored relay events grow with (devices × cells)
+ *     instead of (devices × cells × buckets), up to 48× fewer per cell.
+ *     v1 events are still parsed, so old publishes keep working.
+ */
+const PROFILE_CONTENT_VERSION = 2;
 
 // ── Pure helpers (unit tested) ───────────────────────────────────────
 
@@ -60,39 +66,43 @@ const PROFILE_CONTENT_VERSION = 1;
  * inside the retention window.
  */
 export function canPublishProfile(row: TrafficAreaCondition, nowSec: number): boolean {
-  const cutoff = nowSec - HISTORICAL_MAX_AGE_DAYS * 86_400;
-  return (
-    row.probeSamples >= MIN_PROBE_SAMPLES_FOR_PUBLISH &&
-    row.sampleCount >= MIN_PROBE_SAMPLES_FOR_PUBLISH &&
-    row.lastUpdated >= cutoff
-  );
+  // Scale-safe gate: probe-dominant, well-sampled, observed on more than one
+  // day (so a single drive is never broadcast as a weekly pattern), and still
+  // inside the retention window.
+  return qualifiesForPublish(row, nowSec, HISTORICAL_MAX_AGE_DAYS);
 }
 
-/** Serialize a condition row into profile event content (compact JSON). */
-export function buildProfileContent(row: TrafficAreaCondition): string {
+function wireEntryFor(row: TrafficAreaCondition): Record<string, number | string> {
+  return {
+    d: row.dayOfWeek,
+    h: row.halfHour,
+    s: row.avgSpeedMph,
+    r: row.avgCongestionRatio,
+    f: row.freeFlowSpeedMph,
+    n: row.sampleCount,
+    u: row.lastUpdated,
+  };
+}
+
+/**
+ * Serialize every publishable bucket of one cell into a single event body.
+ * `p` carries the highest probe-sample count among the included rows.
+ */
+export function buildProfileContent(rows: readonly TrafficAreaCondition[]): string {
+  const cell = rows[0]?.geohash5 ?? '';
   return JSON.stringify({
     v: PROFILE_CONTENT_VERSION,
-    p: row.probeSamples,
-    e: {
-      g: row.geohash5,
-      d: row.dayOfWeek,
-      h: row.halfHour,
-      s: row.avgSpeedMph,
-      r: row.avgCongestionRatio,
-      f: row.freeFlowSpeedMph,
-      n: row.sampleCount,
-      u: row.lastUpdated,
-    },
+    g: cell,
+    p: rows.reduce((max, r) => Math.max(max, r.probeSamples), 0),
+    e: rows.map(wireEntryFor),
   });
 }
 
-/** NIP-33 tags for a profile event: parameterized-replaceable `d` + `g` filter. */
-export function buildProfileTags(
-  row: Pick<TrafficAreaCondition, 'geohash5' | 'dayOfWeek' | 'halfHour'>,
-): string[][] {
+/** NIP-33 tags: one replaceable event per cell per week. */
+export function buildProfileTags(cell: string): string[][] {
   return [
-    ['d', `${row.geohash5}:${row.dayOfWeek}:${row.halfHour}`],
-    ['g', row.geohash5],
+    ['d', `${cell}:week`],
+    ['g', cell],
   ];
 }
 
@@ -107,55 +117,69 @@ export function buildProfileFilter(cells: string[], sinceSec: number): Record<st
 }
 
 /**
- * Parse and validate a profile event. Verifies the NIP-01 id + Schnorr
- * signature and range-checks every field; returns null for anything that
- * fails any check.
+ * Parse and validate a profile event, returning every entry it carries.
+ *
+ * Verifies the NIP-01 id + Schnorr signature and range-checks every field.
+ * Handles both content versions: v2 (week-per-cell, `e` is an array) and v1
+ * (single bucket, `e` is an object) so previously published profiles remain
+ * readable. Returns [] for anything that fails a check.
  */
-export function parseProfileEvent(event: NostrEvent): WireConditionEntry | null {
-  if (event.kind !== TRAFFIC_PROFILE_KIND) return null;
-  if (!verifyEvent(event)) return null;
+export function parseProfileEvent(event: NostrEvent): WireConditionEntry[] {
+  if (event.kind !== TRAFFIC_PROFILE_KIND) return [];
+  if (!verifyEvent(event)) return [];
 
   try {
     const content = JSON.parse(event.content) as {
       v?: number;
+      g?: string;
       p?: number;
-      e?: {
-        g?: string;
-        d?: number;
-        h?: number;
-        s?: number;
-        r?: number;
-        f?: number;
-        n?: number;
-        u?: number;
-      };
+      e?: unknown;
     };
-    const e = content.e;
-    if (!e || content.v !== PROFILE_CONTENT_VERSION) return null;
-    if (typeof e.g !== 'string' || e.g.length < 4 || e.g.length > 12) return null;
-    if (typeof e.d !== 'number' || e.d < 0 || e.d > 6) return null;
-    if (typeof e.h !== 'number' || e.h < 0 || e.h > 47) return null;
-    if (typeof e.s !== 'number' || !Number.isFinite(e.s) || e.s <= 0) return null;
-    if (typeof e.r !== 'number' || !Number.isFinite(e.r) || e.r < 0 || e.r > 1) return null;
-    if (typeof e.f !== 'number' || !Number.isFinite(e.f) || e.f <= 0) return null;
-    if (typeof e.n !== 'number' || e.n < 0 || e.n > MAX_SAMPLE_COUNT) return null;
-    if (typeof e.u !== 'number' || e.u <= 0) return null;
+    const probeSamples =
+      typeof content.p === 'number' && content.p >= 0 && content.p <= MAX_SAMPLE_COUNT
+        ? content.p
+        : 0;
 
-    return {
-      g: e.g,
-      d: e.d,
-      h: e.h,
-      s: e.s,
-      r: e.r,
-      f: e.f,
-      n: e.n,
-      u: e.u,
-      fr: 0,
-      p: typeof content.p === 'number' && content.p >= 0 ? content.p : 0,
-    };
+    // v1: { v:1, p, e: { g, d, h, s, r, f, n, u } }
+    if (content.v === 1) {
+      const raw = content.e as Record<string, unknown> | undefined;
+      const entry = raw ? entryFromWire(raw, raw.g, probeSamples) : null;
+      return entry ? [entry] : [];
+    }
+
+    // v2: { v:2, g, p, e: [ { d, h, s, r, f, n, u }, ... ] }
+    if (content.v === PROFILE_CONTENT_VERSION && Array.isArray(content.e)) {
+      if (typeof content.g !== 'string' || content.g.length < 4 || content.g.length > 12) return [];
+      const out: WireConditionEntry[] = [];
+      for (const raw of content.e as Array<Record<string, unknown>>) {
+        const entry = entryFromWire(raw, content.g, probeSamples);
+        if (entry) out.push(entry);
+      }
+      return out;
+    }
+
+    return [];
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** Validate one wire entry and convert it, or null when any field is invalid. */
+function entryFromWire(
+  raw: Record<string, unknown>,
+  cell: unknown,
+  probeSamples: number,
+): WireConditionEntry | null {
+  if (typeof cell !== 'string' || cell.length < 4 || cell.length > 12) return null;
+  const { d, h, s, r, f, n, u } = raw;
+  if (typeof d !== 'number' || d < 0 || d > 6) return null;
+  if (typeof h !== 'number' || h < 0 || h > 47) return null;
+  if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return null;
+  if (typeof r !== 'number' || !Number.isFinite(r) || r < 0 || r > 1) return null;
+  if (typeof f !== 'number' || !Number.isFinite(f) || f <= 0) return null;
+  if (typeof n !== 'number' || n < 0 || n > MAX_SAMPLE_COUNT) return null;
+  if (typeof u !== 'number' || u <= 0) return null;
+  return { g: cell, d, h, s, r, f, n, u, fr: 0, p: probeSamples };
 }
 
 /**
@@ -178,8 +202,9 @@ export function mergeConditionEntries(
 
 const lastPublishAt = new Map<string, number>();
 
-function throttleKey(row: TrafficAreaCondition): string {
-  return `${row.geohash5}:${row.dayOfWeek}:${row.halfHour}`;
+/** Throttle is per cell: one replaceable event carries the cell's whole week. */
+function throttleKey(cell: string): string {
+  return `${cell}:week`;
 }
 
 /**
@@ -196,21 +221,32 @@ export async function publishProfileConditions(
   const minInterval = opts.minIntervalMs ?? PROFILE_PUBLISH_THROTTLE_MS;
   const nowSec = Math.floor(nowMs / 1000);
 
+  // Group by cell: one replaceable event per cell carries the whole week, so
+  // relay storage grows with (devices × cells), not (devices × cells × buckets).
+  const byCell = new Map<string, TrafficAreaCondition[]>();
+  for (const row of rows) {
+    if (!canPublishProfile(row, nowSec)) continue;
+    const group = byCell.get(row.geohash5);
+    if (group) group.push(row);
+    else byCell.set(row.geohash5, [row]);
+  }
+
   let sent = 0;
   const events: NostrEvent[] = [];
   const signing: Promise<void>[] = [];
 
-  for (const row of rows) {
-    if (!canPublishProfile(row, nowSec)) continue;
-    const key = throttleKey(row);
+  for (const [cell, cellRows] of byCell) {
+    const key = throttleKey(cell);
     const last = lastPublishAt.get(key) ?? 0;
     if (nowMs - last < minInterval) continue;
+    // Hard per-device daily cap: one install cannot flood public relays.
+    if (!consumePublishBudget('profile', nowMs)) break;
     lastPublishAt.set(key, nowMs);
     signing.push(
       createSignedEvent(
         TRAFFIC_PROFILE_KIND,
-        buildProfileContent(row),
-        buildProfileTags(row),
+        buildProfileContent(cellRows),
+        buildProfileTags(cell),
         nowSec,
       ).then((event) => {
         events.push(event);
@@ -260,10 +296,14 @@ export async function queryNostrProfiles(
   ]);
 
   // Only entries matching the requested bucket are usable by the cascade.
-  const entries = Array.from(collected.values()).filter(
+  return Array.from(collected.values()).filter(
     (e) => e.d === bucket.dayOfWeek && e.h === bucket.halfHour,
   );
-  return dedupeByCell(entries);
+}
+
+/** Dedupe key for a profile entry: one condition per cell + bucket. */
+function entryKey(entry: WireConditionEntry): string {
+  return `${entry.g}|${entry.d}|${entry.h}`;
 }
 
 function collectFromRelay(
@@ -309,10 +349,12 @@ function collectFromRelay(
           return;
         }
         if (msg[0] === 'EVENT' && msg.length >= 3) {
-          const entry = parseProfileEvent(msg[2] as NostrEvent);
-          if (entry) {
-            const existing = collected.get(entry.g);
-            if (!existing || entry.n > existing.n) collected.set(entry.g, entry);
+          for (const entry of parseProfileEvent(msg[2] as NostrEvent)) {
+            // Dedupe per (cell, bucket): several publishers may cover the same
+            // cell, and a v2 event carries every bucket for its cell.
+            const key = entryKey(entry);
+            const existing = collected.get(key);
+            if (!existing || entry.n > existing.n) collected.set(key, entry);
           }
         }
       } catch {
@@ -325,13 +367,4 @@ function collectFromRelay(
       resolve();
     };
   });
-}
-
-function dedupeByCell(entries: WireConditionEntry[]): WireConditionEntry[] {
-  const byCell = new Map<string, WireConditionEntry>();
-  for (const entry of entries) {
-    const existing = byCell.get(entry.g);
-    if (!existing || entry.n > existing.n) byCell.set(entry.g, entry);
-  }
-  return Array.from(byCell.values());
 }
