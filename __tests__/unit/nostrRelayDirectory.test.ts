@@ -62,6 +62,7 @@ import {
   RELAY_PROBE_TIMEOUT_MS,
   rankRelays,
   relayPoolFromEnv,
+  communityRelaysFromEnv,
   probeRelay,
   getActiveRelays,
   resetRelayDirectory,
@@ -193,4 +194,44 @@ describe('getActiveRelays / refresh cycle', () => {
     },
     RELAY_PROBE_TIMEOUT_MS + 2000,
   );
+});
+
+describe('community relay pinning (gap 5)', () => {
+  it('parses a pinned community relay from the environment', () => {
+    expect(communityRelaysFromEnv('wss://relay.polaris.example, wss://other.example')).toEqual([
+      'wss://relay.polaris.example',
+      'wss://other.example',
+    ]);
+  });
+
+  it('ignores non-websocket values', () => {
+    expect(communityRelaysFromEnv('https://relay.polaris.example,not-a-url')).toEqual([]);
+  });
+
+  it('returns nothing when unset', () => {
+    expect(communityRelaysFromEnv(undefined)).toEqual([]);
+  });
+
+  it('always ranks the pinned relay first', () => {
+    const scores = new Map([['a', score('a', true, 5)]]);
+    expect(rankRelays(['a', 'b'], scores, 3, ['b'])).toEqual(['b', 'a']);
+  });
+
+  it('keeps the pinned relay even when its probe failed', () => {
+    const scores = new Map([
+      ['community', score('community', false, 0)],
+      ['a', score('a', true, 5)],
+    ]);
+    const ranked = rankRelays(['community', 'a'], scores, 2, ['community']);
+    expect(ranked[0]).toBe('community');
+    expect(ranked).toContain('a');
+  });
+
+  it('counts pinned relays against the limit', () => {
+    const scores = new Map([
+      ['a', score('a', true, 1)],
+      ['b', score('b', true, 2)],
+    ]);
+    expect(rankRelays(['a', 'b'], scores, 2, ['pinned'])).toEqual(['pinned', 'a']);
+  });
 });

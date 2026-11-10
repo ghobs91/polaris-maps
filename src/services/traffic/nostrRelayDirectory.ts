@@ -39,6 +39,14 @@ export const MAX_ACTIVE_RELAYS = 3;
 /** Env override: comma-separated relay URLs prepended to the pool. */
 const RELAYS_ENV_KEY = 'EXPO_PUBLIC_NOSTR_RELAYS';
 
+/**
+ * Optional dedicated community relay (Transitous-style: hosted by the
+ * community, not by the project). When set it is **pinned**: always included
+ * in the active set regardless of ranking, because it is the one relay the
+ * community has committed to keeping available.
+ */
+const COMMUNITY_RELAY_ENV_KEY = 'EXPO_PUBLIC_POLARIS_RELAY';
+
 const STORAGE_KEY = 'traffic.nostr-relay-scores.v1';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -56,25 +64,42 @@ export interface RelayScore {
 
 /**
  * Rank candidate relays by health: healthy relays first (fastest first),
- * then never-probed relays, then stale ones. Dead relays are only used
- * as a last resort, after healthy and untested candidates are exhausted.
+ * then never-probed relays, then stale ones. Dead relays are only used as a
+ * last resort, after healthy and untested candidates are exhausted.
+ *
+ * `pinned` relays (the community relay) always come first and survive the
+ * limit even when their probe looks unhealthy: a transient probe failure must
+ * not silently remove the one relay the community has committed to running.
  */
 export function rankRelays(
   pool: string[],
   scores: Map<string, RelayScore>,
   limit: number,
+  pinned: readonly string[] = [],
 ): string[] {
   const healthy: { url: string; latencyMs: number }[] = [];
   const unknown: string[] = [];
   const dead: string[] = [];
   for (const url of pool) {
+    if (pinned.includes(url)) continue;
     const score = scores.get(url);
     if (!score) unknown.push(url);
     else if (score.ok) healthy.push({ url, latencyMs: score.latencyMs });
     else dead.push(url);
   }
   healthy.sort((a, b) => a.latencyMs - b.latencyMs);
-  return [...healthy.map((h) => h.url), ...unknown, ...dead].slice(0, limit);
+  const ranked = [...healthy.map((h) => h.url), ...unknown, ...dead];
+  const pinnedSlots = pinned.slice(0, limit);
+  return [...pinnedSlots, ...ranked.slice(0, Math.max(0, limit - pinnedSlots.length))];
+}
+
+/** Pinned community relay(s) from the environment, deduped and validated. */
+export function communityRelaysFromEnv(env: string | undefined): string[] {
+  const urls = (env ?? '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter((u) => u.startsWith('wss://') || u.startsWith('ws://'));
+  return Array.from(new Set(urls));
 }
 
 /** Build the candidate pool: env override first, then the default list, deduped. */
@@ -210,6 +235,7 @@ export async function refreshRelayDirectory(
     pool?: string[];
     limit?: number;
     probe?: (url: string) => Promise<RelayScore>;
+    pinned?: readonly string[];
     now?: number;
   } = {},
 ): Promise<string[]> {
@@ -219,6 +245,7 @@ export async function refreshRelayDirectory(
 
   const pool = opts.pool ?? relayPoolFromEnv(process.env[RELAYS_ENV_KEY]);
   const limit = opts.limit ?? MAX_ACTIVE_RELAYS;
+  const pinned = opts.pinned ?? communityRelaysFromEnv(process.env[COMMUNITY_RELAY_ENV_KEY]);
   const probe = opts.probe ?? ((url: string) => probeRelay(url));
 
   refreshInFlight = (async () => {
@@ -231,7 +258,7 @@ export async function refreshRelayDirectory(
       for (const score of results) cachedScores.set(score.url, score);
       persistScores();
     }
-    return rankRelays(pool, cachedScores, limit);
+    return rankRelays(pool, cachedScores, limit, pinned);
   })();
 
   try {
@@ -250,6 +277,7 @@ export async function getActiveRelays(
     pool?: string[];
     limit?: number;
     probe?: (url: string) => Promise<RelayScore>;
+    pinned?: readonly string[];
     now?: number;
   } = {},
 ): Promise<string[]> {
@@ -258,9 +286,10 @@ export async function getActiveRelays(
   const pool = opts.pool ?? relayPoolFromEnv(process.env[RELAYS_ENV_KEY]);
   const limit = opts.limit ?? MAX_ACTIVE_RELAYS;
 
+  const pinned = opts.pinned ?? communityRelaysFromEnv(process.env[COMMUNITY_RELAY_ENV_KEY]);
   const fresh = lastRefreshAt > 0 && now - lastRefreshAt < RELAY_REFRESH_MS;
-  if (fresh) return rankRelays(pool, cachedScores, limit);
-  return refreshRelayDirectory({ ...opts, pool, limit, now });
+  if (fresh) return rankRelays(pool, cachedScores, limit, pinned);
+  return refreshRelayDirectory({ ...opts, pool, limit, pinned, now });
 }
 
 /** Test/teardown hook: reset all in-memory directory state. */

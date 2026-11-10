@@ -32,6 +32,7 @@ import {
   disposeProbeCollection,
 } from '@/services/traffic/probeCollectionCoordinator';
 import { initRerouteMonitor, disposeRerouteMonitor } from '@/services/traffic/rerouteCoordinator';
+import { startSeedInstrumentation, stopSeedInstrumentation } from '@/services/sync/seedDiagnostics';
 import {
   initIncidentExchange,
   disposeIncidentExchange,
@@ -158,9 +159,17 @@ function RootLayoutInner() {
     const unsubscribeConfig = subscribeRemoteConfig(applyTrafficFlag);
 
     // Suspend/resume the mesh with the app lifecycle to save battery.
+    // Seed instrumentation samples the Hyperdrive swarm while foregrounded so
+    // seeding availability is measured rather than assumed (iOS suspends
+    // backgrounded apps, so a phone is a weak seed).
     const onAppStateChange = (state: AppStateStatus) => {
-      if (state === 'active') resumeTrafficP2P();
-      else if (state === 'background') suspendTrafficP2P();
+      if (state === 'active') {
+        resumeTrafficP2P();
+        startSeedInstrumentation();
+      } else if (state === 'background') {
+        suspendTrafficP2P();
+        stopSeedInstrumentation();
+      }
     };
     const sub = AppState.addEventListener('change', onAppStateChange);
 
@@ -170,6 +179,7 @@ function RootLayoutInner() {
       sub.remove();
       unsubscribeConfig();
       stopTraffic();
+      stopSeedInstrumentation();
       disposeRerouteMonitor();
       teardownFixDrivenRefresh();
     };
