@@ -182,6 +182,21 @@ are the community/third-party services the project has explicitly adopted (for
 example Overture's published archives); if none of them is reachable the app
 still works, just with less coverage.
 
+### Peer answers over the swarm
+
+`backend/shard-answer.mjs` runs inside the Hyperdrive worklet. A peer seeding a
+pack already holds `shards/<cell>.jsonl`, so it reads those bytes, filters them,
+and replies with Merkle inclusion proofs over a length-prefixed JSON frame
+protocol on the shard's topic (`polaris/shard/<shardId>`). The app
+(`hyperswarmShardClient` → `peerPoiQuery`) verifies every proof against the root
+from the signed shard manifest and rejects a short answer when the committed row
+count is known.
+
+Peer rows answer the _current_ query only: they are never imported and never
+recorded as coverage, because a filtered answer says nothing about the rest of
+the cell. `__tests__/unit/shardAnswerContract.test.ts` runs the worklet module
+under Node and compares its roots and proof layout with the app verifier.
+
 ### Overpass fallback policy
 
 `overpassClient.ts` is deliberately conservative: mirrors are tried

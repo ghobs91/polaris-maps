@@ -33,7 +33,7 @@
 - [x] 5.1 `shardQueryProtocol`: normalised query, predicate matching, responder producing proofs, client verification against the manifest root
 - [x] 5.2 Reject fabrication, wrong root, wrong shard, and (with a committed count) omission
 - [x] 5.3 Per-peer token-bucket rate limiter
-- [ ] 5.4 Hyperswarm transport binding (requires `pnpm swarm:bundle` rebuild + device test)
+- [x] 5.4 Hyperswarm transport binding: worklet responder reads `shards/<cell>.jsonl` from the pack it seeds, answers with proofs over a length-prefixed JSON frame protocol on the shard topic; RN client verifies against the manifest root. Contract test runs the worklet module under Node and compares roots/proofs with the app verifier. Bundle rebuilt with `bare-pack`.
 
 ## 6. Overpass demotion
 
@@ -53,4 +53,4 @@
 
 - [x] 8.1 Gun relay health probe with TTL cache, seeds preserved as fallback, `EXPO_PUBLIC_GUN_RELAYS` override
 - [x] 8.2 Placeholder-origin guard so a release build cannot silently fetch `cdn.example.com`
-- [ ] 8.3 Choose the community/third-party catalog + pack origin and set `EXPO_PUBLIC_REGION_CATALOG_URL`
+- [x] 8.3 Catalog origin: the CI build publishes `catalog.json` as a GitHub Release asset (`--out` mode of `update-region-asset-urls.mjs`), so `EXPO_PUBLIC_REGION_CATALOG_URL` can point at `.../releases/latest/download/catalog.json` with no project-hosted infrastructure. Documented in `.env.example`.

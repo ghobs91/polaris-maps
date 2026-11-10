@@ -17,6 +17,7 @@ import {
   CMD_HD_UNSEED,
   CMD_HD_GUNZIP,
   CMD_HD_EXTRACT_TAR,
+  CMD_HD_SHARD_QUERY,
   CMD_HD_DOWNLOAD_PROGRESS,
 } from './hdRpcCommands';
 
@@ -277,6 +278,30 @@ export async function extractTar(srcPath: string, destDir: string): Promise<void
     { srcPath: toFsPath(srcPath), destDir: toFsPath(destDir) },
     TRANSFER_TIMEOUT_MS,
   );
+}
+
+/** How long a peer shard query may take (peer discovery included). */
+const SHARD_QUERY_TIMEOUT_MS = 20_000;
+
+/**
+ * Ask the swarm for a shard answer.
+ *
+ * The worklet joins the shard's topic, broadcasts the query to peers that seed
+ * that pack, and returns the first reply verbatim. It does not verify anything:
+ * the reply is untrusted until `verifiableShardIndex` checks its proofs against
+ * the root from the signed shard manifest.
+ */
+export async function queryShardOverSwarm(
+  shardId: string,
+  query: Record<string, unknown>,
+  opts?: { timeoutMs?: number },
+): Promise<unknown> {
+  const result = await sendRequest(
+    CMD_HD_SHARD_QUERY,
+    { shardId, query, timeoutMs: opts?.timeoutMs ?? SHARD_QUERY_TIMEOUT_MS },
+    (opts?.timeoutMs ?? SHARD_QUERY_TIMEOUT_MS) + 5_000,
+  );
+  return result.answer;
 }
 
 /** Terminate the worklet and clear handlers. */

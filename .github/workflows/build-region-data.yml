@@ -334,3 +334,36 @@ jobs:
           name: build-${{ matrix.id }}-logs
           path: work/${{ matrix.id }}/*.json
           retention-days: 7
+
+  # ── Job 3: publish the catalog stamped with this release's asset URLs ────────
+  # GitHub Releases is the origin for both the packs and this catalog — Polaris
+  # runs no CDN. The app reads it via EXPO_PUBLIC_REGION_CATALOG_URL, typically
+  # `.../releases/latest/download/catalog.json`.
+  publish-catalog:
+    needs: [setup, build]
+    if: ${{ needs.setup.result == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Stamp and publish the catalog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="map-data-$(date +%Y-%m)"
+          node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json
+
+          gh release view "$TAG" --repo "${{ github.repository }}" 2>/dev/null || \
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "Map Data $(date +%B\ %Y)" \
+              --notes "Auto-generated map data from OpenStreetMap via Geofabrik. Built $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
+              --prerelease
+
+          gh release upload "$TAG" catalog.json \
+            --repo "${{ github.repository }}" \
+            --clobber

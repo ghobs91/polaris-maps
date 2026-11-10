@@ -15,11 +15,16 @@
  *     [--base https://github.com/OWNER/REPO/releases/download] \
  *     [--sizes sizes.json] \
  *     [--catalog scripts/regions.json] \
+ *     [--out catalog.json] \
  *     [--dry-run]
  *
  * `sizes.json` maps region id → { searchIndexSizeBytes, transitIndexSizeBytes },
  * as emitted per region by the CI workflow. Missing sizes are simply omitted;
  * every size field is optional in the app's catalog schema.
+ *
+ * With `--out`, the stamped result is written to that path in the shape the app
+ * reads (`{ version, updated_at, regions }`), so a CI job can publish it as a
+ * release asset — GitHub is the origin, Polaris runs no CDN.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -37,6 +42,7 @@ function parseArgs(argv) {
     else if (arg === '--base') args.base = argv[++i];
     else if (arg === '--sizes') args.sizes = argv[++i];
     else if (arg === '--catalog') args.catalog = argv[++i];
+    else if (arg === '--out') args.out = argv[++i];
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (!args.tag) throw new Error('--tag is required (e.g. map-data-2026-01)');
@@ -76,13 +82,27 @@ export function stampCatalog(catalog, { tag, base, sizes = {} }) {
   return { ...catalog, regions };
 }
 
+/**
+ * Shape the app reads (`catalogService.CatalogManifest`): `regions`, not the CI
+ * matrix's `include`.
+ */
+export function toPublishedCatalog(stamped) {
+  const regions = stamped.regions ?? stamped.include ?? [];
+  return {
+    version: '1',
+    updated_at: new Date().toISOString(),
+    regions,
+  };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const catalogPath = resolve(args.catalog);
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
   const sizes = args.sizes ? JSON.parse(readFileSync(resolve(args.sizes), 'utf8')) : {};
 
-  const updated = stampCatalog(catalog, { tag: args.tag, base: args.base, sizes });
+  const stamped = stampCatalog(catalog, { tag: args.tag, base: args.base, sizes });
+  const updated = args.out ? toPublishedCatalog(stamped) : stamped;
   const serialised = `${JSON.stringify(updated, null, 2)}\n`;
 
   if (args.dryRun) {
@@ -90,9 +110,10 @@ function main() {
     return 0;
   }
 
-  writeFileSync(catalogPath, serialised);
+  const target = args.out ? resolve(args.out) : catalogPath;
+  writeFileSync(target, serialised);
   const count = (updated.regions ?? updated.include ?? []).length;
-  process.stderr.write(`stamped ${count} regions with ${args.tag} asset URLs\n`);
+  process.stderr.write(`stamped ${count} regions with ${args.tag} asset URLs → ${target}\n`);
   return 0;
 }
 

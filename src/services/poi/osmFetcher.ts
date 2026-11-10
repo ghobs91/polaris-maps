@@ -2,6 +2,7 @@ import { overpassFetch } from '../overpassClient';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import { hasLocalPoiCoverage, queryLocalPois, type PoiKeyFilter } from './localPoiIndex';
 import { ensureShardCoverage, hasShardCoverage } from './shardedPoiSource';
+import { queryPeersForPois } from './peerPoiQuery';
 import { throwIfAborted, withTimeout } from '../search/abortUtils';
 import { buildOverpassNameRegex, normalizeOsmName } from '../../utils/osmNameMatch';
 import {
@@ -78,7 +79,26 @@ async function queryLocalIndex(
     }
     // Coverage can come from a whole pack or from a set of shard cells.
     const covered = (await hasLocalPoiCoverage(bounds)) || (await hasShardCoverage(bounds));
-    if (!covered) return null;
+    if (!covered) {
+      // Tier 2: ask peers seeding this pack for the rows that match. Verified
+      // against the shard's committed Merkle root; used for this query only,
+      // and never treated as coverage.
+      const peerPois = await queryPeersForPois({
+        ...bounds,
+        keys,
+        tags: opts.tags,
+        limit: opts.limit,
+      }).catch(() => []);
+      if (peerPois.length > 0) {
+        logDiagnostic('poi', 'info', 'answered from peer shards', {
+          pois: peerPois.length,
+          south: bounds.south,
+          west: bounds.west,
+        });
+        return peerPois;
+      }
+      return null;
+    }
     const pois = await queryLocalPois({
       ...bounds,
       keys,

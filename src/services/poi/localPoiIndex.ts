@@ -411,6 +411,12 @@ export async function recordLocalPoiCoverage(
  * file providers), read the pack through a second read-only connection and
  * upsert in batches — the same pattern the geocoding importer uses. Both paths
  * end in the same rows; only the throughput differs.
+ *
+ * Note on expo-sqlite (verified against 57.0.4 sources): `prepareStatement` is a
+ * thin `sqlite3_prepare_v2` wrapper with no authorizer and no statement
+ * allowlist, so ATTACH is permitted. The fallback exists for platforms where the
+ * pack file is not attachable (scoped/URI file providers) and is exercised by
+ * `__tests__/integration/localSearchIndexPipeline.test.ts`.
  */
 export async function importLocalPoiIndexFromPack(
   packPath: string,

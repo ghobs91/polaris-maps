@@ -13,12 +13,22 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-jest.mock('expo-sqlite', () => ({}));
+jest.mock('expo-sqlite', () => ({
+  // The row-wise fallback opens the pack with a second connection.
+  openDatabaseAsync: async (path: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DatabaseSync: SqliteDb } = require('node:sqlite') as typeof import('node:sqlite');
+    return mockAdapt(new SqliteDb(path));
+  },
+}));
 jest.mock('../../src/services/diagnostics/diagnosticsLog', () => ({
   logDiagnostic: jest.fn(),
 }));
 
-const mockHolder: { db: DatabaseSync | null } = { db: null };
+const mockHolder: { db: DatabaseSync | null; failAttach: boolean } = {
+  db: null,
+  failAttach: false,
+};
 
 function mockAdapt(db: DatabaseSync) {
   return {
@@ -26,6 +36,9 @@ function mockAdapt(db: DatabaseSync) {
       db.exec(sql);
     },
     runAsync: async (sql: string, params: unknown[] = []) => {
+      if (mockHolder.failAttach && /^\s*ATTACH/i.test(sql)) {
+        throw new Error('ATTACH not permitted in this test');
+      }
       db.prepare(sql).run(...(params as never[]));
     },
     getAllAsync: async (sql: string, params: unknown[] = []) =>
@@ -266,6 +279,28 @@ describe('pack → shards → index → query', () => {
     }
 
     expect(covered.sort()).toEqual(PACK_POIS.map((poi) => poi.name).sort());
+  });
+
+  it('falls back to row-wise import when ATTACH is refused, with identical rows', async () => {
+    const { poiPath } = writePack(dir);
+
+    // Reset the local index so the assertion can only pass via the fallback.
+    mockHolder.db!.exec('DELETE FROM osm_pois');
+    mockHolder.failAttach = true;
+    try {
+      const imported = await importLocalPoiIndexFromPack(poiPath, 'fallback-region', GEO);
+      expect(imported).toBe(PACK_POIS.length);
+    } finally {
+      mockHolder.failAttach = false;
+    }
+
+    const cafes = await queryLocalPois({ ...GEO, keys: [{ key: 'amenity', value: 'cafe' }] });
+    expect(cafes.map((poi) => poi.name)).toEqual(['Blue Bottle Coffee']);
+
+    const names = mockHolder
+      .db!.prepare('SELECT name FROM osm_pois ORDER BY osm_id')
+      .all() as Array<{ name: string }>;
+    expect(names.map((row) => row.name)).toEqual(PACK_POIS.map((poi) => poi.name));
   });
 
   it('a shard root is reproducible from its payload alone', () => {
