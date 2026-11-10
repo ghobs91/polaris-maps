@@ -1,6 +1,7 @@
 import { getDatabase } from '../database/init';
 import { throwIfAborted, withTimeout } from '../search/abortUtils';
 import { nominatimThrottle } from '../search/requestThrottle';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { OsmPoi } from '../poi/osmFetcher';
 
@@ -259,7 +260,10 @@ async function searchAddressNominatim(
       },
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      logDiagnostic('nominatim', 'warn', `address search failed: HTTP ${response.status}`);
+      return [];
+    }
 
     const data: NominatimResult[] = await response.json();
 

@@ -17,6 +17,7 @@
  */
 
 import { MAPILLARY_TOKEN, PANORAMAX_SEARCH_URL } from '../../constants/config';
+import { isFeatureEnabled } from '../config/remoteConfig';
 import { haversineMeters } from '../../utils/routeSnap';
 import {
   buildTileGrids,
@@ -273,6 +274,8 @@ export async function findStreetViewPanoramas(
   lng: number,
   query: StreetViewQuery = {},
 ): Promise<StreetViewPanorama[]> {
+  if (!isFeatureEnabled('streetView')) return [];
+
   const radiusDeg = query.radiusDeg ?? DEFAULT_RADIUS_DEG;
   const limit = query.limit ?? DEFAULT_LIMIT;
   const includeMapillary = query.includeMapillary !== false;

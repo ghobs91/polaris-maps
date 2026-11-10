@@ -14,6 +14,7 @@ import type { SQLiteBindValue, SQLiteDatabase } from 'expo-sqlite';
 import { throwIfAborted, withSourceTimeout, withTimeout } from '../search/abortUtils';
 import { invalidateSearchCacheForBbox } from '../search/searchCache';
 import { canonicalYelpListingUrl } from './externalRatings/yelpProvider';
+import { isFeatureEnabled } from '../config/remoteConfig';
 
 /** Preferred place-tile zoom; clamped to the archive header's `maxZoom` at runtime. */
 const TILE_ZOOM = 15;
@@ -400,6 +401,8 @@ export async function fetchOverturePlaces(
   limit: number = 200,
   opts?: { signal?: AbortSignal },
 ): Promise<Place[]> {
+  if (!isFeatureEnabled('overturePlaces')) return [];
+
   throwIfAborted(opts?.signal);
 
   const archive = await getPmtilesArchive();

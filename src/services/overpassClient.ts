@@ -6,6 +6,7 @@
  */
 
 import { abortError, sleepWithAbort } from './search/abortUtils';
+import { logDiagnostic } from './diagnostics/diagnosticsLog';
 
 const OVERPASS_INSTANCES = [
   'https://overpass-api.de/api/interpreter',
@@ -107,6 +108,11 @@ export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Prom
     // `isAbortError` cannot recognise — that made a superseded search look like
     // a failed one, and CarPlay answered it by blanking the driver's list.
     if (opts.signal?.aborted) throw abortError();
+    const failures =
+      err instanceof AggregateError
+        ? err.errors.map((e) => (e instanceof Error ? e.message : String(e)))
+        : [err instanceof Error ? err.message : String(err)];
+    logDiagnostic('overpass', 'warn', 'all mirrors failed', { failures });
     throw err;
   }
 }

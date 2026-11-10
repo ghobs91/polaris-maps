@@ -4,6 +4,7 @@ import { searchPlacesByCategory } from './poiService';
 import { fetchOsmPoisByTags } from './osmFetcher';
 import { isAbortError, throwIfAborted, withTimeout } from '../search/abortUtils';
 import { nominatimThrottle } from '../search/requestThrottle';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import {
   resolveSearchCategories,
@@ -389,7 +390,10 @@ async function fetchNominatimPoiSingle(
       },
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      logDiagnostic('nominatim', 'warn', `category search failed: HTTP ${response.status}`);
+      return [];
+    }
 
     const data: NominatimSearchResult[] = await response.json();
 
