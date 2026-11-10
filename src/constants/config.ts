@@ -8,6 +8,14 @@
  * available from peers, they are fetched on-demand from OpenFreeMap.
  */
 
+/**
+ * Identifying User-Agent for OpenFreeMap requests.
+ *
+ * Their offline-download policy requires a unique User-Agent naming the app;
+ * unidentified bulk downloads may be blocked.
+ */
+export const OPENFREEMAP_USER_AGENT = 'PolarisMaps/1.0 (+https://app.polarismaps.app)';
+
 /** OpenFreeMap MapLibre style URL — global vector tiles, no download needed. */
 export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 

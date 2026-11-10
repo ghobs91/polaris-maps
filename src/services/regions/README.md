@@ -45,6 +45,17 @@ hyperdriveBridge.ts → seed to P2P network (canonical key)
 Other peers can download from this device
 ```
 
+## OpenFreeMap offline policy
+
+OpenFreeMap permits offline area downloads only when each download is at most
+3,000 tiles / 50 MB, uses **at most 4 parallel requests**, and identifies the
+app with a unique User-Agent. `tileDownloadPlan.ts` enforces the tile budget by
+lowering max zoom for oversized bounds (rather than chunking into multiple
+non-conformant pulls), `downloadViaHttp` uses 4-way concurrency, sends
+`PolarisMaps/1.0 (+https://app.polarismaps.app)`, and aborts if the byte count
+exceeds 50 MB. Self-hosting/mirroring is intentionally out of scope: Polaris
+does not host user-facing data.
+
 ## Related Files
 
 - [`src/services/sync/hyperdriveBridge.ts`](../sync/hyperdriveBridge.ts) — Hyperdrive seed/download IPC

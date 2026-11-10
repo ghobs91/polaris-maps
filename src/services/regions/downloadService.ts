@@ -3,7 +3,12 @@ import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
 import { downloadFromPeers, gunzipFile, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
-import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
+import { OPENFREEMAP_TILEJSON_URL, OPENFREEMAP_USER_AGENT } from '../../constants/config';
+import {
+  OPENFREEMAP_MAX_DOWNLOAD_BYTES,
+  OPENFREEMAP_MAX_PARALLEL_DOWNLOADS,
+  planOfflineTileDownload,
+} from './tileDownloadPlan';
 import { downloadOfflineFonts } from '../map/offlineFonts';
 import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
@@ -17,6 +22,8 @@ import { importRegionPlaceDetails } from './placeDetailImporter';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
+import { isFeatureEnabled } from '../config/remoteConfig';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -53,7 +60,10 @@ async function fetchTileJson(): Promise<TileJsonResult | null> {
 
   try {
     const res = await fetch(OPENFREEMAP_TILEJSON_URL, {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': OPENFREEMAP_USER_AGENT,
+      },
     });
     if (!res.ok) return null;
     const json = (await res.json()) as { tiles?: string[] };
@@ -128,6 +138,10 @@ export async function downloadRegion(
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (!isFeatureEnabled('regionDownloads')) {
+    throw new Error('Offline downloads are temporarily unavailable. Please try again later.');
+  }
+
   const destDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
   await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
 
@@ -245,6 +259,11 @@ export async function downloadRegion(
       return;
     }
 
+    if ((error as Error).name === 'DownloadLimitError') {
+      // Over-limit downloads are refused rather than completed non-conformantly.
+      await FileSystem.deleteAsync(destDir, { idempotent: true }).catch(() => {});
+    }
+
     await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
       'failed',
       Math.floor(Date.now() / 1000),
@@ -260,6 +279,9 @@ export async function downloadRegion(
       error: (error as Error).message,
     });
 
+    logDiagnostic('regions', 'error', `download failed: ${region.id}`, {
+      message: (error as Error).message,
+    });
     throw error;
   }
 }
@@ -410,17 +432,26 @@ async function downloadViaHttp(
     );
   }
 
+  // Stay inside OpenFreeMap's offline-download allowance: at most 3,000 tiles
+  // per download. Lowering max zoom cuts the tile count ~4x per level, so a
+  // too-large region degrades to a coarser pack instead of an over-limit one.
+  const plan = planOfflineTileDownload(region.bounds);
+  if (plan.reduced) {
+    console.warn(
+      `[Regions] ${region.id}: capped offline detail at z${plan.maxZoom} to stay within OpenFreeMap's tile limit.`,
+    );
+    logDiagnostic('regions', 'warn', `capped offline detail for ${region.id}`, {
+      maxZoom: plan.maxZoom,
+      tiles: plan.tiles.length,
+    });
+  }
+
   const tilesDir = `${destDir}tiles/`;
   await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
 
-  // Calculate tile coordinates for the region bounds at zoom levels 0-12.
-  // z12 gives city-level detail in vector tiles (MapLibre renders z13+ from z12 data).
-  // Going to z14 multiplies tile count by 16× — far too many for region-scale downloads.
-  const minZoom = 0;
-  const maxZoom = 12;
-  const tileCoords = getTilesForBounds(region.bounds, minZoom, maxZoom);
-  const totalTiles = tileCoords.length;
+  const totalTiles = plan.tiles.length;
   let downloaded = 0;
+  let downloadedBytes = 0;
 
   onProgress?.({
     regionId: region.id,
@@ -430,12 +461,13 @@ async function downloadViaHttp(
     stage: 'tiles',
   });
 
-  // Download tiles in batches of 50 concurrent requests
-  const BATCH_SIZE = 50;
-  for (let i = 0; i < tileCoords.length; i += BATCH_SIZE) {
+  // OpenFreeMap's policy permits at most 4 parallel requests per offline
+  // download. Batches stay small deliberately.
+  const BATCH_SIZE = OPENFREEMAP_MAX_PARALLEL_DOWNLOADS;
+  for (let i = 0; i < plan.tiles.length; i += BATCH_SIZE) {
     checkAborted(signal);
-    const batch = tileCoords.slice(i, i + BATCH_SIZE);
-    await Promise.all(
+    const batch = plan.tiles.slice(i, i + BATCH_SIZE);
+    const batchBytes = await Promise.all(
       batch.map(async ({ z, x, y }) => {
         const url = urlTemplate
           .replace('{z}', String(z))
@@ -445,12 +477,25 @@ async function downloadViaHttp(
         await FileSystem.makeDirectoryAsync(tileDir, { intermediates: true });
         const dest = `${tileDir}${y}.pbf`;
         try {
-          await FileSystem.downloadAsync(url, dest);
+          await FileSystem.downloadAsync(url, dest, {
+            headers: { 'User-Agent': OPENFREEMAP_USER_AGENT },
+          });
+          const info = await FileSystem.getInfoAsync(dest);
+          return (info as { size?: number }).size ?? 0;
         } catch {
           // Skip individual tile failures (ocean tiles, etc.)
+          return 0;
         }
       }),
     );
+    downloadedBytes += batchBytes.reduce((sum, bytes) => sum + bytes, 0);
+    if (downloadedBytes > OPENFREEMAP_MAX_DOWNLOAD_BYTES) {
+      const err = new Error(
+        "Offline map exceeded OpenFreeMap's 50 MB per-download limit. Try a smaller region.",
+      );
+      err.name = 'DownloadLimitError';
+      throw err;
+    }
     downloaded += batch.length;
     onProgress?.({
       regionId: region.id,
@@ -460,34 +505,6 @@ async function downloadViaHttp(
       stage: 'tiles',
     });
   }
-}
-
-/** Convert lat/lng to tile coordinates at a given zoom level. */
-function latLngToTile(lat: number, lng: number, zoom: number): { x: number; y: number } {
-  const n = Math.pow(2, zoom);
-  const x = Math.floor(((lng + 180) / 360) * n);
-  const latRad = (lat * Math.PI) / 180;
-  const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
-  return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
-}
-
-/** Get all tile coordinates covering a bounding box across zoom levels. */
-function getTilesForBounds(
-  bounds: Region['bounds'],
-  minZoom: number,
-  maxZoom: number,
-): { z: number; x: number; y: number }[] {
-  const tiles: { z: number; x: number; y: number }[] = [];
-  for (let z = minZoom; z <= maxZoom; z++) {
-    const topLeft = latLngToTile(bounds.maxLat, bounds.minLng, z);
-    const bottomRight = latLngToTile(bounds.minLat, bounds.maxLng, z);
-    for (let x = topLeft.x; x <= bottomRight.x; x++) {
-      for (let y = topLeft.y; y <= bottomRight.y; y++) {
-        tiles.push({ z, x, y });
-      }
-    }
-  }
-  return tiles;
 }
 
 /** Seed a downloaded region in the background and persist the canonical key. */
