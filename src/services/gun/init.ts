@@ -1,9 +1,16 @@
 import Gun from 'gun';
 import { storage } from '../storage/mmkv';
+import { isRelayHealthStale, primeRelayHealth, resolveRelayPeers } from './relayHealth';
 
 const MMKV_GUN_PREFIX = 'gun:';
 const RELAY_CACHE_KEY = 'gun:cached_relays';
 
+/**
+ * Seed relays. These are community relays, not project infrastructure. A dead
+ * entry is dropped from the working set by the health probe in `relayHealth`
+ * (see `resolveRelayPeers`), and `EXPO_PUBLIC_GUN_RELAYS` overrides them
+ * entirely.
+ */
 const SEED_RELAYS = [
   'https://gun-manhattan.herokuapp.com/gun',
   'https://gun-us.herokuapp.com/gun',
@@ -31,21 +38,6 @@ function getMMKVAdapter() {
   };
 }
 
-function getCachedRelays(): string[] {
-  const cached = storage.getString(RELAY_CACHE_KEY);
-  if (cached) {
-    try {
-      const parsed: unknown = JSON.parse(cached);
-      if (Array.isArray(parsed) && parsed.every((r) => typeof r === 'string')) {
-        return parsed as string[];
-      }
-    } catch {
-      // ignore corrupt cache
-    }
-  }
-  return [];
-}
-
 export function cacheRelays(relays: string[]): void {
   storage.set(RELAY_CACHE_KEY, JSON.stringify(relays));
 }
@@ -55,8 +47,9 @@ let gunInstance: ReturnType<typeof Gun> | null = null;
 export function getGun(): ReturnType<typeof Gun> {
   if (gunInstance) return gunInstance;
 
-  const cachedRelays = getCachedRelays();
-  const peers = cachedRelays.length > 0 ? cachedRelays : SEED_RELAYS;
+  // Cached-healthy set, then seeds; probing happens in the background below so
+  // Gun's constructor never blocks on a relay that may be dead.
+  const peers = resolveRelayPeers(SEED_RELAYS);
 
   gunInstance = Gun({
     peers,
@@ -64,6 +57,18 @@ export function getGun(): ReturnType<typeof Gun> {
     localStorage: false,
     store: getMMKVAdapter(),
   });
+
+  if (isRelayHealthStale()) {
+    // Self-healing seed list: whatever answers now becomes the next launch's
+    // working set, without adding relays the project does not already ship.
+    void primeRelayHealth(peers)
+      .then((healthy) => {
+        if (healthy.length > 0) cacheRelays(healthy);
+      })
+      .catch(() => {
+        // Offline: keep using the current set.
+      });
+  }
 
   return gunInstance;
 }

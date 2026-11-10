@@ -7,10 +7,11 @@ Multi-source POI system with Overture Maps, OpenStreetMap, Apple MapKit enrichme
 The POI service aggregates place data from multiple sources into a unified browsing experience:
 
 1. **Local Overture** — pre-downloaded places stored in SQLite, queried by bounding box with FTS5 search
-2. **OSM Overpass** — real-time viewport queries for nodes/ways with `amenity|shop|tourism|leisure` tags
-3. **Overture-hosted PMTiles** — visible place features decoded client-side from Overture's published `places.pmtiles` archive. The current release is resolved from Overture's STAC catalog at runtime (releases rotate ~monthly and are retained ~60 days); tile requests are clamped to the archive header's `maxZoom`.
-4. **MapKit enrichment** — Apple's native MapKit fills missing phone, website, address, hours, and logo when a POI is selected (iOS only)
-5. **Nominatim fallback** — last-resort geocoder when both local and Overpass return empty
+2. **On-device OSM index** — named OSM POIs shipped inside region packs (`search.sqlite`), queried locally by bbox + tag + name. This answers the viewport and category searches for any covered area with no network call.
+3. **OSM Overpass** — fallback for areas with no local pack coverage, for nodes/ways with `amenity|shop|tourism|leisure` tags
+4. **Overture-hosted PMTiles** — visible place features decoded client-side from Overture's published `places.pmtiles` archive. The current release is resolved from Overture's STAC catalog at runtime (releases rotate ~monthly and are retained ~60 days); tile requests are clamped to the archive header's `maxZoom`.
+5. **MapKit enrichment** — Apple's native MapKit fills missing phone, website, address, hours, and logo when a POI is selected (iOS only)
+6. **Nominatim fallback** — last-resort geocoder when both local and Overpass return empty
 
 Users can contribute back to the map through:
 
@@ -135,6 +136,59 @@ stored — no review text.
 | `OVERPASS_TIMEOUT_MS`         | 5,000  | Overpass API request timeout                           |
 | `ATTESTATION_RADIUS_M`        | 100    | Maximum GPS distance for proof-of-presence             |
 | `ENRICHMENT_CACHE_SIZE`       | 500    | Max MapKit enrichment cache entries                    |
+
+## Overpass replacement (local-first query)
+
+Overpass is a query service over OpenStreetMap, but almost every query the app
+issues is one of a handful of fixed shapes. Those are precomputed at pack build
+time and answered on device; Overpass remains only as an escape hatch.
+
+| Tier | Module                        | Answers                                                                                                                             | Network                         |
+| ---- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| 0    | `localPoiIndex.ts`            | named POIs in a bbox, filtered by primary tag / arbitrary tags / name (FTS5)                                                        | none when the region is covered |
+| 1    | `../regions/shardManifest.ts` | POI data for areas outside a downloaded pack, sharded and content-addressed so any seeding peer (or community archive) can serve it | peer fetch, hash-verified       |
+| 2    | `verifiableShardIndex.ts`     | long-tail tag queries answered by another device, with Merkle inclusion proofs                                                      | peer only                       |
+
+### Local index tables
+
+- `osm_pois` — one row per named OSM POI, addressed by `(osm_type, osm_id)`
+- `osm_pois_fts` — FTS5 over name/subtype (`unicode61`, prefix 2/3/4)
+- `local_poi_coverage` — one row per imported region; separates "nothing here"
+  from "no data here", which is what decides whether Overpass is consulted
+
+Rows arrive from a region pack's `search.sqlite` (see
+`importLocalPoiIndexFromPack`, invoked by `regions/packIndices.ts` after a
+download) or from the app's own edits.
+
+### Query behaviour
+
+- `hasLocalPoiCoverage(bounds)` gates every consumer. A covered bbox is answered
+  locally _even when the answer is empty_ — an honest empty result must not be
+  turned into a third-party request.
+- `buildLocalPoiQuery` is pure and covered by
+  `__tests__/unit/localPoiIndex.test.ts` against real SQLite, including the
+  `json_extract` path quoting for keys like `addr:street` and `fuel:diesel`.
+- Any index failure (missing table, schema race, test environment) returns
+  `null`/`false` and the caller falls back to the network, so a broken index can
+  never make search worse than Overpass.
+
+### No project-hosted infrastructure
+
+Every layer above is designed so Polaris itself never runs a CDN, backend, or
+origin: tier 0 is computed on the device, tier 1 bytes live inside the region
+pack that peers already replicate, tier 2 is answered by other devices, and the
+Overpass fallback goes to public community mirrors. Supplementary HTTP sources
+are the community/third-party services the project has explicitly adopted (for
+example Overture's published archives); if none of them is reachable the app
+still works, just with less coverage.
+
+### Overpass fallback policy
+
+`overpassClient.ts` is deliberately conservative: mirrors are tried
+sequentially (never hedged), a failing mirror enters exponential cooldown, only
+one request is in flight app-wide, every request carries a contactable
+`User-Agent`, and the signed remote config flag `overpassQuery` disables the
+fallback entirely.
 
 ## Related Files
 

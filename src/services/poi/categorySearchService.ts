@@ -2,6 +2,8 @@ import type { PlaceCategory } from '../../models/poi';
 import type { OsmPoi } from './osmFetcher';
 import { searchPlacesByCategory } from './poiService';
 import { fetchOsmPoisByTags } from './osmFetcher';
+import { hasLocalPoiCoverage, queryLocalPois } from './localPoiIndex';
+import { isOverpassEnabled } from '../overpassClient';
 import { isAbortError, throwIfAborted, withTimeout } from '../search/abortUtils';
 import { nominatimThrottle } from '../search/requestThrottle';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
@@ -14,6 +16,9 @@ import {
 
 /** Minimum local results before triggering an Overpass fallback. */
 const LOCAL_SUFFICIENCY_THRESHOLD = 5;
+
+/** How many indexed POIs to pull before ranking against the limit. */
+const LOCAL_INDEX_MIN_RESULTS = 100;
 
 /** Nominatim search terms for each PlaceCategory */
 const CATEGORY_NOMINATIM_QUERY: Partial<Record<PlaceCategory, string>> = {
@@ -113,6 +118,31 @@ export async function searchByCategory(
 
   let localPois = localPlaces.map(placeToOsmPoi);
 
+  // Step 1b: On-device OSM index (shipped in region packs).
+  //
+  // This is the reason Overpass is no longer on the critical path: for a
+  // covered area the same answer is computed locally, so a category search
+  // neither waits on a stranger's server nor leaks the viewport to one.
+  const allTags = categories.flatMap(categoryToOverpassTags);
+  const bounds = { south, west, north, east };
+  let indexPois: OsmPoi[] = [];
+  try {
+    if (await hasLocalPoiCoverage(bounds)) {
+      indexPois = await queryLocalPois({
+        ...bounds,
+        keys: allTags.map(([key, value]) => ({ key, value })),
+        limit: Math.max(limit, LOCAL_INDEX_MIN_RESULTS),
+      });
+    }
+  } catch {
+    // No index yet (fresh install, or a platform without SQLite in tests):
+    // behave exactly as before this layer existed.
+    indexPois = [];
+  }
+  if (indexPois.length > 0) {
+    localPois = deduplicateCategoryResults(localPois, indexPois);
+  }
+
   // When a specific cuisine/food type is requested, filter & rank local
   // results by relevance so generic restaurants don't drown out matches.
   // Otherwise order nearest-first so the limit keeps local places.
@@ -129,34 +159,34 @@ export async function searchByCategory(
   }
   throwIfAborted(opts?.signal);
 
-  // Step 2: Overpass fallback — build tag pairs for all resolved categories
-  const allTags = categories.flatMap(categoryToOverpassTags);
-
-  // When a cuisine hint exists, first try a narrow query with cuisine= ANDed
-  // onto each tag pair. If that yields nothing, retry without the AND filter.
+  // Step 2: Overpass fallback — the escape hatch for areas with no local pack.
+  // Skipped entirely when the signed remote config disables it, or when the
+  // local index already answered.
   let overpassPois: OsmPoi[] = [];
-  try {
-    if (cuisineHint) {
-      overpassPois = await fetchOsmPoisByTags(
-        south,
-        west,
-        north,
-        east,
-        allTags,
-        [['cuisine', cuisineHint]],
-        { requireName: false, signal: opts?.signal },
-      );
+  if (isOverpassEnabled()) {
+    try {
+      if (cuisineHint) {
+        overpassPois = await fetchOsmPoisByTags(
+          south,
+          west,
+          north,
+          east,
+          allTags,
+          [['cuisine', cuisineHint]],
+          { requireName: false, signal: opts?.signal },
+        );
+      }
+      // Broaden to all category results if narrow query was empty or no hint
+      if (overpassPois.length === 0) {
+        overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, undefined, {
+          requireName: false,
+          signal: opts?.signal,
+        });
+      }
+    } catch (err) {
+      // A caller abort must propagate; Overpass outages fall through to Nominatim.
+      if (isAbortError(err) || opts?.signal?.aborted) throw err;
     }
-    // Broaden to all category results if narrow query was empty or no hint
-    if (overpassPois.length === 0) {
-      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, undefined, {
-        requireName: false,
-        signal: opts?.signal,
-      });
-    }
-  } catch (err) {
-    // A caller abort must propagate; Overpass outages fall through to Nominatim.
-    if (isAbortError(err) || opts?.signal?.aborted) throw err;
   }
 
   if (overpassPois.length > 0) {

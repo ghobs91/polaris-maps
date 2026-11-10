@@ -12,6 +12,11 @@ jest.mock('../../src/services/overpassClient', () => ({
   overpassFetch: jest.fn(),
 }));
 
+jest.mock('../../src/services/transit/localTransitIndex', () => ({
+  // No region pack in the test environment: always fall through to Overpass.
+  localRoutesAtPoint: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock('../../src/services/transit/otpEndpointRegistry', () => ({
   findEndpointForCoords: jest.fn(),
 }));

@@ -1,0 +1,166 @@
+/**
+ * Region asset plumbing: placeholder detection + catalog URL stamping.
+ *
+ * Two failure modes this covers:
+ *  - a release build pointing at `cdn.example.com`, which fails *quietly*
+ *    because catalog fetch is best-effort;
+ *  - a published build whose packs have index assets that no catalog entry
+ *    references, so downloads never fetch them.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+jest.mock('expo-sqlite', () => ({}));
+jest.mock('expo-location', () => ({}));
+jest.mock('react-native-mmkv', () => ({
+  MMKV: jest.fn().mockImplementation(() => ({
+    getString: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+  })),
+}));
+jest.mock('../../src/services/diagnostics/diagnosticsLog', () => ({
+  logDiagnostic: jest.fn(),
+}));
+
+import {
+  isPlaceholderUrl,
+  isRegionCatalogConfigured,
+} from '../../src/services/regions/catalogService';
+
+const SCRIPT = resolve(__dirname, '../../scripts/update-region-asset-urls.mjs');
+
+describe('placeholder detection', () => {
+  it('flags documented placeholder hosts', () => {
+    expect(isPlaceholderUrl('https://cdn.example.com/regions/catalog.json')).toBe(true);
+    expect(isPlaceholderUrl('https://example.org/x')).toBe(true);
+    expect(isPlaceholderUrl('https://static.example.net/y')).toBe(true);
+  });
+
+  it('accepts real community / third-party origins', () => {
+    expect(
+      isPlaceholderUrl(
+        'https://github.com/ghobs91/polaris-maps/releases/download/map-data-2026-01/x',
+      ),
+    ).toBe(false);
+    expect(
+      isPlaceholderUrl(
+        'https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-09-23.1/places.pmtiles',
+      ),
+    ).toBe(false);
+  });
+
+  it('treats missing or unparseable URLs as unconfigured', () => {
+    expect(isPlaceholderUrl(null)).toBe(true);
+    expect(isPlaceholderUrl(undefined)).toBe(true);
+    expect(isPlaceholderUrl('not a url')).toBe(true);
+  });
+
+  it('reports the shipped catalog default as unconfigured', () => {
+    // The repository default is still a placeholder; a release build must set
+    // EXPO_PUBLIC_REGION_CATALOG_URL to a real origin.
+    expect(isRegionCatalogConfigured('https://cdn.example.com/regions/catalog.json')).toBe(false);
+    expect(isRegionCatalogConfigured('https://packs.some-community-host.net/catalog.json')).toBe(
+      true,
+    );
+  });
+});
+
+describe('update-region-asset-urls.mjs', () => {
+  let dir: string;
+  let catalogPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'polaris-catalog-'));
+    catalogPath = join(dir, 'regions.json');
+    writeFileSync(
+      catalogPath,
+      JSON.stringify({
+        include: [
+          { id: 'us-ny-new-york', name: 'New York Metro', bbox: '-74.3,40.4,-73.2,41.0' },
+          { id: 'jp-tokyo', name: 'Tokyo', bbox: '139.5,35.5,140.0,35.9' },
+        ],
+      }),
+    );
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('stamps index URLs for every region, preserving other fields', () => {
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--tag', 'map-data-2026-01', '--catalog', catalogPath],
+      {
+        stdio: 'pipe',
+      },
+    );
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8')) as {
+      include: Array<Record<string, unknown>>;
+    };
+
+    const ny = catalog.include[0]!;
+    expect(ny.name).toBe('New York Metro');
+    expect(ny.bbox).toBe('-74.3,40.4,-73.2,41.0');
+    expect(ny.searchIndexUrl).toBe(
+      'https://github.com/ghobs91/polaris-maps/releases/download/map-data-2026-01/us-ny-new-york-search.sqlite',
+    );
+    expect(ny.transitIndexUrl).toContain('us-ny-new-york-transit.sqlite');
+    expect(catalog.include[1]!.transitIndexUrl).toContain('jp-tokyo-transit.sqlite');
+
+    // Sizes are unknown here, so they must not be invented.
+    expect(ny.searchIndexSizeBytes).toBeUndefined();
+  });
+
+  it('applies sizes when a sizes file is supplied', () => {
+    const sizesPath = join(dir, 'sizes.json');
+    writeFileSync(
+      sizesPath,
+      JSON.stringify({
+        'us-ny-new-york': { searchIndexSizeBytes: 12_345, transitIndexSizeBytes: 678 },
+      }),
+    );
+
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--tag', 'map-data-2026-01', '--catalog', catalogPath, '--sizes', sizesPath],
+      { stdio: 'pipe' },
+    );
+
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8')) as {
+      include: Array<Record<string, unknown>>;
+    };
+    expect(catalog.include[0]!.searchIndexSizeBytes).toBe(12_345);
+    expect(catalog.include[0]!.transitIndexSizeBytes).toBe(678);
+    expect(catalog.include[1]!.searchIndexSizeBytes).toBeUndefined();
+  });
+
+  it('honours a custom base origin and does not rewrite the file on --dry-run', () => {
+    const before = readFileSync(catalogPath, 'utf8');
+    const out = execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        '--tag',
+        't1',
+        '--catalog',
+        catalogPath,
+        '--base',
+        'https://packs.community-host.net/regions/',
+        '--dry-run',
+      ],
+      { stdio: 'pipe' },
+    ).toString();
+
+    expect(out).toContain(
+      'https://packs.community-host.net/regions/t1/us-ny-new-york-search.sqlite',
+    );
+    expect(out.startsWith('{')).toBe(true);
+    expect(readFileSync(catalogPath, 'utf8')).toBe(before);
+  });
+});

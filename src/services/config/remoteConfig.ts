@@ -13,6 +13,7 @@
  */
 
 import { isTrustedPublisher } from '../regions/regionManifest';
+import { setOverpassEnabled } from '../overpassClient';
 import { createSigningPayload, verify } from '../identity/signing';
 import { TRUSTED_REGION_PUBLISHERS } from '../../constants/regionPublishers';
 import type { MMKV } from 'react-native-mmkv';
@@ -43,6 +44,21 @@ export interface RemoteConfigFlags {
   overturePlaces: boolean;
   /** TomTom cold-start traffic bridge (flow grid, tiles, route ETA). */
   tomtomBridge: boolean;
+  /**
+   * Public Overpass fallback for areas with no local pack coverage.
+   *
+   * Deliberately NOT part of {@link FLAG_ORDER}: the signature covers the
+   * original five flags, and adding a field to the signed payload would
+   * invalidate every config already published. This flag is fail-safe by
+   * construction — absent defaults to enabled, and its only effect is to turn
+   * an optional third-party fallback *off*.
+   *
+   * Nothing depends on the config being reachable: the fallback runs enabled
+   * without it. Polaris hosts no control-plane service, so this signed static
+   * document (and `setOverpassEnabled` for a local override) are the only
+   * switches, and losing both leaves the app fully functional.
+   */
+  overpassQuery: boolean;
 }
 
 export interface RemoteConfig {
@@ -60,6 +76,7 @@ export const DEFAULT_REMOTE_FLAGS: RemoteConfigFlags = {
   streetView: true,
   overturePlaces: true,
   tomtomBridge: true,
+  overpassQuery: true,
 };
 
 /** Fixed flag order for the canonical signing payload. Do not reorder. */
@@ -124,6 +141,8 @@ export function parseRemoteConfig(
   for (const flag of FLAG_ORDER) {
     if (typeof rawFlags[flag] === 'boolean') flags[flag] = rawFlags[flag]!;
   }
+  // Unsigned on purpose (see RemoteConfigFlags.overpassQuery).
+  if (typeof rawFlags.overpassQuery === 'boolean') flags.overpassQuery = rawFlags.overpassQuery;
 
   const payload = remoteConfigPayload({
     version: config.version,
@@ -157,8 +176,14 @@ function getCache(): MMKV | null {
   }
 }
 
-function applyFlags(flags: RemoteConfigFlags): void {
+/**
+ * Apply a verified flag set. Exported so the loader, cache hydration, and tests
+ * all go through exactly one side-effecting path.
+ */
+export function applyRemoteFlags(flags: RemoteConfigFlags): void {
   current = { ...flags };
+  // Keep the Overpass client's kill switch in sync with the signed config.
+  setOverpassEnabled(flags.overpassQuery !== false);
   notify();
 }
 
@@ -168,8 +193,7 @@ function hydrateFromCache(): void {
     if (!raw) return;
     const flags = parseRemoteConfig(JSON.parse(raw));
     if (flags) {
-      current = { ...flags };
-      notify();
+      applyRemoteFlags(flags);
     }
   } catch {
     // Corrupt cache — defaults apply.
@@ -223,7 +247,7 @@ export function initRemoteConfig(): Promise<void> {
   if (initPromise) return initPromise;
   hydrateFromCache();
   initPromise = fetchRemoteConfig().then((flags) => {
-    if (flags) applyFlags(flags);
+    if (flags) applyRemoteFlags(flags);
   });
   return initPromise;
 }

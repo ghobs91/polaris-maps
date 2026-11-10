@@ -19,6 +19,8 @@ import {
   importRegionOverturePlacesFromSqlite,
 } from './overtureImporter';
 import { importRegionPlaceDetails } from './placeDetailImporter';
+import { importPackSearchIndices } from './packIndices';
+import { registerPackShards } from './shardCatalog';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
@@ -118,7 +120,7 @@ export interface DownloadProgress {
   totalBytes: number;
   downloadedBytes: number;
   percent: number;
-  stage: 'tiles' | 'places' | 'routing' | 'geocoding' | 'complete' | 'error';
+  stage: 'tiles' | 'places' | 'routing' | 'geocoding' | 'indices' | 'complete' | 'error';
   error?: string;
 }
 
@@ -200,6 +202,19 @@ export async function downloadRegion(
     // Seed the place-detail cache from an optional region-pack payload. Region
     // seeds use sourceVersion 0 so they never clobber fresher live snapshots.
     await importRegionPlaceDetails(destDir).catch(() => {});
+
+    checkAborted(signal);
+
+    // Fetch and import the pack's on-device search indices (POIs + transit).
+    // These are what let a covered viewport answer without Overpass; a pack
+    // that omits them still works, it just keeps the network fallback.
+    await downloadPackSearchIndices(region, destDir, onProgress, signal).catch(() => {});
+    await importPackSearchIndices(region.id, destDir, region.bounds).catch(() => {});
+
+    // Shards let a viewport just outside the pack's coverage be answered from
+    // the pack's own verified bytes instead of a network query service. They are
+    // part of the pack, so peers seeding it already serve them.
+    await registerPackShards(region.id, destDir).catch(() => {});
 
     checkAborted(signal);
 
@@ -599,6 +614,51 @@ import * as SQLite from 'expo-sqlite';
 /**
  * Gunzip a file via the Bare worklet (replaces the dead Node sidecar).
  */
+/**
+ * Fetch the pack's optional on-device search indices.
+ *
+ * `search.sqlite` (named POIs) and `transit.sqlite` (stops + route relations)
+ * are what let a covered region answer POI and transit queries with no network
+ * call. Both are optional and both are served by whatever community/third-party
+ * origin hosts the rest of the pack — Polaris runs no CDN; a missing index just
+ * leaves the network fallback in place.
+ */
+async function downloadPackSearchIndices(
+  region: Region,
+  destDir: string,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  const assets: Array<{ url: string | null | undefined; target: string }> = [
+    { url: region.searchIndexUrl, target: 'search.sqlite' },
+    { url: region.transitIndexUrl, target: 'transit.sqlite' },
+  ];
+
+  for (const asset of assets) {
+    if (!asset.url) continue;
+    checkAborted(signal);
+
+    onProgress?.({
+      regionId: region.id,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      percent: 0,
+      stage: 'indices',
+    });
+
+    const dest = `${destDir}${asset.target}`;
+    if (asset.url.endsWith('.gz')) {
+      const gzPath = `${dest}.gz`;
+      await FileSystem.downloadAsync(asset.url, gzPath);
+      checkAborted(signal);
+      await gunzipViaNode(gzPath, dest);
+      await FileSystem.deleteAsync(gzPath, { idempotent: true }).catch(() => {});
+    } else {
+      await FileSystem.downloadAsync(asset.url, dest);
+    }
+  }
+}
+
 function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
   return gunzipFile(inputPath, outputPath);
 }

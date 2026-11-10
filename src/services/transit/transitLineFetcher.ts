@@ -20,6 +20,7 @@ import { fetchWmataLines } from './wmataFetcher';
 import { fetchGtfsStaticLines, type GtfsFetcherConfig } from './gtfsStaticFetcher';
 import { fetchDotGtfsLines } from './dotGtfsFetcher';
 import { overpassFetch } from '../overpassClient';
+import { localRoutesAtPoint } from './localTransitIndex';
 import { storage } from '../storage/mmkv';
 
 const OVERPASS_TIMEOUT_MS = 75_000;
@@ -1796,6 +1797,21 @@ export async function fetchRoutesAtStop(lat: number, lon: number): Promise<Overp
   const key = stopKey(lat, lon);
   const cached = stopRouteCache.get(key);
   if (cached) return cached;
+
+  // On-device transit index first: when a region pack covers this point the
+  // stop→route join is already materialised in SQLite, so the stop card opens
+  // without an Overpass round trip (and without leaking the stop location).
+  // `localRoutesAtPoint` returns null when the area is not covered, so an
+  // uncovered stop still falls through to Overpass.
+  try {
+    const local = await localRoutesAtPoint(lat, lon);
+    if (local && local.length > 0) {
+      stopRouteCache.set(key, local);
+      return local;
+    }
+  } catch {
+    // Index unavailable (no pack, schema race): fall through to Overpass.
+  }
 
   const query = `[out:json][timeout:15];
 (

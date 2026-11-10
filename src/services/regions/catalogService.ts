@@ -10,6 +10,7 @@ import { isOnline } from './connectivityService';
 import { upsertRegion, getRegionById } from './regionRepository';
 import { setRemoteRegionManifests } from './regionManifestResolver';
 import { REGION_CATALOG_URL } from '../../constants/config';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import type { RegionManifest } from './regionManifest';
 import type { Region, RegionDownloadStatus } from '../../models/region';
 
@@ -32,8 +33,44 @@ interface CatalogEntry {
   geocodingSizeBytes?: number;
   placesUrl?: string;
   placesSizeBytes?: number;
+  /** Optional on-device POI index asset (see Region.searchIndexUrl). */
+  searchIndexUrl?: string;
+  searchIndexSizeBytes?: number;
+  /** Optional on-device transit index asset (see Region.transitIndexUrl). */
+  transitIndexUrl?: string;
+  transitIndexSizeBytes?: number;
   /** Optional per-entry signed manifest with the region's canonical drive key. */
   manifest?: RegionManifest;
+}
+
+/**
+ * Hosts that only ever appear in examples and documentation.
+ *
+ * A build that ships one of these cannot fetch a catalog, and it fails quietly
+ * (the fetch is best-effort), which is exactly the sort of thing that reaches
+ * users. Detect it explicitly instead.
+ */
+const PLACEHOLDER_HOSTS = ['example.com', 'example.net', 'example.org'];
+
+/** True when a URL points at a documented placeholder (or is unusable). */
+export function isPlaceholderUrl(url: string | null | undefined): boolean {
+  if (!url) return true;
+  try {
+    const { hostname } = new URL(url);
+    return PLACEHOLDER_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * True when a real catalog origin is configured.
+ *
+ * Polaris hosts no CDN, so this is whatever community/third-party origin serves
+ * the packs — but it must not be a placeholder.
+ */
+export function isRegionCatalogConfigured(url: string = REGION_CATALOG_URL): boolean {
+  return !isPlaceholderUrl(url);
 }
 
 /**
@@ -57,6 +94,14 @@ export async function fetchAndSeedCatalog(): Promise<void> {
 
   // 2. If online, fetch fresh catalog
   if (!isOnline()) return;
+
+  if (!isRegionCatalogConfigured()) {
+    // A cached catalog still works; a placeholder origin can never be fetched.
+    logDiagnostic('regions', 'warn', 'region catalog origin is a placeholder', {
+      url: REGION_CATALOG_URL,
+    });
+    return;
+  }
 
   try {
     const controller = new AbortController();
@@ -127,6 +172,10 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       geocodingUrl: entry.geocodingUrl ?? null,
       placesUrl: entry.placesUrl ?? null,
       placesSizeBytes: entry.placesSizeBytes ?? null,
+      searchIndexUrl: entry.searchIndexUrl ?? null,
+      searchIndexSizeBytes: entry.searchIndexSizeBytes ?? null,
+      transitIndexUrl: entry.transitIndexUrl ?? null,
+      transitIndexSizeBytes: entry.transitIndexSizeBytes ?? null,
       tileVersion: existing?.tileVersion ?? null,
     };
 

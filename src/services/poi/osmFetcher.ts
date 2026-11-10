@@ -1,4 +1,7 @@
 import { overpassFetch } from '../overpassClient';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
+import { hasLocalPoiCoverage, queryLocalPois, type PoiKeyFilter } from './localPoiIndex';
+import { ensureShardCoverage, hasShardCoverage } from './shardedPoiSource';
 import { throwIfAborted, withTimeout } from '../search/abortUtils';
 import { buildOverpassNameRegex, normalizeOsmName } from '../../utils/osmNameMatch';
 import {
@@ -29,6 +32,70 @@ interface Bounds {
   west: number;
   north: number;
   east: number;
+}
+
+/**
+ * Primary tags the viewport POI layer renders. Kept in sync with the Overpass
+ * union query below and with the pack builder's index.
+ */
+const VIEWPORT_POI_KEYS: readonly PoiKeyFilter[] = [
+  { key: 'amenity' },
+  { key: 'shop' },
+  { key: 'tourism' },
+  { key: 'leisure' },
+  { key: 'office' },
+  { key: 'craft' },
+  { key: 'healthcare' },
+];
+
+/**
+ * Answer a bbox from the on-device OSM index.
+ *
+ * Returns `null` when no imported region covers the box — that is "we have no
+ * data here", so the caller must fall back to a network source. A covered box
+ * with zero matches returns `[]` (an honest empty answer, no network). Any
+ * index failure (no database yet, schema race, unit-test environment) also
+ * yields `null`: the local index must never make search worse than Overpass.
+ */
+async function queryLocalIndex(
+  bounds: Bounds,
+  keys: readonly PoiKeyFilter[],
+  opts: {
+    requireName?: boolean;
+    tags?: ReadonlyArray<readonly [string, string]>;
+    namePattern?: string;
+    limit?: number;
+  } = {},
+): Promise<OsmPoi[] | null> {
+  try {
+    // Covered by an imported pack? Answer locally and never leave the device.
+    if (!(await hasLocalPoiCoverage(bounds))) {
+      // Not covered: try to *become* covered by fetching the shards that
+      // intersect this box (pack-local bytes first, then peers). This is the
+      // only network step, it is content-verified, and once it succeeds the
+      // area is indexed locally — the next pan costs nothing.
+      await ensureShardCoverage(bounds).catch(() => undefined);
+    }
+    // Coverage can come from a whole pack or from a set of shard cells.
+    const covered = (await hasLocalPoiCoverage(bounds)) || (await hasShardCoverage(bounds));
+    if (!covered) return null;
+    const pois = await queryLocalPois({
+      ...bounds,
+      keys,
+      tags: opts.tags,
+      namePattern: opts.namePattern,
+      requireName: opts.requireName,
+      limit: opts.limit,
+    });
+    logDiagnostic('poi', 'info', 'answered from local index', {
+      pois: pois.length,
+      south: bounds.south,
+      west: bounds.west,
+    });
+    return pois;
+  } catch {
+    return null;
+  }
 }
 
 interface CacheEntry {
@@ -142,6 +209,16 @@ async function fetchOsmPoisUncached(
   east: number,
   key: string,
 ): Promise<OsmPoi[]> {
+  // On-device index first: when an imported region covers this box, the viewport
+  // is answered offline and the user's location never leaves the device.
+  const local = await queryLocalIndex({ south, west, north, east }, VIEWPORT_POI_KEYS, {
+    requireName: true,
+  });
+  if (local) {
+    cacheSet(key, local, { south, west, north, east });
+    return local;
+  }
+
   const bbox = `${south},${west},${north},${east}`;
   // Include both node and way elements — shops inside shopping centers are
   // almost always mapped as ways (polygon outlines) in OSM, not nodes.
@@ -242,6 +319,16 @@ export async function fetchOsmPoisByTags(
   const cached = cacheGet(key, { south, west, north, east });
   if (cached) return cached;
 
+  const local = await queryLocalIndex(
+    { south, west, north, east },
+    tagPairs.map(([k, v]) => ({ key: k, value: v })),
+    { requireName, tags: extraFilters },
+  );
+  if (local) {
+    cacheSet(key, local, { south, west, north, east });
+    return local;
+  }
+
   const bbox = `${south},${west},${north},${east}`;
 
   // Build Overpass union of node+way queries for each tag pair.
@@ -323,6 +410,16 @@ export async function fetchOsmPoisByName(
   const key = `name:${safe}:${bboxKey(south, west, north, east)}`;
   const cached = cacheGet(key, { south, west, north, east });
   if (cached) return cached;
+
+  const local = await queryLocalIndex({ south, west, north, east }, VIEWPORT_POI_KEYS, {
+    namePattern,
+    requireName: true,
+    limit: 100,
+  });
+  if (local) {
+    cacheSet(key, local, { south, west, north, east });
+    return local;
+  }
 
   const bbox = `${south},${west},${north},${east}`;
 

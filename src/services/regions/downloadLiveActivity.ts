@@ -55,6 +55,7 @@ const STAGE_LABELS: Record<DownloadProgress['stage'], string> = {
   places: 'Importing places',
   routing: 'Downloading routing data',
   geocoding: 'Downloading search index',
+  indices: 'Indexing places',
   complete: 'Download complete',
   error: 'Download failed',
 };
