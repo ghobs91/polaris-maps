@@ -1,5 +1,13 @@
 import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { tomtomApiKey, TOMTOM_FLOW_BASE_URL } from '../../constants/config';
+import { decode as geohashDecode } from '../../utils/geohash';
+import {
+  canCallTomTom,
+  isTomTomConfigured,
+  noteTomTomNetworkError,
+  noteTomTomRequest,
+  noteTomTomResponse,
+} from './tomtomAccess';
 
 export interface TomTomFlowResponse {
   flowSegmentData: {
@@ -64,6 +72,9 @@ function gridSizeForZoom(zoom: number): number {
   return 4;
 }
 
+/** Preferred maximum number of flow requests for one unresolved-cell batch. */
+const MAX_FLOW_POINTS = 25;
+
 /** Generate a grid of sample points within a bounding box. */
 function sampleGrid(
   west: number,
@@ -100,28 +111,54 @@ export interface ViewportBounds {
  * Samples a grid of points and fetches each in parallel.
  * Returns normalized segments, silently dropping failed requests.
  */
+/**
+ * Fetch traffic data from TomTom for the given viewport.
+ *
+ * When `cells` is provided (the cascade's unresolved geohash5 cells), only
+ * those cells are queried — one request per missing cell, capped — instead of
+ * re-fetching the entire viewport grid. This is what makes the local/P2P/open
+ * feed tiers actually suppress TomTom traffic.
+ */
 export async function fetchTomTomTraffic(
   viewport: ViewportBounds,
+  cells?: readonly string[],
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!tomtomApiKey) {
-    console.warn(
-      '[TomTomFetcher] No TomTom API key configured. Viewport traffic data unavailable.',
-    );
+  if (!isTomTomConfigured()) {
     return [];
   }
 
-  const gridSize = gridSizeForZoom(viewport.zoom);
-  const points = sampleGrid(viewport.west, viewport.south, viewport.east, viewport.north, gridSize);
+  // The cascade only calls this with the cells it could not resolve.
+  let points: Array<{ lat: number; lng: number }>;
+  if (cells) {
+    if (cells.length === 0) return [];
+    // Spread the cap across the whole area so a large viewport cannot starve
+    // the cells at the end of the list on every refresh.
+    const chosen =
+      cells.length <= MAX_FLOW_POINTS
+        ? cells
+        : Array.from(
+            { length: MAX_FLOW_POINTS },
+            (_, i) => cells[Math.floor((i * cells.length) / MAX_FLOW_POINTS)],
+          );
+    points = chosen.map((cell) => geohashDecode(cell));
+  } else {
+    const gridSize = gridSizeForZoom(viewport.zoom);
+    points = sampleGrid(viewport.west, viewport.south, viewport.east, viewport.north, gridSize);
+  }
   const zoom = Math.round(Math.min(22, Math.max(0, viewport.zoom)));
 
   const promises = points.map(async (pt) => {
+    if (!canCallTomTom()) return null;
+    noteTomTomRequest();
     const url = `${TOMTOM_FLOW_BASE_URL}/${zoom}/json?point=${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}&key=${encodeURIComponent(tomtomApiKey)}&unit=MPH`;
     try {
       const res = await fetch(url);
+      noteTomTomResponse(res.status);
       if (!res.ok) return null;
       const json: TomTomFlowResponse = await res.json();
       return normalizeTomTomResponse(json);
     } catch {
+      noteTomTomNetworkError();
       return null;
     }
   });
@@ -190,7 +227,7 @@ export function sampleRoutePoints(coords: [number, number][]): Array<{ lat: numb
 export async function fetchTomTomRouteTraffic(
   routeCoords: [number, number][],
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!tomtomApiKey) return [];
+  if (!isTomTomConfigured()) return [];
 
   const points = sampleRoutePoints(routeCoords);
   if (points.length === 0) return [];
@@ -202,9 +239,12 @@ export async function fetchTomTomRouteTraffic(
   for (let b = 0; b < points.length; b += ROUTE_BATCH_SIZE) {
     const batch = points.slice(b, b + ROUTE_BATCH_SIZE);
     const promises = batch.map(async (pt) => {
+      if (!canCallTomTom()) return null;
+      noteTomTomRequest();
       const url = `${TOMTOM_FLOW_BASE_URL}/14/json?point=${pt.lat.toFixed(5)},${pt.lng.toFixed(5)}&key=${encodeURIComponent(tomtomApiKey)}&unit=MPH`;
       try {
         const res = await fetch(url);
+        noteTomTomResponse(res.status);
         if (!res.ok) return null;
         const json: TomTomFlowResponse = await res.json();
         const seg = normalizeTomTomResponse(json);
@@ -216,6 +256,7 @@ export async function fetchTomTomRouteTraffic(
         }
         return seg;
       } catch {
+        noteTomTomNetworkError();
         return null;
       }
     });

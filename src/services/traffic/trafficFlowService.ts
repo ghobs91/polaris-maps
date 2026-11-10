@@ -22,11 +22,10 @@ import {
   getConnectedRelayCount,
 } from './nostrFallback';
 import { ingestProbe } from './trafficAggregator';
-import {
-  TRAFFIC_FETCH_DEBOUNCE_MS,
-  TRAFFIC_REFRESH_INTERVAL_MS,
-  tomtomApiKey,
-} from '../../constants/config';
+import { initTopicManager, disposeTopicManager } from './topicManager';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
+import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../constants/config';
+import { isTomTomConfigured } from './tomtomAccess';
 import { getTrafficHistory, geohash5For, geohash5CellsForBounds } from './trafficHistoryIndex';
 import { currentTimeBucket, bucketLabel } from './trafficTimeBuckets';
 import {
@@ -135,11 +134,9 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       points,
       history: getTrafficHistory(),
       openFeed: () => fetchOpenTrafficSegments(viewport),
-      // TomTom is the optional cold-start bridge: only queried when configured.
-      seedFromTomTom: () =>
-        tomtomApiKey
-          ? fetchTomTomTraffic(viewport).catch(() => [] as NormalizedTrafficSegment[])
-          : Promise.resolve([] as NormalizedTrafficSegment[]),
+      // TomTom is the optional cold-start bridge: only the cells the earlier
+      // tiers could not resolve are queried.
+      seedFromTomTom: (missing) => fetchTomTomTraffic(viewport, missing),
       indexObservations: (b, obs) => getTrafficHistory().recordObservations(b, obs),
     });
 
@@ -274,9 +271,9 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       points,
       history: getTrafficHistory(),
       openFeed: () => fetchOpenTrafficSegments(boundsFromCoords(routeCoords)),
-      // TomTom cold-start: only queried when its key is configured.
-      seedFromTomTom: () =>
-        tomtomApiKey ? sampleRouteTileColors(routeCoords) : Promise.resolve([]),
+      // TomTom cold-start: query only route cells the earlier tiers missed.
+      seedFromTomTom: (missing) =>
+        isTomTomConfigured() ? sampleRouteTileColors(routeCoords, missing) : Promise.resolve([]),
       indexObservations: (b, obs) => getTrafficHistory().recordObservations(b, obs),
     });
 
@@ -346,13 +343,42 @@ let nostrProbeUnsub: (() => void) | null = null;
 let condRequestUnsub: (() => void) | null = null;
 let modeCheckInterval: ReturnType<typeof setInterval> | null = null;
 let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+let nostrFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let nostrInitialized = false;
 
 /** How often to poll the worklet for the full mesh status snapshot. */
 const STATUS_POLL_INTERVAL_MS = 15_000;
 
+/**
+ * Grace period before opening public Nostr relays. Most launches reach three
+ * Hyperswarm peers quickly; delaying the relay connections avoids hammering
+ * shared relays with every install during a spike.
+ */
+const NOSTR_FALLBACK_DELAY_MS = 8_000;
+
 /** Throttle for indexing live P2P probe aggregates into history. */
 let lastProbeIndexAt = 0;
 const PROBE_INDEX_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Open the relay fallback only if the swarm stays sparse for a grace period. */
+function scheduleNostrFallback(): void {
+  if (nostrInitialized || nostrFallbackTimer) return;
+  if (useTrafficStore.getState().swarmPeerCount >= MIN_PEER_THRESHOLD) return;
+
+  nostrFallbackTimer = setTimeout(() => {
+    nostrFallbackTimer = null;
+    if (useTrafficStore.getState().swarmPeerCount >= MIN_PEER_THRESHOLD) return;
+    void initNostrFallback()
+      .then(() => {
+        nostrInitialized = true;
+      })
+      .catch((error) => {
+        logDiagnostic('traffic-mesh', 'warn', 'Nostr fallback failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }, NOSTR_FALLBACK_DELAY_MS);
+}
 
 /**
  * Initialize the full P2P traffic system:
@@ -364,6 +390,10 @@ const PROBE_INDEX_INTERVAL_MS = 5 * 60 * 1000;
 export async function initTrafficP2P(): Promise<void> {
   // Start Hyperswarm worklet
   initHyperswarmBridge();
+
+  // Apply the link profile (metered links run client-only) and start watching
+  // for network changes before any topic is joined.
+  initTopicManager();
 
   // Collect responses for our own condition queries
   initP2pConditionQuery();
@@ -378,6 +408,7 @@ export async function initTrafficP2P(): Promise<void> {
   peerCountUnsub = onPeerCount((count) => {
     useTrafficStore.getState().setSwarmPeerCount(count);
     updateTrafficMode(count);
+    if (count < MIN_PEER_THRESHOLD) scheduleNostrFallback();
   });
 
   // Listen for aggregated traffic state from the worklet
@@ -412,8 +443,8 @@ export async function initTrafficP2P(): Promise<void> {
     })().catch(() => {});
   });
 
-  // Start Nostr fallback connections
-  await initNostrFallback();
+  // Start Nostr fallback connections only if the swarm stays sparse.
+  scheduleNostrFallback();
 
   // Listen for probes arriving via Nostr relays
   nostrProbeUnsub = onNostrProbe((probe) => {
@@ -456,7 +487,13 @@ export function disposeTrafficP2P(): void {
     clearInterval(statusPollInterval);
     statusPollInterval = null;
   }
+  if (nostrFallbackTimer) {
+    clearTimeout(nostrFallbackTimer);
+    nostrFallbackTimer = null;
+  }
+  nostrInitialized = false;
 
+  disposeTopicManager();
   disposeHyperswarmBridge();
   disposeNostrFallback();
 }
@@ -469,6 +506,7 @@ export function suspendTrafficP2P(): void {
 /** Resume P2P connections (app foregrounded). */
 export function resumeTrafficP2P(): void {
   swarmResume();
+  scheduleNostrFallback();
 }
 
 /** Fetch the worklet's full mesh status and mirror it into the store. */

@@ -45,6 +45,8 @@ const CMD_INCOMING_TILE_RESPONSE = 16; // worklet → RN
 const CMD_INCOMING_INCIDENT = 17; // worklet → RN: a peer broadcast an incident
 const CMD_SUSPEND = 20;
 const CMD_RESUME = 21;
+/** RN → worklet: apply the current network profile ("metered"/"unmetered"). */
+const CMD_SET_NETWORK_PROFILE = 22;
 
 // ── Protomux channel name for traffic probes ────────────────────────
 
@@ -58,13 +60,46 @@ const MAX_SPEED_MPH = 125;
 const MAX_TIMESTAMP_DRIFT_S = 300; // ±5 minutes
 const AGGREGATE_BROADCAST_INTERVAL_MS = 3_000;
 
+/**
+ * Hard bounds for a mobile device. Hyperswarm connects to every peer it
+ * discovers on a topic, so a dense cell (a city launch, an event, a viral
+ * post) would otherwise turn into an O(n) connection set and an O(n) fanout
+ * for every probe. These caps keep the mesh linear regardless of density.
+ */
+const MAX_PEER_CONNECTIONS = 64;
+const MAX_PEERS_PER_TOPIC = 24;
+/** Split the global budget so one direction cannot starve the other. */
+const MAX_CLIENT_CONNECTIONS = 32;
+const MAX_SERVER_CONNECTIONS = 32;
+/** Rotating subsets: each message reaches at most this many peers. */
+const PROBE_FANOUT = 12;
+const INCIDENT_FANOUT = 16;
+const CONDITION_REQUEST_FANOUT = 8;
+/**
+ * Tile responses are ~50 KB each, so a tile request goes to fewer peers than a
+ * condition query. Rotating the subset means coverage builds over requests
+ * instead of duplicating one tile across the whole cell.
+ */
+const TILE_REQUEST_FANOUT = 4;
+/** Coalesce peer-count UI updates when many connections churn at once. */
+const PEER_COUNT_BROADCAST_MIN_INTERVAL_MS = 250;
+
 // ── State ───────────────────────────────────────────────────────────
 
 let swarm = null;
 const joinedTopics = new Map(); // geohash4 → { discovery, connections: Set }
 const peerProtocols = new Map(); // connection → { info, connId }
 const connById = new Map(); // connId → connection
+const topicCellByHex = new Map(); // hex(topic) → geohash4
 let nextConnId = 1;
+/** True on cellular/hotspot links: stop announcing ourselves as a server. */
+let metered = false;
+/** Round-robin cursor so rotating fanout reaches every peer over time. */
+let fanoutCursor = 0;
+/** Connections refused by the density cap (surfaced in status/diagnostics). */
+let prunedConnections = 0;
+let peerCountBroadcastTimer = null;
+let lastPeerCountBroadcastAt = 0;
 
 // Probe aggregation (per-segment rolling window)
 const segmentProbes = new Map(); // segmentId → [{ speedMph, timestamp }]
@@ -129,8 +164,15 @@ function handleRequest(req) {
           topicCount: joinedTopics.size,
           topics: Array.from(joinedTopics.keys()),
           segmentCount: aggregated.size,
+          metered,
+          prunedConnections,
         });
         req.reply(b4a.from(status));
+        break;
+      }
+      case CMD_SET_NETWORK_PROFILE: {
+        applyNetworkProfile(b4a.toString(req.data) === 'metered');
+        req.reply(b4a.from('ok'));
         break;
       }
       case CMD_SUSPEND: {
@@ -159,7 +201,11 @@ function handleRequest(req) {
 function ensureSwarm() {
   if (swarm) return swarm;
 
-  swarm = new Hyperswarm();
+  swarm = new Hyperswarm({
+    maxPeers: MAX_PEER_CONNECTIONS,
+    maxClientConnections: MAX_CLIENT_CONNECTIONS,
+    maxServerConnections: MAX_SERVER_CONNECTIONS,
+  });
 
   swarm.on('connection', (conn, info) => {
     setupPeerProtocol(conn, info);
@@ -178,9 +224,13 @@ function joinGeohashTopic(geohash4) {
 
   const sw = ensureSwarm();
   const topic = topicHash(geohash4);
-  const discovery = sw.join(topic, { server: true, client: true });
+  // On metered links we stay client-only: we still consume peers' data but
+  // never accept inbound connections or upload from cellular.
+  const discovery = sw.join(topic, { server: !metered, client: true });
+  const topicHex = b4a.toString(topic, 'hex');
+  topicCellByHex.set(topicHex, geohash4);
 
-  joinedTopics.set(geohash4, { discovery, connections: new Set() });
+  joinedTopics.set(geohash4, { discovery, connections: new Set(), topicHex });
 
   // Report peer count change once discovery flushes
   discovery
@@ -197,28 +247,132 @@ function leaveGeohashTopic(geohash4) {
 
   entry.discovery.destroy().catch(() => {});
   joinedTopics.delete(geohash4);
+  if (entry.topicHex) topicCellByHex.delete(entry.topicHex);
   broadcastPeerCount();
+}
+
+/**
+ * Re-apply the server/client role to every joined topic.
+ *
+ * Hyperswarm's `server` flag is fixed at join time, so changing it means
+ * leaving and re-joining the topic. Existing outbound connections stay up.
+ */
+function applyNetworkProfile(nextMetered) {
+  if (metered === nextMetered) return;
+  metered = nextMetered;
+
+  const cells = Array.from(joinedTopics.keys());
+  for (const cell of cells) {
+    const entry = joinedTopics.get(cell);
+    if (entry) entry.discovery.destroy().catch(() => {});
+    joinedTopics.delete(cell);
+  }
+  topicCellByHex.clear();
+  for (const cell of cells) joinGeohashTopic(cell);
+
+  // Do not keep serving inbound streams after switching to metered.
+  if (metered) {
+    for (const [conn, peer] of Array.from(peerProtocols.entries())) {
+      if (peer.info && peer.info.client === false) {
+        try {
+          conn.destroy();
+        } catch {
+          // Already closed.
+        }
+      }
+    }
+  }
+
+  broadcastPeerCount();
+}
+
+/** geohash4 cell for a connection, from the topic(s) the connection is on. */
+function topicCellForConnection(info) {
+  const topics = info && Array.isArray(info.topics) ? info.topics : [];
+  for (const topic of topics) {
+    const cell = topicCellByHex.get(b4a.toString(topic, 'hex'));
+    if (cell) return cell;
+  }
+  return null;
+}
+
+/**
+ * Send an envelope to a bounded, rotating subset of peers.
+ *
+ * Full fanout is O(peers) per message and O(peers²) network-wide per interval;
+ * at city density that is the mesh's worst case. Rotating the start offset
+ * means every peer still sees every kind of message over time.
+ */
+function sendToPeerSubset(bytes, limit) {
+  const conns = Array.from(peerProtocols.keys());
+  if (conns.length === 0) return;
+
+  if (conns.length <= limit) {
+    for (const conn of conns) {
+      try {
+        conn.write(bytes);
+      } catch {
+        // Connection may have closed
+      }
+    }
+    return;
+  }
+
+  const start = fanoutCursor % conns.length;
+  for (let i = 0; i < limit; i++) {
+    const conn = conns[(start + i) % conns.length];
+    try {
+      conn.write(bytes);
+    } catch {
+      // Connection may have closed
+    }
+  }
+  fanoutCursor = (start + limit) % conns.length;
 }
 
 // ── Per-connection protocol ─────────────────────────────────────────
 
 function setupPeerProtocol(conn, info) {
+  const cell = topicCellForConnection(info);
+  const topicEntry = cell ? joinedTopics.get(cell) : null;
+
+  // Density cap. Hyperswarm reconnects pruned peers, which is preferable to
+  // an unbounded connection set: each rejection is a cheap handshake, while
+  // each retained peer costs a stream, timers, and per-message writes.
+  if (
+    peerProtocols.size >= MAX_PEER_CONNECTIONS ||
+    (topicEntry && topicEntry.connections.size >= MAX_PEERS_PER_TOPIC)
+  ) {
+    prunedConnections++;
+    try {
+      conn.destroy();
+    } catch {
+      // Already closed.
+    }
+    return;
+  }
+
   const connId = nextConnId++;
   connById.set(connId, conn);
+  if (topicEntry) topicEntry.connections.add(conn);
 
   conn.on('data', (data) => {
     handleConnectionData(data, conn, connId);
   });
 
-  conn.on('close', () => {
+  const detach = () => {
     peerProtocols.delete(conn);
     connById.delete(connId);
+    if (topicEntry) topicEntry.connections.delete(conn);
+  };
+
+  conn.on('close', () => {
+    detach();
     broadcastPeerCount();
   });
 
   conn.on('error', () => {
-    peerProtocols.delete(conn);
-    connById.delete(connId);
+    detach();
   });
 
   peerProtocols.set(conn, { info, connId });
@@ -269,14 +423,8 @@ function handleConnectionData(data, conn, connId) {
 // ── Probe broadcasting ──────────────────────────────────────────────
 
 function broadcastProbe(probeBytes) {
-  // Send to all connected peers
-  for (const conn of peerProtocols.keys()) {
-    try {
-      conn.write(probeBytes);
-    } catch {
-      // Connection may have closed
-    }
-  }
+  // Bounded, rotating sample of peers — never the whole cell.
+  sendToPeerSubset(probeBytes, PROBE_FANOUT);
 
   // Also ingest locally
   handleIncomingProbe(probeBytes, null);
@@ -284,26 +432,14 @@ function broadcastProbe(probeBytes) {
 
 // ── Condition request/response relaying ─────────────────────────────
 
-/** Broadcast a condition request (raw JSON from RN) to every peer. */
+/** Broadcast a condition request (raw JSON from RN) to a bounded peer sample. */
 function broadcastConditionRequest(reqBytes) {
-  for (const conn of peerProtocols.keys()) {
-    try {
-      conn.write(reqBytes);
-    } catch {
-      // Connection may have closed
-    }
-  }
+  sendToPeerSubset(reqBytes, CONDITION_REQUEST_FANOUT);
 }
 
-/** Broadcast a tile request (raw JSON from RN) to every peer. */
+/** Request a tile from a small, rotating peer sample (responses are large). */
 function broadcastTileRequest(reqBytes) {
-  for (const conn of peerProtocols.keys()) {
-    try {
-      conn.write(reqBytes);
-    } catch {
-      // Connection may have closed
-    }
-  }
+  sendToPeerSubset(reqBytes, TILE_REQUEST_FANOUT);
 }
 
 /**
@@ -312,13 +448,7 @@ function broadcastTileRequest(reqBytes) {
  * happens in React Native so peers cannot smuggle data past the check.
  */
 function broadcastIncident(incidentBytes) {
-  for (const conn of peerProtocols.keys()) {
-    try {
-      conn.write(incidentBytes);
-    } catch {
-      // Connection may have closed
-    }
-  }
+  sendToPeerSubset(incidentBytes, INCIDENT_FANOUT);
 }
 
 /**
@@ -554,6 +684,21 @@ function notifyIncident(msg) {
 }
 
 function broadcastPeerCount() {
+  if (peerCountBroadcastTimer) return;
+  const elapsed = Date.now() - lastPeerCountBroadcastAt;
+  const wait = PEER_COUNT_BROADCAST_MIN_INTERVAL_MS - elapsed;
+  if (wait <= 0) {
+    sendPeerCount();
+    return;
+  }
+  peerCountBroadcastTimer = setTimeout(() => {
+    peerCountBroadcastTimer = null;
+    sendPeerCount();
+  }, wait);
+}
+
+function sendPeerCount() {
+  lastPeerCountBroadcastAt = Date.now();
   try {
     const count = swarm ? swarm.connections.size : 0;
     const req = rpc.request(CMD_PEER_COUNT);
@@ -598,6 +743,7 @@ export {
   CMD_INCOMING_INCIDENT,
   CMD_SUSPEND,
   CMD_RESUME,
+  CMD_SET_NETWORK_PROFILE,
   encodeProbe,
   decodeProbe,
 };

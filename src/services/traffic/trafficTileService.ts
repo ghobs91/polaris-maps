@@ -11,6 +11,13 @@ import {
 } from '../../models/trafficTile';
 import { TOMTOM_FLOW_TILES_BASE_URL, tomtomApiKey } from '../../constants/config';
 import {
+  canCallTomTom,
+  isTomTomConfigured,
+  noteTomTomNetworkError,
+  noteTomTomRequest,
+  noteTomTomResponse,
+} from './tomtomAccess';
+import {
   requestTile as bridgeRequestTile,
   sendTileResponse as bridgeSendTileResponse,
   onTileRequest as bridgeOnTileRequest,
@@ -195,10 +202,12 @@ export function initTrafficTileService(): void {
 // ── Seeding (TomTom fallback) ───────────────────────────────────────
 
 async function seedFromTomTom(key: TileKey): Promise<string | null> {
-  if (!tomtomApiKey) return null;
+  if (!isTomTomConfigured() || !canCallTomTom()) return null;
+  noteTomTomRequest();
   const url = `${TOMTOM_FLOW_TILES_BASE_URL}/${key.z}/${key.x}/${key.y}.png?key=${encodeURIComponent(tomtomApiKey)}&tileSize=256&thickness=3`;
   try {
     const res = await fetch(url);
+    noteTomTomResponse(res.status);
     if (!res.ok) return null;
     const bytes = await res.arrayBuffer();
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_TILE_BYTES) return null;
@@ -206,6 +215,7 @@ async function seedFromTomTom(key: TileKey): Promise<string | null> {
     await writeTileToDisk(key, b64);
     return b64;
   } catch {
+    noteTomTomNetworkError();
     return null;
   }
 }

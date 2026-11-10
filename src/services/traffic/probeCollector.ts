@@ -9,10 +9,17 @@ import type { TrafficProbe } from '../../models/traffic';
 import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 
 const PUBLISH_INTERVAL_MS = 5_000;
+/**
+ * Public Nostr relays are shared infrastructure. When the swarm has too few
+ * peers and probes fall back to relays, sample at 1/6 the local GPS rate so a
+ * launch spike does not turn into thousands of events per second per relay.
+ */
+const NOSTR_PUBLISH_MIN_INTERVAL_MS = 30_000;
 const MIN_SPEED_MPH = 3;
 const PROBE_ID_ROTATION_MS = 60 * 60 * 1000; // 1 hour
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
+let lastNostrPublishAt = 0;
 let currentProbeId: Uint8Array = randomBytes(32);
 let probeIdCreatedAt: number = Date.now();
 
@@ -80,7 +87,10 @@ async function collectAndPublish(): Promise<void> {
       const probeJson = encodeTrafficProbe(probe);
       hyperswarmPublish(probeJson);
     } else {
-      // Fallback: Nostr relay broadcast
+      // Fallback: Nostr relay broadcast, sampled to protect public relays.
+      const now = Date.now();
+      if (now - lastNostrPublishAt < NOSTR_PUBLISH_MIN_INTERVAL_MS) return;
+      lastNostrPublishAt = now;
       await nostrPublish(probe, geohash4);
     }
   } catch {

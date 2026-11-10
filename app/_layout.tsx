@@ -37,6 +37,12 @@ import {
   disposeIncidentExchange,
 } from '@/services/traffic/incidentExchangeService';
 import { startMonitoring as startConnectivityMonitoring } from '@/services/regions/connectivityService';
+import {
+  initRemoteConfig,
+  isFeatureEnabled,
+  subscribeRemoteConfig,
+} from '@/services/config/remoteConfig';
+import { logDiagnostic } from '@/services/diagnostics/diagnosticsLog';
 import { scheduleGeonamesDownload } from '@/services/geocoding/geonamesDownloadScheduler';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 import { useOsmAuthStore } from '@/stores/osmAuthStore';
@@ -80,6 +86,10 @@ function RootLayoutInner() {
     // Show aggregate offline-download progress in a Live Activity while the
     // app is backgrounded during an active region download.
     initDownloadLiveActivity();
+    // Load the signed kill-switch config in the background. Defaults apply if
+    // the static file is unreachable; a verified config can disable features
+    // without an App Store release.
+    void initRemoteConfig();
   }, []);
 
   useEffect(() => {
@@ -101,21 +111,51 @@ function RootLayoutInner() {
 
   useEffect(() => {
     // Start the P2P traffic mesh (Hyperswarm worklet + Nostr fallback) after
-    // initial interactions so the map's first paint isn't delayed.
+    // initial interactions so the map's first paint isn't delayed. A verified
+    // remote config can keep it off (or turn it off later) without a release.
     let cancelled = false;
+    let trafficStarted = false;
+
+    const startTraffic = () => {
+      if (cancelled || trafficStarted) return;
+      trafficStarted = true;
+      void initTrafficP2P().catch((error) => {
+        logDiagnostic('traffic-mesh', 'error', 'P2P init failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+      // Consent-gated probe contribution. The coordinator owns its own
+      // foreground/background lifecycle and reacts to consent changes.
+      initProbeCollection();
+      // Receive, verify, and persist crowd-reported incidents.
+      initIncidentExchange();
+    };
+
+    const stopTraffic = () => {
+      if (!trafficStarted) return;
+      trafficStarted = false;
+      disposeProbeCollection();
+      disposeIncidentExchange();
+      disposeTrafficP2P();
+    };
+
+    const applyTrafficFlag = () => {
+      if (isFeatureEnabled('trafficP2P')) startTraffic();
+      else stopTraffic();
+    };
+
     const task = InteractionManager.runAfterInteractions(() => {
-      if (!cancelled) void initTrafficP2P().catch(() => {});
+      if (cancelled) return;
+      void initRemoteConfig().finally(() => {
+        if (!cancelled) applyTrafficFlag();
+      });
     });
 
-    // Consent-gated probe contribution. The coordinator owns its own
-    // foreground/background lifecycle and reacts to consent changes.
-    initProbeCollection();
-
-    // Congestion rerouting follows the navigation lifecycle.
+    // Congestion rerouting follows the navigation lifecycle and only reads
+    // whatever traffic data is available.
     initRerouteMonitor();
 
-    // Receive, verify, and persist crowd-reported incidents from both transports.
-    initIncidentExchange();
+    const unsubscribeConfig = subscribeRemoteConfig(applyTrafficFlag);
 
     // Suspend/resume the mesh with the app lifecycle to save battery.
     const onAppStateChange = (state: AppStateStatus) => {
@@ -128,10 +168,9 @@ function RootLayoutInner() {
       cancelled = true;
       task.cancel();
       sub.remove();
-      disposeProbeCollection();
+      unsubscribeConfig();
+      stopTraffic();
       disposeRerouteMonitor();
-      disposeIncidentExchange();
-      disposeTrafficP2P();
       teardownFixDrivenRefresh();
     };
   }, []);

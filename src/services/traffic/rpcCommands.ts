@@ -29,3 +29,5 @@ export const CMD_INCOMING_TILE_RESPONSE = 16;
 export const CMD_INCOMING_INCIDENT = 17;
 export const CMD_SUSPEND = 20;
 export const CMD_RESUME = 21;
+/** RN → worklet: apply the current network profile ("metered"/"unmetered"). */
+export const CMD_SET_NETWORK_PROFILE = 22;

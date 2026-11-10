@@ -87,6 +87,29 @@ describe('getStatus', () => {
       topicCount: 2,
       topics: ['9q8y', '9q8z'],
       segmentCount: 42,
+      metered: false,
+      prunedConnections: 0,
+    });
+  });
+
+  it('reports the metered profile and density-cap rejections', async () => {
+    mockStatusReply = JSON.stringify({
+      peerCount: 24,
+      topicCount: 1,
+      topics: ['9q8y'],
+      segmentCount: 8,
+      metered: true,
+      prunedConnections: 11,
+    });
+
+    bridge.initHyperswarmBridge();
+    await expect(bridge.getStatus()).resolves.toEqual({
+      peerCount: 24,
+      topicCount: 1,
+      topics: ['9q8y'],
+      segmentCount: 8,
+      metered: true,
+      prunedConnections: 11,
     });
   });
 
@@ -97,6 +120,8 @@ describe('getStatus', () => {
       topicCount: 0,
       topics: [],
       segmentCount: 0,
+      metered: false,
+      prunedConnections: 0,
     });
   });
 
@@ -109,6 +134,8 @@ describe('getStatus', () => {
       topicCount: 0,
       topics: [],
       segmentCount: 0,
+      metered: false,
+      prunedConnections: 0,
     });
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -127,6 +154,8 @@ describe('getStatus', () => {
       topicCount: 0,
       topics: [],
       segmentCount: 0,
+      metered: false,
+      prunedConnections: 0,
     });
   });
 
@@ -138,6 +167,8 @@ describe('getStatus', () => {
       topicCount: 0,
       topics: [],
       segmentCount: 0,
+      metered: false,
+      prunedConnections: 0,
     });
   });
 });

@@ -1,15 +1,25 @@
+import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import { encode as geohashEncode, neighbors as geohashNeighbors } from '../../utils/geohash';
-import { joinTopic, leaveTopic, isStarted as isSwarmStarted } from './hyperswarmBridge';
+import {
+  joinTopic,
+  leaveTopic,
+  isStarted as isSwarmStarted,
+  setNetworkProfile,
+} from './hyperswarmBridge';
 import { syncSubscriptions as nostrSync } from './nostrFallback';
 import { useTrafficStore } from '../../stores/trafficStore';
 import { MIN_PEER_THRESHOLD } from '../../models/traffic';
+import { isMeteredConnection, selectTrafficCells } from './densityPolicy';
 
 const DEBOUNCE_MS = 500;
-const MAX_TRAFFIC_TOPICS = 9; // geohash4 cells (center + 8 neighbors)
 
 const activeSwarmTopics = new Set<string>();
 const activeNostrTopics = new Set<string>();
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let networkUnsubscribe: (() => void) | null = null;
+let metered = false;
+/** Last viewport cells, replayed when the network profile changes. */
+let lastCells: string[] = [];
 
 function getVisibleGeohash4Cells(centerLat: number, centerLng: number): string[] {
   // Use geohash4 precision (~39km × 20km cells) for traffic topic discovery
@@ -22,7 +32,7 @@ function getVisibleGeohash4Cells(centerLat: number, centerLng: number): string[]
  * Simultaneously sync Nostr subscriptions for fallback.
  */
 function syncTopics(desiredCells: string[]): void {
-  const desiredSet = new Set(desiredCells.slice(0, MAX_TRAFFIC_TOPICS));
+  const desiredSet = new Set(selectTrafficCells(desiredCells, metered));
   const swarmPeerCount = useTrafficStore.getState().swarmPeerCount;
 
   // Always join Hyperswarm topics (primary)
@@ -56,17 +66,49 @@ function syncTopics(desiredCells: string[]): void {
   }
 }
 
+function applyNetworkState(state: NetInfoState): void {
+  const details = state.details as { isConnectionExpensive?: boolean } | null;
+  const nextMetered = isMeteredConnection(state.type, details?.isConnectionExpensive);
+  if (nextMetered === metered) return;
+
+  metered = nextMetered;
+  // The worklet applies this by re-joining its topics client-only; RN then
+  // trims the topic set so a metered link carries the center cell only.
+  setNetworkProfile(metered);
+  if (lastCells.length > 0) syncTopics(lastCells);
+}
+
+/** Start tracking the link type so the mesh can degrade on cellular. */
+export function initTopicManager(): void {
+  if (networkUnsubscribe) return;
+  setNetworkProfile(metered);
+  networkUnsubscribe = NetInfo.addEventListener(applyNetworkState);
+  void NetInfo.fetch()
+    .then(applyNetworkState)
+    .catch(() => {
+      // NetInfo unavailable — stay on the unmetered profile.
+    });
+}
+
+/** Stop tracking the link type and leave every topic. */
+export function disposeTopicManager(): void {
+  networkUnsubscribe?.();
+  networkUnsubscribe = null;
+  unsubscribeAll();
+}
+
 export function onViewportChange(centerLat: number, centerLng: number): void {
   if (debounceTimer) clearTimeout(debounceTimer);
 
   debounceTimer = setTimeout(() => {
-    const cells = getVisibleGeohash4Cells(centerLat, centerLng);
-    syncTopics(cells);
+    lastCells = getVisibleGeohash4Cells(centerLat, centerLng);
+    syncTopics(lastCells);
   }, DEBOUNCE_MS);
 }
 
 export function unsubscribeAll(): void {
   if (debounceTimer) clearTimeout(debounceTimer);
+  lastCells = [];
 
   for (const cell of activeSwarmTopics) {
     leaveTopic(cell);

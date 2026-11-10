@@ -74,6 +74,38 @@ trafficStore.incidents → IncidentLayer / IncidentAheadBanner
 | `REROUTE_COOLDOWN_MS`             | 120,000 | Anti-thrash window after a dismissed/expired suggestion      |
 | `MERGE_PROXIMITY_M`               | 30      | Haversine distance for matching multi-source segments        |
 
+## Density controls
+
+A launch spike concentrates peers in a few geohash4 cells, so the worklet bounds
+the mesh instead of scaling linearly with the crowd:
+
+- **Connections**: at most 64 total, 24 per geohash4 topic, split 32 client /
+  32 server. Inbound connections beyond the cap are rejected; Hyperswarm's own
+  `maxPeers`/`maxClientConnections` handle the outbound side.
+- **Fanout**: messages go to a rotating subset rather than every peer — probes
+  12, incidents 16, condition requests 8, tile requests 4 (tile responses are
+  large, so they get the smallest sample).
+- **Metered links**: cellular/hotspot connections run client-only and join the
+  center cell only; Wi-Fi joins the full 3×3 neighbourhood.
+- **Nostr fallback**: relays open only after an 8 s grace period if the swarm
+  stays sparse, and probes are sampled to one publish per 30 s to protect the
+  public relays.
+
+## TomTom cold-start bridge
+
+TomTom is optional and last in the cascade. The key is inlined at build time
+(`EXPO_PUBLIC_TOMTOM_API_KEY`) and is therefore extractable; caching limits
+normal spend but cannot make it confidential. Guard rails:
+
+- only the geohash5 cells the earlier tiers missed are queried (one point per
+  cell, capped at 25), not the whole viewport grid;
+- flow raster tiles resolve disk → P2P → TomTom, with a 15-minute TTL and a
+  2,000-tile cap; route ETA answers are cached for 5 minutes;
+- a per-session budget of 400 requests stops runaway loops;
+- HTTP 403/429 opens a 30-minute breaker; repeated 5xx/network failures open a
+  10-minute breaker (both logged to diagnostics);
+- the signed `tomtomBridge` remote flag disables the bridge without a release.
+
 ## Related Files
 
 - [`backend/traffic-swarm.mjs`](../../backend/traffic-swarm.mjs) — Bare worklet managing Hyperswarm connections, probe/tile/condition exchange, and the incident channel
