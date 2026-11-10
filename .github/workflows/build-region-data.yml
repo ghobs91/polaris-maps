@@ -78,6 +78,11 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
+      # The build job runs repository scripts (osm-to-search-sqlite.py,
+      # build-search-shards.mjs), so it needs its own checkout — the setup job's
+      # checkout does not carry over between jobs.
+      - uses: actions/checkout@v4
+
       # The runner's default JDK is too old for planetiler (class file 61 =
       # Java 17), which is why every build failed at "Generate PMTiles".
       - uses: actions/setup-java@v4
