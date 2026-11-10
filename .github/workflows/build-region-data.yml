@@ -295,6 +295,27 @@ jobs:
             fs.writeFileSync(`${dir}/sizes.json`, JSON.stringify(out));
           '
 
+      - name: Record asset checksums for the catalog
+        run: |
+          # Delta downloads need a checksum per published asset so the client can
+          # skip files it already has. Keys are release asset names
+          # (`<region>-<file>`), matching what scripts/update-region-asset-urls.mjs
+          # emits into each region's `assets` manifest.
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const dir = "work/${{ matrix.id }}";
+            const region = "${{ matrix.id }}";
+            const out = {};
+            for (const name of ["search.sqlite", "transit.sqlite"]) {
+              try {
+                const bytes = fs.readFileSync(`${dir}/${name}`);
+                out[`${region}-${name}`] = crypto.createHash("md5").update(bytes).digest("hex");
+              } catch { /* asset not built for this region */ }
+            }
+            fs.writeFileSync(`${dir}/checksums.json`, JSON.stringify(out));
+          '
+
       - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -317,7 +338,7 @@ jobs:
           # the previous one. Rename to `<region>-<file>` before uploading; the
           # catalog's asset URLs (scripts/update-region-asset-urls.mjs) depend on
           # exactly this naming.
-          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite search-shards.tar sizes.json; do
+          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite search-shards.tar sizes.json checksums.json; do
             if [ -f "work/${{ matrix.id }}/$file" ]; then
               cp "work/${{ matrix.id }}/$file" "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}"
               gh release upload "$TAG" \
@@ -361,9 +382,30 @@ jobs:
             ASSETS_JSON=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name]')
           fi
 
+          # Merge the per-region checksum files into one map so the catalog can
+          # carry a delta checksum per asset (asset name -> md5).
+          CHECKSUMS_ARG=""
+          if [ -n "$ASSETS_JSON" ]; then
+            rm -rf checksums && mkdir -p checksums
+            if gh release download "$TAG" --repo "${{ github.repository }}" \
+                 --pattern '*-checksums.json' --dir checksums --clobber 2>/dev/null; then
+              node -e '
+                const fs = require("fs");
+                const path = require("path");
+                const out = {};
+                for (const file of fs.readdirSync("checksums")) {
+                  Object.assign(out, JSON.parse(fs.readFileSync(path.join("checksums", file), "utf8")));
+                }
+                fs.writeFileSync("checksums.json", JSON.stringify(out, null, 2));
+              '
+              CHECKSUMS_ARG="--checksums checksums.json"
+            fi
+          fi
+
           if [ -n "$ASSETS_JSON" ]; then
             printf '%s' "$ASSETS_JSON" > release-assets.json
-            node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json --assets release-assets.json
+            node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json \
+              --assets release-assets.json $CHECKSUMS_ARG
           else
             node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json
           fi

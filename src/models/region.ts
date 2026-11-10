@@ -41,6 +41,32 @@ export interface Region {
   transitIndexSizeBytes?: number | null;
   /** OpenFreeMap tile build version (date-stamp from tile URL, e.g. "20260422_001001_pt"). */
   tileVersion: string | null;
+  /**
+   * Per-file pack manifest (name, URL, mirrors, checksum, size).
+   *
+   * When present, downloads go through the resumable/mirror/delta path: an
+   * asset whose local checksum already matches is skipped, and a partial
+   * transfer resumes instead of restarting. Absent for packs published
+   * before the manifest existed — the app then falls back to the per-URL
+   * fields above.
+   */
+  assets?: RegionAsset[];
+}
+
+/** One file inside a region pack. */
+export interface RegionAsset {
+  /** File name relative to the region directory, e.g. `search.sqlite.gz`. */
+  name: string;
+  /** Primary download URL. */
+  url: string;
+  /** Additional origins tried, in order, when the primary fails. */
+  mirrors?: string[];
+  /** MD5 of the file, used for delta skips (native hash, not read into JS). */
+  md5?: string | null;
+  /** Exact byte size, used for delta skips when no checksum is published. */
+  sizeBytes?: number | null;
+  /** True when the file is gzipped and must be expanded after download. */
+  gzip?: boolean;
 }
 
 export type RegionDownloadStatus = 'none' | 'downloading' | 'complete' | 'failed';

@@ -50,10 +50,28 @@ function parseArgs(argv) {
     else if (arg === '--catalog') args.catalog = argv[++i];
     else if (arg === '--out') args.out = argv[++i];
     else if (arg === '--assets') args.assets = argv[++i];
+    else if (arg === '--checksums') args.checksums = argv[++i];
+    else if (arg === '--mirrors') args.mirrors = argv[++i];
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (!args.tag) throw new Error('--tag is required (e.g. map-data-2026-01)');
   return args;
+}
+
+/**
+ * One manifest entry. `checksums` maps release asset name -> md5; `mirrors`
+ * are base URLs that serve the same asset names (community mirrors).
+ */
+function assetEntry(fileName, releaseName, url, sizeBytes, checksums, mirrors) {
+  const entry = { name: fileName, url, gzip: url.endsWith('.gz') };
+  if (typeof sizeBytes === 'number') entry.sizeBytes = sizeBytes;
+  const md5 = checksums[releaseName];
+  if (md5) entry.md5 = String(md5).toLowerCase();
+  const mirrorUrls = mirrors
+    .map((base) => `${String(base).replace(/\/+$/, '')}/${releaseName}`)
+    .filter((u) => u !== url);
+  if (mirrorUrls.length > 0) entry.mirrors = mirrorUrls;
+  return entry;
 }
 
 /** Release asset name for a region's optional index. */
@@ -65,14 +83,16 @@ export function assetName(regionId, asset) {
  * Pure transform: given a catalog and the release coordinates, return a new
  * catalog with asset URLs (and sizes, when known) stamped in.
  */
-export function stampCatalog(catalog, { tag, base, sizes = {} }) {
+export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, mirrors = [] }) {
   const prefix = `${base.replace(/\/+$/, '')}/${tag}`;
   const regions = (catalog.regions ?? catalog.include ?? []).map((region) => {
     const size = sizes[region.id] ?? {};
+    const searchName = assetName(region.id, 'search.sqlite');
+    const transitName = assetName(region.id, 'transit.sqlite');
     const stamped = {
       ...region,
-      searchIndexUrl: `${prefix}/${assetName(region.id, 'search.sqlite')}`,
-      transitIndexUrl: `${prefix}/${assetName(region.id, 'transit.sqlite')}`,
+      searchIndexUrl: `${prefix}/${searchName}`,
+      transitIndexUrl: `${prefix}/${transitName}`,
     };
     if (typeof size.searchIndexSizeBytes === 'number') {
       stamped.searchIndexSizeBytes = size.searchIndexSizeBytes;
@@ -80,6 +100,26 @@ export function stampCatalog(catalog, { tag, base, sizes = {} }) {
     if (typeof size.transitIndexSizeBytes === 'number') {
       stamped.transitIndexSizeBytes = size.transitIndexSizeBytes;
     }
+    // Per-asset manifest: enables resumable + mirror-aware + delta downloads
+    // on the client (checksum/size let an unchanged asset be skipped).
+    stamped.assets = [
+      assetEntry(
+        'search.sqlite',
+        searchName,
+        `${prefix}/${searchName}`,
+        size.searchIndexSizeBytes,
+        checksums,
+        mirrors,
+      ),
+      assetEntry(
+        'transit.sqlite',
+        transitName,
+        `${prefix}/${transitName}`,
+        size.transitIndexSizeBytes,
+        checksums,
+        mirrors,
+      ),
+    ];
     return stamped;
   });
 
@@ -114,11 +154,21 @@ function main() {
   const catalogPath = resolve(args.catalog);
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
   const sizes = args.sizes ? JSON.parse(readFileSync(resolve(args.sizes), 'utf8')) : {};
+  const checksums = args.checksums
+    ? JSON.parse(readFileSync(resolve(args.checksums), 'utf8'))
+    : {};
+  const mirrors = args.mirrors ? args.mirrors.split(',').map((m) => m.trim()).filter(Boolean) : [];
 
   const assets = args.assets
     ? JSON.parse(readFileSync(resolve(args.assets), 'utf8'))
     : null;
-  const stamped = stampCatalog(catalog, { tag: args.tag, base: args.base, sizes });
+  const stamped = stampCatalog(catalog, {
+    tag: args.tag,
+    base: args.base,
+    sizes,
+    checksums,
+    mirrors,
+  });
   const updated = args.out ? toPublishedCatalog(stamped, assets) : stamped;
   const serialised = `${JSON.stringify(updated, null, 2)}\n`;
 

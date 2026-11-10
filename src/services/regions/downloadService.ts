@@ -24,6 +24,13 @@ import { registerPackShards } from './shardCatalog';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
+import {
+  buildSourceList,
+  downloadResumable,
+  localAssetState,
+  planAssetDownloads,
+} from './assetDownload';
+import type { RegionAsset } from '../../models/region';
 import { isFeatureEnabled } from '../config/remoteConfig';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 
@@ -629,13 +636,8 @@ async function downloadPackSearchIndices(
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<void> {
-  const assets: Array<{ url: string | null | undefined; target: string }> = [
-    { url: region.searchIndexUrl, target: 'search.sqlite' },
-    { url: region.transitIndexUrl, target: 'transit.sqlite' },
-  ];
-
+  const assets = packAssetsFor(region, ['search.sqlite', 'transit.sqlite']);
   for (const asset of assets) {
-    if (!asset.url) continue;
     checkAborted(signal);
 
     onProgress?.({
@@ -646,17 +648,85 @@ async function downloadPackSearchIndices(
       stage: 'indices',
     });
 
-    const dest = `${destDir}${asset.target}`;
-    if (asset.url.endsWith('.gz')) {
-      const gzPath = `${dest}.gz`;
-      await FileSystem.downloadAsync(asset.url, gzPath);
-      checkAborted(signal);
-      await gunzipViaNode(gzPath, dest);
-      await FileSystem.deleteAsync(gzPath, { idempotent: true }).catch(() => {});
-    } else {
-      await FileSystem.downloadAsync(asset.url, dest);
-    }
+    await fetchPackAsset(region, destDir, asset, onProgress, signal);
   }
+}
+
+/**
+ * Resolve the pack manifest for a region, falling back to the per-URL fields
+ * for packs published before `assets` existed.
+ */
+function packAssetsFor(region: Region, names: readonly string[]): RegionAsset[] {
+  const declared = (region.assets ?? []).filter((a) => names.includes(a.name));
+  if (declared.length > 0) return declared;
+
+  const legacy: RegionAsset[] = [];
+  const add = (name: string, url: string | null | undefined) => {
+    if (!url) return;
+    legacy.push({ name, url, gzip: url.endsWith('.gz') });
+  };
+  if (names.includes('search.sqlite')) add('search.sqlite', region.searchIndexUrl);
+  if (names.includes('transit.sqlite')) add('transit.sqlite', region.transitIndexUrl);
+  if (names.includes('geocoding-data.sqlite')) add('geocoding-data.sqlite', region.geocodingUrl);
+  return legacy;
+}
+
+/**
+ * Download one pack asset: skip when the local copy already matches the
+ * published checksum (delta), otherwise transfer resumably across mirrors and
+ * expand gzipped payloads.
+ */
+async function fetchPackAsset(
+  region: Region,
+  destDir: string,
+  asset: RegionAsset,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  const finalPath = `${destDir}${asset.name}`;
+
+  // Delta: an unchanged asset costs nothing.
+  const local = await localAssetState(destDir, [asset]);
+  const { skipped } = planAssetDownloads([asset], local);
+  if (skipped.length > 0) {
+    logDiagnostic('regions', 'info', `asset unchanged, skipping download`, {
+      regionId: region.id,
+      asset: asset.name,
+    });
+    return;
+  }
+
+  const tempPath = asset.gzip ? `${finalPath}.gz` : finalPath;
+  const sources = buildSourceList(asset.url, asset.mirrors ?? []);
+  const startedAt = Date.now();
+
+  await downloadResumable({
+    destPath: tempPath,
+    sources,
+    signal,
+    onProgress: (p) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: p.totalBytes ?? 0,
+        downloadedBytes: p.bytesWritten,
+        percent: p.totalBytes ? Math.round((p.bytesWritten / p.totalBytes) * 100) : 0,
+        stage: 'indices',
+      });
+    },
+  });
+
+  checkAborted(signal);
+  if (asset.gzip) {
+    await gunzipViaNode(tempPath, finalPath);
+    await FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+  }
+
+  logDiagnostic('regions', 'info', `asset downloaded`, {
+    regionId: region.id,
+    asset: asset.name,
+    ms: Date.now() - startedAt,
+    sources: sources.length,
+  });
 }
 
 function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
@@ -690,13 +760,28 @@ async function downloadAndImportGeocodingBundle(
   const gzPath = `${destDir}geocoding-data.sqlite.gz`;
   const dbPath = `${destDir}geocoding-data.sqlite`;
 
-  // Download the gzipped bundle
+  // Download the gzipped bundle (resumable + mirror-aware + delta-skipped).
   checkAborted(signal);
-  await FileSystem.downloadAsync(region.geocodingUrl, gzPath);
+  await fetchPackAsset(
+    region,
+    destDir,
+    packAssetsFor(region, ['geocoding-data.sqlite'])[0] ?? {
+      name: 'geocoding-data.sqlite',
+      url: region.geocodingUrl,
+      gzip: true,
+    },
+    onProgress,
+    signal,
+  );
 
-  // Decompress via Node.js IPC
+  // Decompress via Node.js IPC (skipped when the delta check already left an
+  // expanded copy in place).
   checkAborted(signal);
-  await gunzipViaNode(gzPath, dbPath);
+  const gzInfo = await FileSystem.getInfoAsync(gzPath);
+  if (gzInfo.exists) {
+    await gunzipViaNode(gzPath, dbPath);
+    await FileSystem.deleteAsync(gzPath, { idempotent: true }).catch(() => {});
+  }
 
   // Open the downloaded SQLite as read-only
   const srcDb = await SQLite.openDatabaseAsync(dbPath, {
