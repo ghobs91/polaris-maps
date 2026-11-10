@@ -121,13 +121,50 @@ jobs:
           rm -f work/${{ matrix.id }}/region.osm.pbf
           echo "Clipped size: $(du -h work/${{ matrix.id }}/clipped.osm.pbf | cut -f1)"
 
+      - name: Generate POI + transit search indices
+        run: |
+          # On-device search indices: these answer viewport POI and transit
+          # queries with no network call for downloaded regions, which is what
+          # keeps Overpass off the critical path
+          # (src/services/poi/localPoiIndex.ts, localTransitIndex.ts).
+          python3 scripts/osm-to-search-sqlite.py \
+            "work/${{ matrix.id }}/clipped.osm.pbf" \
+            "${{ matrix.id }}" \
+            "work/${{ matrix.id }}"
+          echo "Search index size:  $(du -h work/${{ matrix.id }}/search.sqlite | cut -f1)"
+          echo "Transit index size: $(du -h work/${{ matrix.id }}/transit.sqlite | cut -f1)"
+
+      - name: Build content-addressed POI shards
+        run: |
+          # Shards let a device fetch just the cells it needs and verify each
+          # one by hash (src/services/regions/shardManifest.ts). Signing the
+          # descriptor manifest is a separate publisher step with a trusted key.
+          node scripts/build-search-shards.mjs \
+            "work/${{ matrix.id }}/search.sqlite" \
+            "work/${{ matrix.id }}"
+          tar -cf "work/${{ matrix.id }}/search-shards.tar" \
+            -C "work/${{ matrix.id }}" shards.json shards
+
       - name: Generate PMTiles
         run: |
-          java -Xmx6g -jar /usr/local/bin/planetiler.jar \
-            --osm-path=work/${{ matrix.id }}/clipped.osm.pbf \
-            --output=work/${{ matrix.id }}/tiles.pmtiles \
-            --force \
-            --download
+          # Planetiler fetches auxiliary sources (water polygons, natural earth)
+          # on first run; that download times out intermittently on CI runners and
+          # the failure is not retried internally, so retry the whole step.
+          for attempt in 1 2 3; do
+            if java -Xmx6g -jar /usr/local/bin/planetiler.jar \
+              --osm-path=work/${{ matrix.id }}/clipped.osm.pbf \
+              --output=work/${{ matrix.id }}/tiles.pmtiles \
+              --force \
+              --download; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              echo "::error::planetiler failed after $attempt attempts"
+              exit 1
+            fi
+            echo "planetiler attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
           echo "PMTiles size: $(du -h work/${{ matrix.id }}/tiles.pmtiles | cut -f1)"
 
       - name: Build Valhalla routing tiles
@@ -219,30 +256,6 @@ jobs:
           print(f"Indexed {h.count} entries.")
           PYEOF
           echo "Geocoding DB size: $(du -h work/${{ matrix.id }}/geocoding.db | cut -f1)"
-
-      - name: Generate POI + transit search indices
-        run: |
-          # On-device search indices: these answer viewport POI and transit
-          # queries with no network call for downloaded regions, which is what
-          # keeps Overpass off the critical path
-          # (src/services/poi/localPoiIndex.ts, localTransitIndex.ts).
-          python3 scripts/osm-to-search-sqlite.py \
-            "work/${{ matrix.id }}/clipped.osm.pbf" \
-            "${{ matrix.id }}" \
-            "work/${{ matrix.id }}"
-          echo "Search index size:  $(du -h work/${{ matrix.id }}/search.sqlite | cut -f1)"
-          echo "Transit index size: $(du -h work/${{ matrix.id }}/transit.sqlite | cut -f1)"
-
-      - name: Build content-addressed POI shards
-        run: |
-          # Shards let a device fetch just the cells it needs and verify each
-          # one by hash (src/services/regions/shardManifest.ts). Signing the
-          # descriptor manifest is a separate publisher step with a trusted key.
-          node scripts/build-search-shards.mjs \
-            "work/${{ matrix.id }}/search.sqlite" \
-            "work/${{ matrix.id }}"
-          tar -cf "work/${{ matrix.id }}/search-shards.tar" \
-            -C "work/${{ matrix.id }}" shards.json shards
 
       - name: Record asset sizes for the catalog
         run: |
