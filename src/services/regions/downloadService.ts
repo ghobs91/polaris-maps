@@ -1,7 +1,13 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
-import { downloadFromPeers, gunzipFile, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
+import {
+  downloadFromPeers,
+  gunzipFile,
+  seedRegion,
+  unseedRegion,
+  unpackPmtiles,
+} from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
 import { OPENFREEMAP_TILEJSON_URL, OPENFREEMAP_USER_AGENT } from '../../constants/config';
 import {
@@ -186,7 +192,15 @@ export async function downloadRegion(
     checkAborted(signal);
 
     if (!usedP2P) {
-      await downloadViaHttp(region, destDir, onProgress, signal);
+      const shippedTiles = (region.assets ?? []).find((a) => a.name === TILES_PMTILES);
+      if (shippedTiles) {
+        // The pack carries a base-map PMTiles archive: expand it into the
+        // per-tile tree the local tile server serves, so a downloaded region
+        // renders from local bytes with no third-party tile requests.
+        await downloadAndUnpackTilesArchive(region, destDir, shippedTiles, onProgress, signal);
+      } else {
+        await downloadViaHttp(region, destDir, onProgress, signal);
+      }
     }
 
     checkAborted(signal);
@@ -527,6 +541,77 @@ async function downloadViaHttp(
       stage: 'tiles',
     });
   }
+}
+
+/** File name of a pack's base-map archive. */
+const TILES_PMTILES = 'tiles.pmtiles';
+
+/**
+ * Highest zoom expanded out of the pack archive.
+ *
+ * The render path serves one file per tile, so this bounds both the file count
+ * and the on-disk size. It matches the zoom the previous per-tile download
+ * path fetched from OpenFreeMap, so a downloaded region looks the same while
+ * needing no third-party tile requests.
+ */
+const UNPACK_MAX_ZOOM = 12;
+
+/**
+ * Download a pack's base-map archive and expand it into `{z}/{x}/{y}.pbf`.
+ *
+ * The archive is removed after a successful expansion: the tile tree is what
+ * peers seed and what the tile server serves, so keeping both would double
+ * every pack's footprint.
+ */
+async function downloadAndUnpackTilesArchive(
+  region: Region,
+  destDir: string,
+  asset: RegionAsset,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: asset.sizeBytes ?? 0,
+    downloadedBytes: 0,
+    percent: 0,
+    stage: 'tiles',
+  });
+
+  const archivePath = `${destDir}${TILES_PMTILES}`;
+  const sources = buildSourceList(asset.url, asset.mirrors ?? []);
+  const startedAt = Date.now();
+
+  await downloadResumable({
+    destPath: archivePath,
+    sources,
+    signal,
+    onProgress: (p) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: p.totalBytes ?? asset.sizeBytes ?? 0,
+        downloadedBytes: p.bytesWritten,
+        percent: p.totalBytes ? Math.round((p.bytesWritten / p.totalBytes) * 100) : 0,
+        stage: 'tiles',
+      });
+    },
+  });
+
+  checkAborted(signal);
+
+  const tilesDir = `${destDir}tiles/`;
+  await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
+
+  const result = await unpackPmtiles(archivePath, tilesDir, { maxZoom: UNPACK_MAX_ZOOM });
+  logDiagnostic('regions', 'info', 'expanded base-map archive', {
+    regionId: region.id,
+    tiles: result.tiles,
+    skipped: result.skipped,
+    ms: Date.now() - startedAt,
+  });
+
+  // Tile tree is now the offline source of truth; drop the archive.
+  await FileSystem.deleteAsync(archivePath, { idempotent: true }).catch(() => {});
 }
 
 /** Seed a downloaded region in the background and persist the canonical key. */

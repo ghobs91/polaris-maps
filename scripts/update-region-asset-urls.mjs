@@ -102,7 +102,18 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
     }
     // Per-asset manifest: enables resumable + mirror-aware + delta downloads
     // on the client (checksum/size let an unchanged asset be skipped).
+    const tilesName = assetName(region.id, 'tiles.pmtiles');
     stamped.assets = [
+      // Base-map archive: when present the client expands it locally instead
+      // of pulling tiles from the shared OpenFreeMap servers.
+      assetEntry(
+        'tiles.pmtiles',
+        tilesName,
+        `${prefix}/${tilesName}`,
+        size.tilesSizeBytes,
+        checksums,
+        mirrors,
+      ),
       assetEntry(
         'search.sqlite',
         searchName,

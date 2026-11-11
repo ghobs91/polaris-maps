@@ -88,6 +88,15 @@ interface PersistedSettings {
   showOnboardingOnLaunch: boolean;
   /** Show diagnostics: node dashboard, P2P stats, traffic coverage badge. */
   devMode: boolean;
+  /**
+   * Download the offline pack for the region the map is looking at, so the
+   * area around the user renders from local bytes instead of shared tile
+   * servers. Only packs under the size cap, and only on unmetered links
+   * unless `allowMeteredRegionDownloads` is set.
+   */
+  autoDownloadRegions: boolean;
+  /** Allow automatic region downloads over cellular / metered links. */
+  allowMeteredRegionDownloads: boolean;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -104,6 +113,8 @@ interface SettingsState extends PersistedSettings {
   setSavedListsSort: (mode: SavedListsSortMode) => void;
   setShowOnboardingOnLaunch: (enabled: boolean) => void;
   setDevMode: (enabled: boolean) => void;
+  setAutoDownloadRegions: (enabled: boolean) => void;
+  setAllowMeteredRegionDownloads: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -151,6 +162,8 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   placeSort: 'recent',
   savedListsSort: 'recent',
   showOnboardingOnLaunch: false,
+  autoDownloadRegions: true,
+  allowMeteredRegionDownloads: false,
   devMode: false,
 };
 
@@ -207,6 +220,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       savedListsSort: state.savedListsSort,
       showOnboardingOnLaunch: state.showOnboardingOnLaunch,
       devMode: state.devMode,
+      autoDownloadRegions: state.autoDownloadRegions,
+      allowMeteredRegionDownloads: state.allowMeteredRegionDownloads,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -263,6 +278,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setDevMode: (devMode) => {
       set({ devMode });
+      persist();
+    },
+    setAutoDownloadRegions: (autoDownloadRegions) => {
+      set({ autoDownloadRegions });
+      persist();
+    },
+    setAllowMeteredRegionDownloads: (allowMeteredRegionDownloads) => {
+      set({ allowMeteredRegionDownloads });
       persist();
     },
   };

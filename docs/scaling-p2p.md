@@ -66,6 +66,37 @@ The catalog gains `assets[]` (name, url, mirrors, md5, sizeBytes) from
 `scripts/update-region-asset-urls.mjs`; the CI workflow publishes a
 `<region>-checksums.json` per region that the catalog job merges.
 
+## Base-map packs (tiles)
+
+Region packs ship a `tiles.pmtiles` archive built by planetiler. At install the
+worklet expands it into the `{z}/{x}/{y}.pbf` tree the on-device tile server
+already serves (`backend/pmtiles.mjs`, RPC `unpack-pmtiles`), then deletes the
+archive so a pack is not stored twice.
+
+Why it matters at scale: a downloaded region then renders with **zero**
+third-party tile requests. Previously every install pulled ~3,000 tiles from the
+shared OpenFreeMap servers, which is a donation-funded service — at a large user
+base that is the single biggest external dependency in the app.
+
+Expansion is capped at z12 (`UNPACK_MAX_ZOOM`), matching the zoom the previous
+per-tile path fetched, which bounds both file count and disk use. Raising it
+means many more files per region; the alternative is serving the archive
+directly via HTTP range requests, which needs Range support in the native tile
+server.
+
+## Auto-download for the visible region
+
+`autoRegionDownload.ts` + `autoRegionDownloadCoordinator.ts` download the pack
+for whatever region the map is looking at, so a first open (panned to the user's
+location) ends up rendering from local bytes without the user finding the region
+list.
+
+Guards (all in the pure `decideAutoDownload`): enabled in settings, point inside
+a known region, not already downloaded/downloading, pack under
+`AUTO_DOWNLOAD_MAX_BYTES` (150 MB — unknown size counts as too large), unmetered
+unless the user opted into cellular, viewport settled for 4 s, and no retry
+after a failure this session.
+
 ## Seeding measurement
 
 iOS suspends backgrounded apps, so a phone is a weaker seed than a desktop

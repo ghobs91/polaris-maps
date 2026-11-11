@@ -16,6 +16,7 @@ import {
   CMD_HD_STATUS,
   CMD_HD_UNSEED,
   CMD_HD_GUNZIP,
+  CMD_HD_UNPACK_PMTILES,
   CMD_HD_EXTRACT_TAR,
   CMD_HD_SHARD_QUERY,
   CMD_HD_DOWNLOAD_PROGRESS,
@@ -260,6 +261,34 @@ export async function getHyperdriveStatus(): Promise<{
   } catch {
     return { drives: [], swarmConnections: 0 };
   }
+}
+
+/**
+ * Expand a region pack's base-map PMTiles archive into `{z}/{x}/{y}.pbf` files
+ * under `destDir` (region-pack assembly).
+ *
+ * Runs in the worklet so the archive is parsed once with real gzip and the
+ * tiles land as plain MVT files the on-device tile server already serves.
+ */
+export async function unpackPmtiles(
+  srcPath: string,
+  destDir: string,
+  options: { maxZoom?: number } = {},
+): Promise<{ tiles: number; skipped: number; bytes: number }> {
+  const result = await sendRequest(
+    CMD_HD_UNPACK_PMTILES,
+    {
+      srcPath: toFsPath(srcPath),
+      destDir: toFsPath(destDir),
+      maxZoom: options.maxZoom,
+    },
+    TRANSFER_TIMEOUT_MS,
+  );
+  return {
+    tiles: Number(result.tiles ?? 0),
+    skipped: Number(result.skipped ?? 0),
+    bytes: Number(result.bytes ?? 0),
+  };
 }
 
 /** Gunzip a file in place (region-pack assembly). */

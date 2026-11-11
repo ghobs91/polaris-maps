@@ -27,6 +27,7 @@ import goodbye from 'graceful-goodbye';
 import { ungzip } from 'pako';
 import { sha256 } from './node_modules/@noble/hashes/sha256.js';
 import { answerQuery, parseJsonl, shardPathFor, shardTopic } from './shard-answer.mjs';
+import { unpackPmtiles } from './pmtiles.mjs';
 
 // ── RPC command IDs (shared with src/services/sync/hdRpcCommands.ts) ─
 
@@ -37,6 +38,7 @@ const CMD_HD_UNSEED = 3; // RN → worklet
 const CMD_HD_GUNZIP = 4; // RN → worklet: gunzip a file in place
 const CMD_HD_EXTRACT_TAR = 5; // RN → worklet: extract a (gzipped) tar archive
 const CMD_HD_SHARD_QUERY = 6; // RN → worklet: ask peers for a shard answer
+const CMD_HD_UNPACK_PMTILES = 7; // RN → worklet: expand tiles.pmtiles into {z}/{x}/{y}.pbf
 const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN
 
 // ── State ───────────────────────────────────────────────────────────
@@ -120,6 +122,9 @@ async function handleRequest(req) {
         break;
       case CMD_HD_SHARD_QUERY:
         await handleShardQuery(req);
+        break;
+      case CMD_HD_UNPACK_PMTILES:
+        await handleUnpackPmtiles(req);
         break;
       default:
         reply(req, { error: `unknown command ${req.command}` });
@@ -425,6 +430,34 @@ function handleGunzip(req) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, out);
   reply(req, { outputPath });
+}
+
+/**
+ * Expand a region pack's base-map `tiles.pmtiles` into the `{z}/{x}/{y}.pbf`
+ * tree the on-device tile server serves. This is what makes a downloaded
+ * region render from local bytes instead of the shared OpenFreeMap tile
+ * servers, so it runs once at install time.
+ */
+async function handleUnpackPmtiles(req) {
+  const { srcPath, destDir, maxZoom } = JSON.parse(b4a.toString(req.data));
+  if (!fs.existsSync(srcPath)) {
+    return reply(req, { error: `Source file not found: ${srcPath}` });
+  }
+  try {
+    const result = await unpackPmtiles(
+      {
+        readFile: (p) => fs.readFileSync(p),
+        writeFile: (p, data) => fs.writeFileSync(p, data),
+        mkdir: (p) => fs.mkdirSync(p, { recursive: true }),
+      },
+      srcPath,
+      destDir,
+      maxZoom === undefined ? {} : { maxZoom },
+    );
+    reply(req, result);
+  } catch (err) {
+    reply(req, { error: err && err.message ? err.message : String(err) });
+  }
 }
 
 /**

@@ -34,6 +34,10 @@ import {
 import { initRerouteMonitor, disposeRerouteMonitor } from '@/services/traffic/rerouteCoordinator';
 import { startSeedInstrumentation, stopSeedInstrumentation } from '@/services/sync/seedDiagnostics';
 import {
+  initAutoRegionDownload,
+  disposeAutoRegionDownload,
+} from '@/services/regions/autoRegionDownloadCoordinator';
+import {
   initIncidentExchange,
   disposeIncidentExchange,
 } from '@/services/traffic/incidentExchangeService';
@@ -156,6 +160,11 @@ function RootLayoutInner() {
     // whatever traffic data is available.
     initRerouteMonitor();
 
+    // Download the offline pack for whatever region the map is looking at, so
+    // a first open (panned to the user's location) renders from local bytes
+    // instead of the shared tile servers.
+    initAutoRegionDownload();
+
     const unsubscribeConfig = subscribeRemoteConfig(applyTrafficFlag);
 
     // Suspend/resume the mesh with the app lifecycle to save battery.
@@ -180,6 +189,7 @@ function RootLayoutInner() {
       unsubscribeConfig();
       stopTraffic();
       stopSeedInstrumentation();
+      disposeAutoRegionDownload();
       disposeRerouteMonitor();
       teardownFixDrivenRefresh();
     };

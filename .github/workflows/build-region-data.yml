@@ -290,8 +290,11 @@ jobs:
             const out = {};
             const search = size("search.sqlite");
             const transit = size("transit.sqlite");
+            const tiles = size("tiles.pmtiles");
             if (search !== undefined) out.searchIndexSizeBytes = search;
             if (transit !== undefined) out.transitIndexSizeBytes = transit;
+            // Drives the auto-download size gate and tile download progress.
+            if (tiles !== undefined) out.tilesSizeBytes = tiles;
             fs.writeFileSync(`${dir}/sizes.json`, JSON.stringify(out));
           '
 
@@ -307,7 +310,7 @@ jobs:
             const dir = "work/${{ matrix.id }}";
             const region = "${{ matrix.id }}";
             const out = {};
-            for (const name of ["search.sqlite", "transit.sqlite"]) {
+            for (const name of ["search.sqlite", "transit.sqlite", "tiles.pmtiles"]) {
               try {
                 const bytes = fs.readFileSync(`${dir}/${name}`);
                 out[`${region}-${name}`] = crypto.createHash("md5").update(bytes).digest("hex");
