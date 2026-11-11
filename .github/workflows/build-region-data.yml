@@ -234,12 +234,26 @@ jobs:
               );
           """)
 
+          INTERP_STEP = {'all': 1, 'odd': 2, 'even': 2}
+
+          def interpolate_range(start_number, end_number, step, limit=200):
+              lo, hi = sorted((start_number, end_number))
+              out, n = [], lo + step
+              while n < hi and len(out) < limit:
+                  out.append(n)
+                  n += step
+              return out if start_number <= end_number else list(reversed(out))
+
           class Handler(osmium.SimpleHandler):
               def __init__(self, db):
                   super().__init__()
                   self.db = db
                   self.count = 0
                   self.batch = []
+                  # Address node id -> housenumber, so an addr:interpolation way
+                  # can resolve the numbers at its two endpoints. Interpolated
+                  # points are approximations; the app labels and de-ranks them.
+                  self.addr_numbers = {}
               def flush(self):
                   if not self.batch: return
                   self.db.executemany(
@@ -259,12 +273,44 @@ jobs:
                   self.count += 1
                   if len(self.batch) >= 5000: self.flush()
               def node(self, n):
+                  if n.tags.get('addr:housenumber'):
+                      self.addr_numbers[n.id] = n.tags['addr:housenumber']
                   if n.tags.get('addr:street') or (n.tags.get('name') and n.tags.get('amenity')):
                       self._add(n.tags, n.location.lat, n.location.lon)
               def way(self, w):
+                  interp = (w.tags.get('addr:interpolation') or '').lower()
+                  if interp in INTERP_STEP and len(w.nodes) >= 2:
+                      self._interpolate(w, INTERP_STEP[interp])
                   if w.tags.get('addr:street') or (w.tags.get('name') and w.tags.get('building')):
                       try: self._add(w.tags, w.nodes[0].lat, w.nodes[0].lon)
                       except: pass
+              def _interpolate(self, w, step):
+                  try:
+                      first, last = w.nodes[0], w.nodes[-1]
+                      start = self.addr_numbers.get(first.ref)
+                      end = self.addr_numbers.get(last.ref)
+                      if not start or not end:
+                          return
+                      start_number, end_number = int(start), int(end)
+                  except (AttributeError, TypeError, ValueError):
+                      return
+                  span = end_number - start_number
+                  if span == 0:
+                      return
+                  tags = w.tags
+                  for number in interpolate_range(start_number, end_number, step):
+                      t = (number - start_number) / span
+                      lat = first.lat + (last.lat - first.lat) * t
+                      lng = first.lon + (last.lon - first.lon) * t
+                      self.batch.append((
+                          'address_interpolated', str(number),
+                          tags.get('addr:street'), tags.get('addr:city') or tags.get('addr:suburb'),
+                          tags.get('addr:state'), tags.get('addr:postcode'),
+                          tags.get('addr:country'), lat, lng,
+                      ))
+                      self.count += 1
+                      if len(self.batch) >= 5000:
+                          self.flush()
 
           h = Handler(db)
           h.apply_file(pbf_path, locations=True)

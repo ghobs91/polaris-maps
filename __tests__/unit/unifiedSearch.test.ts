@@ -589,8 +589,11 @@ describe('unifiedSearch progressive + cancellation', () => {
   });
 
   it('onPartial emits local results before the network phase completes', async () => {
+    // ~30 km out: inside the 75 km search area so it is returned locally, but
+    // outside the 15 km strong-match radius — so the Photon fallback still runs
+    // and the test can hold the network phase open.
     (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
-      makePlace({ name: 'Starbucks', uuid: 'p-starbucks' }),
+      makePlace({ name: 'Starbucks', uuid: 'p-starbucks', lat: 40.98, lng: -73.985 }),
     ]);
     let resolvePhoton!: (value: ReturnType<typeof makePhotonResult>[]) => void;
     (photonGeocoder.searchPhoton as jest.Mock).mockImplementation(

@@ -618,34 +618,44 @@ export async function unifiedSearch(
     }
   };
 
-  // Source 3: Photon geocoder (fuzzy, online)
-  const photonPromise = (() => {
-    const osmTagFilter =
-      parsed.categories?.length === 1
-        ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
-        : undefined;
-    // Pass the actual viewport zoom so Photon's location bias stays local.
-    // Photon already ranks globally-unique names ("Times Square") correctly
-    // even at a high zoom, so lowering it is unnecessary — and harmful, since
-    // it floods generic local queries ("plumbing supply") with distant
-    // matches that outrank the nearby ones.
-    const viewportBounds = { south, north, west, east };
-    return cachedFetch(
-      cacheKey([
-        'photon',
-        parsed.originalQuery,
-        boundsKey(viewportBounds),
-        zoom,
-        limit,
-        osmTagFilter,
-      ]),
-      () =>
-        searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
-          signal,
-        }),
-      { bounds: viewportBounds, signal },
-    );
-  })();
+  // Source 3: Photon geocoder (fuzzy, online) — FALLBACK ONLY.
+  //
+  // The unified local index answers both place and address queries offline, so
+  // Photon is only worth a network hop when local coverage actually failed:
+  // no strong local POI match, and (for an address query) no local address at
+  // all. Running it unconditionally made every keystroke in a downloaded region
+  // pay for a request whose results the local index already had.
+  const photonNeeded =
+    strongLocalMatches === 0 && (!addressQuery || localAddressResults.length === 0);
+  const photonPromise = !photonNeeded
+    ? Promise.resolve([] as PhotonResult[])
+    : (() => {
+        const osmTagFilter =
+          parsed.categories?.length === 1
+            ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
+            : undefined;
+        // Pass the actual viewport zoom so Photon's location bias stays local.
+        // Photon already ranks globally-unique names ("Times Square") correctly
+        // even at a high zoom, so lowering it is unnecessary — and harmful, since
+        // it floods generic local queries ("plumbing supply") with distant
+        // matches that outrank the nearby ones.
+        const viewportBounds = { south, north, west, east };
+        return cachedFetch(
+          cacheKey([
+            'photon',
+            parsed.originalQuery,
+            boundsKey(viewportBounds),
+            zoom,
+            limit,
+            osmTagFilter,
+          ]),
+          () =>
+            searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
+              signal,
+            }),
+          { bounds: viewportBounds, signal },
+        );
+      })();
 
   // Source 2 (full): Category search (local + Overpass + Nominatim bounded)
   //
@@ -707,8 +717,9 @@ export async function unifiedSearch(
   const addressQueryText = addressQuery ? parsed.originalQuery : parsed.coreQuery;
   const addressPromise: Promise<GeocodingResult[]> = (() => {
     if (!isAddressPass) return Promise.resolve([] as GeocodingResult[]);
-    // An exact structured local hit skips the Nominatim fallback entirely.
-    if (hasStructuredAddressHit) {
+    // Nominatim is a fallback, never a primary source: skip it whenever the
+    // local unified index already answered, structured hit or not.
+    if (hasStructuredAddressHit || localAddressResults.length > 0) {
       return searchAddress(addressQueryText, 10, lat, lng, { signal, localOnly: true });
     }
     const viewportBounds = { south, north, west, east };

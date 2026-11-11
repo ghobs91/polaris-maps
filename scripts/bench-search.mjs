@@ -311,6 +311,43 @@ function seedGeocoding(db, rows, rng) {
 // Schema (mirrors src/services/database/init.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Populate the unified index from the two stores, mirroring the app's
+ * migration backfill (src/services/database/init.ts). One-off, outside the
+ * timed section.
+ */
+function seedUnifiedIndex(db) {
+  db.exec(`
+    INSERT OR IGNORE INTO search_docs (
+      doc_key, kind, name, brand, category, street, city, state, postcode,
+      country, lat, lng, importance, ref_id
+    )
+    SELECT
+      'place:' || uuid, 'poi', name, brand_name, category, address_street,
+      address_city, address_state, address_postcode, address_country,
+      lat, lng, COALESCE(review_count, 0) / 50.0, uuid
+    FROM places;
+
+    INSERT OR IGNORE INTO search_docs (
+      doc_key, kind, name, housenumber, street, city, state, postcode, country,
+      lat, lng, importance, interpolated, ref_id
+    )
+    SELECT
+      'geo:' || id,
+      CASE WHEN type = 'city' THEN 'locality'
+           WHEN type = 'place' THEN 'admin'
+           ELSE 'address' END,
+      text, housenumber, street, city, state, postcode, country, lat, lng,
+      CASE WHEN type = 'city' THEN 3.0
+           WHEN type = 'place' THEN 2.0
+           ELSE 1.0 END,
+      0, CAST(id AS TEXT)
+    FROM geocoding_data;
+
+    INSERT INTO search_docs_fts(search_docs_fts) VALUES('rebuild');
+  `);
+}
+
 function createSchema(db, { placesFts, trigram, placesBoundsIndex }) {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -400,7 +437,54 @@ function createSchema(db, { placesFts, trigram, placesBoundsIndex }) {
     );
   `);
 
+  // The index the app actually searches (src/services/search/searchIndex.ts).
+  // Seeded once from the two stores below, exactly like the app's migration
+  // backfill, so its measurements are comparable with the legacy indexes.
+  db.exec(`
+    CREATE TABLE search_docs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      doc_key TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL,
+      name TEXT,
+      brand TEXT,
+      category TEXT,
+      housenumber TEXT,
+      street TEXT,
+      city TEXT,
+      state TEXT,
+      postcode TEXT,
+      country TEXT,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      importance REAL NOT NULL DEFAULT 0,
+      interpolated INTEGER NOT NULL DEFAULT 0,
+      region_id TEXT,
+      ref_id TEXT
+    );
+    CREATE INDEX idx_search_docs_bounds ON search_docs (lat, lng);
+    CREATE INDEX idx_search_docs_kind ON search_docs (kind);
+    CREATE VIRTUAL TABLE search_docs_fts USING fts5(
+      name, brand, category, street, city, housenumber,
+      content='search_docs', content_rowid='id',
+      tokenize='unicode61 remove_diacritics 2', prefix='2 3 4'
+    );
+  `);
+
   if (trigram) {
+    try {
+      db.exec(`
+        CREATE VIRTUAL TABLE search_docs_trigram USING fts5(
+          name,
+          street,
+          city,
+          content='search_docs',
+          content_rowid='id',
+          tokenize='trigram'
+        );
+      `);
+    } catch (err) {
+      process.stderr.write(`search_docs trigram unavailable: ${err.message}\n`);
+    }
     try {
       db.exec(`
         CREATE VIRTUAL TABLE geocoding_trigram USING fts5(
@@ -633,6 +717,39 @@ function run(db, args) {
     2,
   );
 
+  // The shipping query (src/services/search/searchIndex.ts): one index, kind
+  // filter, bbox, bm25 ordering then importance as the tie-break.
+  const unifiedPoiQuery = db.prepare(
+    `SELECT d.ref_id, d.name, bm25(search_docs_fts, 10.0, 8.0, 3.0, 6.0, 4.0, 5.0) AS fts_rank
+     FROM search_docs_fts
+     CROSS JOIN search_docs d ON d.id = search_docs_fts.rowid
+     WHERE search_docs_fts MATCH ?
+       AND d.kind IN ('poi')
+       AND d.lat BETWEEN ? AND ? AND d.lng BETWEEN ? AND ?
+     ORDER BY fts_rank, d.importance DESC
+     LIMIT 30`,
+  );
+  const unifiedAddressQuery = db.prepare(
+    `SELECT d.ref_id, d.name, bm25(search_docs_fts, 10.0, 8.0, 3.0, 6.0, 4.0, 5.0) AS fts_rank
+     FROM search_docs_fts
+     CROSS JOIN search_docs d ON d.id = search_docs_fts.rowid
+     WHERE search_docs_fts MATCH ?
+       AND d.kind IN ('address', 'street', 'locality', 'admin')
+     ORDER BY fts_rank, d.importance DESC
+     LIMIT 20`,
+  );
+
+  measurements.unified_poi_prefix = measure(
+    'unified_poi_prefix',
+    () => unifiedPoiQuery.all('"coff"*', BBOX.south, BBOX.north, BBOX.west, BBOX.east),
+    measurementIterations,
+  );
+  measurements.unified_address_prefix = measure(
+    'unified_address_prefix',
+    () => unifiedAddressQuery.all('"main"* "1"*'),
+    measurementIterations,
+  );
+
   return measurements;
 }
 
@@ -658,6 +775,7 @@ try {
   });
   seedPlaces(db, args.rows, rng);
   seedGeocoding(db, args.geocodingRows, rng);
+  seedUnifiedIndex(db);
 
   const measurements = run(db, args);
   const stats = statSync(dbPath);

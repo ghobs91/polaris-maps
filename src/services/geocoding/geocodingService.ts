@@ -4,6 +4,14 @@ import { nominatimThrottle } from '../search/requestThrottle';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import type { GeocodingEntry } from '../../models/geocoding';
 import type { OsmPoi } from '../poi/osmFetcher';
+import {
+  houseNumbersOnStreet,
+  searchDocs,
+  searchDocsFuzzy,
+  type BoundingBox,
+  type SearchDocHit,
+} from '../search/searchIndex';
+import { interpolateAddressPoint } from '../search/addressInterpolation';
 
 export interface GeocodingResult {
   entry: GeocodingEntry;
@@ -11,6 +19,9 @@ export interface GeocodingResult {
   /** Original POI data from unified search, if this result came from a POI. */
   poi?: OsmPoi;
 }
+
+/** Document kinds that answer an address query (POIs are searched separately). */
+const ADDRESS_KINDS: SearchDocHit['kind'][] = ['address', 'street', 'locality', 'admin'];
 
 export interface SearchAddressOptions {
   /** Abort a stale in-flight search (e.g. superseded by a newer keystroke). */
@@ -28,13 +39,15 @@ export async function searchAddress(
 ): Promise<GeocodingResult[]> {
   if (!query.trim()) return [];
 
-  // Try local DB first — gracefully fall through to Nominatim on any error
+  // Local index first — it is the primary path. Nominatim exists only to fill
+  // gaps where the downloaded packs have no coverage.
   const localResults = await searchAddressLocal(query, limit, lat, lng).catch(() => []);
   if (localResults.length > 0 || opts?.localOnly) return localResults;
   throwIfAborted(opts?.signal);
 
-  // Fall back to Nominatim online geocoding
-  return searchAddressNominatim(query, limit, lat, lng, opts?.signal);
+  // No local match: fall back to Nominatim, still rate-limited and abortable.
+  const remote = await searchAddressNominatim(query, limit, lat, lng, opts?.signal);
+  return remote;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,137 +98,169 @@ export function sortRowsByDistance<T extends { lat: number; lng: number }>(
   });
 }
 
-function rowToGeocodingResult(row: GeocodingRow, rank: number): GeocodingResult {
+async function searchGeocodingFuzzy(
+  query: string,
+  limit: number,
+  lat?: number,
+  lng?: number,
+  bbox?: BoundingBox,
+): Promise<GeocodingResult[]> {
+  const hits = await searchDocsFuzzy({
+    query,
+    kinds: ADDRESS_KINDS,
+    bbox,
+    limit,
+    anchor: lat != null && lng != null ? { lat, lng } : undefined,
+  }).catch(() => []);
+  return hits.map((hit, i) => docToGeocodingResult(hit, 100 + i));
+}
+
+/** Map a unified-index document onto the geocoding entry shape. */
+function docToGeocodingResult(hit: SearchDocHit, rank: number): GeocodingResult {
   return {
     entry: {
-      id: row.id,
-      text: formatEntry(row),
-      type: row.type as GeocodingEntry['type'],
-      housenumber: row.housenumber,
-      street: row.street,
-      city: row.city,
-      state: row.state,
-      postcode: row.postcode,
-      country: row.country,
-      lat: row.lat,
-      lng: row.lng,
+      id: hit.id,
+      text: formatDocText(hit),
+      type: kindToEntryType(hit.kind),
+      housenumber: hit.housenumber,
+      street: hit.street,
+      city: hit.city,
+      state: hit.state,
+      postcode: hit.postcode,
+      country: hit.country,
+      lat: hit.lat,
+      lng: hit.lng,
     },
     rank,
   };
 }
 
-const GEOCODING_SELECT = `SELECT g.id, g.type, g.housenumber, g.street, g.city, g.state,
-        g.postcode, g.country, g.lat, g.lng, e.rank`;
+function kindToEntryType(kind: SearchDocHit['kind']): GeocodingEntry['type'] {
+  switch (kind) {
+    case 'locality':
+      return 'city';
+    case 'admin':
+      return 'place';
+    case 'street':
+      return 'street';
+    case 'address':
+      return 'address';
+    default:
+      return 'place';
+  }
+}
 
-function buildStructuredFtsQuery(structured: StructuredAddressQuery): string | null {
-  const parts: string[] = [];
-  const token = (value: string) =>
-    value
-      .replace(/[^\p{L}\p{N} ]/gu, ' ')
-      .trim()
-      .split(/\s+/)
+function formatDocText(hit: SearchDocHit): string {
+  if (hit.kind === 'address' && hit.housenumber && hit.street) {
+    return [`${hit.housenumber} ${hit.street}`, hit.city, hit.state, hit.postcode]
       .filter(Boolean)
-      .map((t) => `"${t}"*`)
-      .join(' ');
-
-  if (structured.housenumber && structured.street) {
-    parts.push(`{housenumber}:${token(structured.housenumber)}`);
-    parts.push(`{street}:${token(structured.street)}`);
-  } else if (structured.street) {
-    parts.push(`{street}:${token(structured.street)}`);
+      .join(', ');
   }
-  if (structured.city) parts.push(`{city}:${token(structured.city)}`);
-  return parts.length > 0 ? parts.join(' ') : null;
+  return hit.name ?? hit.street ?? hit.city ?? '';
 }
 
-async function searchGeocodingTrigram(query: string, limit: number): Promise<GeocodingResult[]> {
-  const text = query
-    .replace(/[^\p{L}\p{N} ]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (text.length < 4) return [];
-
-  try {
-    const db = await getDatabase();
-    const rows = await db.getAllAsync<GeocodingRow>(
-      `SELECT g.id, g.type, g.housenumber, g.street, g.city, g.state, g.postcode, g.country,
-              g.lat, g.lng, 100 AS rank
-       FROM geocoding_trigram t
-       JOIN geocoding_data g ON g.id = t.rowid
-       WHERE geocoding_trigram MATCH ?
-       LIMIT ?`,
-      [`"${text}"`, limit],
-    );
-    return rows.map((row, i) => rowToGeocodingResult(row, 100 + i));
-  } catch {
-    return [];
-  }
-}
-
+/**
+ * Local address search — the only primary path. The unified index answers from
+ * the downloaded packs; Nominatim is a fallback for gaps, never the default.
+ */
 async function searchAddressLocal(
   query: string,
   limit: number,
   lat?: number,
   lng?: number,
+  bbox?: BoundingBox,
 ): Promise<GeocodingResult[]> {
-  const db = await getDatabase();
   const structured = classifyAddressQuery(query);
+  const anchor = lat != null && lng != null ? { lat, lng } : undefined;
 
-  // Structured query first: house number + street + city as FTS column
-  // filters, distance-ranked around the reference point.
-  if (structured.street && (structured.housenumber || structured.city)) {
-    const structuredFts = buildStructuredFtsQuery(structured);
-    if (structuredFts) {
-      try {
-        const rows = await db.getAllAsync<GeocodingRow>(
-          `${GEOCODING_SELECT}
-           FROM geocoding_entries e
-           JOIN geocoding_data g ON g.id = e.rowid
-           WHERE geocoding_entries MATCH ?
-           LIMIT 50`,
-          [structuredFts],
-        );
-        if (rows.length > 0) {
-          return sortRowsByDistance(rows, lat, lng)
-            .slice(0, limit)
-            .map((row, i) => rowToGeocodingResult(row, i));
-        }
-      } catch {
-        // Malformed structured query — fall through to free text.
-      }
+  // Structured query first: the parsed street/city become the match terms so
+  // "350 fifth avenue, new york" doesn't have to match punctuation.
+  const matchQuery =
+    structured.street && (structured.housenumber || structured.city)
+      ? [structured.housenumber, structured.street, structured.city].filter(Boolean).join(' ')
+      : query;
+
+  const hits = await searchDocs({
+    query: matchQuery,
+    kinds: ADDRESS_KINDS,
+    bbox,
+    anchor,
+    limit: Math.max(limit * 3, 30),
+  }).catch(() => []);
+
+  const results = hits.slice(0, limit).map((hit, i) => docToGeocodingResult(hit, i));
+
+  // Query-time interpolation: the exact number is missing from the pack, but
+  // its neighbours on the same street are known, so place it between them.
+  const interpolated = await interpolateMissingNumber(structured, bbox, lat, lng);
+  if (interpolated) {
+    const seen = new Set(results.map((r) => `${r.entry.housenumber}|${r.entry.street}`));
+    if (!seen.has(`${interpolated.entry.housenumber}|${interpolated.entry.street}`)) {
+      results.unshift(interpolated);
     }
   }
 
-  // FTS5 match query — add * for prefix matching
-  // Strip double-quotes to prevent FTS5 syntax injection
-  const ftsQuery = query
-    .trim()
-    .split(/\s+/)
-    .map((w) => `"${w.replace(/"/g, '')}"*`)
-    .join(' ');
+  if (results.length >= 3) return results.slice(0, limit);
+  const fuzzy = await searchGeocodingFuzzy(structured.street ?? query, limit, lat, lng, bbox);
+  const seenIds = new Set(results.map((r) => r.entry.id));
+  return [...results, ...fuzzy.filter((r) => !seenIds.has(r.entry.id))].slice(0, limit);
+}
 
-  if (!ftsQuery.replace(/["* ]/g, '')) return [];
+/**
+ * Interpolate an address whose house number is absent from the index.
+ *
+ * Returns null unless the query has a numeric house number and the street has
+ * at least two numbered points around it — a guess without both endpoints is
+ * worse than no result.
+ */
+async function interpolateMissingNumber(
+  structured: StructuredAddressQuery,
+  bbox?: BoundingBox,
+  lat?: number,
+  lng?: number,
+): Promise<GeocodingResult | null> {
+  if (!structured.housenumber || !structured.street) return null;
 
-  const rows = await db.getAllAsync<GeocodingRow>(
-    `${GEOCODING_SELECT}
-     FROM geocoding_entries e
-     JOIN geocoding_data g ON g.id = e.rowid
-     WHERE geocoding_entries MATCH ?
-     ORDER BY e.rank
-     LIMIT ?`,
-    [ftsQuery, Math.max(limit * 3, 30)],
+  const points = await houseNumbersOnStreet(structured.street, { bbox, limit: 400 }).catch(
+    () => [],
   );
+  if (points.length < 2) return null;
 
-  const primary = sortRowsByDistance(rows, lat, lng).slice(0, limit);
-  const results = primary.map((row, i) => rowToGeocodingResult(row, i));
+  const resolved = interpolateAddressPoint(structured.housenumber, points);
+  if (!resolved || resolved.exact) return null;
 
-  // Offline typo tolerance: when the primary query is thin, add trigram
-  // matches (lower-ranked) for misspelled street/locality names.
-  if (results.length >= 3) return results;
-  const trigramCandidate = structured.street ?? query;
-  const trigram = await searchGeocodingTrigram(trigramCandidate, limit).catch(() => []);
-  const seen = new Set(results.map((r) => r.entry.id));
-  return [...results, ...trigram.filter((r) => !seen.has(r.entry.id))].slice(0, limit);
+  // The synthetic point sits between real neighbours; keep it last among equals
+  // by reporting a negative rank so callers can also surface "approximate".
+  return {
+    entry: {
+      id: 0,
+      text: formatInterpolatedText(resolved, structured, points),
+      type: 'address',
+      housenumber: resolved.housenumber,
+      street: structured.street,
+      city: structured.city ?? null,
+      state: null,
+      postcode: null,
+      country: null,
+      lat: resolved.lat,
+      lng: resolved.lng,
+    },
+    rank: lat != null && lng != null ? 0 : -1,
+  };
+}
+
+function formatInterpolatedText(
+  resolved: ReturnType<typeof interpolateAddressPoint>,
+  structured: StructuredAddressQuery,
+  points: Array<{ housenumber: string }>,
+): string {
+  const address = [resolved!.housenumber, structured.street, structured.city]
+    .filter(Boolean)
+    .join(', ');
+  const lower = resolved!.lower.housenumber;
+  const upper = resolved!.upper.housenumber;
+  void points;
+  return `${address} (approx. between ${lower} and ${upper})`;
 }
 
 /** Client-side timeout for Nominatim requests (previously unbounded). */

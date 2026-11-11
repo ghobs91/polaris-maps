@@ -6,6 +6,7 @@ import { getOrCreateKeypair } from '../identity/keypair';
 import type { Place, PlaceCategory } from '../../models/poi';
 import { PLACE_CATEGORIES } from '../../models/poi';
 import { haversineMeters } from '../../utils/routeSnap';
+import { searchDocs } from '../search/searchIndex';
 
 export async function getPlaceById(uuid: string): Promise<Place | null> {
   const db = await getDatabase();
@@ -72,31 +73,16 @@ export interface PlaceSearchResult extends Place {
 }
 
 /** Map a raw SQLite bm25() value (negative, lower = better) to 0–1. */
-export function normalizeBm25(bm25: number): number {
-  return Math.max(0, Math.min(1, 0.5 + -bm25 / 40));
-}
+export { normalizeBm25 } from '../search/searchIndex';
 
 /**
- * Weighted FTS query used by {@link searchPlacesFts}.
+ * Place search over the unified index.
  *
- * `CROSS JOIN` is load-bearing, not stylistic: it pins the FTS virtual table as
- * the outer loop. With a plain `JOIN`, SQLite instead drives from `places`
- * through `idx_places_bounds (status, lat, lng)` and probes `places_fts` by
- * rowid for every row in the bbox — milliseconds become multiple seconds per
- * keystroke, growing with the prefix length (queries longer than the 4-char
- * prefix indexes can no longer use them). `pnpm search:bench` measures
- * ~2.5 s vs ~4 ms for the same query. Keep `CROSS JOIN`.
+ * `search_docs` is the single ranked index behind place *and* address search
+ * (see `search/searchIndex.ts`); `places` stays the detail store. Ranking
+ * happens once in the index, then the matching rows are hydrated by uuid so
+ * the caller still receives full `Place` records.
  */
-export const PLACES_FTS_SEARCH_SQL = `SELECT p.*, bm25(places_fts, 10.0, 6.0, 2.0, 1.0) AS fts_rank
-   FROM places_fts
-   CROSS JOIN places p ON p.rowid = places_fts.rowid
-   WHERE places_fts MATCH ?
-     AND p.lat BETWEEN ? AND ?
-     AND p.lng BETWEEN ? AND ?
-     AND p.status = 'open'
-   ORDER BY fts_rank
-   LIMIT ?`;
-
 export async function searchPlacesFts(
   query: string,
   south: number,
@@ -106,38 +92,40 @@ export async function searchPlacesFts(
   limit: number = 50,
 ): Promise<PlaceSearchResult[]> {
   if (!query.trim()) return [];
-  const db = await getDatabase();
 
-  // Build an FTS5 match query with prefix matching on each word
-  const ftsQuery = query
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 0)
-    .map((w) => `"${w.replace(/"/g, '')}"*`)
-    .join(' ');
+  const hits = await searchDocs({
+    query,
+    kinds: ['poi'],
+    bbox: { south, west, north, east },
+    limit,
+  });
 
-  if (!ftsQuery) return [];
-
-  try {
-    const rows = await db.getAllAsync<PlaceRow & { fts_rank: number }>(PLACES_FTS_SEARCH_SQL, [
-      ftsQuery,
-      south,
-      north,
-      west,
-      east,
-      limit,
-    ]);
-    if (rows.length > 0) {
-      return rows.map((row) => ({
-        ...rowToPlace(row),
-        ftsRelevance: normalizeBm25(row.fts_rank),
-      }));
+  if (hits.length > 0) {
+    const ranked = hits.filter((hit) => hit.refId);
+    const uuids = ranked.map((hit) => hit.refId as string);
+    try {
+      const db = await getDatabase();
+      const placeholders = uuids.map(() => '?').join(', ');
+      const rows = await db.getAllAsync<PlaceRow>(
+        `SELECT * FROM places WHERE uuid IN (${placeholders})`,
+        uuids,
+      );
+      const byUuid = new Map(rows.map((row) => [row.uuid as string, row]));
+      const relevance = new Map(ranked.map((hit) => [hit.refId as string, hit.relevance]));
+      return uuids
+        .map((uuid) => byUuid.get(uuid))
+        .filter((row): row is PlaceRow => row != null)
+        .map((row) => ({
+          ...rowToPlace(row),
+          ftsRelevance: relevance.get(row.uuid as string) ?? 0,
+        }));
+    } catch {
+      // Fall through to the LIKE path.
     }
-  } catch {
-    // FTS table may not be populated yet — fall through to LIKE
   }
 
   // Fallback: LIKE search with bbox filter
+  const db = await getDatabase();
   const rows = await db.getAllAsync<PlaceRow>(
     `SELECT * FROM places
      WHERE (name LIKE ? OR brand_name LIKE ?)

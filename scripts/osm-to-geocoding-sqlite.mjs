@@ -5,6 +5,14 @@
  * Parse an OSM PBF file and produce a geocoding SQLite database matching the
  * schema in src/services/database/init.ts (plus region_id column).
  *
+ * Address ranges mapped with `addr:interpolation` ways are expanded into
+ * `address_interpolated` rows so the on-device index can answer numbers OSM
+ * never mapped as nodes. Those points are linearly interpolated between the
+ * way's two endpoint addresses (the common case is a straight block); the app
+ * treats them as approximate and de-ranks them, and it also interpolates at
+ * query time for gaps this misses. Keep the range maths in sync with
+ * src/services/search/addressInterpolation.ts.
+ *
  * Usage: node scripts/osm-to-geocoding-sqlite.mjs <input.osm.pbf> <region_id>
  * Output: geocoding-data.sqlite in the current directory.
  *
@@ -73,6 +81,24 @@ let totalInserted = 0;
 const BATCH_SIZE = 5000;
 let batch = [];
 
+/** Address nodes by id, kept only so interpolation ways can resolve endpoints. */
+const addressNodes = new Map();
+/** `addr:interpolation` ways awaiting their endpoints' coordinates. */
+const interpolationWays = new Map();
+
+/** Numbers strictly between the endpoints, preserving the way's direction.
+ *  Mirrors `interpolateRange` in src/services/search/addressInterpolation.ts. */
+function interpolateRange(startNumber, endNumber, step, limit = 200) {
+  const lo = Math.min(startNumber, endNumber);
+  const hi = Math.max(startNumber, endNumber);
+  const out = [];
+  for (let n = lo + step; n < hi; n += step) {
+    out.push(n);
+    if (out.length >= limit) break;
+  }
+  return startNumber <= endNumber ? out : out.reverse();
+}
+
 function flushBatch() {
   if (batch.length === 0) return;
   const tx = db.transaction((rows) => {
@@ -115,6 +141,24 @@ function processItem(item) {
   const tags = item.tags || {};
   let lat, lng;
 
+  // Interpolation ways are resolved after the stream: their endpoint nodes may
+  // not have been visited yet, and ways carry no coordinates of their own.
+  if (item.type === 'way' && tags['addr:interpolation'] && item.refs?.length >= 2) {
+    const mode = String(tags['addr:interpolation']).toLowerCase();
+    if (mode !== 'alphabetic') {
+      interpolationWays.set(item.id, {
+        refs: [item.refs[0], item.refs[item.refs.length - 1]],
+        mode,
+        street: tags['addr:street'] || null,
+        city: tags['addr:city'] || null,
+        state: tags['addr:state'] || null,
+        postcode: tags['addr:postcode'] || null,
+        country: tags['addr:country'] || null,
+      });
+    }
+    return;
+  }
+
   if (item.lat != null && item.lon != null) {
     lat = item.lat;
     lng = item.lon;
@@ -133,6 +177,10 @@ function processItem(item) {
   const postcode = tags['addr:postcode'] || null;
   const country = tags['addr:country'] || null;
   const name = tags['name'] || null;
+
+  if (housenumber) {
+    addressNodes.set(item.id, { housenumber, lat, lng });
+  }
 
   if (housenumber && street) {
     // Address entry
@@ -192,6 +240,50 @@ await new Promise((resolve, reject) => {
     .on('error', reject);
 });
 
+// Expand `addr:interpolation` ranges now that every endpoint is known.
+let interpolatedCount = 0;
+for (const way of interpolationWays.values()) {
+  const [startId, endId] = way.refs;
+  const start = addressNodes.get(startId);
+  const end = addressNodes.get(endId);
+  if (!start || !end) continue;
+
+  const startNumber = Number.parseInt(start.housenumber, 10);
+  const endNumber = Number.parseInt(end.housenumber, 10);
+  if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber)) continue;
+
+  const step = way.mode === 'all' ? 1 : 2;
+  const numbers = interpolateRange(startNumber, endNumber, step);
+  if (numbers.length === 0) continue;
+
+  const span = endNumber - startNumber;
+  const street = way.street || null;
+  const city = way.city || null;
+
+  for (const number of numbers) {
+    const t = (number - startNumber) / span;
+    const lat = start.lat + (end.lat - start.lat) * t;
+    const lng = start.lng + (end.lng - start.lng) * t;
+    const housenumber = String(number);
+    batch.push({
+      text: [housenumber, street, city].filter(Boolean).join(', '),
+      type: 'address_interpolated',
+      housenumber,
+      street,
+      city,
+      state: way.state,
+      postcode: way.postcode,
+      country: way.country,
+      lat,
+      lng,
+      regionId,
+    });
+    interpolatedCount += 1;
+  }
+
+  if (batch.length >= BATCH_SIZE) flushBatch();
+}
+
 // Flush remaining
 flushBatch();
 
@@ -200,4 +292,7 @@ console.log('Rebuilding FTS5 index …');
 db.exec("INSERT INTO geocoding_entries(geocoding_entries) VALUES('rebuild')");
 
 db.close();
-console.log(`Done — ${totalInserted.toLocaleString()} rows written to ${OUTPUT_PATH}`);
+console.log(
+  `Done — ${totalInserted.toLocaleString()} rows written to ${OUTPUT_PATH} ` +
+    `(${interpolatedCount.toLocaleString()} interpolated addresses)`,
+);
