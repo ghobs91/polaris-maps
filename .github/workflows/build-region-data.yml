@@ -351,6 +351,35 @@ jobs:
             fi
           done
 
+      # Optional: mirror this region's assets to the secondary pack origins
+      # (Cloudflare R2, Backblaze B2, Internet Archive). GitHub Releases stays
+      # the primary origin and the only required one — enable by setting the
+      # POLARIS_PACK_MIRRORS repository variable to 'true' and configuring the
+      # rclone remotes as secrets (see scripts/publish-region-mirrors.sh).
+      - name: Mirror assets to secondary origins
+        if: ${{ vars.POLARIS_PACK_MIRRORS == 'true' }}
+        env:
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          RCLONE_CONFIG_B2_TYPE: b2
+          RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.B2_ACCOUNT_ID }}
+          RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          IA_ITEM: ${{ secrets.IA_ITEM }}
+          RCLONE_CONFIG_IA_TYPE: internetarchive
+          RCLONE_CONFIG_IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+          TAG="map-data-$(date +%Y-%m)"
+          # --dry-run keeps the step green when no origin is configured yet.
+          bash scripts/publish-region-mirrors.sh "$TAG" "work/${{ matrix.id }}" || \
+            echo "::warning::No pack mirror origin configured; GitHub Releases remains the only origin."
+
       - name: Upload build artifacts (for debugging)
         if: failure()
         uses: actions/upload-artifact@v4

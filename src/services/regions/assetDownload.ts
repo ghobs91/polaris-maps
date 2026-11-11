@@ -54,6 +54,16 @@ export interface ResumableDownloadOptions {
   sources: string[];
   headers?: Record<string, string>;
   onProgress?: (progress: DownloadProgress) => void;
+  /**
+   * Integrity check run against the freshly transferred file. Throwing rejects
+   * the source (no retry) and moves the transfer to the next mirror — which is
+   * what makes a third-party origin safe to trust: a mirror that serves the
+   * wrong bytes is demoted by the caller's health record, not silently used.
+   */
+  verify?: (path: string) => Promise<void>;
+  /** Report per-source outcomes so the caller can rank mirrors for later
+   *  transfers. Called once per source, after it succeeds or is abandoned. */
+  onSourceSettled?: (source: string, outcome: 'success' | 'failure') => void;
   signal?: AbortSignal;
   maxAttemptsPerSource?: number;
   /** Injectable filesystem adapter (defaults to expo-file-system/legacy). */
@@ -250,7 +260,24 @@ export async function downloadResumable(
           throw Object.assign(new Error(`HTTP ${status} from ${source}`), { status });
         }
 
+        if (options.verify) {
+          try {
+            await options.verify(options.destPath);
+          } catch (verifyError) {
+            // Wrong bytes: never retry this source, and never keep the file.
+            await fs.deleteAsync(options.destPath, { idempotent: true }).catch(() => {});
+            await fs.deleteAsync(sidecar, { idempotent: true }).catch(() => {});
+            throw Object.assign(
+              verifyError instanceof Error
+                ? verifyError
+                : new Error(`integrity check failed for ${source}`),
+              { permanent: true },
+            );
+          }
+        }
+
         await fs.deleteAsync(sidecar, { idempotent: true }).catch(() => {});
+        options.onSourceSettled?.(source, 'success');
         return { path: options.destPath, source, bytes: transferred, skipped: false };
       } catch (error) {
         lastError = error;
@@ -267,6 +294,8 @@ export async function downloadResumable(
           }
         }
 
+        if ((error as { permanent?: boolean }).permanent) break;
+
         const status = (error as { status?: number }).status;
         const message = error instanceof Error ? error.message : String(error);
         if (!isRetryableFailure(status, message)) {
@@ -277,6 +306,7 @@ export async function downloadResumable(
         }
       }
     }
+    options.onSourceSettled?.(source, 'failure');
   }
 
   throw lastError instanceof Error

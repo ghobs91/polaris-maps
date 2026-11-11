@@ -14,6 +14,12 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { extractTar } from '../../utils/archiveExtract';
 import { REGION_DATA_REPO } from '../../constants/config';
+import { buildSourceList, downloadResumable } from '../regions/assetDownload';
+import {
+  orderMirrorSources,
+  recordMirrorFailure,
+  recordMirrorSuccess,
+} from '../regions/mirrorHealth';
 import {
   REGION_CATALOG,
   boundsIntersect,
@@ -32,6 +38,23 @@ const RELEASE_TAG_PREFIX = 'map-data-';
 
 /** Cached latest `map-data-*` release tag; `undefined` until first lookup. */
 let cachedReleaseTag: string | null | undefined;
+
+/**
+ * Multi-origin metadata from the catalog, resolved lazily.
+ *
+ * `catalogService` pulls in MMKV (and through it expo-crypto), and this module
+ * is imported by the region downloader on paths that never touch the catalog.
+ * Requiring it at call time keeps that dependency out of their module graph.
+ */
+function catalogAssetOrigins(): { tag: string | null; baseUrls: string[] } {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('../regions/catalogService') as typeof import('../regions/catalogService');
+    return mod.getCatalogAssetOrigins();
+  } catch {
+    return { tag: null, baseUrls: [] };
+  }
+}
 
 /** Strip the `file://` scheme — the native engine and node sidecar need raw paths. */
 function toNativePath(uri: string): string {
@@ -55,9 +78,17 @@ async function exists(uri: string): Promise<boolean> {
   }
 }
 
-/** Latest `map-data-*` release tag, or null when unreachable/disabled. */
+/** Latest `map-data-*` release tag, or null when unreachable/disabled.
+ *
+ * The catalog stamps the tag its asset URLs were published under, so the
+ * mirrors stay usable even when the GitHub API is rate-limited or down. The API
+ * is only consulted for catalogs published before `assetTag` existed. */
 async function getLatestRoutingReleaseTag(): Promise<string | null> {
   if (cachedReleaseTag !== undefined) return cachedReleaseTag;
+
+  const catalogTag = catalogAssetOrigins().tag;
+  if (catalogTag) return (cachedReleaseTag = catalogTag);
+
   if (!REGION_DATA_REPO) return (cachedReleaseTag = null);
 
   try {
@@ -80,6 +111,26 @@ async function getLatestRoutingReleaseTag(): Promise<string | null> {
   } catch {
     return (cachedReleaseTag = null);
   }
+}
+
+/**
+ * Origins for a routing tarball, in load-distributed order.
+ *
+ * The tarball is published as a release asset, so it lives beside the packs on
+ * every mirror: GitHub Releases (primary) plus whatever `assetBaseUrls` the
+ * catalog advertises (R2 / B2 / Internet Archive). Rotation and failure
+ * cooldowns are shared with the pack downloader.
+ */
+function routingTarballSources(catalogId: string, tag: string): string[] {
+  const asset = `${catalogId}-routing.tar`;
+  const githubBase = REGION_DATA_REPO
+    ? `https://github.com/${REGION_DATA_REPO}/releases/download`
+    : null;
+  const bases = [githubBase, ...catalogAssetOrigins().baseUrls].filter(
+    (base): base is string => !!base,
+  );
+  const urls = bases.map((base) => `${base.replace(/\/+$/, '')}/${tag}/${asset}`);
+  return orderMirrorSources(buildSourceList(null, urls));
 }
 
 /** Catalog entries intersecting a region download, most specific (smallest) first. */
@@ -105,7 +156,6 @@ export async function downloadRoutingGraph(
   const tag = await getLatestRoutingReleaseTag();
   if (!tag) return false;
 
-  const url = `https://github.com/${REGION_DATA_REPO}/releases/download/${tag}/${catalogId}-routing.tar`;
   const tarUri = `${FileSystem.cacheDirectory}routing-${catalogId}.tar`;
   const tmpUri = `${sharedRootUri()}.tmp-${catalogId}/`;
 
@@ -114,13 +164,24 @@ export async function downloadRoutingGraph(
     await FileSystem.deleteAsync(tarUri, { idempotent: true }).catch(() => {});
     await FileSystem.deleteAsync(tmpUri, { idempotent: true }).catch(() => {});
 
-    const download = FileSystem.createDownloadResumable(url, tarUri, {}, (progress) => {
-      const total = progress.totalBytesExpectedToWrite ?? 0;
-      const written = progress.totalBytesWritten ?? 0;
-      onProgress?.(written, total, total > 0 ? Math.round((written / total) * 100) : 0);
+    await downloadResumable({
+      destPath: tarUri,
+      sources: routingTarballSources(catalogId, tag),
+      signal,
+      onSourceSettled: (source, outcome) => {
+        if (outcome === 'success') recordMirrorSuccess(source);
+        else recordMirrorFailure(source);
+      },
+      onProgress: (progress) => {
+        const total = progress.totalBytes ?? 0;
+        onProgress?.(
+          progress.bytesWritten,
+          total,
+          total > 0 ? Math.round((progress.bytesWritten / total) * 100) : 0,
+        );
+      },
     });
-    const result = await download.downloadAsync();
-    if (!result || signal?.aborted) return false;
+    if (signal?.aborted) return false;
 
     // Extract to a temp dir and move into place, so an interrupted extraction
     // never leaves a half-populated graph that later reads as installed.

@@ -166,7 +166,7 @@ describe('update-region-asset-urls.mjs', () => {
     expect(published.regions.map((region) => region.id)).toEqual(['us-ny-new-york']);
   });
 
-  it('publishes the app catalog shape (regions, version, updated_at)', () => {
+  it('publishes the app catalog shape (regions, version, updated_at + origins)', () => {
     execFileSync(
       process.execPath,
       [SCRIPT, '--tag', 'map-data-2026-01', '--catalog', catalogPath, '--out', join(dir, 'c.json')],
@@ -176,8 +176,87 @@ describe('update-region-asset-urls.mjs', () => {
       string,
       unknown
     >;
-    expect(Object.keys(published).sort()).toEqual(['regions', 'updated_at', 'version']);
+    expect(Object.keys(published).sort()).toEqual([
+      'assetBaseUrls',
+      'assetTag',
+      'regions',
+      'updated_at',
+      'version',
+    ]);
     expect((published.regions as unknown[]).length).toBe(2);
+    // The tag travels with the catalog so mirrors work without a GitHub API call.
+    expect(published.assetTag).toBe('map-data-2026-01');
+    expect(published.assetBaseUrls).toEqual([
+      'https://github.com/ghobs91/polaris-maps/releases/download',
+    ]);
+  });
+
+  it('stamps every mirror onto each asset and records the origin list', () => {
+    execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        '--tag',
+        'map-data-2026-01',
+        '--catalog',
+        catalogPath,
+        '--out',
+        join(dir, 'c-mirrors.json'),
+        '--mirror',
+        'r2=https://packs.example-r2.dev',
+        '--mirror',
+        'b2=https://packs.s3.us-west-004.backblazeb2.com',
+        '--mirror',
+        'ia=https://archive.org/download/polaris-packs',
+      ],
+      { stdio: 'pipe' },
+    );
+
+    const published = JSON.parse(readFileSync(join(dir, 'c-mirrors.json'), 'utf8')) as {
+      assetBaseUrls: string[];
+      regions: Array<{ assets: Array<{ name: string; url: string; mirrors?: string[] }> }>;
+    };
+
+    expect(published.assetBaseUrls).toEqual([
+      'https://github.com/ghobs91/polaris-maps/releases/download',
+      'https://packs.example-r2.dev',
+      'https://packs.s3.us-west-004.backblazeb2.com',
+      'https://archive.org/download/polaris-packs',
+    ]);
+
+    const tiles = published.regions[0]!.assets.find((a) => a.name === 'tiles.pmtiles')!;
+    expect(tiles.url).toContain('github.com/ghobs91/polaris-maps/releases/download');
+    expect(tiles.mirrors).toEqual([
+      'https://packs.example-r2.dev/map-data-2026-01/us-ny-new-york-tiles.pmtiles',
+      'https://packs.s3.us-west-004.backblazeb2.com/map-data-2026-01/us-ny-new-york-tiles.pmtiles',
+      'https://archive.org/download/polaris-packs/map-data-2026-01/us-ny-new-york-tiles.pmtiles',
+    ]);
+  });
+
+  it('accepts the comma-separated --mirrors form for backwards compatibility', () => {
+    execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        '--tag',
+        't1',
+        '--catalog',
+        catalogPath,
+        '--out',
+        join(dir, 'c-compat.json'),
+        '--mirrors',
+        'https://a.example.org/,https://b.example.org',
+      ],
+      { stdio: 'pipe' },
+    );
+    const published = JSON.parse(readFileSync(join(dir, 'c-compat.json'), 'utf8')) as {
+      assetBaseUrls: string[];
+    };
+    expect(published.assetBaseUrls).toEqual([
+      'https://github.com/ghobs91/polaris-maps/releases/download',
+      'https://a.example.org',
+      'https://b.example.org',
+    ]);
   });
 
   it('honours a custom base origin and does not rewrite the file on --dry-run', () => {

@@ -28,6 +28,55 @@ The regions service enables fully offline map usage by downloading region packs 
 | `regionManifestGossip.ts`    | Peer-to-peer manifest discovery over Gun.js — publish/subscribe at `polaris/region-manifests/<regionId>/<publisherPubkey>`, verify-before-merge, relay, and bounded MMKV persistence.                                                                                                                                    |
 | `regionRepository.ts`        | SQLite CRUD for the `regions` table — get all, get by ID, spatial point lookup (`getRegionForPoint`), upsert, and filter by download status.                                                                                                                                                                             |
 | `connectivityService.ts`     | Monitors network connectivity via `@react-native-community/netinfo`. Derives connection quality (good/poor/none) and exposes `isOnline()` for the rest of the app.                                                                                                                                                       |
+| `mirrorSelector.ts`          | Pure multi-origin policy: origin rotation for load distribution, failure cooldowns, and health pruning. Unit tested without touching MMKV or the network.                                                                                                                                                                |
+| `mirrorHealth.ts`            | Persists mirror health + the rotation counter in MMKV (in-memory fallback), and applies `mirrorSelector` to each asset's source list.                                                                                                                                                                                    |
+
+## Pack origins (multi-tier CDN)
+
+Packs and routing graphs are published to **four interchangeable origins**. No
+origin is required beyond GitHub Releases; each additional one adds redundancy
+and takes a share of the download load.
+
+| Tier | Origin           | Role                                                   |
+| ---- | ---------------- | ------------------------------------------------------ |
+| 1    | GitHub Releases  | Primary; where CI publishes and the catalog is stamped |
+| 2    | Cloudflare R2    | Redundancy + load; zero egress                         |
+| 3    | Backblaze B2     | Redundancy + load                                      |
+| 4    | Internet Archive | Redundancy + archival                                  |
+
+Two pieces make them interchangeable rather than "primary plus fallbacks":
+
+- **Load distribution** (`mirrorSelector.ts`) — the catalog's primary URL and
+  its `mirrors` are rotated by a persisted counter, so clients start on
+  different origins instead of every first byte hitting GitHub. An origin that
+  fails goes into an exponential cooldown (`mirrorHealth.ts`, MMKV-persisted)
+  and is pushed to the back rather than being retried first on every asset.
+- **Integrity** — each transfer is verified against the catalog's `md5` before
+  it is expanded (`downloadResumable({ verify })`). A mirror that serves the
+  wrong bytes is deleted and demoted, so a cheap third-party origin is only ever
+  trusted for availability, never for correctness.
+
+The catalog carries `assetBaseUrls` (every origin) and `assetTag` (the release
+the URLs were stamped from), which is what lets the routing-graph downloader
+resolve `<origin>/<tag>/<region>-routing.tar` against any mirror — and without a
+GitHub API call for the current tag.
+
+Publication:
+
+```bash
+# Stamp the catalog with every origin (repeatable, optionally labelled):
+node scripts/update-region-asset-urls.mjs --tag map-data-2026-01 --out catalog.json \
+  --mirror r2=https://packs.example-r2.dev \
+  --mirror b2=https://packs.s3.us-west-004.backblazeb2.com \
+  --mirror ia=https://archive.org/download/polaris-packs
+
+# Mirror a built region's assets (`--dry-run` prints the plan):
+scripts/publish-region-mirrors.sh map-data-2026-01 work/us-ny-new-york
+```
+
+In CI the mirror step is opt-in: set the `POLARIS_PACK_MIRRORS` repository
+variable to `true` and configure the rclone remotes as secrets. With nothing
+configured, the job warns and GitHub Releases remains the only origin.
 
 ## Pack search indices (optional)
 

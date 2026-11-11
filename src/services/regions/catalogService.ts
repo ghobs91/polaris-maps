@@ -22,6 +22,15 @@ interface CatalogManifest {
   regions: CatalogEntry[];
   /** Verified remote region-pack manifests, merged over the bundled set. */
   manifests?: RegionManifest[];
+  /** Release tag the asset URLs were stamped from, when published. */
+  assetTag?: string;
+  /**
+   * Origins serving `<base>/<assetTag>/<assetName>` — the pack CDN, as a list.
+   * GitHub Releases is first; Cloudflare R2, Backblaze B2 and the Internet
+   * Archive follow. The downloader rotates between them and verifies each
+   * transfer against the catalog's checksum.
+   */
+  assetBaseUrls?: string[];
 }
 
 interface CatalogEntry {
@@ -138,6 +147,34 @@ export function getCatalogIds(): string[] {
     return manifest.regions.map((r) => r.id);
   } catch {
     return [];
+  }
+}
+
+export interface CatalogAssetOrigins {
+  /** Release tag the catalog's asset URLs were stamped from (null when absent). */
+  tag: string | null;
+  /** Base URLs serving `<base>/<tag>/<assetName>`, primary first. */
+  baseUrls: string[];
+}
+
+/**
+ * Multi-origin publication metadata from the cached catalog.
+ *
+ * Lets the routing-graph downloader resolve a tarball against every mirror
+ * (GitHub, R2, B2, Internet Archive) instead of hard-coding the GitHub
+ * Releases path, and without a GitHub API round trip for the current tag.
+ */
+export function getCatalogAssetOrigins(): CatalogAssetOrigins {
+  const cached = storage.getString(MMKV_CATALOG_KEY);
+  if (!cached) return { tag: null, baseUrls: [] };
+  try {
+    const manifest = JSON.parse(cached) as CatalogManifest;
+    const baseUrls = (manifest.assetBaseUrls ?? [])
+      .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+      .map((url) => url.trim().replace(/\/+$/, ''));
+    return { tag: manifest.assetTag ?? null, baseUrls };
+  } catch {
+    return { tag: null, baseUrls: [] };
   }
 }
 

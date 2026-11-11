@@ -317,3 +317,78 @@ describe('localAssetState', () => {
     expect(state.has('transit.sqlite')).toBe(false);
   });
 });
+
+describe('downloadResumable integrity + mirror reporting', () => {
+  it('moves to the next mirror when the checksum does not match', async () => {
+    const { fs, calls, deleted } = makeFs([{ bytes: 1024 }, { bytes: 1024 }]);
+    const verified: string[] = [];
+
+    const result = await downloadResumable({
+      destPath: '/r/tiles.pmtiles',
+      sources: ['https://primary/tiles.pmtiles', 'https://mirror/tiles.pmtiles'],
+      fs,
+      sleep: noSleep,
+      verify: async () => {
+        verified.push('check');
+        // First origin serves the wrong bytes.
+        if (verified.length === 1) throw new Error('checksum mismatch');
+      },
+    });
+
+    expect(result.source).toBe('https://mirror/tiles.pmtiles');
+    expect(verified).toHaveLength(2);
+    // The rejected file was removed instead of being kept or expanded.
+    expect(deleted).toContain('/r/tiles.pmtiles');
+    expect(calls.map((c) => c.uri)).toEqual([
+      'https://primary/tiles.pmtiles',
+      'https://mirror/tiles.pmtiles',
+    ]);
+  });
+
+  it('does not retry the same source after an integrity failure', async () => {
+    const { fs, calls } = makeFs([{ bytes: 10 }, { bytes: 10 }]);
+    await downloadResumable({
+      destPath: '/r/tiles.pmtiles',
+      sources: ['https://primary/tiles.pmtiles', 'https://mirror/tiles.pmtiles'],
+      fs,
+      sleep: noSleep,
+      verify: async () => {
+        if (calls.length === 1) throw new Error('checksum mismatch');
+      },
+    });
+    // One attempt against the bad origin, one against the good one.
+    expect(calls).toHaveLength(2);
+  });
+
+  it('reports a success only for the source that served the bytes', async () => {
+    const { fs } = makeFs([{ bytes: 10 }]);
+    const settled: Array<[string, string]> = [];
+    await downloadResumable({
+      destPath: '/r/a.gz',
+      sources: ['https://a/a.gz'],
+      fs,
+      sleep: noSleep,
+      onSourceSettled: (source, outcome) => settled.push([source, outcome]),
+    });
+    expect(settled).toEqual([['https://a/a.gz', 'success']]);
+  });
+
+  it('reports a failure for each abandoned source', async () => {
+    const { fs } = makeFs([
+      { error: Object.assign(new Error('HTTP 404'), { status: 404 }) },
+      { bytes: 10 },
+    ]);
+    const settled: Array<[string, string]> = [];
+    await downloadResumable({
+      destPath: '/r/a.gz',
+      sources: ['https://dead/a.gz', 'https://alive/a.gz'],
+      fs,
+      sleep: noSleep,
+      onSourceSettled: (source, outcome) => settled.push([source, outcome]),
+    });
+    expect(settled).toEqual([
+      ['https://dead/a.gz', 'failure'],
+      ['https://alive/a.gz', 'success'],
+    ]);
+  });
+});

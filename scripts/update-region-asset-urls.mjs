@@ -41,6 +41,8 @@ const DEFAULT_CATALOG = 'scripts/regions.json';
 
 function parseArgs(argv) {
   const args = { base: DEFAULT_BASE, catalog: DEFAULT_CATALOG, dryRun: false };
+  args.mirrorBases = [];
+  args.mirrors = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') args.dryRun = true;
@@ -51,8 +53,23 @@ function parseArgs(argv) {
     else if (arg === '--out') args.out = argv[++i];
     else if (arg === '--assets') args.assets = argv[++i];
     else if (arg === '--checksums') args.checksums = argv[++i];
-    else if (arg === '--mirrors') args.mirrors = argv[++i];
-    else throw new Error(`unknown argument: ${arg}`);
+    else if (arg === '--mirrors') {
+      // Backwards compatible: a comma-separated list of base URLs.
+      for (const base of String(argv[++i]).split(',')) {
+        const trimmed = base.trim();
+        if (trimmed) args.mirrorBases.push(trimmed);
+      }
+    } else if (arg === '--mirror') {
+      // Repeatable, optionally labelled: --mirror r2=https://...
+      const spec = String(argv[++i]).trim();
+      const eq = spec.indexOf('=');
+      const name = eq === -1 ? `mirror-${args.mirrorBases.length + 1}` : spec.slice(0, eq);
+      const base = eq === -1 ? spec : spec.slice(eq + 1);
+      if (base.trim()) {
+        args.mirrorBases.push(base.trim());
+        args.mirrors.push({ name, base: base.trim() });
+      }
+    } else throw new Error(`unknown argument: ${arg}`);
   }
   if (!args.tag) throw new Error('--tag is required (e.g. map-data-2026-01)');
   return args;
@@ -85,6 +102,9 @@ export function assetName(regionId, asset) {
  */
 export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, mirrors = [] }) {
   const prefix = `${base.replace(/\/+$/, '')}/${tag}`;
+  // Mirrors follow the same `<origin>/<tag>/<asset>` layout as the primary, so
+  // a base is an origin only — never a prefix that already carries the tag.
+  const mirrorPrefixes = mirrors.map((mirror) => `${String(mirror).replace(/\/+$/, '')}/${tag}`);
   const regions = (catalog.regions ?? catalog.include ?? []).map((region) => {
     const size = sizes[region.id] ?? {};
     const searchName = assetName(region.id, 'search.sqlite');
@@ -112,7 +132,7 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
         `${prefix}/${tilesName}`,
         size.tilesSizeBytes,
         checksums,
-        mirrors,
+        mirrorPrefixes,
       ),
       assetEntry(
         'search.sqlite',
@@ -120,7 +140,7 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
         `${prefix}/${searchName}`,
         size.searchIndexSizeBytes,
         checksums,
-        mirrors,
+        mirrorPrefixes,
       ),
       assetEntry(
         'transit.sqlite',
@@ -128,7 +148,7 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
         `${prefix}/${transitName}`,
         size.transitIndexSizeBytes,
         checksums,
-        mirrors,
+        mirrorPrefixes,
       ),
     ];
     return stamped;
@@ -147,17 +167,24 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
  * `assets` (asset names present in the release) filters out regions whose pack
  * was not built, so a partial run cannot advertise a pack that 404s.
  */
-export function toPublishedCatalog(stamped, assets = null) {
+export function toPublishedCatalog(stamped, assets = null, { tag = null, baseUrls = [] } = {}) {
   let regions = stamped.regions ?? stamped.include ?? [];
   if (assets) {
     const present = new Set(assets);
     regions = regions.filter((region) => present.has(`${region.id}-routing.tar`));
   }
-  return {
+  const catalog = {
     version: '1',
     updated_at: new Date().toISOString(),
     regions,
   };
+  // Multi-origin publication metadata. `assetBaseUrls` lets the client build a
+  // URL for any release asset (including the routing tarballs, which are not
+  // listed in the per-asset manifest) against every origin, and `assetTag`
+  // means it can do so without asking the GitHub API for the current tag.
+  if (tag) catalog.assetTag = tag;
+  if (baseUrls.length > 0) catalog.assetBaseUrls = baseUrls;
+  return catalog;
 }
 
 function main() {
@@ -165,14 +192,10 @@ function main() {
   const catalogPath = resolve(args.catalog);
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
   const sizes = args.sizes ? JSON.parse(readFileSync(resolve(args.sizes), 'utf8')) : {};
-  const checksums = args.checksums
-    ? JSON.parse(readFileSync(resolve(args.checksums), 'utf8'))
-    : {};
-  const mirrors = args.mirrors ? args.mirrors.split(',').map((m) => m.trim()).filter(Boolean) : [];
+  const checksums = args.checksums ? JSON.parse(readFileSync(resolve(args.checksums), 'utf8')) : {};
+  const mirrors = args.mirrorBases;
 
-  const assets = args.assets
-    ? JSON.parse(readFileSync(resolve(args.assets), 'utf8'))
-    : null;
+  const assets = args.assets ? JSON.parse(readFileSync(resolve(args.assets), 'utf8')) : null;
   const stamped = stampCatalog(catalog, {
     tag: args.tag,
     base: args.base,
@@ -180,7 +203,10 @@ function main() {
     checksums,
     mirrors,
   });
-  const updated = args.out ? toPublishedCatalog(stamped, assets) : stamped;
+  const baseUrls = [args.base, ...mirrors].map((base) => String(base).replace(/\/+$/, ''));
+  const updated = args.out
+    ? toPublishedCatalog(stamped, assets, { tag: args.tag, baseUrls })
+    : stamped;
   const serialised = `${JSON.stringify(updated, null, 2)}\n`;
 
   if (args.dryRun) {

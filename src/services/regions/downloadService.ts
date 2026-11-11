@@ -36,6 +36,7 @@ import {
   localAssetState,
   planAssetDownloads,
 } from './assetDownload';
+import { orderMirrorSources, recordMirrorFailure, recordMirrorSuccess } from './mirrorHealth';
 import type { RegionAsset } from '../../models/region';
 import { isFeatureEnabled } from '../config/remoteConfig';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
@@ -547,6 +548,45 @@ async function downloadViaHttp(
 const TILES_PMTILES = 'tiles.pmtiles';
 
 /**
+ * Order an asset's origins for one transfer.
+ *
+ * The pack is served by GitHub Releases, Cloudflare R2, Backblaze B2 and the
+ * Internet Archive. Rotation spreads first attempts across all four instead of
+ * funnelling every client at the primary, and origins that recently failed are
+ * pushed to the back so their timeout is not paid again.
+ */
+function orderedSourcesFor(asset: RegionAsset): string[] {
+  return orderMirrorSources(buildSourceList(asset.url, asset.mirrors ?? []));
+}
+
+/**
+ * Checksum verification for a transferred asset.
+ *
+ * The catalog's `md5` describes the published file (the `.gz` for gzipped
+ * assets), so this runs against the transfer target before any expansion. A
+ * mirror that serves the wrong bytes is rejected and demoted rather than
+ * expanded into the region directory.
+ */
+function verifierFor(asset: RegionAsset): ((path: string) => Promise<void>) | undefined {
+  if (!asset.md5) return undefined;
+  const expected = asset.md5.toLowerCase();
+  return async (path: string) => {
+    const info = await FileSystem.getInfoAsync(path, { md5: true });
+    const actual = (info as { md5?: string }).md5?.toLowerCase();
+    if (!actual || actual !== expected) {
+      throw new Error(
+        `checksum mismatch for ${asset.name} (expected ${expected}, got ${actual ?? 'none'})`,
+      );
+    }
+  };
+}
+
+function reportSourceOutcome(source: string, outcome: 'success' | 'failure'): void {
+  if (outcome === 'success') recordMirrorSuccess(source);
+  else recordMirrorFailure(source);
+}
+
+/**
  * Highest zoom expanded out of the pack archive.
  *
  * The render path serves one file per tile, so this bounds both the file count
@@ -579,13 +619,15 @@ async function downloadAndUnpackTilesArchive(
   });
 
   const archivePath = `${destDir}${TILES_PMTILES}`;
-  const sources = buildSourceList(asset.url, asset.mirrors ?? []);
+  const sources = orderedSourcesFor(asset);
   const startedAt = Date.now();
 
   await downloadResumable({
     destPath: archivePath,
     sources,
     signal,
+    verify: verifierFor(asset),
+    onSourceSettled: reportSourceOutcome,
     onProgress: (p) => {
       onProgress?.({
         regionId: region.id,
@@ -782,13 +824,15 @@ async function fetchPackAsset(
   }
 
   const tempPath = asset.gzip ? `${finalPath}.gz` : finalPath;
-  const sources = buildSourceList(asset.url, asset.mirrors ?? []);
+  const sources = orderedSourcesFor(asset);
   const startedAt = Date.now();
 
   await downloadResumable({
     destPath: tempPath,
     sources,
     signal,
+    verify: verifierFor(asset),
+    onSourceSettled: reportSourceOutcome,
     onProgress: (p) => {
       onProgress?.({
         regionId: region.id,
