@@ -7,3 +7,4 @@ export { CurrentRoadPill } from './CurrentRoadPill';
 export { LaneGuidance } from './LaneGuidance';
 export { IncidentReportPanel } from './IncidentReportPanel';
 export { FasterRouteBanner } from './FasterRouteBanner';
+export { RoutingTierBadge } from './RoutingTierBadge';

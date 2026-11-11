@@ -22,6 +22,16 @@ export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liber
 /** OpenFreeMap TileJSON endpoint for the planet vector tile source. */
 export const OPENFREEMAP_TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
 
+/**
+ * OSRM base URL — tier 2 of the routing cascade, used only when the on-device
+ * Valhalla engine cannot answer. Defaults to the public OSRM demo server; point
+ * `EXPO_PUBLIC_OSRM_BASE_URL` at a self-hosted instance for production volume
+ * (the demo server is rate-limited and driving-only, so other profiles fail
+ * over to tier 3 on their own).
+ */
+export const OSRM_BASE_URL: string =
+  process.env.EXPO_PUBLIC_OSRM_BASE_URL ?? 'https://router.project-osrm.org';
+
 /** TomTom Traffic Flow API base URL (bounded cold-start bridge only). */
 export const TOMTOM_FLOW_BASE_URL =
   'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute';

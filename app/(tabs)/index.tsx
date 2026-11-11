@@ -12,6 +12,7 @@ import { FloatingMenuPanel } from '@/components/map/FloatingMenuPanel';
 import { POIInfoCard } from '@/components/map/POIInfoCard';
 import { StreetViewThumbOverlay } from '@/components/map/StreetViewThumbOverlay';
 import { TrafficCoverageBadge } from '@/components/map/TrafficCoverageBadge';
+import { RoutingTierBadge } from '@/components/navigation/RoutingTierBadge';
 import { TransitStopCard } from '@/components/map/TransitStopCard';
 import { useMapStore } from '@/stores/mapStore';
 import { useNavigationStore } from '@/stores/navigationStore';
@@ -218,6 +219,8 @@ export default function MapScreen() {
               ]}
             >
               <TrafficCoverageBadge />
+              <View style={styles.devBadgeSpacer} />
+              <RoutingTierBadge />
             </View>
           ) : null}
 
@@ -265,6 +268,8 @@ export default function MapScreen() {
             style={[styles.coverageBadgeMount, { top: insets.top + spacing.sm, left: spacing.md }]}
           >
             <TrafficCoverageBadge />
+            <View style={styles.devBadgeSpacer} />
+            <RoutingTierBadge />
           </View>
         ) : null}
         <StreetViewThumbOverlay bottom={streetViewBottom} left={spacing.md} />
@@ -319,4 +324,5 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 15,
   },
+  devBadgeSpacer: { height: 6 },
 });

@@ -1,6 +1,7 @@
 import * as Valhalla from '../../native/valhalla';
 import * as MapKitRouting from '../../native/mapkit';
-import { isOnline, getConnectionQuality } from '../regions/connectivityService';
+import { computeOsrmRoute, isOsrmSupported } from './osrmClient';
+import { isOnline } from '../regions/connectivityService';
 import { Platform } from 'react-native';
 import { decodePolyline, encodePolyline } from '../../utils/polyline';
 import type {
@@ -16,6 +17,60 @@ let initialized = false;
 
 /** Native path of the currently loaded graph, or null when none is loaded. */
 let initializedPath: string | null = null;
+
+/**
+ * Routing tiers, in the order they are attempted.
+ *
+ * 1. `on-device` — the bundled Valhalla engine over a downloaded region graph.
+ * 2. `osrm` — the (online) OSRM server, when Valhalla cannot answer.
+ * 3. `mapkit` / `fossgis` — Apple MapKit `MKDirections` and the public
+ *    FOSSGIS Valhalla instances, both network-backed last resorts.
+ */
+export type RoutingTier = 'on-device' | 'osrm' | 'mapkit' | 'fossgis';
+
+/** Terminal state when every tier failed (nothing was computed). */
+export type RoutingTierStatus = RoutingTier | 'unavailable';
+
+export interface RoutingTierState {
+  /** Tier that produced the most recent successful route. */
+  tier: RoutingTierStatus;
+  /** Epoch ms of that computation. */
+  at: number;
+  /** True whenever the answer did not come from the on-device engine. */
+  degraded: boolean;
+}
+
+/**
+ * Last tier used to compute a route. Kept as a tiny observable (not a Zustand
+ * store) because routing is a service-level concern shared by the map, the
+ * navigation screen and CarPlay — none of which own this state.
+ */
+let tierState: RoutingTierState | null = null;
+const tierListeners = new Set<() => void>();
+
+export function getRoutingTierState(): RoutingTierState | null {
+  return tierState;
+}
+
+/** Stable snapshot for `useSyncExternalStore` (object identity only changes
+ *  when the tier actually changes). */
+export function subscribeRoutingTier(listener: () => void): () => void {
+  tierListeners.add(listener);
+  return () => {
+    tierListeners.delete(listener);
+  };
+}
+
+function recordRoutingTier(tier: RoutingTierStatus): void {
+  tierState = { tier, at: Date.now(), degraded: tier !== 'on-device' };
+  for (const listener of tierListeners) listener();
+}
+
+/** Reset for tests and for a full routing dispose. */
+export function resetRoutingTier(): void {
+  tierState = null;
+  for (const listener of tierListeners) listener();
+}
 
 /** Public Valhalla API endpoints hosted by FOSSGIS/OpenStreetMap.
  *  valhalla1 and valhalla2 resolve to different IPs for hardware redundancy. */
@@ -563,6 +618,140 @@ export function getInitializedPath(): string | null {
   return initializedPath;
 }
 
+/** Options shared by the whole cascade. `originHeading` is only honoured by
+ *  the network tiers: the bundled Valhalla build cannot take a start bearing. */
+type RouteCascadeOptions = {
+  avoidTolls?: boolean;
+  avoidHighways?: boolean;
+  avoidFerries?: boolean;
+  alternates?: number;
+  originHeading?: number;
+};
+
+interface CascadeContext {
+  /** Present for a reroute: enables the native single-destination fast path and
+   *  the MapKit reroute shape (both take a bearing). */
+  reroute?: {
+    currentPosition: { lat: number; lng: number; bearing: number };
+    destination: { lat: number; lng: number };
+  };
+}
+
+function describeFailure(err: unknown): string {
+  if (err instanceof Error) return err.name === 'AbortError' ? 'timed out' : err.message;
+  return String(err);
+}
+
+/**
+ * Run the routing cascade in tier order and return the first tier that answers.
+ *
+ * 1. on-device Valhalla
+ * 2. OSRM
+ * 3. MapKit `MKDirections`, then the FOSSGIS public Valhalla instances
+ *
+ * Every tier failure is absorbed so a degraded network cannot turn one slow
+ * endpoint into a dead navigation session; only "all tiers failed" throws.
+ */
+async function runRouteCascade(
+  waypoints: Array<{ lat: number; lng: number }>,
+  costing: CostingModel,
+  options?: RouteCascadeOptions,
+  ctx: CascadeContext = {},
+): Promise<ValhallaRoute[]> {
+  const failures: string[] = [];
+
+  // ── Tier 1 — on-device Valhalla ──────────────────────────────────────────
+  if (initialized) {
+    try {
+      const routes =
+        ctx.reroute && waypoints.length === 2
+          ? [await Valhalla.reroute(ctx.reroute.currentPosition, ctx.reroute.destination, costing)]
+          : await Valhalla.computeRoute(waypoints, costing, {
+              avoidTolls: options?.avoidTolls,
+              avoidHighways: options?.avoidHighways,
+              avoidFerries: options?.avoidFerries,
+              alternates: options?.alternates,
+            });
+      if (routes.length > 0) {
+        recordRoutingTier('on-device');
+        return routes;
+      }
+      failures.push('on-device Valhalla: no route in coverage');
+    } catch (err) {
+      failures.push(`on-device Valhalla: ${describeFailure(err)}`);
+    }
+  } else {
+    failures.push('on-device Valhalla: no region graph loaded');
+  }
+
+  // ── Tier 2 — OSRM ────────────────────────────────────────────────────────
+  if (!isOnline()) {
+    failures.push('OSRM: offline');
+  } else if (!isOsrmSupported(costing)) {
+    failures.push(`OSRM: no "${costing}" profile`);
+  } else {
+    try {
+      const routes = await computeOsrmRoute(waypoints, costing, {
+        alternates: options?.alternates,
+        originHeading: options?.originHeading,
+      });
+      if (routes.length > 0) {
+        recordRoutingTier('osrm');
+        return routes;
+      }
+      failures.push('OSRM: no route');
+    } catch (err) {
+      failures.push(`OSRM: ${describeFailure(err)}`);
+    }
+  }
+
+  // ── Tier 3 — Apple MapKit, then FOSSGIS public Valhalla ──────────────────
+  if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+    try {
+      const routes = ctx.reroute
+        ? [
+            await mapKitRerouteOrCompute(
+              waypoints,
+              ctx.reroute.currentPosition,
+              ctx.reroute.destination,
+              costing,
+            ),
+          ]
+        : await MapKitRouting.computeRoute(waypoints, costing);
+      if (routes.length > 0) {
+        recordRoutingTier('mapkit');
+        return routes;
+      }
+      failures.push('MapKit: no route');
+    } catch (err) {
+      failures.push(`MapKit: ${describeFailure(err)}`);
+    }
+  } else if (Platform.OS !== 'ios') {
+    failures.push('MapKit: iOS only');
+  }
+
+  if (isOnline()) {
+    try {
+      const routes = await computeRouteOnline(waypoints, costing, options);
+      if (routes.length > 0) {
+        recordRoutingTier('fossgis');
+        return routes;
+      }
+      failures.push('FOSSGIS Valhalla: no route');
+    } catch (err) {
+      failures.push(`FOSSGIS Valhalla: ${describeFailure(err)}`);
+    }
+  } else {
+    failures.push('FOSSGIS Valhalla: offline');
+  }
+
+  recordRoutingTier('unavailable');
+  if (!initialized && !isOnline()) {
+    throw new Error('No offline routing data and no internet connection.');
+  }
+  throw new Error(`Every routing tier failed.\n${failures.join('\n')}`);
+}
+
 export async function computeRoute(
   waypoints: Array<{ lat: number; lng: number }>,
   costing: CostingModel,
@@ -573,68 +762,7 @@ export async function computeRoute(
     alternates?: number;
   },
 ): Promise<ValhallaRoute[]> {
-  if (initialized) {
-    try {
-      return await Valhalla.computeRoute(waypoints, costing, options);
-    } catch (nativeErr) {
-      // Native engine failed (e.g. route outside tile coverage).
-      // Fall back to online Valhalla if connected.
-      if (isOnline()) {
-        try {
-          return await computeRouteOnline(waypoints, costing, options);
-        } catch {
-          // Online also failed — try MapKit as last resort (iOS only)
-          if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
-            try {
-              return await MapKitRouting.computeRoute(waypoints, costing);
-            } catch {
-              throw nativeErr;
-            }
-          }
-          throw nativeErr;
-        }
-      }
-      // Offline and native failed — try MapKit as last resort
-      if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
-        try {
-          return await MapKitRouting.computeRoute(waypoints, costing);
-        } catch {
-          throw nativeErr;
-        }
-      }
-      throw nativeErr;
-    }
-  }
-  // Local tiles not loaded — fall back to online Valhalla if connected
-  if (!isOnline()) {
-    // No internet and no offline tiles — try MapKit as last resort
-    if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
-      return MapKitRouting.computeRoute(waypoints, costing);
-    }
-    throw new Error('No offline routing data and no internet connection.');
-  }
-  try {
-    return await computeRouteOnline(waypoints, costing, options);
-  } catch (onlineErr) {
-    // Online failed — try native engine as a last resort (it may still work
-    // if tiles were loaded in a previous session or by another code path).
-    if (initialized) {
-      try {
-        return await Valhalla.computeRoute(waypoints, costing, options);
-      } catch {
-        // Native also failed — try MapKit
-        if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
-          return MapKitRouting.computeRoute(waypoints, costing);
-        }
-        throw onlineErr;
-      }
-    }
-    // Try MapKit as final fallback
-    if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
-      return MapKitRouting.computeRoute(waypoints, costing);
-    }
-    throw onlineErr;
-  }
+  return runRouteCascade(waypoints, costing, options);
 }
 
 export interface RerouteOptions {
@@ -676,114 +804,33 @@ export async function reroute(
 ): Promise<ValhallaRoute> {
   const via = options?.via ?? [];
   const waypoints = [{ lat: currentPosition.lat, lng: currentPosition.lng }, ...via, destination];
-  const routeOpts = {
-    avoidTolls: options?.avoidTolls,
-    avoidHighways: options?.avoidHighways,
-    avoidFerries: options?.avoidFerries,
-    originHeading: options?.heading,
-  };
 
-  // When a GPS course is known and the connection is good, prefer the
-  // heading-aware online engine first: the native fast-path drops `heading`,
-  // producing U-turn-heavy routes that immediately read as off-route again.
-  // On a weak/no link this would stall ~8s before falling back, so local
-  // routing wins whenever quality is not 'good'.
-  if (
-    initialized &&
-    options?.heading != null &&
-    isOnline() &&
-    getConnectionQuality() === 'good' &&
-    via.length === 0
-  ) {
-    try {
-      const routes = await computeRouteOnline(waypoints, costing, routeOpts);
-      if (routes.length) return routes[0];
-    } catch {
-      // Fall through to native fast-path below.
-    }
-  }
+  // Same tier order as a fresh route: on-device first, then OSRM, then the
+  // network-backed last resorts. `heading` only reaches the network tiers —
+  // the bundled Valhalla build cannot take a start bearing — so an on-device
+  // reroute may still pick the wrong direction at a stop; the next fix is
+  // normally enough to snap back.
+  const routes = await runRouteCascade(
+    waypoints,
+    costing,
+    {
+      avoidTolls: options?.avoidTolls,
+      avoidHighways: options?.avoidHighways,
+      avoidFerries: options?.avoidFerries,
+      originHeading: options?.heading,
+    },
+    { reroute: { currentPosition, destination } },
+  );
 
-  if (initialized) {
-    try {
-      if (via.length > 0) {
-        // Native reroute is single-destination only — route through the
-        // remaining stops so they aren't silently dropped on deviation.
-        const routes = await Valhalla.computeRoute(waypoints, costing, routeOpts);
-        if (!routes.length) throw new Error('No route found');
-        return routes[0];
-      }
-      return await Valhalla.reroute(currentPosition, destination, costing);
-    } catch (nativeErr) {
-      // Native reroute failed — try online as fallback
-      if (isOnline()) {
-        try {
-          const routes = await computeRouteOnline(waypoints, costing, routeOpts);
-          if (!routes.length) throw nativeErr;
-          return routes[0];
-        } catch {
-          // Online also failed — try MapKit as last resort
-          try {
-            return await mapKitRerouteOrCompute(waypoints, currentPosition, destination, costing);
-          } catch {
-            throw nativeErr;
-          }
-        }
-      }
-      // Offline and native failed — try MapKit as last resort
-      try {
-        return await mapKitRerouteOrCompute(waypoints, currentPosition, destination, costing);
-      } catch {
-        throw nativeErr;
-      }
-    }
-  }
-
-  if (!isOnline()) {
-    // No internet and no offline tiles — try MapKit as last resort
-    try {
-      return await mapKitRerouteOrCompute(waypoints, currentPosition, destination, costing);
-    } catch {
-      throw new Error('No offline routing data and no internet connection.');
-    }
-  }
-  try {
-    const routes = await computeRouteOnline(waypoints, costing, routeOpts);
-    if (!routes.length) throw new Error('No route found');
-    return routes[0];
-  } catch (onlineErr) {
-    // Online reroute failed — try native engine as a last resort
-    if (initialized) {
-      try {
-        if (via.length > 0) {
-          const routes = await Valhalla.computeRoute(waypoints, costing, routeOpts);
-          if (!routes.length) throw onlineErr;
-          return routes[0];
-        }
-        return await Valhalla.reroute(currentPosition, destination, costing);
-      } catch {
-        // Native also failed — try MapKit
-        try {
-          return await mapKitRerouteOrCompute(waypoints, currentPosition, destination, costing);
-        } catch {
-          throw onlineErr;
-        }
-      }
-    }
-    // Try MapKit as final fallback
-    try {
-      return await mapKitRerouteOrCompute(waypoints, currentPosition, destination, costing);
-    } catch {
-      throw onlineErr;
-    }
-  }
+  if (!routes.length) throw new Error('No route found');
+  return routes[0];
 }
 
 /**
  * Compute candidate reroutes from the current position, returning the primary
  * plus any engine alternatives. The faster-route monitor compares these against
- * the active route; alternatives are only requested on the online engine (which
- * supports both alternates and an origin heading). With via points, or offline,
- * it degrades to the single route that `reroute()` would return.
+ * the active route. Alternatives are requested from whichever tier answers;
+ * MapKit returns a single route, so a tier-3 reroute degrades to one candidate.
  */
 export async function rerouteCandidates(
   currentPosition: { lat: number; lng: number; bearing: number },
@@ -794,29 +841,22 @@ export async function rerouteCandidates(
   const via = options?.via ?? [];
   const alternates = options?.alternates ?? 0;
 
-  // Alternates are only supported on the online multi-point engine; the native
-  // fast-path and MapKit return a single route, and Valhalla does not combine
-  // alternates with via points.
-  if (alternates > 0 && via.length === 0 && isOnline()) {
-    try {
-      const routes = await computeRouteOnline(
-        [{ lat: currentPosition.lat, lng: currentPosition.lng }, destination],
-        costing,
-        {
-          avoidTolls: options?.avoidTolls,
-          avoidHighways: options?.avoidHighways,
-          avoidFerries: options?.avoidFerries,
-          originHeading: options?.heading,
-          alternates,
-        },
-      );
-      if (routes.length) return routes;
-    } catch {
-      // Fall through to the single-route path.
-    }
-  }
+  const routes = await runRouteCascade(
+    [{ lat: currentPosition.lat, lng: currentPosition.lng }, ...via, destination],
+    costing,
+    {
+      avoidTolls: options?.avoidTolls,
+      avoidHighways: options?.avoidHighways,
+      avoidFerries: options?.avoidFerries,
+      originHeading: options?.heading,
+      // Valhalla does not combine alternates with via points; OSRM does.
+      alternates: via.length === 0 ? alternates : 0,
+    },
+    { reroute: { currentPosition, destination } },
+  );
 
-  return [await reroute(currentPosition, destination, costing, options)];
+  if (!routes.length) throw new Error('No route found');
+  return routes;
 }
 
 export async function updateTrafficSpeeds(speeds: Record<string, number>): Promise<void> {

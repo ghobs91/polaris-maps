@@ -8,6 +8,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MapView, NAVIGATION_PUCK_SCREEN_FRACTION } from '@/components/map/MapView';
 import type { MapViewHandle } from '@/components/map/MapView';
 import { NextTurnBanner, NavigationHud, FasterRouteBanner } from '@/components/navigation';
+import { RoutingTierBadge } from '@/components/navigation/RoutingTierBadge';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import { IncidentAheadBanner } from '@/components/navigation/IncidentAheadBanner';
@@ -95,6 +96,7 @@ export default function NavigationScreen() {
   const streetViewSession = useStreetViewCaptureStore((s) => s.session);
   const dashRecording = useDashCamStore((s) => s.recording);
   const dashCamEnabled = useSettingsStore((s) => s.dashCam.enabled);
+  const devMode = useSettingsStore((s) => s.devMode);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const capturing = Boolean(streetViewSession) || dashRecording;
   // Landscape + a live capture replaces the map with the directions/camera split.
@@ -843,6 +845,7 @@ export default function NavigationScreen() {
         )}
         <FasterRouteBanner />
         <IncidentAheadBanner />
+        {devMode ? <RoutingTierBadge /> : null}
 
         {alternateRoutes.length > 0 && (
           <View style={styles.alternateRow}>
