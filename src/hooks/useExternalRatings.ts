@@ -27,10 +27,12 @@ import { browseScheduler } from '../services/poi/externalRatings/antiBot';
 import {
   getCachedListing,
   hydrateListingCache,
+  removeCachedListing,
   setCachedListing,
   type ListingOrigin,
 } from '../services/poi/externalRatings/listingCache';
 import {
+  namesMatch,
   parsePageVerdict,
   setCachedExternalRating,
   validateExternalRating,
@@ -45,9 +47,17 @@ import type {
   ExternalRatingProviderId,
   ExternalRatingQuery,
   ExternalRatingSummary,
+  RatingSearchCandidate,
 } from '../services/poi/externalRatings/types';
 
-export const STAGE_TIMEOUT_MS = 8_000;
+/**
+ * The clock must cover the page load itself plus the collector's retry window
+ * (~7.2 s after load). The injected collector only starts once the document has
+ * finished loading, and DataDome-protected JS apps routinely take 4–7 s to load
+ * in the hidden WebView — tighter clocks cut their verdicts off before they
+ * were posted, turning every slow page into a silent retryable timeout.
+ */
+export const STAGE_TIMEOUT_MS = 15_000;
 
 /**
  * Whole-pipeline budget for a single provider, armed the first time that
@@ -124,10 +134,25 @@ export interface ExternalRatingProviderState {
   blockedUntil: number | null;
   /** Why the lookup is paused: a provider block or the app's own pacing. */
   blockReason: 'blocked' | 'paced' | null;
+  /**
+   * How the failure settled, when `status` is `'failed'`: `'verdict'` means the
+   * provider answered "no rating here" (remembered for the session), `'retry'`
+   * means a transient failure (timeout, network, pacing) worth a fresh attempt
+   * on the next card open. The UI must not read a transient failure as
+   * "no ratings yet".
+   */
+  failedKind: 'verdict' | 'retry' | null;
 }
 
 interface InternalState extends ExternalRatingProviderState {
   origin: Origin;
+  /**
+   * Name-matching candidates left to try, current listing first. Filled by the
+   * search stage; consumed when the listing stage rejects a candidate on
+   * identity (a same-named listing elsewhere), so the next candidate gets a
+   * turn instead of the whole provider failing.
+   */
+  candidates: RatingSearchCandidate[];
 }
 
 export interface UseExternalRatingsResult {
@@ -145,6 +170,8 @@ function blankState(provider: ExternalRatingProviderId): InternalState {
     listingUrl: null,
     blockedUntil: null,
     blockReason: null,
+    failedKind: null,
+    candidates: [],
     origin: 'website',
   };
 }
@@ -247,7 +274,7 @@ export function useExternalRatings(
         log(id, 'failed — retryable (nothing learned; will re-attempt on reopen)');
       }
       clearBudget(id);
-      update(id, { status: 'failed', webView: null });
+      update(id, { status: 'failed', failedKind: kind, webView: null });
     },
     [clearBudget, update],
   );
@@ -275,6 +302,7 @@ export function useExternalRatings(
         // stale stage timeout wipe a loaded row.
         const current = statesRef.current.find((s) => s.provider === id);
         if (current?.status === 'loaded') return;
+        log(id, 'stage timeout', current?.webView?.uri ?? current?.listingUrl ?? '');
         fail(id, 'retry');
       }, STAGE_TIMEOUT_MS);
     },
@@ -474,14 +502,17 @@ export function useExternalRatings(
 
         const candidates = candidatesFromSearchMessage(provider, data);
         const chosen = selectSearchCandidate(candidates, q);
+        // Full candidate list: diagnosing a wrong first pick (a same-named
+        // listing elsewhere) needs to see what else the search returned.
         log(
           id,
           'search results',
           candidates.length,
+          candidates.map((c) => ({ name: c.name, url: c.url })),
           chosen
             ? {
+                chosen: chosen.url,
                 name: chosen.name,
-                url: chosen.url,
                 hasRating: chosen.rating != null,
                 hasGeo: !!chosen.geo,
                 hasAddress: !!chosen.address,
@@ -536,10 +567,21 @@ export function useExternalRatings(
           }
         }
 
-        // Remember the listing this search confirmed so the next visit skips
-        // the search page entirely.
+        // Nothing is cached yet: a search candidate is only name-matched, and
+        // a same-named listing elsewhere must not be remembered as this
+        // place's listing. The cache is written after the listing stage (or
+        // the inline card) confirms identity below.
         clearTimer(id);
-        setCachedListing(id, placeRatingKey(q), chosen.url, 'search');
+
+        // Queue the remaining name-matching candidates: if the listing stage
+        // rejects this one on identity, the next candidate gets a turn instead
+        // of the whole provider failing.
+        const queue = [
+          chosen,
+          ...candidates.filter(
+            (c) => c.url !== chosen.url && !!c.name && namesMatch(c.name, q.name),
+          ),
+        ];
 
         // Browser-only providers go straight to the listing: a plain fetch of
         // them is a guaranteed 403 and only adds a bot signature.
@@ -550,6 +592,7 @@ export function useExternalRatings(
             status: 'loading',
             listingUrl: chosen.url,
             origin: 'search',
+            candidates: queue,
             webView: {
               provider: id,
               uri: chosen.url,
@@ -559,7 +602,6 @@ export function useExternalRatings(
           });
           return;
         }
-
         // Fetch-first is opt-in (`supportsPlainFetch`); no current provider sets
         // it. Identity would be re-confirmed from the listing's own
         // address/`geo`, so a sibling chain branch would still be rejected even
@@ -568,6 +610,7 @@ export function useExternalRatings(
           status: 'loading',
           listingUrl: chosen.url,
           origin: 'search',
+          candidates: queue,
           webView: null,
         });
         void (async () => {
@@ -644,7 +687,32 @@ export function useExternalRatings(
             listingAddress: raw.listingAddress,
             hasGeo: !!raw.geo,
           });
-          fail(id, 'verdict');
+          // The search picked a same-named listing elsewhere. Nothing was
+          // learned about THIS place — forget the candidate, evict any cached
+          // mapping to it (a pre-confirmation cache could otherwise keep
+          // short-circuiting every open), and let the next candidate try.
+          removeCachedListing(id, placeRatingKey(q));
+          const next = current.candidates.find(
+            (c) => c.url !== current.listingUrl && !!c.name && namesMatch(c.name, q.name),
+          );
+          if (next) {
+            log(id, 'trying next candidate', next.url);
+            armTimeout(id);
+            update(id, {
+              status: 'loading',
+              listingUrl: next.url,
+              origin: 'search',
+              candidates: current.candidates.filter((c) => c.url !== next.url),
+              webView: {
+                provider: id,
+                uri: next.url,
+                injectedJavaScript: provider.listingJs,
+                stage: 'listing',
+              },
+            });
+            return;
+          }
+          fail(id, 'retry');
           return;
         }
       }
@@ -662,6 +730,12 @@ export function useExternalRatings(
         return;
       }
       setCachedExternalRating(id, listingUrl, summary);
+      // Identity is confirmed at this point (for a search-derived listing the
+      // match above ran first), so this is the safe moment to remember the
+      // listing for future opens.
+      if (current.origin === 'search') {
+        setCachedListing(id, placeRatingKey(q), listingUrl, 'search');
+      }
       clearTimer(id);
       clearBudget(id);
       log(id, 'loaded', summary.rating, summary.reviewCount, listingUrl);
@@ -695,7 +769,7 @@ export function useExternalRatings(
   const publicStates = useMemo<ExternalRatingProviderState[]>(
     () =>
       states.map(
-        ({ provider, status, summary, webView, listingUrl, blockedUntil, blockReason }) => ({
+        ({
           provider,
           status,
           summary,
@@ -703,6 +777,16 @@ export function useExternalRatings(
           listingUrl,
           blockedUntil,
           blockReason,
+          failedKind,
+        }) => ({
+          provider,
+          status,
+          summary,
+          webView,
+          listingUrl,
+          blockedUntil,
+          blockReason,
+          failedKind,
         }),
       ),
     [states],

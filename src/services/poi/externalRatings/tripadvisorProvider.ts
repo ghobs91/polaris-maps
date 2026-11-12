@@ -368,10 +368,18 @@ export function parseTripadvisorSearchResults(
   return out;
 }
 
-/** Build a TripAdvisor search URL for a place name + address. */
-export function buildTripadvisorSearchUrl(name: string, address: string | null): string {
-  const query = [name, address].filter(Boolean).join(' ');
-  return `https://www.tripadvisor.com/Search?q=${encodeURIComponent(query)}`;
+/**
+ * Build a TripAdvisor search URL.
+ *
+ * Name only, deliberately: appending the street address made TripAdvisor rank
+ * a same-named listing in another country above the local one (verified on
+ * device: "Your Mother's House … 2349 Jericho Tpke" surfaced the Willemstad,
+ * Curaçao restaurant first and no local candidate at all). The name-only
+ * search surfaces same-named candidates; the listing stage's identity check
+ * (name + geo/address) rejects the wrong branches.
+ */
+export function buildTripadvisorSearchUrl(name: string, _address: string | null): string {
+  return `https://www.tripadvisor.com/Search?q=${encodeURIComponent(name)}`;
 }
 
 /** The TripAdvisor provider adapter. */

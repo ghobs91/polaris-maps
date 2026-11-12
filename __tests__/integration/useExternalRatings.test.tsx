@@ -18,7 +18,10 @@ import {
   useExternalRatings,
 } from '../../src/hooks/useExternalRatings';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
-import { clearListingCache } from '../../src/services/poi/externalRatings/listingCache';
+import {
+  clearListingCache,
+  getCachedListing,
+} from '../../src/services/poi/externalRatings/listingCache';
 import {
   clearSessionPlaceRatings,
   isExternalRatingMiss,
@@ -377,5 +380,141 @@ describe('useExternalRatings timeout lifecycle (regression)', () => {
 
     expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.status).toBe('failed');
     expect(isExternalRatingMiss(missKey('tripadvisor'))).toBe(true);
+  });
+
+  describe('search-derived listing identity', () => {
+    const WRONG_LISTING =
+      'https://www.tripadvisor.com/Restaurant_Review-g147278-d19289317-Reviews-Other_Town.html';
+    const RIGHT_LISTING =
+      'https://www.tripadvisor.com/Restaurant_Review-g60763-d25723381-Reviews-New_York_City.html';
+    const NEAR_GEO = { lat: 40.7501, lng: -73.9901 };
+    const FAR_GEO = { lat: 12.1, lng: -68.9 };
+
+    const mismatchedPayload = JSON.stringify({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.8,
+      ldCount: 4,
+      ldName: "Your Mother's House Restaurant",
+      ldAddress: 'Van Krimpenlaan 8',
+      geo: FAR_GEO,
+      automation: [],
+      challenge: false,
+    });
+
+    const confirmedPayload = JSON.stringify({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.8,
+      ldCount: 214,
+      ldName: "Your Mother's House Restaurant",
+      ldAddress: '2349 Jericho Tpke',
+      geo: NEAR_GEO,
+      automation: [],
+      challenge: false,
+    });
+
+    const QUERY_ALIKE: ExternalRatingQuery = { ...QUERY, name: "Your Mother's House" };
+
+    it('advances to the next name-matched candidate when a listing fails identity', async () => {
+      mockResolveKnownListing.mockResolvedValue(null);
+      const search = JSON.stringify({
+        type: 'rating-search',
+        provider: 'tripadvisor',
+        candidates: [
+          { url: WRONG_LISTING, name: "Your Mother's House Restaurant", address: null, geo: null },
+          { url: RIGHT_LISTING, name: "Your Mother's House Restaurant", address: null, geo: null },
+        ],
+      });
+
+      const { result } = renderHook(() => useExternalRatings(QUERY_ALIKE, 'place-1'));
+      await act(async () => {
+        await flush();
+      });
+
+      act(() => {
+        result.current.handleMessage('tripadvisor', search);
+      });
+      expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.webView?.uri).toBe(
+        WRONG_LISTING,
+      );
+
+      // The listing page answers with a far-away geo: a same-named listing
+      // elsewhere. The next candidate must get a turn, not a verdict.
+      act(() => {
+        result.current.handleMessage('tripadvisor', mismatchedPayload);
+      });
+      expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.webView?.uri).toBe(
+        RIGHT_LISTING,
+      );
+      expect(isExternalRatingMiss(missKey('tripadvisor'))).toBe(false);
+
+      act(() => {
+        result.current.handleMessage('tripadvisor', confirmedPayload);
+      });
+      expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.status).toBe(
+        'loaded',
+      );
+    });
+
+    it('never caches a search candidate before identity is confirmed', async () => {
+      mockResolveKnownListing.mockResolvedValue(null);
+      const search = JSON.stringify({
+        type: 'rating-search',
+        provider: 'tripadvisor',
+        candidates: [{ url: WRONG_LISTING, name: "Your Mother's House Restaurant" }],
+      });
+
+      const { result } = renderHook(() => useExternalRatings(QUERY_ALIKE, 'place-1'));
+      await act(async () => {
+        await flush();
+      });
+
+      act(() => {
+        result.current.handleMessage('tripadvisor', search);
+      });
+      // The old bug: the chosen URL was cached the moment the search stage
+      // picked it, so a same-named listing elsewhere poisoned every future
+      // open of the place for a week.
+      expect(getCachedListing('tripadvisor', placeRatingKey(QUERY_ALIKE))).toBeNull();
+
+      act(() => {
+        result.current.handleMessage('tripadvisor', mismatchedPayload);
+      });
+      // No remaining candidate: retryable, nothing remembered as a verdict.
+      expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.status).toBe(
+        'failed',
+      );
+      expect(isExternalRatingMiss(missKey('tripadvisor'))).toBe(false);
+      expect(getCachedListing('tripadvisor', placeRatingKey(QUERY_ALIKE))).toBeNull();
+    });
+
+    it('caches the listing only after the listing stage confirms identity', async () => {
+      mockResolveKnownListing.mockResolvedValue(null);
+      const search = JSON.stringify({
+        type: 'rating-search',
+        provider: 'tripadvisor',
+        candidates: [{ url: RIGHT_LISTING, name: "Your Mother's House Restaurant" }],
+      });
+
+      const { result } = renderHook(() => useExternalRatings(QUERY_ALIKE, 'place-1'));
+      await act(async () => {
+        await flush();
+      });
+
+      act(() => {
+        result.current.handleMessage('tripadvisor', search);
+      });
+      act(() => {
+        result.current.handleMessage('tripadvisor', confirmedPayload);
+      });
+      expect(result.current.states.find((s) => s.provider === 'tripadvisor')?.status).toBe(
+        'loaded',
+      );
+      expect(getCachedListing('tripadvisor', placeRatingKey(QUERY_ALIKE))).toMatchObject({
+        url: RIGHT_LISTING,
+        origin: 'search',
+      });
+    });
   });
 });
