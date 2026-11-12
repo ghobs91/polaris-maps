@@ -105,6 +105,77 @@ let _now = () => Date.now();
 /** Serialises requests: at most one Overpass request in flight app-wide. */
 let _serial: Promise<unknown> = Promise.resolve();
 const _policies = new Map<string, MirrorPolicy>();
+let _hydrated = false;
+
+/**
+ * Persisted mirror health.
+ *
+ * Cooldowns are device-local state but they describe a *shared* server: when a
+ * volunteer mirror is 429ing or down, a cold start that forgets the cooldown
+ * re-probes it. That is how a small app turns somebody else's outage into a
+ * request storm, so bounded cooldowns survive relaunches.
+ */
+const POLICY_STORAGE_KEY = 'overpass.policy.v1';
+
+interface PolicyCache {
+  getString(key: string): string | undefined;
+  set(key: string, value: string): void;
+  delete(key: string): void;
+}
+
+/** Lazy MMKV lookup; importing it eagerly pulls native modules into Jest. */
+function getPolicyCache(): PolicyCache | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('./storage/mmkv') as typeof import('./storage/mmkv');
+    return mod.storage as unknown as PolicyCache;
+  } catch {
+    return null;
+  }
+}
+
+/** Restore unexpired cooldowns recorded before the last launch. */
+function loadPersistedPolicies(): void {
+  const cache = getPolicyCache();
+  if (!cache) return;
+  try {
+    const raw = cache.getString(POLICY_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, Partial<MirrorPolicy>>;
+    const now = _now();
+    for (const [mirror, entry] of Object.entries(parsed)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const cooldownUntil = Number(entry.cooldownUntil);
+      if (!Number.isFinite(cooldownUntil) || cooldownUntil <= now) continue;
+      _policies.set(mirror, {
+        consecutiveFailures: Math.max(0, Number(entry.consecutiveFailures) || 0),
+        cooldownUntil: Math.min(cooldownUntil, now + MAX_COOLDOWN_MS),
+      });
+    }
+  } catch {
+    // Corrupt or stale cache — start clean.
+  }
+}
+
+/** Persist only the cooldowns still in force. Best-effort by design. */
+function savePersistedPolicies(): void {
+  const cache = getPolicyCache();
+  if (!cache) return;
+  try {
+    const now = _now();
+    const active: Record<string, MirrorPolicy> = {};
+    for (const [mirror, policy] of _policies) {
+      if (policy.cooldownUntil > now) active[mirror] = { ...policy };
+    }
+    if (Object.keys(active).length === 0) {
+      cache.delete(POLICY_STORAGE_KEY);
+      return;
+    }
+    cache.set(POLICY_STORAGE_KEY, JSON.stringify(active));
+  } catch {
+    // Persistence is an optimisation; the in-memory policy still holds.
+  }
+}
 
 /** Remote kill switch. */
 export function setOverpassEnabled(enabled: boolean): void {
@@ -133,6 +204,12 @@ export function __resetOverpassPolicyForTests(): void {
   _now = () => Date.now();
   _serial = Promise.resolve();
   _policies.clear();
+  _hydrated = false;
+  try {
+    getPolicyCache()?.delete(POLICY_STORAGE_KEY);
+  } catch {
+    // Nothing to clear.
+  }
 }
 
 /** Exposed for testing only. */
@@ -208,6 +285,7 @@ function penalize(mirror: string, err: unknown): number {
   const base = status === 429 || status >= 500 ? RATE_LIMIT_COOLDOWN_MS : FAILURE_COOLDOWN_MS;
   const backoff = base * Math.pow(2, Math.min(policy.consecutiveFailures - 1, 4));
   policy.cooldownUntil = _now() + Math.min(backoff, MAX_COOLDOWN_MS);
+  savePersistedPolicies();
   return policy.cooldownUntil;
 }
 
@@ -236,6 +314,7 @@ async function attempt<T>(opts: OverpassRequestOptions): Promise<T> {
       const value = await requestFrom<T>(mirror, opts);
       policy.consecutiveFailures = 0;
       policy.cooldownUntil = 0;
+      savePersistedPolicies();
       return value;
     } catch (err) {
       // A caller abort is terminal: do not try other mirrors.
@@ -268,6 +347,10 @@ async function attempt<T>(opts: OverpassRequestOptions): Promise<T> {
  */
 export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
   if (!_enabled) throw new OverpassDisabledError();
+  if (!_hydrated) {
+    _hydrated = true;
+    loadPersistedPolicies();
+  }
   throwIfAborted(opts.signal);
 
   const run = _serial.then(
