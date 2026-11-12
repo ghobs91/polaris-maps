@@ -14,6 +14,7 @@
 
 import { isTrustedPublisher } from '../regions/regionManifest';
 import { setOverpassEnabled } from '../overpassClient';
+import { setNominatimEnabled } from '../geocoding/nominatimPolicy';
 import { createSigningPayload, verify } from '../identity/signing';
 import { TRUSTED_REGION_PUBLISHERS } from '../../constants/regionPublishers';
 import type { MMKV } from 'react-native-mmkv';
@@ -59,6 +60,16 @@ export interface RemoteConfigFlags {
    * switches, and losing both leaves the app fully functional.
    */
   overpassQuery: boolean;
+  /**
+   * Public Nominatim address-lookup fallback.
+   *
+   * Unsigned for the same reason as {@link overpassQuery} — adding a field to
+   * the signed payload would invalidate every config already published. Unlike
+   * it, this defaults to **disabled**: OSMF's policy ceiling is one request per
+   * second for the *whole* application, so the safe default is off and a
+   * published config has to opt in. See `services/geocoding/nominatimPolicy`.
+   */
+  nominatimFallback: boolean;
 }
 
 export interface RemoteConfig {
@@ -77,6 +88,7 @@ export const DEFAULT_REMOTE_FLAGS: RemoteConfigFlags = {
   overturePlaces: true,
   tomtomBridge: true,
   overpassQuery: true,
+  nominatimFallback: false,
 };
 
 /** Fixed flag order for the canonical signing payload. Do not reorder. */
@@ -143,6 +155,9 @@ export function parseRemoteConfig(
   }
   // Unsigned on purpose (see RemoteConfigFlags.overpassQuery).
   if (typeof rawFlags.overpassQuery === 'boolean') flags.overpassQuery = rawFlags.overpassQuery;
+  if (typeof rawFlags.nominatimFallback === 'boolean') {
+    flags.nominatimFallback = rawFlags.nominatimFallback;
+  }
 
   const payload = remoteConfigPayload({
     version: config.version,
@@ -184,6 +199,8 @@ export function applyRemoteFlags(flags: RemoteConfigFlags): void {
   current = { ...flags };
   // Keep the Overpass client's kill switch in sync with the signed config.
   setOverpassEnabled(flags.overpassQuery !== false);
+  // Nominatim defaults to off; only an explicit flag turns it on.
+  setNominatimEnabled(flags.nominatimFallback === true);
   notify();
 }
 

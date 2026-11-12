@@ -10,14 +10,16 @@ Search is a staged multi-source pipeline:
 2. **Staged emission** delivers results as each source stage completes: `local` → `cities` → `photon` → `category` → `remaining` (final)
 3. **Sources**
    - **Unified local index** (`search_docs`, weighted bm25) over Overture/OSM places _and_ addresses — see "The unified index" below
-   - Offline GeoNames cities1000 (~140k cities) for instant city results
+   - Offline GeoNames cities1000 (~140k cities) for instant city results, with
+     the bundled ~6k-city asset (`geocoding/coarseGeocoder`) answering the same
+     stage when that database has not been downloaded
    - Photon (Komoot) for fuzzy, typo-tolerant address/POI search
    - Overpass for category POIs and, as a **gap-filler**, name matches: Overpass is
      routinely congested (HTTP 406/403 from every mirror), so Photon + Overture +
      MapKit are load-bearing for name search and Overpass runs only after they
      settle — and only when their candidates leave the query thin (≤1 strong
      match within 15 km of the camera)
-   - Nominatim for structured address geocoding (shared 1 req/s throttle)
+   - Nominatim for structured address geocoding (off unless enabled; shared 1 req/s throttle)
    - Overture PMTiles for viewport/user-location place freshness
    - Apple MapKit nearby POIs (iOS) for commercial place coverage that open data lacks
 4. **Result cache** (LRU + TTL) serves repeated/concurrent queries without re-hitting the network; local writes invalidate overlapping areas
@@ -98,11 +100,11 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 
 ### Geocoding (`src/services/geocoding/`)
 
-| File                           | Description                                                                                                                                                                      |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `geocodingService.ts`          | Local address search over the unified index (structured query → prefix → trigram → query-time interpolation), then Nominatim strictly as a fallback (rate-limited, 8 s timeout). |
-| `globalGeocoderService.ts`     | Offline GeoNames cities1000 geocoder (download, FTS5 + population + proximity ranking).                                                                                          |
-| `geonamesDownloadScheduler.ts` | Opportunistic Wi-Fi-preferred download on first online idle; silent no-op when no URL is configured.                                                                             |
+| File                           | Description                                                                                                                                                                                              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `geocodingService.ts`          | Local address search over the unified index (structured query → prefix → trigram → query-time interpolation), then Nominatim strictly as an opt-in fallback (off by default, rate-limited, 8 s timeout). |
+| `globalGeocoderService.ts`     | Offline GeoNames cities1000 geocoder (download, FTS5 + population + proximity ranking).                                                                                                                  |
+| `geonamesDownloadScheduler.ts` | Opportunistic Wi-Fi-preferred download on first online idle; silent no-op when no URL is configured.                                                                                                     |
 
 ### The unified index (`searchIndex.ts`, `database/init.ts`)
 
@@ -160,6 +162,13 @@ The local index is the primary path for **both** POIs and addresses:
 - **Nominatim** runs only when the local address pass returned nothing at all
   — a structured hit is no longer required to suppress it. It stays
   rate-limited (1 req/s) and abortable.
+
+Nominatim is additionally **off unless a build or a signed remote config turns
+it on** (`EXPO_PUBLIC_NOMINATIM_FALLBACK=1` / `nominatimFallback: true`, see
+`geocoding/nominatimPolicy.ts`). OSMF's policy caps the _application_ at one
+request per second across every user, so a shipped fallback cannot scale: an
+empty local result is answered as empty rather than by turning 1M devices into
+one geocoding client.
 
 Both log through `diagnosticsLog`, so a degraded local index is visible rather
 than silently answered by the network.

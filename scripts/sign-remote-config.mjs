@@ -44,6 +44,17 @@ for (const flag of FLAG_ORDER) {
   flags[flag] = raw.flags?.[flag] !== false;
 }
 
+/**
+ * Unsigned kill switches travel in the document but not in the signature.
+ * Signing them would invalidate every config already installed in the field;
+ * their only effect is enabling/disabling an optional third-party fallback.
+ * Mirrors `RemoteConfigFlags.overpassQuery` / `nominatimFallback`.
+ */
+const UNSIGNED_FLAGS = ['overpassQuery', 'nominatimFallback'];
+for (const flag of UNSIGNED_FLAGS) {
+  if (typeof raw.flags?.[flag] === 'boolean') flags[flag] = raw.flags[flag];
+}
+
 const version = Number.isInteger(raw.version) && raw.version > 0 ? raw.version : 1;
 const issuedAt = typeof raw.issuedAt === 'string' ? raw.issuedAt : new Date().toISOString();
 const privateKey = Uint8Array.from(Buffer.from(privateKeyHex, 'hex'));

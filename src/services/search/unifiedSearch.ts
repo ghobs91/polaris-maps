@@ -46,6 +46,7 @@ import {
   searchGlobalPlaces,
   type GlobalPlace,
 } from '../geocoding/globalGeocoderService';
+import { isBundledCityName, searchCoarseCities } from '../geocoding/coarseGeocoder';
 import { getPersonalizedPlaceNames, PERSONALIZATION_BOOST } from './searchHistoryService';
 import { searchMapKitPlaces } from './mapKitPlaceSource';
 import { createQueryPlan } from './queryPlan';
@@ -142,6 +143,9 @@ async function queryNamesDistantPlace(coreQuery: string): Promise<boolean> {
   if (words.length < 2) return false;
   const last = words[words.length - 1];
   if (last.length < 3) return false;
+  // Bundled first: it is synchronous and needs no download, so a cold install
+  // recognises "tatte boston" without the GeoNames database.
+  if (isBundledCityName(last)) return true;
   return isKnownCityName(last);
 }
 
@@ -318,15 +322,25 @@ export async function unifiedSearch(
   const signal = options.signal;
   throwIfAborted(signal);
 
-  // Offline GeoNames cities resolve in milliseconds and are emitted right
-  // after the local phase. Fetch them first so the same run can also tell a
-  // bare place search from a city search.
+  // Offline cities resolve in milliseconds and are emitted right after the
+  // local phase. Fetch them first so the same run can also tell a bare place
+  // search from a city search.
+  //
+  // Two tiers answer the same stage: the downloaded GeoNames database when it
+  // is present, otherwise the bundled ~6k-city asset. Falling back here is what
+  // keeps "search for Tokyo" working on a cold install without a network
+  // geocoder.
   let cityPlaces: GlobalPlace[] = [];
-  if (!addressQuery && isGeonamesReady()) {
-    try {
-      cityPlaces = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
-    } catch {
-      // Missing/corrupt GeoNames DB degrades to no city results.
+  if (!addressQuery) {
+    if (isGeonamesReady()) {
+      try {
+        cityPlaces = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
+      } catch {
+        // Missing/corrupt GeoNames DB degrades to the bundled tier below.
+        cityPlaces = searchCoarseCities(parsed.coreQuery, lat, lng, 10);
+      }
+    } else {
+      cityPlaces = searchCoarseCities(parsed.coreQuery, lat, lng, 10);
     }
   }
 

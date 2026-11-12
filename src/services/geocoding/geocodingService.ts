@@ -12,6 +12,16 @@ import {
   type SearchDocHit,
 } from '../search/searchIndex';
 import { interpolateAddressPoint } from '../search/addressInterpolation';
+import { isNominatimEnabled } from './nominatimPolicy';
+import { nearestCoarsePlace } from './coarseGeocoder';
+import {
+  DEFAULT_RADIUS_KM,
+  longitudeWeight,
+  reverseQueryParams,
+  reverseQuerySql,
+  reverseTiers,
+  searchWindow,
+} from './reverseQuery';
 
 export interface GeocodingResult {
   entry: GeocodingEntry;
@@ -46,8 +56,27 @@ export async function searchAddress(
   throwIfAborted(opts?.signal);
 
   // No local match: fall back to Nominatim, still rate-limited and abortable.
+  //
+  // Nominatim is opt-in (see `nominatimPolicy`): OSMF allows one request per
+  // second for the *whole application*, so a shipped fallback that every device
+  // calls cannot scale. The local index is the product; this path exists for
+  // builds that deliberately turn it on.
+  if (!isNominatimEnabled()) {
+    logNominatimSuppressedOnce();
+    return [];
+  }
+
   const remote = await searchAddressNominatim(query, limit, lat, lng, opts?.signal);
   return remote;
+}
+
+let nominatimSuppressedLogged = false;
+
+/** One diagnostic per session, not one per keystroke. */
+function logNominatimSuppressedOnce(): void {
+  if (nominatimSuppressedLogged) return;
+  nominatimSuppressedLogged = true;
+  logDiagnostic('nominatim', 'info', 'fallback disabled; no local address match');
 }
 
 // ---------------------------------------------------------------------------
@@ -368,29 +397,61 @@ function mapNominatimType(type: string): GeocodingEntry['type'] {
   return mapping[type] ?? 'address';
 }
 
+/**
+ * Reverse geocode a coordinate from the on-device packs.
+ *
+ * Walks {@link reverseTiers} most-specific-first: the address beside the pin,
+ * then a named feature beside it, then addresses nearby, then the nearest
+ * locality. Each tier is an R*Tree lookup, so the cascade costs a few index
+ * probes rather than a table scan.
+ *
+ * Returns null only when the point is nowhere near anything known (open ocean).
+ * It never reaches for a network geocoder: when no pack tier answers, the
+ * bundled coarse layer supplies country and nearest city from bytes already in
+ * the app.
+ *
+ * `radiusKm` scales the first tiers; the wider ones derive from it.
+ */
 export async function reverseGeocode(
   lat: number,
   lng: number,
-  radiusKm: number = 0.5,
+  radiusKm: number = DEFAULT_RADIUS_KM,
 ): Promise<GeocodingEntry | null> {
   const db = await getDatabase();
+  const lngWeight = longitudeWeight(lat);
 
-  // Approximate bounding box
-  const latDelta = radiusKm / 111.0;
-  const lngDelta = radiusKm / (111.0 * Math.cos((lat * Math.PI) / 180));
+  for (const tier of reverseTiers(radiusKm)) {
+    const row = await db.getFirstAsync<GeocodingRow>(
+      reverseQuerySql(tier.predicate),
+      reverseQueryParams(lat, lng, searchWindow(lat, lng, tier.radiusKm), lngWeight),
+    );
+    if (row) return rowToGeocodingEntry(row);
+  }
 
-  const row = await db.getFirstAsync<GeocodingRow>(
-    `SELECT id, type, housenumber, street, city, state, postcode, country, lat, lng
-     FROM geocoding_data
-     WHERE lat BETWEEN ? AND ?
-       AND lng BETWEEN ? AND ?
-     ORDER BY ((lat - ?) * (lat - ?) + (lng - ?) * (lng - ?))
-     LIMIT 1`,
-    [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta, lat, lat, lng, lng],
-  );
+  // No pack covers this point. Answer from the bundled asset rather than an
+  // empty row — this is the cold-install and out-of-coverage path, and it is
+  // the reason nothing here needs a network geocoder.
+  const coarse = nearestCoarsePlace(lat, lng);
+  if (!coarse) return null;
 
-  if (!row) return null;
+  return {
+    // Negative: not a `geocoding_data` row, so callers cannot treat it as one.
+    id: -1,
+    text: [coarse.city, coarse.admin1, coarse.country].filter(Boolean).join(', '),
+    type: 'city',
+    housenumber: null,
+    street: null,
+    city: coarse.city,
+    state: coarse.admin1,
+    postcode: null,
+    country: coarse.country,
+    lat: coarse.lat,
+    lng: coarse.lng,
+  };
+}
 
+/** Map a `geocoding_data` row onto the shared entry shape. */
+function rowToGeocodingEntry(row: GeocodingRow): GeocodingEntry {
   return {
     id: row.id,
     text: formatEntry(row),
@@ -408,6 +469,8 @@ export async function reverseGeocode(
 
 interface GeocodingRow {
   id: number;
+  /** Precomputed label from the pack (`addr:housenumber + street`, or a name). */
+  text?: string | null;
   type: string;
   housenumber: string | null;
   street: string | null;
@@ -426,6 +489,10 @@ function formatEntry(row: GeocodingRow): string {
     parts.push(`${row.housenumber} ${row.street}`);
   } else if (row.street) {
     parts.push(row.street);
+  } else if (row.text) {
+    // A named place carries its name in `text` and has no street, so without
+    // this a pin on "Boston Common" resolved to just "Boston".
+    parts.push(row.text);
   }
   if (row.city) parts.push(row.city);
   if (row.state) parts.push(row.state);

@@ -113,6 +113,62 @@ To measure real seeding behaviour, run the same region on two devices:
    backgrounded confirms the iOS suspension limit, and tells you to treat P2P
    seeding as best-effort rather than a guaranteed origin.
 
+## Volunteer and donated infrastructure
+
+Every remaining third-party origin is somebody else's donation-funded server, so
+the app treats them as optional and asks nothing of them at scale:
+
+| Origin                 | Default                       | Why                                                                                                                                                                                                            |
+| ---------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenFreeMap (tiles)    | on, until a pack is installed | Unlimited requests, but ~150–300 MB per install of egress. Packs exist to remove it entirely (see above). Offline downloads stay inside their published 3,000-tile / 50 MB / 4-parallel budget.                |
+| Overpass               | on, gap-filler only           | Volunteer mirrors. No hedging, sequential with cooldowns, one request in flight, and cooldowns **persist across launches** so a device that learned a mirror is down does not re-probe it.                     |
+| Nominatim              | **off**                       | OSMF caps the whole _application_ at 1 req/s, so a shipped fallback cannot scale. Addresses come from the local index; the network path needs `EXPO_PUBLIC_NOMINATIM_FALLBACK=1` or `nominatimFallback: true`. |
+| FOSSGIS Valhalla, OSRM | last-resort tiers             | Demo services. On-device Valhalla answers first (`fff7a1b`).                                                                                                                                                   |
+| Transitous             | on                            | Community MOTIS instance, no published quota and no client-side budget yet.                                                                                                                                    |
+| Nostr relays           | on, bounded                   | 240 probe + 60 profile publishes per device per day, and probes only leave the mesh when a device has zero swarm peers.                                                                                        |
+| GitHub Releases        | primary pack origin           | Polaris runs no CDN. Packs, catalog and the signed config all live there.                                                                                                                                      |
+
+Because none of these are ours, two things have to be true before a release
+ships:
+
+1. **The kill switches are published.** `https://app.polarismaps.app/config.json`
+   is the only way to turn an origin off without an App Store release, and the
+   Nominatim and Overpass policies both require that ability.
+2. **The pack release exists.** Without a `map-data-<YYYY-MM>` release carrying
+   `catalog.json`, every install streams live tiles — the load profile packs
+   remove.
+
+`pnpm packs:verify` (`scripts/verify-pack-origins.mjs`) checks both plus a pack
+asset and the tile origin, and the iOS workflow runs it before the native build
+whenever a catalog URL is configured.
+
+## Geocoding
+
+Geocoding is the clearest example of the per-query problem, because the corpus is
+small and the query rate is high: at a million users, one address lookup per day
+is ~12x OSMF's entire per-second allowance for the _application_.
+
+It is answered at three levels, all of them local:
+
+| Tier | Source                                                       | Covers                                                                        |
+| ---- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| 1    | `geocoding_data` via `geocoding_rtree`                       | The address or named feature at the point, from a downloaded pack             |
+| 2    | `geocoding_rtree` widening 0.5 km → 100 km                   | A nearby address, then the nearest locality                                   |
+| 3    | `src/constants/coarseGeocoder.json` (~310 kB, in the binary) | Country, first-level area and nearest city — cold install and out-of-coverage |
+
+Reverse lookups walk the tiers in order; each is an R*Tree probe, so the cascade
+costs a few index reads rather than a table scan over a metro's addresses. The
+bundled tier means a pin always resolves to *something\* recognisable instead of
+an empty row, which is what used to justify a network geocoder.
+
+`reverseGeocode` never issues a request, and neither does address search: the
+Nominatim fallback ships disabled (`nominatimPolicy.ts`) and only a build or a
+signed config turns it on. The regression suite
+(`__tests__/unit/geocodingStaysOffline.test.ts`) asserts `fetch` is never called.
+
+Regenerate the bundled tier with `pnpm geo:coarse` (GeoNames `cities1000`,
+CC BY 4.0). The output is committed so a normal build needs no network.
+
 ## Not yet done
 
 Hyperdrive-seeded **profile** shards (writing weekly profiles into a seeded
