@@ -122,7 +122,19 @@ export async function fetchAndSeedCatalog(): Promise<void> {
     });
     clearTimeout(timer);
 
-    if (!res.ok) return;
+    if (!res.ok) {
+      // A 404 here means no pack release is published at this origin, so every
+      // install falls back to live third-party tiles — exactly the load profile
+      // the region packs exist to remove. Say so instead of failing quietly.
+      logDiagnostic('regions', 'warn', `region catalog fetch failed: HTTP ${res.status}`, {
+        url: REGION_CATALOG_URL,
+        hint:
+          res.status === 404
+            ? 'no region-pack release published at this origin; running on live tiles'
+            : undefined,
+      });
+      return;
+    }
 
     const raw = await res.text();
     const manifest: CatalogManifest = JSON.parse(raw);
