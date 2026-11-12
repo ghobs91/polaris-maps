@@ -756,6 +756,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   /// `Any?` so the property itself doesn't require the iOS 27 availability.
   private var homePanel: Any?
   private var homePanelVisible = false
+  /// Latest navigation start that arrived while the map template was not the
+  /// top template (the pop back from search/results is animated). Starting a
+  /// guidance session on a map template CarPlay isn't presenting can raise, so
+  /// the payload waits here until `templateDidAppear` shows the map.
+  private var pendingNavigationStart: NSDictionary?
 
   private lazy var mapViewHost = CarPlayMapViewHost(mode: .full)
   private weak var templateWindow: UIWindow?
@@ -891,6 +896,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchReaskTimer = nil
     homePanel = nil
     homePanelVisible = false
+    pendingNavigationStart = nil
   }
 
   func deactivate() {
@@ -930,6 +936,7 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchDeadlineTimer = nil
     searchReaskTimer?.invalidate()
     searchReaskTimer = nil
+    pendingNavigationStart = nil
   }
 
   /// CarPlay scene activation / cold-launch recovery: re-assert the map window
@@ -1254,7 +1261,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     searchResultsTemplate = nil
     searchItems = []
     lastNonEmptySearchItems = []
-    interfaceController?.pushTemplate(search, animated: true, completion: nil)
+    interfaceController?.pushTemplate(search, animated: true) { success, error in
+      if !success {
+        NSLog(
+          "[PolarisCarPlay] search push failed: \(error?.localizedDescription ?? "unknown")"
+        )
+      }
+    }
   }
 
   /// Rows for the pushed results list, each opening the same Start/Add Stop
@@ -1263,8 +1276,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let rows = searchItems.prefix(12).map { item -> CPListItem in
       let row = makeListItem(from: item)
       row.handler = { [weak self] _, done in
-        self?.presentDestinationActions(name: item.name, lat: item.lat, lng: item.lng)
+        // Finish the selection before `presentDestinationActions` can pop this
+        // list; popping from inside the selection callback leaves CarPlay
+        // mid-transition when JS starts guidance.
         done()
+        self?.presentDestinationActions(name: item.name, lat: item.lat, lng: item.lng)
       }
       return row
     }
@@ -1299,7 +1315,13 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       }
     }
     let grid = CPGridTemplate(title: "Report", gridButtons: buttons)
-    interfaceController.pushTemplate(grid, animated: true, completion: nil)
+    interfaceController.pushTemplate(grid, animated: true) { success, error in
+      if !success {
+        NSLog(
+          "[PolarisCarPlay] report grid push failed: \(error?.localizedDescription ?? "unknown")"
+        )
+      }
+    }
   }
 
   /// Reports at the live vehicle position and returns to the map. The native
@@ -1325,6 +1347,20 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // buttons): the map still renders into the Dashboard window, only the
     // full-screen template's navigation session is skipped.
     guard let payload = CarPlayStartNavigationPayload(from: data) else { return }
+
+    // A head-unit destination pick can reach JS while the search/results list
+    // is still on screen: the pop back to the map is animated, so JS starts the
+    // trip before the map template is presented. Starting a guidance session on
+    // a template CarPlay isn't showing raises (the app disappears back to the
+    // map, then the CarPlay app terminates). Hold the payload until the map
+    // template appears, then apply it exactly once.
+    if let template = mapTemplate, interfaceController?.topTemplate !== template {
+      NSLog("[PolarisCarPlay] deferring navigation start until the map template is visible")
+      pendingNavigationStart = data
+      return
+    }
+    pendingNavigationStart = nil
+
     useMetric = payload.useMetric
 
     // Ignore duplicate starts for the route already on screen. Restarting the
@@ -1336,7 +1372,16 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       return
     }
 
-    endNavigation()
+    // An idle start has nothing to tear down. `endNavigation` drives
+    // `setNavigating(false)`, which re-shows the floating Pinned/Recents panel
+    // for a frame before `setNavigating(true)` hides it again — the map visibly
+    // flashes between the panel and the new trip.
+    let hadActiveTrip =
+      navigationSession != nil || activeTrip != nil || previewTrip != nil
+      || !activePolyline.isEmpty
+    if hadActiveTrip {
+      endNavigation()
+    }
 
     // A phone-side navigation session may connect before its first position
     // update reaches CarPlay. Use the route start instead of leaving the trip
@@ -1486,6 +1531,9 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   }
 
   func endNavigation() {
+    // A start that was waiting for the map template must not fire after the
+    // trip was ended (e.g. the driver cancelled while search was still up).
+    pendingNavigationStart = nil
     if navigationSession != nil {
       navigationSession?.finishTrip()
     }
@@ -2125,28 +2173,37 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   @available(iOS 27.0, *)
   private func makeHomePanel() -> CPMapPanel {
     var sections: [CPMapPanelSection] = []
-    if !searchShortcuts.isEmpty {
-      let rows: [CPMapPanelItem] = searchShortcuts.prefix(4).map { shortcut in
-        let listItem = makeShortcutListItem(from: shortcut)
-        listItem.handler = { [weak self] _, done in
-          self?.runSearchShortcut(shortcut.query)
-          done()
-        }
-        return CPMapPanelItem(listItem: listItem)
-      }
-      sections.append(CPMapPanelSection(title: "Nearby", items: rows))
-    }
+    // Saved places first (Home → Work → pins), then Recents, then the quick
+    // category shortcuts. The driver's own places stay at the top of the
+    // panel instead of being pushed below the Nearby row.
     for (section, items) in Self.groupedSections(homeSuggestions) {
       let rows: [CPMapPanelItem] = items.prefix(6).map { item in
         let listItem = makeListItem(from: item)
         listItem.handler = { [weak self] _, done in
-          self?.presentDestinationActions(name: item.name, lat: item.lat, lng: item.lng)
+          // Finish the selection first: `startIdleDestination` may pop the
+          // search/results template, and mutating the stack from inside the
+          // selection callback leaves CarPlay mid-transition.
           done()
+          self?.presentDestinationActions(name: item.name, lat: item.lat, lng: item.lng)
         }
         return CPMapPanelItem(listItem: listItem)
       }
       sections.append(
         CPMapPanelSection(title: section == "pinned" ? "Pinned" : "Recents", items: rows))
+    }
+    if !searchShortcuts.isEmpty {
+      // A grid item is CarPlay's horizontal shortcut row (there is no
+      // horizontal CPListSection). Four buttons keep the panel compact.
+      let buttons: [CPGridButton] = searchShortcuts.prefix(4).map { shortcut in
+        CPGridButton(
+          titleVariants: [shortcut.name],
+          image: Self.searchIcon(for: shortcut.kind) ?? UIImage()
+        ) { [weak self] _ in
+          self?.runSearchShortcut(shortcut.query)
+        }
+      }
+      sections.append(
+        CPMapPanelSection(title: "Nearby", items: [CPMapPanelItem(gridButtons: buttons)]))
     }
     // No panel button config: search stays on the map template's search button.
     return CPMapPanel(title: nil, sections: sections, buttonConfiguration: nil)
@@ -2167,10 +2224,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
   @available(iOS 27.0, *)
   private func hideHomePanel() {
     guard let template = mapTemplate else { return }
+    let hadPanel = homePanelVisible || homePanel != nil
     homePanelVisible = false
     homePanel = nil
-    // Always attempt the hide: `homePanelVisible` is best-effort and must never
-    // block hiding an overlay that would otherwise cover the map.
+    // Only hide an overlay on a template CarPlay is presenting. `hideHomePanel`
+    // is also called when the map template disappears (the driver opened
+    // search), where the system already removed the panel — asking again can
+    // raise and take the CarPlay app down.
+    guard hadPanel, interfaceController?.topTemplate === template else { return }
     template.hidePanel { _, _ in }
   }
 
@@ -2181,7 +2242,21 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     // The full-screen map window can lose its content across template
     // transitions; re-assert it before (re)showing the panel.
     mapViewHost.reassertWindowContent()
+    if flushPendingNavigationStart() { return }
     refreshHomePanel()
+  }
+
+  /// Applies a navigation start that was held while a search/results template
+  /// was being popped. Returns true when a pending start was applied.
+  @discardableResult
+  private func flushPendingNavigationStart() -> Bool {
+    guard let data = pendingNavigationStart else { return false }
+    guard let template = mapTemplate, interfaceController?.topTemplate === template else {
+      return false
+    }
+    pendingNavigationStart = nil
+    startNavigation(with: data)
+    return true
   }
 
   func templateDidDisappear(_ template: CPTemplate, animated: Bool) {
@@ -2193,15 +2268,24 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
 
   /// Start/Add Stop chooser mirroring the phone's place card.
   private func presentDestinationActions(name: String?, lat: Double, lng: Double) {
+    // Idle: selecting a destination *is* the trip. Start it directly instead of
+    // asking Start vs Add stop and then waiting for a Go tap on the phone.
+    if !navigationActive {
+      startIdleDestination(name: name, lat: lat, lng: lng)
+      return
+    }
+
+    // An active drive keeps the choice: replace the trip or add a stop to it.
     let startItem = CPListItem(
       text: "Start Navigation",
       detailText: name,
       image: UIImage(systemName: "car.fill")
     )
     startItem.handler = { [weak self] _, done in
-      PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
-      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
       done()
+      self?.returnToMap {
+        PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
+      }
     }
     let addStopItem = CPListItem(
       text: "Add Stop",
@@ -2209,13 +2293,50 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
       image: UIImage(systemName: "plus.circle.fill")
     )
     addStopItem.handler = { [weak self] _, done in
-      PolarisCarPlay.emitSearchResultAddStop(name: name, lat: lat, lng: lng)
-      self?.interfaceController?.popToRootTemplate(animated: true, completion: nil)
       done()
+      self?.returnToMap {
+        PolarisCarPlay.emitSearchResultAddStop(name: name, lat: lat, lng: lng)
+      }
     }
     let section = CPListSection(items: [startItem, addStopItem])
     let detail = CPListTemplate(title: name ?? "Destination", sections: [section])
-    interfaceController?.pushTemplate(detail, animated: true, completion: nil)
+    // Always pass a completion: CarPlay raises when a push fails without one
+    // (`CPInterfaceController.pushTemplate`), and a push can be rejected while
+    // another template transition is still running.
+    interfaceController?.pushTemplate(detail, animated: true) { success, error in
+      if !success {
+        NSLog(
+          "[PolarisCarPlay] destination chooser push failed: \(error?.localizedDescription ?? "unknown")"
+        )
+      }
+    }
+  }
+
+  /// Emits a head-unit destination pick once the map template is on screen.
+  ///
+  /// A pick can come from the floating home panel (map already presented) or
+  /// from the search/results list. In the latter case the trip must not start
+  /// during the animated pop: `startNavigation` would begin a guidance session
+  /// on a template CarPlay isn't presenting, which flashes the map and then
+  /// takes the CarPlay app down.
+  private func startIdleDestination(name: String?, lat: Double, lng: Double) {
+    returnToMap {
+      PolarisCarPlay.emitSearchResultSelected(name: name, lat: lat, lng: lng)
+    }
+  }
+
+  /// Runs `body` once the map template is the presented template, popping any
+  /// search/results templates first. The body always runs — a pick must never
+  /// be dropped — and the native manager defers the navigation start as a
+  /// second guard if the pop still hasn't settled.
+  private func returnToMap(_ body: @escaping () -> Void) {
+    guard let controller = interfaceController, controller.topTemplate !== mapTemplate else {
+      body()
+      return
+    }
+    controller.popToRootTemplate(animated: true) { _, _ in
+      body()
+    }
   }
 
   /// Circular colored row icon (Apple Maps style): a blue house for Home, a
@@ -2340,7 +2461,11 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     guard !normalizedSearchText(searchText).isEmpty else {
       pendingSearchCompletion = nil
       let shortcutRows = searchShortcuts.map { makeShortcutListItem(from: $0) }
-      completionHandler(shortcutRows + makeSearchListItems(from: homeSuggestions))
+      // CPSearchTemplate only accepts CPListItem, so it cannot render the map
+      // panel's horizontal shortcut row. Put Pinned/Recents first so the saved
+      // places appear above the quick categories; the shortcuts stay one scroll
+      // below and remain the only pre-search surface on iOS < 27.
+      completionHandler(makeSearchListItems(from: homeSuggestions) + shortcutRows)
       return
     }
     PolarisCarPlay.emitSearchQuery(searchText)
@@ -2417,7 +2542,14 @@ final class CarPlayTemplateManager: NSObject, CPSearchTemplateDelegate,
     let template = CPListTemplate(title: "Results", sections: [searchResultsSection()])
     template.emptyViewTitleVariants = ["No Results"]
     searchResultsTemplate = template
-    interfaceController.pushTemplate(template, animated: true, completion: nil)
+    // Completion required: a rejected push without one raises.
+    interfaceController.pushTemplate(template, animated: true) { success, error in
+      if !success {
+        NSLog(
+          "[PolarisCarPlay] results list push failed: \(error?.localizedDescription ?? "unknown")"
+        )
+      }
+    }
   }
 
   // MARK: CPMapTemplateDelegate

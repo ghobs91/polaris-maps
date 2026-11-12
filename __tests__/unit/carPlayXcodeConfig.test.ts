@@ -328,15 +328,44 @@ describe('CarPlay iOS configuration', () => {
       // A duration-based alert that auto-dismisses must clear the manager's
       // record, or it suppresses every later incident/reroute alert.
       expect(nativeModule).toContain('didDismiss navigationAlert: CPNavigationAlert');
-      // Empty search field shows the add-stop shortcuts above Pinned/Recents,
+      // Empty search field shows Pinned/Recents above the add-stop shortcuts,
       // the only pre-search surface on iOS < 27 where the floating map panel
       // doesn't exist.
       expect(nativeModule).toContain(
         'let shortcutRows = searchShortcuts.map { makeShortcutListItem(from: $0) }',
       );
       expect(nativeModule).toContain(
-        'completionHandler(shortcutRows + makeSearchListItems(from: homeSuggestions))',
+        'completionHandler(makeSearchListItems(from: homeSuggestions) + shortcutRows)',
       );
+    }
+  });
+
+  it('puts favorites above the quick categories and defers a start until the map is up', () => {
+    for (const root of ['plugins/native/PolarisMaps', 'ios/PolarisMaps']) {
+      const nativeModule = readRepoFile(`${root}/PolarisCarPlay.swift`);
+      // The floating panel renders Pinned/Recents before the Nearby shortcut
+      // grid, matching the empty search list.
+      const panelStart = nativeModule.indexOf('private func makeHomePanel()');
+      const pinnedSection = nativeModule.indexOf(
+        'for (section, items) in Self.groupedSections',
+        panelStart,
+      );
+      const nearbySection = nativeModule.indexOf('CPMapPanelSection(title: "Nearby"', panelStart);
+      expect(pinnedSection).toBeGreaterThan(panelStart);
+      expect(nearbySection).toBeGreaterThan(pinnedSection);
+      // A head-unit pick can arrive while the search/results template is still
+      // popping; starting guidance then raised on the head unit. The payload is
+      // held until the map template appears.
+      expect(nativeModule).toContain('private var pendingNavigationStart: NSDictionary?');
+      expect(nativeModule).toContain('interfaceController?.topTemplate !== template');
+      expect(nativeModule).toContain('flushPendingNavigationStart()');
+      // The destination pick waits for the pop instead of emitting mid-flight.
+      expect(nativeModule).toContain('controller.popToRootTemplate(animated: true) { _, _ in');
+      // Every push carries a completion block, which is mandatory: CarPlay
+      // throws when a push fails without one.
+      expect(nativeModule).not.toContain('pushTemplate(search, animated: true, completion: nil)');
+      expect(nativeModule).not.toContain('pushTemplate(template, animated: true, completion: nil)');
+      expect(nativeModule).not.toContain('pushTemplate(detail, animated: true, completion: nil)');
     }
   });
 
