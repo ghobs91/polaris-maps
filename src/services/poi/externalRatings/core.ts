@@ -619,6 +619,12 @@ export const COLLECTOR_MAX_ATTEMPTS = 6;
  * presenting a DataDome interstitial gets re-read once it clears (verified:
  * Yelp's interstitial auto-resolves within seconds in a warmed WebView).
  *
+ * A no-data page is only classified as a challenge when a real interstitial is
+ * present (protection iframe or interstitial copy in the visible text). A page
+ * that merely embeds a DataDome script bundle — which both providers' valid
+ * pages do — and has not hydrated yet stays verdict-free, so the controller
+ * treats the stage as retryable instead of remembering "no ratings".
+ *
  * The generated script is ES5-compatible — it runs inside third-party pages.
  *
  * @param providerId    Value posted as `provider` on every message.
@@ -655,32 +661,57 @@ export function buildCollectorScript(opts: {
   function collect() {
     var out = { type: TYPE, provider: PROVIDER };
 ${opts.collectBodyJs}
-    // A page that produced data needs no verdict: markers only fence off the
-    // no-data case, so the success path skips both full-document scans below.
+    // A page that produced data needs no verdict: interstitial signals only
+    // fence off the no-data case, so the success path skips the scans below.
     var hasData = ${opts.hasDataJs};
     if (hasData) { out.blocked = false; out.challenge = false; post(out); return; }
-    var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot', 'you have been blocked', 'behaviour of the browser'];
+    var CHALLENGE_PHRASES = ['just a moment', 'verify you are human', 'are you a robot', 'attention required'];
     var BLOCK_MARKERS = ['you have been blocked', 'behaviour of the browser has caught our attention'];
-    var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
-    var markerHit = false;
-    for (var mi = 0; mi < MARKERS.length; mi++) {
-      if (low.indexOf(MARKERS[mi]) !== -1) { markerHit = true; break; }
-    }
+    // A challenge is a *real interstitial*, not the mere presence of an
+    // anti-bot marker: every provider page embeds DataDome/Akamai bundles in
+    // its valid documents, so script-tag markers would brand every slow page
+    // a challenge. Structural signals only: a protection iframe, or
+    // interstitial copy in the visible text.
+    var challengeHit = false;
+    try {
+      var frames = document.querySelectorAll('iframe');
+      for (var fi = 0; fi < frames.length; fi++) {
+        var fsrc = ((frames[fi].getAttribute && frames[fi].getAttribute('src')) || '').toLowerCase();
+        if (fsrc.indexOf('captcha-delivery') !== -1 || fsrc.indexOf('datadome') !== -1 || fsrc.indexOf('px-captcha') !== -1 || fsrc.indexOf('challenges.cloudflare') !== -1 || fsrc.indexOf('hcaptcha') !== -1) {
+          challengeHit = true;
+          break;
+        }
+      }
+    } catch (e) { /* no iframe access — fall through to text checks */ }
     // Block copy is checked against *visible* text: page bundles and inline
     // scripts can contain the same phrases without the page being blocked.
     // Reading innerText forces a layout pass on the provider's (often very
-    // heavy) page, so it is skipped unless a marker was actually found — the
-    // block markers are a subset of the marker list, so no block can exist
-    // without one.
+    // heavy) page, so it is gated on a cheap DOM-string scan first — the
+    // interstitial/block copy is always part of the document itself.
     var blockHit = false;
-    if (markerHit) {
-      var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
-      for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
-        if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+    if (!challengeHit) {
+      var gateHit = false;
+      var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
+      for (var gi = 0; gi < CHALLENGE_PHRASES.length && !gateHit; gi++) {
+        if (low.indexOf(CHALLENGE_PHRASES[gi]) !== -1) { gateHit = true; break; }
+      }
+      for (var bgi = 0; bgi < BLOCK_MARKERS.length && !gateHit; bgi++) {
+        if (low.indexOf(BLOCK_MARKERS[bgi]) !== -1) { gateHit = true; break; }
+      }
+      if (gateHit) {
+        var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
+        for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
+          if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+        }
+        if (!blockHit) {
+          for (var ci = 0; ci < CHALLENGE_PHRASES.length; ci++) {
+            if (visible.indexOf(CHALLENGE_PHRASES[ci]) !== -1) { challengeHit = true; break; }
+          }
+        }
       }
     }
     out.blocked = blockHit;
-    out.challenge = markerHit && !blockHit;
+    out.challenge = challengeHit;
     ATTEMPTS -= 1;
     if (ATTEMPTS > 0) {
       var delay = INTERVAL;
