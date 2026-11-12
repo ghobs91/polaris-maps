@@ -57,6 +57,7 @@ import { findStreetViewPanoramas } from '../../services/imagery/streetViewServic
 import { openInAppBrowser } from '../../utils/inAppBrowser';
 import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
 import { ExternalRatingsSection } from './ExternalRatingsSection';
+import { HiddenRatingsBrowserHost } from './HiddenRatingsBrowserHost';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
@@ -1313,340 +1314,345 @@ export function POIInfoCard() {
   ]);
 
   return (
-    <BottomSheet
-      visible={!!selectedPoi}
-      onClose={() => setSelectedPoi(null)}
-      snapPoints={POI_SHEET_SNAPS}
-      snapIndex={snapIndex}
-      onSnapChange={setSnapIndex}
-      showBackdrop={false}
-      surfaceStyle={styles.sheetSurface}
-      testID="poi-info-sheet"
-    >
-      <View style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
-        {/* Share/close with the name centered between them (Apple Maps-style).
+    <>
+      {/* The hidden ratings browser must live outside the sheet's animated,
+          clipped subtree — see HiddenRatingsBrowserHost for why. */}
+      <HiddenRatingsBrowserHost />
+      <BottomSheet
+        visible={!!selectedPoi}
+        onClose={() => setSelectedPoi(null)}
+        snapPoints={POI_SHEET_SNAPS}
+        snapIndex={snapIndex}
+        onSnapChange={setSnapIndex}
+        showBackdrop={false}
+        surfaceStyle={styles.sheetSurface}
+        testID="poi-info-sheet"
+      >
+        <View style={[styles.cardGlass, { paddingBottom: insets.bottom }]}>
+          {/* Share/close with the name centered between them (Apple Maps-style).
             The sheet's own handle sits above this row. */}
-        {cardPoi && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              onPress={handleShare}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Share place"
-              accessibilityRole="button"
-            >
-              <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                <Ionicons name="share-outline" size={18} color={subtextColor} />
-              </GlassView>
-            </TouchableOpacity>
-            <View style={styles.topTitle}>
-              <Text
-                style={[styles.name, { color: textColor }]}
-                numberOfLines={1}
-                accessibilityRole="header"
-                accessibilityLabel={poiDisplayName}
+          {cardPoi && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                onPress={handleShare}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Share place"
+                accessibilityRole="button"
               >
-                {poiDisplayName}
-              </Text>
-              {cuisineOrigins.length > 0 && (
-                <View style={styles.cuisineRow}>
-                  {cuisineOrigins.map((origin) => (
-                    <View
-                      key={origin.countryCode}
-                      style={[
-                        styles.cuisinePill,
-                        {
-                          backgroundColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.06)',
-                          borderColor,
-                        },
-                      ]}
-                      accessible
-                      accessibilityRole="text"
-                      accessibilityLabel={`Cuisine from ${origin.countryName}, according to the restaurant's website`}
-                    >
-                      <Text style={[styles.cuisinePillText, { color: textColor }]}>
-                        {origin.flag} Cuisine: {origin.countryName}
-                      </Text>
-                    </View>
-                  ))}
+                <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                  <Ionicons name="share-outline" size={18} color={subtextColor} />
+                </GlassView>
+              </TouchableOpacity>
+              <View style={styles.topTitle}>
+                <Text
+                  style={[styles.name, { color: textColor }]}
+                  numberOfLines={1}
+                  accessibilityRole="header"
+                  accessibilityLabel={poiDisplayName}
+                >
+                  {poiDisplayName}
+                </Text>
+                {cuisineOrigins.length > 0 && (
+                  <View style={styles.cuisineRow}>
+                    {cuisineOrigins.map((origin) => (
+                      <View
+                        key={origin.countryCode}
+                        style={[
+                          styles.cuisinePill,
+                          {
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.06)',
+                            borderColor,
+                          },
+                        ]}
+                        accessible
+                        accessibilityRole="text"
+                        accessibilityLabel={`Cuisine from ${origin.countryName}, according to the restaurant's website`}
+                      >
+                        <Text style={[styles.cuisinePillText, { color: textColor }]}>
+                          {origin.flag} Cuisine: {origin.countryName}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
+                  {category
+                    ? enrichedData?.poiCategory
+                      ? formatPoiCategory(enrichedData.poiCategory)
+                      : capitalise(cardPoi.subtype)
+                    : capitalise(String(cardPoi.type))}
+                  {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
+                  {parsed?.stars ? ` · ${parsed.stars}` : ''}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSelectedPoi(null)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityLabel="Close place details"
+                accessibilityRole="button"
+              >
+                <GlassView material="clear" isInteractive style={styles.closeCircle}>
+                  <Ionicons name="close" size={18} color={subtextColor} />
+                </GlassView>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Street-level preview now floats over the map (StreetViewThumbOverlay). */}
+
+          {cardPoi && parsed && category && (
+            <ScrollView
+              style={styles.scroll}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              scrollEnabled
+            >
+              {/* ── Hero image ────────────────────────────────────────────── */}
+              {parsed.imageUrl && (
+                <Image
+                  source={{ uri: parsed.imageUrl }}
+                  style={styles.heroImage}
+                  resizeMode="cover"
+                />
+              )}
+
+              {communityRating && communityRating.count > 0 && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: spacing.md,
+                    paddingTop: spacing.sm,
+                  }}
+                  accessibilityRole="text"
+                  accessibilityLabel={`Community rating ${communityRating.average.toFixed(1)} from ${communityRating.count} reviews`}
+                >
+                  <Ionicons name="star" size={14} color="#FFB300" />
+                  <Text style={{ color: textColor, fontWeight: '600' }}>
+                    {communityRating.average.toFixed(1)}
+                  </Text>
+                  <Text style={{ color: subtextColor, fontSize: 12 }}>
+                    · {communityRating.count} community review
+                    {communityRating.count === 1 ? '' : 's'}
+                  </Text>
                 </View>
               )}
-              <Text style={[styles.categoryLabel, { color: subtextColor }]} numberOfLines={1}>
-                {category
-                  ? enrichedData?.poiCategory
-                    ? formatPoiCategory(enrichedData.poiCategory)
-                    : capitalise(cardPoi.subtype)
-                  : capitalise(String(cardPoi.type))}
-                {parsed?.cuisine ? ` · ${parsed.cuisine}` : ''}
-                {parsed?.stars ? ` · ${parsed.stars}` : ''}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setSelectedPoi(null)}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Close place details"
-              accessibilityRole="button"
-            >
-              <GlassView material="clear" isInteractive style={styles.closeCircle}>
-                <Ionicons name="close" size={18} color={subtextColor} />
-              </GlassView>
-            </TouchableOpacity>
-          </View>
-        )}
 
-        {/* Street-level preview now floats over the map (StreetViewThumbOverlay). */}
-
-        {cardPoi && parsed && category && (
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled
-          >
-            {/* ── Hero image ────────────────────────────────────────────── */}
-            {parsed.imageUrl && (
-              <Image
-                source={{ uri: parsed.imageUrl }}
-                style={styles.heroImage}
-                resizeMode="cover"
-              />
-            )}
-
-            {communityRating && communityRating.count > 0 && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  paddingHorizontal: spacing.md,
-                  paddingTop: spacing.sm,
-                }}
-                accessibilityRole="text"
-                accessibilityLabel={`Community rating ${communityRating.average.toFixed(1)} from ${communityRating.count} reviews`}
-              >
-                <Ionicons name="star" size={14} color="#FFB300" />
-                <Text style={{ color: textColor, fontWeight: '600' }}>
-                  {communityRating.average.toFixed(1)}
-                </Text>
-                <Text style={{ color: subtextColor, fontSize: 12 }}>
-                  · {communityRating.count} community review
-                  {communityRating.count === 1 ? '' : 's'}
-                </Text>
-              </View>
-            )}
-
-            {cachedAt != null && (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  paddingHorizontal: spacing.md,
-                  paddingTop: spacing.sm,
-                }}
-                accessibilityRole="text"
-                accessibilityLabel="Showing cached place details, offline"
-              >
-                <Ionicons name="cloud-offline-outline" size={13} color={subtextColor} />
-                <Text style={{ color: subtextColor, fontSize: 12 }}>
-                  Offline · cached {new Date(cachedAt).toLocaleDateString()}
-                </Text>
-              </View>
-            )}
-
-            {/* ── Action pill buttons (max 4 visible; the rest scroll) ───── */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.actionsRow}
-              contentContainerStyle={styles.actionsContent}
-            >
-              {actionItems.map((item) => (
-                <ActionPill
-                  key={item.key}
-                  icon={item.icon}
-                  label={item.label}
-                  width={actionPillWidth}
-                  onPress={item.onPress}
-                  color={item.primary ? pillPrimaryContent : pillSecondaryContent}
-                  fillColor={item.primary ? pillPrimaryFill : pillSecondaryFill}
-                  borderColor={item.primary ? pillPrimaryFill : pillSecondaryBorder}
-                />
-              ))}
-            </ScrollView>
-
-            {/* ── Reviews: TripAdvisor + Yelp aggregate (on-device headless browse) ── */}
-            <ExternalRatingsSection
-              poi={cardPoi}
-              enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
-              website={parsed.website}
-              onWriteReview={handleWriteReview}
-              enabled={heavySectionsEnabled}
-            />
-
-            {/* ── Photos: POI website + open-licensed supplements (Wikimedia) ── */}
-            <PlaceMediaCarousel
-              lat={cardPoi.lat}
-              lng={cardPoi.lng}
-              name={cardPoi.name}
-              osmId={String(cardPoi.id)}
-              websiteUrl={parsed.website}
-              tags={cardPoi.tags}
-              resetKey={cardPoi.id}
-              online={isOnline}
-              enabled={heavySectionsEnabled}
-              onWebsiteResolved={handleWebsiteResolved}
-            />
-
-            <RNModal
-              visible={showSaveSheet}
-              animationType="slide"
-              presentationStyle="pageSheet"
-              onRequestClose={() => setShowSaveSheet(false)}
-            >
-              {cardPoi && (
-                <SaveToListSheet
-                  poiUuid={String(cardPoi.id)}
-                  placeName={cardPoi.name}
-                  lat={cardPoi.lat}
-                  lng={cardPoi.lng}
-                  address={parsed?.address ?? undefined}
-                  category={cardPoi.subtype}
-                  website={parsed?.website ?? undefined}
-                  phone={parsed?.phone ?? undefined}
-                  onDone={() => setShowSaveSheet(false)}
-                />
+              {cachedAt != null && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: spacing.md,
+                    paddingTop: spacing.sm,
+                  }}
+                  accessibilityRole="text"
+                  accessibilityLabel="Showing cached place details, offline"
+                >
+                  <Ionicons name="cloud-offline-outline" size={13} color={subtextColor} />
+                  <Text style={{ color: subtextColor, fontSize: 12 }}>
+                    Offline · cached {new Date(cachedAt).toLocaleDateString()}
+                  </Text>
+                </View>
               )}
-            </RNModal>
 
-            {/* ── Description ───────────────────────────────────────────── */}
-            {parsed.description && (
-              <GlassView material="regular" style={[styles.section, { borderColor }]}>
-                <Text style={[styles.sectionDescription, { color: subtextColor }]}>
-                  {parsed.description}
-                </Text>
-              </GlassView>
-            )}
-
-            {/* ── Info rows ─────────────────────────────────────────────── */}
-            {infoRows.length > 0 && (
-              <GlassView
-                material="regular"
-                style={[
-                  styles.section,
-                  {
-                    borderRadius: borderRadius.lg,
-                    overflow: 'hidden',
-                  },
-                ]}
+              {/* ── Action pill buttons (max 4 visible; the rest scroll) ───── */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.actionsRow}
+                contentContainerStyle={styles.actionsContent}
               >
-                {infoRows.map((row, i) => (
-                  <InfoRow
-                    key={i}
-                    icon={row.icon}
-                    label={row.label}
-                    onPress={row.onPress}
-                    iconColor={row.iconColor}
-                    textColor={textColor}
-                    subtextColor={subtextColor}
-                    borderColor={borderColor}
-                    isLast={i === infoRows.length - 1}
+                {actionItems.map((item) => (
+                  <ActionPill
+                    key={item.key}
+                    icon={item.icon}
+                    label={item.label}
+                    width={actionPillWidth}
+                    onPress={item.onPress}
+                    color={item.primary ? pillPrimaryContent : pillSecondaryContent}
+                    fillColor={item.primary ? pillPrimaryFill : pillSecondaryFill}
+                    borderColor={item.primary ? pillPrimaryFill : pillSecondaryBorder}
                   />
                 ))}
-              </GlassView>
-            )}
+              </ScrollView>
 
-            {(parsed.facebook || parsed.instagram || parsed.twitter) && (
-              <View style={styles.socialRow}>
-                {parsed.facebook && (
-                  <TouchableOpacity onPress={handleFacebook}>
-                    <GlassView material="regular" isInteractive style={styles.socialBtn}>
-                      <Text style={[styles.socialLabel, { color: primary }]}>Facebook</Text>
-                    </GlassView>
-                  </TouchableOpacity>
-                )}
-                {parsed.instagram && (
-                  <TouchableOpacity onPress={handleInstagram}>
-                    <GlassView material="regular" isInteractive style={styles.socialBtn}>
-                      <Text style={[styles.socialLabel, { color: primary }]}>Instagram</Text>
-                    </GlassView>
-                  </TouchableOpacity>
-                )}
-                {parsed.twitter && (
-                  <TouchableOpacity
-                    onPress={() =>
-                      void openInAppBrowser(
-                        parsed.twitter!.startsWith('http')
-                          ? parsed.twitter!
-                          : `https://twitter.com/${parsed.twitter}`,
-                      )
-                    }
-                  >
-                    <GlassView material="regular" isInteractive style={styles.socialBtn}>
-                      <Text style={[styles.socialLabel, { color: primary }]}>X / Twitter</Text>
-                    </GlassView>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
+              {/* ── Reviews: TripAdvisor + Yelp aggregate (on-device headless browse) ── */}
+              <ExternalRatingsSection
+                poi={cardPoi}
+                enrichedFormattedAddress={enrichedData?.formattedAddress ?? null}
+                website={parsed.website}
+                onWriteReview={handleWriteReview}
+                enabled={heavySectionsEnabled}
+              />
 
-            {/* ── Note ──────────────────────────────────────────────────── */}
-            {parsed.note && (
-              <GlassView material="regular" style={styles.noteBox}>
-                <Ionicons
-                  name="information-circle-outline"
-                  size={15}
-                  color={subtextColor}
-                  style={{ marginTop: 1 }}
-                />
-                <Text style={[styles.noteText, { color: subtextColor }]}>{parsed.note}</Text>
-              </GlassView>
-            )}
+              {/* ── Photos: POI website + open-licensed supplements (Wikimedia) ── */}
+              <PlaceMediaCarousel
+                lat={cardPoi.lat}
+                lng={cardPoi.lng}
+                name={cardPoi.name}
+                osmId={String(cardPoi.id)}
+                websiteUrl={parsed.website}
+                tags={cardPoi.tags}
+                resetKey={cardPoi.id}
+                online={isOnline}
+                enabled={heavySectionsEnabled}
+                onWebsiteResolved={handleWebsiteResolved}
+              />
 
-            {/* ── Update Place Info (OSM edit) ────────────────────────
+              <RNModal
+                visible={showSaveSheet}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setShowSaveSheet(false)}
+              >
+                {cardPoi && (
+                  <SaveToListSheet
+                    poiUuid={String(cardPoi.id)}
+                    placeName={cardPoi.name}
+                    lat={cardPoi.lat}
+                    lng={cardPoi.lng}
+                    address={parsed?.address ?? undefined}
+                    category={cardPoi.subtype}
+                    website={parsed?.website ?? undefined}
+                    phone={parsed?.phone ?? undefined}
+                    onDone={() => setShowSaveSheet(false)}
+                  />
+                )}
+              </RNModal>
+
+              {/* ── Description ───────────────────────────────────────────── */}
+              {parsed.description && (
+                <GlassView material="regular" style={[styles.section, { borderColor }]}>
+                  <Text style={[styles.sectionDescription, { color: subtextColor }]}>
+                    {parsed.description}
+                  </Text>
+                </GlassView>
+              )}
+
+              {/* ── Info rows ─────────────────────────────────────────────── */}
+              {infoRows.length > 0 && (
+                <GlassView
+                  material="regular"
+                  style={[
+                    styles.section,
+                    {
+                      borderRadius: borderRadius.lg,
+                      overflow: 'hidden',
+                    },
+                  ]}
+                >
+                  {infoRows.map((row, i) => (
+                    <InfoRow
+                      key={i}
+                      icon={row.icon}
+                      label={row.label}
+                      onPress={row.onPress}
+                      iconColor={row.iconColor}
+                      textColor={textColor}
+                      subtextColor={subtextColor}
+                      borderColor={borderColor}
+                      isLast={i === infoRows.length - 1}
+                    />
+                  ))}
+                </GlassView>
+              )}
+
+              {(parsed.facebook || parsed.instagram || parsed.twitter) && (
+                <View style={styles.socialRow}>
+                  {parsed.facebook && (
+                    <TouchableOpacity onPress={handleFacebook}>
+                      <GlassView material="regular" isInteractive style={styles.socialBtn}>
+                        <Text style={[styles.socialLabel, { color: primary }]}>Facebook</Text>
+                      </GlassView>
+                    </TouchableOpacity>
+                  )}
+                  {parsed.instagram && (
+                    <TouchableOpacity onPress={handleInstagram}>
+                      <GlassView material="regular" isInteractive style={styles.socialBtn}>
+                        <Text style={[styles.socialLabel, { color: primary }]}>Instagram</Text>
+                      </GlassView>
+                    </TouchableOpacity>
+                  )}
+                  {parsed.twitter && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        void openInAppBrowser(
+                          parsed.twitter!.startsWith('http')
+                            ? parsed.twitter!
+                            : `https://twitter.com/${parsed.twitter}`,
+                        )
+                      }
+                    >
+                      <GlassView material="regular" isInteractive style={styles.socialBtn}>
+                        <Text style={[styles.socialLabel, { color: primary }]}>X / Twitter</Text>
+                      </GlassView>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {/* ── Note ──────────────────────────────────────────────────── */}
+              {parsed.note && (
+                <GlassView material="regular" style={styles.noteBox}>
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={15}
+                    color={subtextColor}
+                    style={{ marginTop: 1 }}
+                  />
+                  <Text style={[styles.noteText, { color: subtextColor }]}>{parsed.note}</Text>
+                </GlassView>
+              )}
+
+              {/* ── Update Place Info (OSM edit) ────────────────────────
                 Shown for every place: an OSM node edits directly, while an
                 Overture/saved/geocode place has its OSM element resolved on
                 tap (and is offered for creation when it isn't mapped). */}
-            {selectedPoi && (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                disabled={resolvingOsm}
-                onPress={() => {
-                  void handleUpdatePlaceInfo();
-                }}
-              >
-                <GlassView material="regular" isInteractive style={styles.updatePlaceBtn}>
-                  {resolvingOsm ? (
-                    <ActivityIndicator size="small" color={primary} />
-                  ) : (
-                    <Ionicons name="create-outline" size={18} color={primary} />
-                  )}
-                  <Text style={[styles.updatePlaceBtnText, { color: primary }]}>
-                    {resolvingOsm ? 'Checking OpenStreetMap…' : 'Update Place Info'}
-                  </Text>
-                </GlassView>
-              </TouchableOpacity>
-            )}
-
-            {/* ── Add to OpenStreetMap (Overture POI) ─────────────────
-                Hidden when auto-seeding is active (signed in + contributions
-                enabled); shown otherwise as the manual/login fallback. */}
-            {selectedPoi &&
-              selectedPoi.id <= 0 &&
-              selectedPoi.tags['polaris:source'] === 'overture' &&
-              !canAutoSeedOsm && (
+              {selectedPoi && (
                 <TouchableOpacity
-                  style={styles.osmAddBtn}
                   activeOpacity={0.7}
-                  onPress={handleAddToOsm}
+                  disabled={resolvingOsm}
+                  onPress={() => {
+                    void handleUpdatePlaceInfo();
+                  }}
                 >
-                  <Ionicons name="add-circle-outline" size={18} color="#fff" />
-                  <Text style={styles.osmAddBtnText}>Add to OpenStreetMap</Text>
+                  <GlassView material="regular" isInteractive style={styles.updatePlaceBtn}>
+                    {resolvingOsm ? (
+                      <ActivityIndicator size="small" color={primary} />
+                    ) : (
+                      <Ionicons name="create-outline" size={18} color={primary} />
+                    )}
+                    <Text style={[styles.updatePlaceBtnText, { color: primary }]}>
+                      {resolvingOsm ? 'Checking OpenStreetMap…' : 'Update Place Info'}
+                    </Text>
+                  </GlassView>
                 </TouchableOpacity>
               )}
-          </ScrollView>
-        )}
-      </View>
-    </BottomSheet>
+
+              {/* ── Add to OpenStreetMap (Overture POI) ─────────────────
+                Hidden when auto-seeding is active (signed in + contributions
+                enabled); shown otherwise as the manual/login fallback. */}
+              {selectedPoi &&
+                selectedPoi.id <= 0 &&
+                selectedPoi.tags['polaris:source'] === 'overture' &&
+                !canAutoSeedOsm && (
+                  <TouchableOpacity
+                    style={styles.osmAddBtn}
+                    activeOpacity={0.7}
+                    onPress={handleAddToOsm}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                    <Text style={styles.osmAddBtnText}>Add to OpenStreetMap</Text>
+                  </TouchableOpacity>
+                )}
+            </ScrollView>
+          )}
+        </View>
+      </BottomSheet>
+    </>
   );
 }
 
