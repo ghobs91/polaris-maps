@@ -25,6 +25,8 @@
     "test:e2e:android": "detox test --configuration android.emu.release",
     "test:benchmark": "jest --config jest.benchmark.config.js",
     "search:bench": "node scripts/bench-search.mjs",
+    "packs:verify": "node scripts/verify-pack-origins.mjs",
+    "geo:coarse": "node scripts/build-coarse-geocoder.mjs",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
