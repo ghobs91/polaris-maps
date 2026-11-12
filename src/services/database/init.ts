@@ -440,6 +440,7 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
   await migrateReviewsForeignKey(database);
   await migrateSearchIndexes(database);
   await migrateUnifiedSearchIndex(database);
+  await migrateGeocodingRtree(database);
 }
 
 /**
@@ -809,6 +810,83 @@ export const SEARCH_DOCS_DDL = `
       region_id = NEW.region_id;
   END;
 `;
+
+/**
+ * Spatial index over `geocoding_data`, plus the triggers that maintain it.
+ *
+ * Reverse geocoding is "nearest row inside a box", which without an index reads
+ * every row in the table — and a metro pack holds hundreds of thousands once
+ * interpolated house numbers are expanded, so every dropped pin paid for a full
+ * scan. The R*Tree turns that into an index lookup.
+ *
+ * Triggers mirror the `geocoding_trigram` pattern so every write path (pack
+ * import, per-region cascade delete) maintains the index without any caller
+ * having to remember. The R*Tree stores 32-bit floats (~0.5 m at mid
+ * latitudes), so it only narrows candidates; ordering is computed against the
+ * real columns in `geocoding/reverseQuery.ts`.
+ *
+ * Exported for the schema regression suite, which runs it against node:sqlite.
+ */
+export const GEOCODING_RTREE_DDL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS geocoding_rtree USING rtree(
+    id, min_lat, max_lat, min_lng, max_lng
+  );
+`;
+
+/** Trigger families keeping `geocoding_rtree` level with `geocoding_data`. */
+export const GEOCODING_RTREE_TRIGGERS = `
+  CREATE TRIGGER IF NOT EXISTS geocoding_rtree_insert AFTER INSERT ON geocoding_data BEGIN
+    INSERT INTO geocoding_rtree(id, min_lat, max_lat, min_lng, max_lng)
+      VALUES (NEW.id, NEW.lat, NEW.lat, NEW.lng, NEW.lng);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS geocoding_rtree_delete AFTER DELETE ON geocoding_data BEGIN
+    DELETE FROM geocoding_rtree WHERE id = OLD.id;
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS geocoding_rtree_update AFTER UPDATE ON geocoding_data BEGIN
+    DELETE FROM geocoding_rtree WHERE id = OLD.id;
+    INSERT INTO geocoding_rtree(id, min_lat, max_lat, min_lng, max_lng)
+      VALUES (NEW.id, NEW.lat, NEW.lat, NEW.lng, NEW.lng);
+  END;
+`;
+
+/**
+ * Create the reverse-geocoding index and backfill it from existing rows.
+ *
+ * Existing installs already hold pack data, so the backfill is part of the
+ * migration rather than a download-time step. Idempotent: a database that
+ * already has the index only gets a repair pass (an app killed mid-backfill
+ * leaves the index short of the table; the count comparison catches it).
+ */
+export async function migrateGeocodingRtree(
+  database: Pick<SQLite.SQLiteDatabase, 'execAsync' | 'getFirstAsync'>,
+): Promise<void> {
+  const existing = await database.getFirstAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'geocoding_rtree'",
+  );
+
+  if (existing) {
+    const counts = await database.getFirstAsync<{ rows: number; indexed: number }>(
+      `SELECT (SELECT COUNT(*) FROM geocoding_data) AS rows,
+              (SELECT COUNT(*) FROM geocoding_rtree) AS indexed`,
+    );
+    const rows = counts?.rows ?? 0;
+    const indexed = counts?.indexed ?? 0;
+    if (indexed >= rows) return;
+  } else {
+    await database.execAsync(GEOCODING_RTREE_DDL);
+  }
+
+  await database.execAsync(GEOCODING_RTREE_TRIGGERS);
+  // Rewrite rather than append: this runs for a missing index and for a
+  // partial one, and a plain INSERT would duplicate the rows already indexed.
+  await database.execAsync(`
+    DELETE FROM geocoding_rtree;
+    INSERT INTO geocoding_rtree(id, min_lat, max_lat, min_lng, max_lng)
+      SELECT id, lat, lat, lng, lng FROM geocoding_data;
+  `);
+}
 
 export async function closeDatabase(): Promise<void> {
   if (db) {
