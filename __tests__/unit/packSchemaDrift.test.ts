@@ -81,8 +81,14 @@ describe('pack schema drift', () => {
     const builder = tableColumns(pythonDdl(BUILDER_SOURCE, 'POI_SCHEMA'));
     const app = tableColumns(PACK_POI_SCHEMA_SQL);
 
-    expect(Object.keys(builder)).toEqual(['osm_pois']);
-    expect(builder.osm_pois).toEqual(app.osm_pois);
+    expect(Object.keys(builder).sort()).toEqual(['osm_pois', 'poi_index_shapes']);
+    // Both directions: a table the app declares but the builder omits breaks
+    // the importer just as badly as the reverse.
+    expect(Object.keys(app).sort()).toEqual(Object.keys(builder).sort());
+    for (const table of Object.keys(app)) {
+      expect(builder[table]).toBeDefined();
+      expect(builder[table]).toEqual(app[table]);
+    }
   });
 
   it('transit.sqlite columns match PACK_TRANSIT_SCHEMA_SQL', () => {
@@ -121,5 +127,11 @@ describe('pack schema drift', () => {
         'updated_at',
       ]),
     );
+
+    // Shape metadata: the importer selects exactly these columns.
+    const shapes = tableColumns(pythonDdl(BUILDER_SOURCE, 'POI_SCHEMA')).poi_index_shapes!.map(
+      (column) => column.name,
+    );
+    expect(shapes).toEqual(['key', 'value', 'named_only', 'poi_count']);
   });
 });

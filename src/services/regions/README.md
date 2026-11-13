@@ -105,8 +105,10 @@ asset type:
 | `scripts/build-region-bundle.sh`          | Local bundle for a single Geofabrik slug: geocoding + Overture places + bodies + shards + a `manifest-entry.json` with the asset URLs and sizes |
 
 `scripts/osm-to-search-sqlite.py` writes both indices from the clipped PBF using
-the `PACK_*_SCHEMA_SQL` constants from the app (so schema drift fails fast), and
-`scripts/build-search-shards.mjs` splits `search.sqlite` into geohash cells with
+the `PACK_*_SCHEMA_SQL` constants from the app (so schema drift fails fast). POIs
+come from a single DuckDB `ST_ReadOSM` pass; transit from an osmium walk, which
+can assemble ordered route-relation geometry. `scripts/build-search-shards.mjs`
+splits `search.sqlite` into geohash cells with
 per-shard SHA-256 and Merkle roots. That pairing is pinned by
 `__tests__/unit/shardBuilderParity.test.ts`, which rebuilds the roots with the
 app's verifier — if the two ever disagree, every shard would look corrupt on

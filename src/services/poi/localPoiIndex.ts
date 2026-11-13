@@ -105,7 +105,28 @@ export const PACK_POI_SCHEMA_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_osm_pois_bounds ON osm_pois (lat, lng);
   CREATE INDEX IF NOT EXISTS idx_osm_pois_primary ON osm_pois (primary_key, subtype);
+
+  CREATE TABLE IF NOT EXISTS poi_index_shapes (
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    named_only INTEGER NOT NULL,
+    poi_count INTEGER NOT NULL,
+    PRIMARY KEY (key, value)
+  );
 `;
+
+/** Wildcard `value` in {@link PoiIndexShape}: every value of that key. */
+export const POI_SHAPE_ANY_VALUE = '*';
+
+/** A query shape a pack's POI index can answer. */
+export interface PoiIndexShape {
+  key: string;
+  /** Tag value, or {@link POI_SHAPE_ANY_VALUE}. */
+  value: string;
+  /** True when the index only holds features that carry a name. */
+  namedOnly: boolean;
+  poiCount: number;
+}
 
 /** Bounding box, in degrees. Dateline-crossing boxes are not supported. */
 export interface GeoBounds {

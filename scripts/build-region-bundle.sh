@@ -43,7 +43,9 @@ mv geocoding-data.sqlite "$WORK_DIR/geocoding-data.sqlite"
 # ── 3b. Build on-device POI + transit indices ───────────────────────────────
 # These are what keep Overpass/transit queries off the network for a downloaded
 # region (see src/services/poi/localPoiIndex.ts). Run against the *unfiltered*
-# extract: transit route relations need unnamed railway ways and their geometry.
+# extract: POIs are indexed by tag shape (including unnamed features like
+# parking lots) and transit route relations need unnamed railway ways and their
+# geometry. POIs are extracted by DuckDB, transit by osmium.
 echo "==> Building search.sqlite + transit.sqlite …"
 python3 "$(dirname "$0")/osm-to-search-sqlite.py" \
   "$WORK_DIR/input.osm.pbf" "$REGION_ID" "$WORK_DIR"
