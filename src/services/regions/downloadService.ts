@@ -9,7 +9,11 @@ import {
   unpackPmtiles,
 } from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
-import { OPENFREEMAP_TILEJSON_URL, OPENFREEMAP_USER_AGENT } from '../../constants/config';
+import {
+  OPENFREEMAP_TILEJSON_URL,
+  OPENFREEMAP_USER_AGENT,
+  TRANSIT_TIMETABLE_ASSET,
+} from '../../constants/config';
 import {
   OPENFREEMAP_MAX_DOWNLOAD_BYTES,
   OPENFREEMAP_MAX_PARALLEL_DOWNLOADS,
@@ -25,7 +29,7 @@ import {
   importRegionOverturePlacesFromSqlite,
 } from './overtureImporter';
 import { importRegionPlaceDetails } from './placeDetailImporter';
-import { importPackSearchIndices } from './packIndices';
+import { importPackSearchIndices, registerPackTimetable } from './packIndices';
 import { registerPackShards } from './shardCatalog';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
@@ -232,6 +236,10 @@ export async function downloadRegion(
     // that omits them still works, it just keeps the network fallback.
     await downloadPackSearchIndices(region, destDir, onProgress, signal).catch(() => {});
     await importPackSearchIndices(region.id, destDir, region.bounds).catch(() => {});
+    // The timetable is registered where it lies rather than imported — see
+    // `registerPackTimetable`. Absent in most packs today, so this is a no-op
+    // until a region publishes one.
+    await registerPackTimetable(region.id, destDir, region.bounds).catch(() => {});
 
     // Shards let a viewport just outside the pack's coverage be answered from
     // the pack's own verified bytes instead of a network query service. They are
@@ -763,7 +771,11 @@ async function downloadPackSearchIndices(
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<void> {
-  const assets = packAssetsFor(region, ['search.sqlite', 'transit.sqlite']);
+  const assets = packAssetsFor(region, [
+    'search.sqlite',
+    'transit.sqlite',
+    TRANSIT_TIMETABLE_ASSET,
+  ]);
   for (const asset of assets) {
     checkAborted(signal);
 

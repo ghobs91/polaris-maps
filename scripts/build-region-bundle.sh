@@ -112,7 +112,25 @@ duckdb -c "
   DETACH places_db;
 "
 
-# ── 6. Gzip outputs ─────────────────────────────────────────────────────────
+# ── 6. Optional transit timetable ───────────────────────────────────────────
+# Scheduled connections for offline journey planning (Tier 0). Opt-in because a
+# pack build does not necessarily have the region's GTFS zip to hand; without it
+# the pack still works, the planner just falls through to a live source.
+TIMETABLE_GZ=""
+TIMETABLE_SIZE=0
+if [ -n "${GTFS_ZIP:-}" ]; then
+  echo "==> Building transit-timetable.sqlite from ${GTFS_ZIP} …"
+  python3 "$(dirname "$0")/build-transit-timetable.py" \
+    "$GTFS_ZIP" "$WORK_DIR" --region-id "$REGION_ID"
+  gzip -9 -k "$WORK_DIR/transit-timetable.sqlite"
+  TIMETABLE_GZ="$WORK_DIR/transit-timetable.sqlite.gz"
+  TIMETABLE_SIZE=$(stat -f%z "$TIMETABLE_GZ" 2>/dev/null \
+    || stat -c%s "$TIMETABLE_GZ")
+else
+  echo "==> Skipping transit timetable (set GTFS_ZIP to build one)"
+fi
+
+# ── 7. Gzip outputs ─────────────────────────────────────────────────────────
 echo "==> Compressing outputs …"
 gzip -9 -k "$WORK_DIR/geocoding-data.sqlite"
 gzip -9 -k "$WORK_DIR/overture-places.sqlite"
@@ -128,7 +146,7 @@ SEARCH_SIZE=$(stat -f%z "$WORK_DIR/search.sqlite.gz" 2>/dev/null \
 TRANSIT_SIZE=$(stat -f%z "$WORK_DIR/transit.sqlite.gz" 2>/dev/null \
   || stat -c%s "$WORK_DIR/transit.sqlite.gz")
 
-# ── 7. Write manifest entry ─────────────────────────────────────────────────
+# ── 8. Write manifest entry ─────────────────────────────────────────────────
 cat > "$WORK_DIR/manifest-entry.json" <<EOF
 {
   "id": "${REGION_ID}",
@@ -146,11 +164,14 @@ cat > "$WORK_DIR/manifest-entry.json" <<EOF
 }
 EOF
 
-# ── 8. Copy outputs to current directory ─────────────────────────────────────
+# ── 9. Copy outputs to current directory ─────────────────────────────────────
 cp "$WORK_DIR/geocoding-data.sqlite.gz" .
 cp "$WORK_DIR/overture-places.sqlite.gz" .
 cp "$WORK_DIR/search.sqlite.gz" .
 cp "$WORK_DIR/transit.sqlite.gz" .
+if [ -n "$TIMETABLE_GZ" ]; then
+  cp "$TIMETABLE_GZ" .
+fi
 cp -R "$WORK_DIR/shards" .
 cp "$WORK_DIR/shards.json" .
 cp "$WORK_DIR/manifest-entry.json" .
@@ -161,6 +182,9 @@ echo "  geocoding-data.sqlite.gz  (${GEOCODING_SIZE} bytes)"
 echo "  overture-places.sqlite.gz  (${PLACES_SIZE} bytes)"
 echo "  search.sqlite.gz           (${SEARCH_SIZE} bytes)"
 echo "  transit.sqlite.gz          (${TRANSIT_SIZE} bytes)"
+if [ -n "$TIMETABLE_GZ" ]; then
+  echo "  transit-timetable.sqlite.gz (${TIMETABLE_SIZE} bytes)"
+fi
 echo "  shards.json + shards/      (content-addressed POI shards)"
 echo "  manifest-entry.json"
 echo ""

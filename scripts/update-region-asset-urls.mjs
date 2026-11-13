@@ -109,6 +109,7 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
     const size = sizes[region.id] ?? {};
     const searchName = assetName(region.id, 'search.sqlite');
     const transitName = assetName(region.id, 'transit.sqlite');
+    const timetableName = assetName(region.id, 'transit-timetable.sqlite');
     const stamped = {
       ...region,
       searchIndexUrl: `${prefix}/${searchName}`,
@@ -147,6 +148,17 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
         transitName,
         `${prefix}/${transitName}`,
         size.transitIndexSizeBytes,
+        checksums,
+        mirrorPrefixes,
+      ),
+      // Scheduled timetable (connections). Optional: a region only lists it when
+      // the pack builder could produce one. Large enough that it is its own
+      // asset — see services/transit/transitTimetable.ts for why.
+      assetEntry(
+        'transit-timetable.sqlite',
+        timetableName,
+        `${prefix}/${timetableName}`,
+        size.timetableSizeBytes,
         checksums,
         mirrorPrefixes,
       ),

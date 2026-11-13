@@ -93,6 +93,15 @@ export const OVERTURE_PLACES_PM_TILES_URL: string =
   process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL ?? overturePmtilesUrl(OVERTURE_RELEASE);
 
 /** Overture GeoParquet S3 path for places. */
+/**
+ * Pack asset name for the scheduled transit timetable.
+ *
+ * Lives here rather than in `services/transit/transitTimetable` so the download
+ * path can name the asset without pulling the SQLite/storage stack into its
+ * module graph.
+ */
+export const TRANSIT_TIMETABLE_ASSET = 'transit-timetable.sqlite';
+
 export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/type=place/*`;
 
 // ── Transit ─────────────────────────────────────────────────────────

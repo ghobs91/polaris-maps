@@ -108,3 +108,55 @@ export async function importPackSearchIndices(
 
   return result;
 }
+
+/**
+ * Register the pack's transit timetable, if it shipped one.
+ *
+ * Unlike the two indices above, the timetable is **not** imported into the main
+ * database: it holds millions of connection rows, so copying it would double
+ * the bytes on disk and stall the download. It is opened where it lies and
+ * queried read-only (`services/transit/transitTimetable`).
+ *
+ * Never throws: a missing or malformed timetable just means Tier 0 planning is
+ * unavailable for this region, and the planner falls through to a live source.
+ */
+export async function registerPackTimetable(
+  regionId: string,
+  dirPath: string,
+  bounds: PackBoundaries,
+): Promise<boolean> {
+  // Imported lazily: the timetable module pulls the SQLite + storage stack, and
+  // the download path should only pay for it when a pack actually ships one.
+  const { TRANSIT_TIMETABLE_ASSET, registerTimetable, unregisterTimetable } =
+    await import('../transit/transitTimetable');
+
+  const path = `${dirPath}/${TRANSIT_TIMETABLE_ASSET}`;
+  if (!(await fileExists(path))) {
+    // A re-download that no longer ships a timetable must not leave the old
+    // registration pointing at a file that is gone.
+    unregisterTimetable(regionId);
+    return false;
+  }
+
+  try {
+    registerTimetable({
+      regionId,
+      path,
+      bounds: {
+        south: bounds.minLat,
+        west: bounds.minLng,
+        north: bounds.maxLat,
+        east: bounds.maxLng,
+      },
+      installedAt: Date.now(),
+    });
+    logDiagnostic('regions', 'info', 'registered pack transit timetable', { regionId });
+    return true;
+  } catch (err) {
+    logDiagnostic('regions', 'warn', 'pack transit timetable registration failed', {
+      regionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
