@@ -1,4 +1,5 @@
 import NetInfo from '@react-native-community/netinfo';
+import { getFreeDiskStorageAsync } from 'expo-file-system/legacy';
 import { useMapStore } from '../../stores/mapStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { getRegionContainingPoint } from './regionRepository';
@@ -43,16 +44,32 @@ export function packSizeOf(region: Region): number | null {
   return region.tilesSizeBytes ?? null;
 }
 
+/**
+ * Free space, or null when it cannot be read.
+ *
+ * Null is a real answer, not an error to paper over: `decideAutoDownload` skips
+ * with `disk-unknown` rather than guessing, because an auto-download that fills
+ * the disk is worse than no download.
+ */
+async function freeDiskBytes(): Promise<number | null> {
+  try {
+    return await getFreeDiskStorageAsync();
+  } catch {
+    return null;
+  }
+}
+
 async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision> {
   const settings = useSettingsStore.getState();
   const region = await getRegionContainingPoint(lat, lng);
-  const netState = await NetInfo.fetch();
+  const [netState, freeBytes] = await Promise.all([NetInfo.fetch(), freeDiskBytes()]);
   const netDetails = netState.details as { isConnectionExpensive?: boolean } | null;
 
   const decision = decideAutoDownload({
     enabled: settings.autoDownloadRegions,
     regionId: region?.id ?? null,
     packSizeBytes: region ? packSizeOf(region) : null,
+    freeBytes,
     downloaded: region?.downloadStatus === 'complete',
     downloading: region ? isDownloading(region.id) : false,
     metered: isMeteredConnection(netState.type, netDetails?.isConnectionExpensive),

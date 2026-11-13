@@ -92,10 +92,16 @@ location) ends up rendering from local bytes without the user finding the region
 list.
 
 Guards (all in the pure `decideAutoDownload`): enabled in settings, point inside
-a known region, not already downloaded/downloading, pack under
-`AUTO_DOWNLOAD_MAX_BYTES` (150 MB — unknown size counts as too large), unmetered
-unless the user opted into cellular, viewport settled for 4 s, and no retry
-after a failure this session.
+a known region, not already downloaded/downloading, free disk at least
+`AUTO_DOWNLOAD_DISK_HEADROOM` (2.5x) the pack size — a pack briefly holds the
+archive and the expanded tile tree at once — unmetered unless the user opted
+into cellular, viewport settled for 4 s, and no retry after a failure this
+session. Unknown size or unreadable free space skips rather than guesses.
+
+There is no fixed size ceiling: the pack reader streams
+(`READ_WINDOW_BYTES` in `backend/pmtiles.mjs`), so pack size is bounded by
+storage rather than by what fits in memory. An earlier 150 MB cap was a proxy
+for the unpacker having to hold the whole archive in RAM.
 
 ## Seeding measurement
 
