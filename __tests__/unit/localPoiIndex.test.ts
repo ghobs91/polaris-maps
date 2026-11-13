@@ -20,7 +20,9 @@ import {
   PACK_POI_SCHEMA_SQL,
   buildLocalPoiQuery,
   buildPoiCoverageQuery,
+  buildPoiShapeCoverageQuery,
   ftsQueryFromText,
+  shapeSatisfiesFilter,
 } from '../../src/services/poi/localPoiIndex';
 
 interface Fixture {
@@ -209,6 +211,140 @@ describe('coverage', () => {
 
   it('treats a zero-POI region as no coverage', () => {
     expect(covered({ south: 0.25, west: 0.25, north: 0.75, east: 0.75 })).toBe(0);
+  });
+});
+
+describe('shape coverage', () => {
+  let db: DatabaseSync;
+
+  const NYC = { south: 40.7, west: -74.0, north: 40.8, east: -73.9 };
+  const NOWHERE = { south: 0, west: 0, north: 1, east: 1 };
+
+  beforeEach(() => {
+    db = new DatabaseSync(':memory:');
+    db.exec(LOCAL_POI_SCHEMA_SQL);
+    db.exec(`
+      INSERT INTO local_poi_coverage (region_id, south, west, north, east, poi_count, updated_at)
+      VALUES ('nyc', 40.0, -74.5, 41.0, -73.0, 4, 1),
+             ('empty', 0, 0, 1, 1, 0, 1);
+
+      INSERT INTO local_poi_shapes (region_id, key, value, named_only, poi_count)
+      VALUES ('nyc', 'amenity', '*',  1, 3),
+             ('nyc', 'amenity', 'parking', 0, 1),
+             ('nyc', 'railway', 'station', 0, 0);
+    `);
+  });
+
+  afterEach(() => db.close());
+
+  function shapeCovered(
+    bounds: { south: number; west: number; north: number; east: number },
+    keys: Array<{ key: string; value?: string }>,
+    requireName: boolean,
+  ): number {
+    const { sql, params } = buildPoiShapeCoverageQuery(bounds, keys, requireName);
+    const row = db.prepare(sql).get(...params) as { covered: number };
+    return row.covered;
+  }
+
+  it('answers a wildcard shape for a named query', () => {
+    expect(shapeCovered(NYC, [{ key: 'amenity', value: 'cafe' }], true)).toBe(1);
+  });
+
+  it('refuses a wildcard shape for an unnamed query', () => {
+    // The pack only holds named amenities under the wildcard, so it cannot
+    // answer "every amenity including unnamed ones".
+    expect(shapeCovered(NYC, [{ key: 'amenity', value: 'bench' }], false)).toBe(0);
+  });
+
+  it('accepts a specific pair that the pack indexed unnamed', () => {
+    expect(shapeCovered(NYC, [{ key: 'amenity', value: 'parking' }], false)).toBe(1);
+  });
+
+  it('reports a shape with zero matches as covered', () => {
+    // This is the whole point: the pack indexed `railway=station` and found
+    // none, so "nothing here" is final and must not cost a network request.
+    expect(shapeCovered(NYC, [{ key: 'railway', value: 'station' }], false)).toBe(1);
+  });
+
+  it('requires every requested shape, not just one', () => {
+    expect(
+      shapeCovered(
+        NYC,
+        [
+          { key: 'amenity', value: 'parking' },
+          { key: 'railway', value: 'station' },
+        ],
+        false,
+      ),
+    ).toBe(1);
+    // `natural=peak` was never indexed.
+    expect(
+      shapeCovered(
+        NYC,
+        [
+          { key: 'amenity', value: 'parking' },
+          { key: 'natural', value: 'peak' },
+        ],
+        false,
+      ),
+    ).toBe(0);
+  });
+
+  it('does not answer for a box no region covers', () => {
+    expect(shapeCovered(NOWHERE, [{ key: 'amenity', value: 'parking' }], false)).toBe(0);
+  });
+
+  it('ignores shapes from a region with no POIs', () => {
+    db.exec(`INSERT INTO local_poi_shapes (region_id, key, value, named_only, poi_count)
+             VALUES ('empty', 'amenity', 'cafe', 0, 0)`);
+    expect(
+      shapeCovered(
+        { south: 0.25, west: 0.25, north: 0.75, east: 0.75 },
+        [{ key: 'amenity', value: 'cafe' }],
+        false,
+      ),
+    ).toBe(0);
+  });
+
+  it('degrades to the bbox check when no filter is given', () => {
+    expect(shapeCovered(NYC, [], false)).toBe(1);
+    expect(shapeCovered(NOWHERE, [], false)).toBe(0);
+  });
+
+  it('falls back to bbox coverage when the pack carries no shapes', () => {
+    // A pack built before shape metadata existed: coverage rows only. The
+    // caller must not treat this as "indexed, zero matches".
+    db.exec('DELETE FROM local_poi_shapes');
+    expect(shapeCovered(NYC, [{ key: 'amenity', value: 'cafe' }], true)).toBe(0);
+    // ...but a filter-less query still works, because it only needs the bbox.
+    expect(shapeCovered(NYC, [], true)).toBe(1);
+  });
+
+  describe('shapeSatisfiesFilter', () => {
+    const shape = { key: 'amenity', value: '*', namedOnly: true };
+
+    it('matches the key', () => {
+      expect(shapeSatisfiesFilter(shape, { key: 'shop' }, true)).toBe(false);
+      expect(shapeSatisfiesFilter(shape, { key: 'amenity' }, true)).toBe(true);
+    });
+
+    it('treats the wildcard as any value', () => {
+      expect(shapeSatisfiesFilter(shape, { key: 'amenity', value: 'atm' }, true)).toBe(true);
+    });
+
+    it('requires an exact value for a specific shape', () => {
+      const parking = { key: 'amenity', value: 'parking', namedOnly: false };
+      expect(shapeSatisfiesFilter(parking, { key: 'amenity', value: 'parking' }, false)).toBe(true);
+      expect(shapeSatisfiesFilter(parking, { key: 'amenity', value: 'atm' }, false)).toBe(false);
+      // "any amenity" cannot be answered by a single-value shape.
+      expect(shapeSatisfiesFilter(parking, { key: 'amenity' }, false)).toBe(false);
+    });
+
+    it('lets a named-only shape answer a named query but not an unnamed one', () => {
+      expect(shapeSatisfiesFilter(shape, { key: 'amenity', value: 'atm' }, true)).toBe(true);
+      expect(shapeSatisfiesFilter(shape, { key: 'amenity', value: 'atm' }, false)).toBe(false);
+    });
   });
 });
 

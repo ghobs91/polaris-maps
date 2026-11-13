@@ -2,7 +2,7 @@ import type { PlaceCategory } from '../../models/poi';
 import type { OsmPoi } from './osmFetcher';
 import { searchPlacesByCategory } from './poiService';
 import { fetchOsmPoisByTags } from './osmFetcher';
-import { hasLocalPoiCoverage, queryLocalPois } from './localPoiIndex';
+import { hasLocalPoiCoverage, hasLocalPoiShapeCoverage, queryLocalPois } from './localPoiIndex';
 import { isOverpassEnabled } from '../overpassClient';
 import { isAbortError, throwIfAborted, withTimeout } from '../search/abortUtils';
 import { nominatimThrottle } from '../search/requestThrottle';
@@ -126,11 +126,19 @@ export async function searchByCategory(
   const allTags = categories.flatMap(categoryToOverpassTags);
   const bounds = { south, west, north, east };
   let indexPois: OsmPoi[] = [];
+  // True when the pack indexed every tag shape this search asks for. Then an
+  // empty local answer is the real answer: no third-party request can improve
+  // it, and asking anyway is exactly the load a pack is supposed to remove.
+  let shapesCovered = false;
   try {
     if (await hasLocalPoiCoverage(bounds)) {
+      const shapeFilters = allTags.map(([key, value]) => ({ key, value }));
+      shapesCovered = await hasLocalPoiShapeCoverage(bounds, shapeFilters, false).catch(
+        () => false,
+      );
       indexPois = await queryLocalPois({
         ...bounds,
-        keys: allTags.map(([key, value]) => ({ key, value })),
+        keys: shapeFilters,
         limit: Math.max(limit, LOCAL_INDEX_MIN_RESULTS),
       });
     }
@@ -138,6 +146,7 @@ export async function searchByCategory(
     // No index yet (fresh install, or a platform without SQLite in tests):
     // behave exactly as before this layer existed.
     indexPois = [];
+    shapesCovered = false;
   }
   if (indexPois.length > 0) {
     localPois = deduplicateCategoryResults(localPois, indexPois);
@@ -150,11 +159,12 @@ export async function searchByCategory(
     ? rankByCuisineRelevance(localPois, cuisineHint, anchor)
     : keepNearest(localPois, anchor);
 
-  const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD;
+  // Two independent reasons to stop here: enough local rows that a network
+  // answer would only add noise, or a pack that indexed every shape this
+  // search asks for — in which case zero rows is the answer, not a shortfall.
+  const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD || shapesCovered;
 
   if (localPrimary || opts?.localOnly) {
-    // Report the honest flag: a local-only pass with too few rows is not
-    // "local is primary", it is "local is all we have so far".
     return { categories, pois: localPois.slice(0, limit), localPrimary };
   }
   throwIfAborted(opts?.signal);

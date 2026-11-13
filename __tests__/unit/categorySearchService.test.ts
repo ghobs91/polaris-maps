@@ -24,6 +24,7 @@ jest.mock('../../src/services/identity/keypair', () => ({
 import { searchByCategory } from '../../src/services/poi/categorySearchService';
 import * as poiService from '../../src/services/poi/poiService';
 import * as osmFetcher from '../../src/services/poi/osmFetcher';
+import * as localPoiIndex from '../../src/services/poi/localPoiIndex';
 import type { Place } from '../../src/models/poi';
 
 // ---------------------------------------------------------------------------
@@ -373,5 +374,86 @@ describe('searchByCategory', () => {
     expect(result).not.toBeNull();
     // "Joe's Pizza" should be ranked first because the name contains "pizza"
     expect(result!.pois[0].name).toBe("Joe's Pizza");
+  });
+
+  // -------------------------------------------------------------------------
+  // Pack shape coverage: when a downloaded pack indexed every tag shape this
+  // search asks for, a sparse result is the truth, not a reason to ask a
+  // stranger's server. This is what keeps a pack's whole point intact — a
+  // category with no matches used to cost an Overpass request *and* a
+  // Nominatim request even inside a fully downloaded region.
+  // -------------------------------------------------------------------------
+  describe('when the pack indexed every requested shape', () => {
+    function mockPack(opts: {
+      shapesCovered: boolean;
+      localPois?: ReturnType<typeof makeOsmPoi>[];
+    }) {
+      jest.spyOn(localPoiIndex, 'hasLocalPoiCoverage').mockResolvedValue(true);
+      jest.spyOn(localPoiIndex, 'hasLocalPoiShapeCoverage').mockResolvedValue(opts.shapesCovered);
+      jest.spyOn(localPoiIndex, 'queryLocalPois').mockResolvedValue(opts.localPois ?? []);
+    }
+
+    it('treats an empty local answer as final, with no third-party request', async () => {
+      jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
+      mockPack({ shapesCovered: true });
+      const overpass = jest.spyOn(osmFetcher, 'fetchOsmPoisByTags').mockResolvedValue([]);
+
+      const result = await searchByCategory(
+        'parking',
+        bbox.south,
+        bbox.west,
+        bbox.north,
+        bbox.east,
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.localPrimary).toBe(true);
+      expect(result!.pois).toEqual([]);
+      expect(overpass).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('still asks Overpass when the pack carries no shape metadata', async () => {
+      // Packs built before `poi_index_shapes` existed: the app cannot tell
+      // "no matches" from "never indexed", so it must keep the old behaviour.
+      jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
+      mockPack({ shapesCovered: false });
+      const overpass = jest
+        .spyOn(osmFetcher, 'fetchOsmPoisByTags')
+        .mockResolvedValue([makeOsmPoi(200, 'Lot 9', 40.75, -73.98)]);
+
+      const result = await searchByCategory(
+        'parking',
+        bbox.south,
+        bbox.west,
+        bbox.north,
+        bbox.east,
+      );
+
+      expect(result).not.toBeNull();
+      expect(overpass).toHaveBeenCalled();
+      expect(result!.pois.map((p) => p.name)).toContain('Lot 9');
+    });
+
+    it('does not claim authority when the local index answered with rows', async () => {
+      jest.spyOn(poiService, 'searchPlacesByCategory').mockResolvedValue([]);
+      mockPack({
+        shapesCovered: true,
+        localPois: [makeOsmPoi(201, 'Garage A', 40.75, -73.98)],
+      });
+      const overpass = jest.spyOn(osmFetcher, 'fetchOsmPoisByTags').mockResolvedValue([]);
+
+      const result = await searchByCategory(
+        'parking',
+        bbox.south,
+        bbox.west,
+        bbox.north,
+        bbox.east,
+      );
+
+      expect(result!.pois.map((p) => p.name)).toEqual(['Garage A']);
+      expect(result!.localPrimary).toBe(true);
+      expect(overpass).not.toHaveBeenCalled();
+    });
   });
 });

@@ -126,16 +126,16 @@ stored — no review text.
 
 ## Key Constants
 
-| Constant                      | Value  | Description                                            |
-| ----------------------------- | ------ | ------------------------------------------------------ |
-| `POI_MIN_ZOOM`                | 14     | POIs only fetch when map zoom ≥14                      |
-| `OSM_FETCH_DEBOUNCE_MS`       | 300    | Debounce viewport changes before fetching              |
-| `POI_FETCH_THRESHOLD`         | 0.01   | Skip re-fetch if viewport shifted <1km                 |
-| `DEDUP_THRESHOLD_DEG`         | 0.0003 | ~30m threshold for duplicate detection                 |
-| `LOCAL_SUFFICIENCY_THRESHOLD` | 5      | Trigger Overpass fallback if <5 local category results |
-| `OVERPASS_TIMEOUT_MS`         | 5,000  | Overpass API request timeout                           |
-| `ATTESTATION_RADIUS_M`        | 100    | Maximum GPS distance for proof-of-presence             |
-| `ENRICHMENT_CACHE_SIZE`       | 500    | Max MapKit enrichment cache entries                    |
+| Constant                      | Value  | Description                                                                                               |
+| ----------------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
+| `POI_MIN_ZOOM`                | 14     | POIs only fetch when map zoom ≥14                                                                         |
+| `OSM_FETCH_DEBOUNCE_MS`       | 300    | Debounce viewport changes before fetching                                                                 |
+| `POI_FETCH_THRESHOLD`         | 0.01   | Skip re-fetch if viewport shifted <1km                                                                    |
+| `DEDUP_THRESHOLD_DEG`         | 0.0003 | ~30m threshold for duplicate detection                                                                    |
+| `LOCAL_SUFFICIENCY_THRESHOLD` | 5      | Trigger Overpass fallback if <5 local category results _and_ the pack did not index every requested shape |
+| `OVERPASS_TIMEOUT_MS`         | 5,000  | Overpass API request timeout                                                                              |
+| `ATTESTATION_RADIUS_M`        | 100    | Maximum GPS distance for proof-of-presence                                                                |
+| `ENRICHMENT_CACHE_SIZE`       | 500    | Max MapKit enrichment cache entries                                                                       |
 
 ## Overpass replacement (local-first query)
 
@@ -151,20 +151,41 @@ time and answered on device; Overpass remains only as an escape hatch.
 
 ### Local index tables
 
-- `osm_pois` — one row per named OSM POI, addressed by `(osm_type, osm_id)`
+- `osm_pois` — one row per indexed OSM POI, addressed by `(osm_type, osm_id)`
 - `osm_pois_fts` — FTS5 over name/subtype (`unicode61`, prefix 2/3/4)
 - `local_poi_coverage` — one row per imported region; separates "nothing here"
-  from "no data here", which is what decides whether Overpass is consulted
+  from "no data here"
+- `local_poi_shapes` — which tag shapes the pack actually indexed, and whether
+  unnamed features are included
+
+`local_poi_coverage` alone can only answer "is this box covered by a pack?".
+That is not enough to retire a third-party request: a category with genuinely
+zero matches looks identical to a tag the pack never indexed, so a sparse area
+would still call Overpass to find out nothing. `local_poi_shapes` closes that
+gap — the pack publishes the shapes it built (`key`, `value`, `named_only`,
+`poi_count`; `value = '*'` means any value of that key), and
+`hasLocalPoiShapeCoverage` answers "would this pack have found one?" per query.
+When it says yes, an empty result is final.
+
+Packs built before shape metadata existed have no rows there, so
+`hasLocalPoiShapeCoverage` returns false and behaviour degrades to the
+coverage-only rule rather than lying.
 
 Rows arrive from a region pack's `search.sqlite` (see
 `importLocalPoiIndexFromPack`, invoked by `regions/packIndices.ts` after a
-download) or from the app's own edits.
+download) or from the app's own edits. The build rule lives in
+`scripts/poi-index-shapes.json`; `__tests__/unit/poiIndexShapes.test.ts` fails
+if a `PlaceCategory` can ask for a tag pair that file does not index.
 
 ### Query behaviour
 
 - `hasLocalPoiCoverage(bounds)` gates every consumer. A covered bbox is answered
   locally _even when the answer is empty_ — an honest empty result must not be
   turned into a third-party request.
+- `hasLocalPoiShapeCoverage(bounds, keys, requireName)` decides whether that
+  empty answer is authoritative. `categorySearchService` treats a shape-covered
+  result as primary regardless of count, which is what stops "no pizza places
+  within 5 km" from becoming an Overpass call inside a fully downloaded region.
 - `buildLocalPoiQuery` is pure and covered by
   `__tests__/unit/localPoiIndex.test.ts` against real SQLite, including the
   `json_extract` path quoting for keys like `addr:street` and `fuel:diesel`.

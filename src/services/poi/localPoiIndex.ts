@@ -14,6 +14,12 @@
  *   osm_pois_fts      FTS5 over name/subtype for text queries
  *   local_poi_coverage  one row per imported region, so callers can tell
  *                       "no POIs here" apart from "we have no data here"
+ *   local_poi_shapes  which tag shapes a region's pack actually indexed, and
+ *                       whether unnamed features are included. Without it the
+ *                       only question answerable is "is this box covered?", so
+ *                       a category with genuinely zero matches looks identical
+ *                       to a tag the pack never indexed — and costs a network
+ *                       request to find out. With it, "nothing here" is final.
  *
  * Rows come from a signed region pack (`search.sqlite`, produced by the pack
  * builder) via {@link importLocalPoiIndexFromPack}, or from the app's own OSM
@@ -84,6 +90,17 @@ export const LOCAL_POI_SCHEMA_SQL = `
     east REAL NOT NULL,
     poi_count INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
+  );
+
+  -- Which query shapes this region's pack indexed. A value of '*' means "any
+  -- value of this key"; named_only is 0 when unnamed features are included.
+  CREATE TABLE IF NOT EXISTS local_poi_shapes (
+    region_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    named_only INTEGER NOT NULL,
+    poi_count INTEGER NOT NULL,
+    PRIMARY KEY (region_id, key, value)
   );
 `;
 
@@ -166,6 +183,60 @@ export function buildPoiCoverageQuery(bounds: GeoBounds): BuiltPoiQuery {
             FROM local_poi_coverage
            WHERE south <= ? AND north >= ? AND west <= ? AND east >= ? AND poi_count > 0`,
     params: [bounds.south, bounds.north, bounds.west, bounds.east],
+  };
+}
+
+/** Does an indexed shape satisfy a requested filter at this name requirement? */
+export function shapeSatisfiesFilter(
+  shape: Pick<PoiIndexShape, 'key' | 'value' | 'namedOnly'>,
+  filter: PoiKeyFilter,
+  requireName: boolean,
+): boolean {
+  if (shape.key !== filter.key) return false;
+  // A named-only shape cannot answer a query that wants unnamed features too.
+  if (shape.namedOnly && !requireName) return false;
+  if (shape.value === POI_SHAPE_ANY_VALUE) return true;
+  return filter.value !== undefined && shape.value === filter.value;
+}
+
+/**
+ * SQL that answers "does an imported region index every requested shape?".
+ *
+ * One `EXISTS` per filter, ANDed, so this is a single round trip. An empty
+ * filter list degrades to the plain bbox check: any indexed POI will do.
+ */
+export function buildPoiShapeCoverageQuery(
+  bounds: GeoBounds,
+  keys: readonly PoiKeyFilter[],
+  requireName: boolean,
+): BuiltPoiQuery {
+  if (keys.length === 0) return buildPoiCoverageQuery(bounds);
+
+  const params: Array<string | number> = [];
+  const clauses = keys.map((filter) => {
+    params.push(bounds.south, bounds.north, bounds.west, bounds.east, filter.key);
+    let valueClause: string;
+    if (filter.value === undefined) {
+      valueClause = 's.value = ?';
+      params.push(POI_SHAPE_ANY_VALUE);
+    } else {
+      valueClause = '(s.value = ? OR s.value = ?)';
+      params.push(POI_SHAPE_ANY_VALUE, filter.value);
+    }
+    params.push(requireName ? 1 : 0);
+    return `EXISTS (SELECT 1
+                     FROM local_poi_shapes s
+                     JOIN local_poi_coverage c ON c.region_id = s.region_id
+                    WHERE c.south <= ? AND c.north >= ? AND c.west <= ? AND c.east >= ?
+                      AND c.poi_count > 0
+                      AND s.key = ? AND ${valueClause}
+                      AND (s.named_only = 0 OR ? = 1))`;
+  });
+
+  return {
+    sql: `SELECT CASE WHEN ${clauses.map((clause) => `(${clause})`).join(' AND ')}
+                THEN 1 ELSE 0 END AS covered`,
+    params,
   };
 }
 
@@ -339,6 +410,51 @@ export async function hasLocalPoiCoverage(bounds: GeoBounds): Promise<boolean> {
   return (row?.covered ?? 0) > 0;
 }
 
+/**
+ * True when every requested tag shape is indexed for this box — i.e. the pack
+ * would have found a matching feature if one existed. Callers use this to treat
+ * an empty local result as final instead of asking a third party.
+ *
+ * Returns false when the pack predates `poi_index_shapes` (no rows), which
+ * degrades to the previous bbox-only behaviour rather than lying.
+ */
+export async function hasLocalPoiShapeCoverage(
+  bounds: GeoBounds,
+  keys: readonly PoiKeyFilter[],
+  requireName: boolean,
+): Promise<boolean> {
+  if (keys.length === 0) return hasLocalPoiCoverage(bounds);
+  await ensureLocalPoiSchema();
+  const db = await getDatabase();
+  const { sql, params } = buildPoiShapeCoverageQuery(bounds, keys, requireName);
+  const row = await db.getFirstAsync<{ covered: number }>(sql, params);
+  return (row?.covered ?? 0) > 0;
+}
+
+/** Shapes indexed for the region(s) covering a box (diagnostics and tests). */
+export async function localPoiShapesForBounds(bounds: GeoBounds): Promise<PoiIndexShape[]> {
+  await ensureLocalPoiSchema();
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{
+    key: string;
+    value: string;
+    named_only: number;
+    poi_count: number;
+  }>(
+    `SELECT DISTINCT s.key, s.value, s.named_only, s.poi_count
+       FROM local_poi_shapes s
+       JOIN local_poi_coverage c ON c.region_id = s.region_id
+      WHERE c.south <= ? AND c.north >= ? AND c.west <= ? AND c.east >= ?`,
+    [bounds.south, bounds.north, bounds.west, bounds.east],
+  );
+  return rows.map((row) => ({
+    key: row.key,
+    value: row.value,
+    namedOnly: row.named_only !== 0,
+    poiCount: row.poi_count,
+  }));
+}
+
 /** Region ids whose coverage box contains the point (freshest first). */
 export async function regionsCoveringPoint(
   lat: number,
@@ -462,6 +578,14 @@ export async function importLocalPoiIndexFromPack(
   return imported;
 }
 
+/** Does the attached pack carry shape metadata (packs built after v2 do)? */
+async function packHasShapes(db: SQLiteDatabase): Promise<boolean> {
+  const row = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM pack.sqlite_master WHERE type = 'table' AND name = 'poi_index_shapes'`,
+  );
+  return Boolean(row);
+}
+
 /** ATTACH + INSERT..SELECT: one statement, one transaction. */
 async function importPoiRowsViaAttach(
   db: SQLiteDatabase,
@@ -470,6 +594,10 @@ async function importPoiRowsViaAttach(
 ): Promise<number> {
   await db.runAsync(`ATTACH DATABASE '${packPath.replace(/'/g, "''")}' AS pack`);
   try {
+    // Older packs have no shape table: importing is then a no-op and the app
+    // falls back to bbox-only coverage for that region.
+    const withShapes = await packHasShapes(db);
+
     let imported = 0;
     await db.withTransactionAsync(async () => {
       await db.runAsync(
@@ -495,6 +623,15 @@ async function importPoiRowsViaAttach(
         'SELECT COUNT(*) AS n FROM pack.osm_pois',
       );
       imported = count?.n ?? 0;
+
+      if (withShapes) {
+        await db.runAsync('DELETE FROM local_poi_shapes WHERE region_id = ?', [regionId]);
+        await db.runAsync(
+          `INSERT INTO local_poi_shapes (region_id, key, value, named_only, poi_count)
+           SELECT ?, key, value, named_only, poi_count FROM pack.poi_index_shapes`,
+          [regionId],
+        );
+      }
     });
     return imported;
   } finally {
@@ -547,6 +684,26 @@ async function importPoiRowsRowWise(packPath: string, regionId: string): Promise
       imported += rows.length;
       offset += rows.length;
     }
+
+    // Shape metadata, same source and same best-effort rule as the rows.
+    const shapes = await packDb
+      .getAllAsync<{
+        key: string;
+        value: string;
+        named_only: number;
+        poi_count: number;
+      }>('SELECT key, value, named_only, poi_count FROM poi_index_shapes')
+      .catch(() => []);
+    await db.withTransactionAsync(async () => {
+      await db.runAsync('DELETE FROM local_poi_shapes WHERE region_id = ?', [regionId]);
+      for (const shape of shapes) {
+        await db.runAsync(
+          `INSERT INTO local_poi_shapes (region_id, key, value, named_only, poi_count)
+           VALUES (?, ?, ?, ?, ?)`,
+          [regionId, shape.key, shape.value, shape.named_only, shape.poi_count],
+        );
+      }
+    });
   } finally {
     await packDb.closeAsync().catch(() => undefined);
   }
@@ -560,6 +717,7 @@ export async function clearLocalPoiIndex(regionId: string): Promise<void> {
   const db = await getDatabase();
   await db.withTransactionAsync(async () => {
     await db.runAsync('DELETE FROM osm_pois WHERE region_id = ?', [regionId]);
+    await db.runAsync('DELETE FROM local_poi_shapes WHERE region_id = ?', [regionId]);
     await db.runAsync('DELETE FROM local_poi_coverage WHERE region_id = ?', [regionId]);
   });
 }
