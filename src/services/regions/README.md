@@ -107,7 +107,10 @@ asset type:
 `scripts/osm-to-search-sqlite.py` writes both indices from the clipped PBF using
 the `PACK_*_SCHEMA_SQL` constants from the app (so schema drift fails fast). POIs
 come from a single DuckDB `ST_ReadOSM` pass; transit from an osmium walk, which
-can assemble ordered route-relation geometry. `scripts/build-search-shards.mjs`
+can assemble ordered route-relation geometry. Each POI keeps only the tags the
+app reads (`scripts/poi-tags.json`): on a dense metro the full tag maps were 87%
+of the search index's payload, and most of it was `surface`/`check_date`/`source`
+metadata no screen touches. `scripts/build-search-shards.mjs`
 splits `search.sqlite` into geohash cells with
 per-shard SHA-256 and Merkle roots. That pairing is pinned by
 `__tests__/unit/shardBuilderParity.test.ts`, which rebuilds the roots with the

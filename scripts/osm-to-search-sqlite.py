@@ -53,6 +53,10 @@ except ImportError:  # pragma: no cover - CI installs it
 # drift test (__tests__/unit/poiIndexShapes.test.ts).
 SHAPES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "poi-index-shapes.json")
 
+# Which tags each POI keeps. Asserted against what the app reads by
+# __tests__/unit/poiTagAllowlist.test.ts.
+TAGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "poi-tags.json")
+
 TRANSIT_ROUTE_MODES = ("subway", "light_rail", "train", "tram", "monorail")
 
 STOP_ROLES = (
@@ -249,6 +253,12 @@ def _load_shapes():
     return shapes["anyValueKeys"], shapes["namedOptionalPairs"]
 
 
+def _load_tags():
+    with open(TAGS_PATH, "r", encoding="utf-8") as handle:
+        tags = json.load(handle)
+    return tags["exact"], tags["prefixes"]
+
+
 def build_poi_index(pbf_path, poi_path, now):
     """Fill search.sqlite with POIs and the query shapes they cover.
 
@@ -269,6 +279,7 @@ def build_poi_index(pbf_path, poi_path, now):
         return None
 
     any_keys, named_optional = _load_shapes()
+    exact_tags, tag_prefixes = _load_tags()
 
     db = sqlite3.connect(poi_path)
     try:
@@ -296,6 +307,14 @@ def build_poi_index(pbf_path, poi_path, now):
         if key not in any_keys
     ]
     shape_predicate = "\n         OR ".join(shape_clauses)
+
+    # Tags kept per row: an explicit key list plus whole namespaces, because
+    # the app reads `payment:*`/`diet:*`/`addr:*` as families. Everything else
+    # is render metadata the app never reads — 87% of the payload on a dense
+    # metro — so it is dropped here rather than shipped and ignored.
+    keep_clauses = [f"je.key = {_sql_literal(key)}" for key in exact_tags]
+    keep_clauses += [f"starts_with(je.key, {_sql_literal(prefix)})" for prefix in tag_prefixes]
+    keep_predicate = "\n         OR ".join(keep_clauses)
 
     sql = f"""
 INSTALL spatial; LOAD spatial;
@@ -374,14 +393,31 @@ CREATE OR REPLACE TABLE final AS
             WHERE no.k = primary_key AND no.v = tags[primary_key]
          );
 
+-- Tags kept per row: an explicit key list plus whole namespaces, because the
+-- app reads `payment:*`/`diet:*`/`addr:*` as families. Everything else is
+-- render metadata the app never reads — 87% of the payload on a dense metro —
+-- so it is dropped here rather than shipped and ignored.
+CREATE OR REPLACE TABLE trimmed AS
+  SELECT f.osm_type, f.id, f.lat, f.lon, f.primary_key, f.subtype, f.name,
+         to_json(map_from_entries(list(je))) AS tags_json
+    FROM final f, unnest(map_entries(f.tags)) AS je
+   WHERE ({keep_predicate})
+   GROUP BY f.osm_type, f.id, f.lat, f.lon, f.primary_key, f.subtype, f.name;
+
+-- Every indexed feature carries its primary key, which is always in the
+-- allowlist, so the trim can never drop a row. If it ever does, fail here
+-- rather than silently shrink the pack.
+SELECT CASE WHEN (SELECT count(*) FROM trimmed) = (SELECT count(*) FROM final)
+            THEN 1 ELSE error('tag trim dropped rows') END AS trim_check;
+
 ATTACH {_sql_literal(poi_path)} AS pack (TYPE SQLITE);
 
 INSERT INTO pack.osm_pois
   (osm_type, osm_id, lat, lng, primary_key, subtype, name, name_norm,
    tags_json, version, updated_at)
 SELECT osm_type, id, lat, lon, primary_key, subtype, name, lower(name),
-       to_json(tags), 1, {now}
-  FROM final;
+       tags_json, 1, {now}
+  FROM trimmed;
 
 -- Wildcard rows: "any value of this key", named features only.
 INSERT INTO pack.poi_index_shapes (key, value, named_only, poi_count)

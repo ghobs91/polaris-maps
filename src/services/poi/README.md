@@ -177,6 +177,13 @@ download) or from the app's own edits. The build rule lives in
 `scripts/poi-index-shapes.json`; `__tests__/unit/poiIndexShapes.test.ts` fails
 if a `PlaceCategory` can ask for a tag pair that file does not index.
 
+`tags_json` is trimmed at build time to what the app reads
+(`scripts/poi-tags.json`: explicit keys plus whole namespaces like `addr:*` and
+`payment:*`, which are read as families). It is not the raw OSM tag map, so a
+new tag read in app code needs a matching entry there —
+`__tests__/unit/poiTagAllowlist.test.ts` scans the source for `tags['…']` and
+fails otherwise, because the alternative failure is a silently empty field.
+
 ### Query behaviour
 
 - `hasLocalPoiCoverage(bounds)` gates every consumer. A covered bbox is answered
