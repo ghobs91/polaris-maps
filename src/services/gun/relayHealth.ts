@@ -15,6 +15,16 @@
  * with a TTL, so a dead seed drops out of the working set on the next session
  * instead of poisoning every launch. It never invents relays: a probe can only
  * remove a candidate, never add one.
+ *
+ * ## Why the probe is a WebSocket handshake, not an HTTP status
+ *
+ * It used to `fetch()` the relay and treat any status below 500 as healthy.
+ * That is why the dead Heroku seeds survived: a deleted Heroku app still
+ * answers `404` with an HTML page, which counted as healthy, so the probe
+ * could never evict it. A Gun relay is only a relay if it accepts the
+ * WebSocket upgrade and speaks the wire protocol, so that is what is probed.
+ * Gun greets every socket with a `{"dam":"?","pid":…}` frame; a plain HTTP
+ * server cannot produce one.
  */
 
 import { storage } from '../storage/mmkv';
@@ -24,6 +34,18 @@ const HEALTHY_KEY = 'gun:relayHealth';
 const HEALTHY_AT_KEY = 'gun:relayHealthAt';
 export const RELAY_HEALTH_TTL_MS = 6 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 4_000;
+
+/** Minimal surface of the global WebSocket the probe needs (Hermes / RN). */
+export interface ProbeSocket {
+  onopen: (() => void) | null;
+  onmessage: ((event: { data: unknown }) => void) | null;
+  onerror: (() => void) | null;
+  onclose: (() => void) | null;
+  send(data: string): void;
+  close(): void;
+}
+
+export type ProbeSocketFactory = (url: string) => ProbeSocket;
 
 /**
  * Pick the relay set to hand to Gun.
@@ -49,41 +71,94 @@ export function selectRelayPeers(input: {
 }
 
 /**
- * A relay counts as healthy when it answers at all.
+ * Normalise a relay URL to the scheme Gun's WebSocket transport needs.
  *
- * Gun relays reply with a challenge/greeting rather than a REST body, and some
- * front them with proxies that return 401/403. Anything under 500 means the
- * host is reachable and speaking HTTP, which is the only thing we can assert
- * cheaply — a semantically broken relay still fails at sync time, visibly.
+ * Seeds and `EXPO_PUBLIC_GUN_RELAYS` have historically been written as
+ * `https://host/gun`; both spellings are accepted so an existing override does
+ * not silently stop working.
  */
-export function isHealthyResponse(status: number): boolean {
-  return status > 0 && status < 500;
+export function toWebSocketUrl(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed.startsWith('wss://') || trimmed.startsWith('ws://')) return trimmed;
+  if (trimmed.startsWith('https://')) return `wss://${trimmed.slice('https://'.length)}`;
+  if (trimmed.startsWith('http://')) return `ws://${trimmed.slice('http://'.length)}`;
+  return trimmed;
 }
 
-/** Probe one relay. Resolves false on any network error or timeout. */
+/**
+ * Probe one relay by completing a Gun handshake.
+ *
+ * Healthy means: the upgrade succeeded *and* the relay produced a wire frame.
+ * On open we also send a harmless `get` for a random key, so a relay that
+ * waits for the client to speak before greeting still answers. Anything that
+ * cannot do that — a 404 HTML page, a parked domain, a plain web server — is
+ * not a relay and must not be kept in the working set.
+ */
 export async function probeRelay(
   url: string,
-  opts?: { timeoutMs?: number; fetchImpl?: typeof fetch },
+  opts?: { timeoutMs?: number; socketFactory?: ProbeSocketFactory },
 ): Promise<boolean> {
-  const doFetch = opts?.fetchImpl ?? fetch;
   const timeoutMs = opts?.timeoutMs ?? PROBE_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const create = opts?.socketFactory ?? defaultSocketFactory;
 
-  try {
-    const res = await doFetch(url, { method: 'GET', signal: controller.signal });
-    return isHealthyResponse(res.status);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let socket: ProbeSocket | null = null;
+
+    const finish = (healthy: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        socket?.close();
+      } catch {
+        // Already closed.
+      }
+      resolve(healthy);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    try {
+      socket = create(toWebSocketUrl(url));
+    } catch {
+      finish(false);
+      return;
+    }
+
+    socket.onopen = () => {
+      try {
+        // Gun's own greeting is the `dam` frame; this `get` is the fallback for
+        // relays that stay quiet until the client sends something.
+        socket?.send(
+          JSON.stringify({ '#': 'polaris-health-probe', get: { 'polaris-probe': { '#': 'x' } } }),
+        );
+      } catch {
+        finish(false);
+      }
+    };
+    socket.onmessage = () => finish(true);
+    socket.onerror = () => finish(false);
+    socket.onclose = () => finish(false);
+  });
+}
+
+/**
+ * The global WebSocket, when the runtime provides one.
+ *
+ * Hermes and Jest differ here, so the probe degrades to "unhealthy" rather
+ * than throwing when there is no WebSocket at all.
+ */
+function defaultSocketFactory(url: string): ProbeSocket {
+  const Ctor = (globalThis as { WebSocket?: new (url: string) => ProbeSocket }).WebSocket;
+  if (!Ctor) throw new Error('WebSocket is not available in this runtime');
+  return new Ctor(url);
 }
 
 /** Probe every candidate concurrently, preserving input order in the result. */
 export async function probeRelays(
   relays: readonly string[],
-  opts?: { timeoutMs?: number; fetchImpl?: typeof fetch },
+  opts?: { timeoutMs?: number; socketFactory?: ProbeSocketFactory },
 ): Promise<string[]> {
   const results = await Promise.all(
     relays.map(async (relay) => ((await probeRelay(relay, opts)) ? relay : null)),

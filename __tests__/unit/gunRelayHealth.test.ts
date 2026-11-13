@@ -24,16 +24,56 @@ import {
   RELAY_HEALTH_TTL_MS,
   __clearRelayHealthForTests,
   getCachedHealthyRelays,
-  isHealthyResponse,
   isRelayHealthStale,
   primeRelayHealth,
   probeRelay,
   probeRelays,
   resolveRelayPeers,
   selectRelayPeers,
+  toWebSocketUrl,
+  type ProbeSocket,
 } from '../../src/services/gun/relayHealth';
 
 const SEEDS = ['https://a.example.org/gun', 'https://b.example.org/gun'];
+
+/**
+ * A scriptable stand-in for the global WebSocket.
+ *
+ * The probe is event-driven, so the test drives the lifecycle explicitly
+ * instead of faking a promise — that keeps the "dead relay" cases honest.
+ */
+class FakeSocket implements ProbeSocket {
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  sent: string[] = [];
+  closed = false;
+
+  constructor(public readonly url: string) {}
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  // Driver helpers
+  open(): void {
+    this.onopen?.();
+  }
+  emit(data: unknown): void {
+    this.onmessage?.({ data });
+  }
+  fail(): void {
+    this.onerror?.();
+  }
+  drop(): void {
+    this.onclose?.();
+  }
+}
 
 beforeEach(() => {
   mockStore.clear();
@@ -66,71 +106,117 @@ describe('selectRelayPeers', () => {
   });
 });
 
+describe('toWebSocketUrl', () => {
+  it('upgrades http(s) to the WebSocket scheme Gun needs', () => {
+    expect(toWebSocketUrl('https://a.example.org/gun')).toBe('wss://a.example.org/gun');
+    expect(toWebSocketUrl('http://a.example.org/gun')).toBe('ws://a.example.org/gun');
+  });
+
+  it('leaves an explicit ws(s) URL alone', () => {
+    expect(toWebSocketUrl('wss://a.example.org/gun')).toBe('wss://a.example.org/gun');
+    expect(toWebSocketUrl('ws://a.example.org/gun')).toBe('ws://a.example.org/gun');
+  });
+});
+
 describe('probeRelay', () => {
-  const ok = { status: 200 } as Response;
-
-  it('treats any reachable HTTP response below 500 as healthy', async () => {
-    expect(isHealthyResponse(200)).toBe(true);
-    expect(isHealthyResponse(403)).toBe(true);
-    expect(isHealthyResponse(503)).toBe(false);
-    expect(isHealthyResponse(0)).toBe(false);
-  });
-
-  it('probes with GET and reports reachability', async () => {
-    const fetchImpl = jest.fn(async () => ok);
-    await expect(probeRelay('https://a/gun', { fetchImpl })).resolves.toBe(true);
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'https://a/gun',
-      expect.objectContaining({ method: 'GET' }),
-    );
-  });
-
-  it('reports a dead relay as unhealthy', async () => {
-    const fetchImpl = jest.fn(async () => {
-      throw new Error('ENOTFOUND');
+  /**
+   * Regression: a deleted Heroku app still answers `404` with an HTML page. The
+   * old probe counted any status below 500 as healthy, so three dead seeds could
+   * never be evicted. Health now requires the Gun wire protocol, which an HTML
+   * 404 cannot produce.
+   */
+  it('rejects a host that cannot complete the handshake', async () => {
+    const socket = new FakeSocket('wss://dead.example.org/gun');
+    const result = probeRelay('https://dead.example.org/gun', {
+      socketFactory: () => socket,
     });
-    await expect(probeRelay('https://dead/gun', { fetchImpl })).resolves.toBe(false);
+    socket.fail();
+    await expect(result).resolves.toBe(false);
   });
 
-  it('reports an erroring relay as unhealthy', async () => {
-    const fetchImpl = jest.fn(async () => ({ status: 502 }) as Response);
-    await expect(probeRelay('https://broken/gun', { fetchImpl })).resolves.toBe(false);
+  it('accepts a relay that greets with a Gun frame', async () => {
+    const socket = new FakeSocket('wss://live.example.org/gun');
+    const result = probeRelay('https://live.example.org/gun', {
+      socketFactory: () => socket,
+    });
+    socket.open();
+    socket.emit('{"#":"abc","dam":"?","pid":"xyz"}');
+    await expect(result).resolves.toBe(true);
+    expect(socket.closed).toBe(true);
   });
 
-  it('aborts a relay that never answers', async () => {
-    const fetchImpl = jest.fn(
-      (_url: string, init: { signal: AbortSignal }) =>
-        new Promise<Response>((_resolve, reject) => {
-          init.signal.addEventListener('abort', () => reject(new Error('aborted')));
-        }),
-    );
+  it('sends a get on open so a quiet relay still answers', async () => {
+    const socket = new FakeSocket('wss://quiet.example.org/gun');
+    const result = probeRelay('https://quiet.example.org/gun', {
+      socketFactory: () => socket,
+    });
+    socket.open();
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({ get: { 'polaris-probe': { '#': 'x' } } });
+    socket.emit('{}');
+    await expect(result).resolves.toBe(true);
+  });
+
+  it('reports a relay that closes without a frame as unhealthy', async () => {
+    const socket = new FakeSocket('wss://flaky.example.org/gun');
+    const result = probeRelay('https://flaky.example.org/gun', {
+      socketFactory: () => socket,
+    });
+    socket.open();
+    socket.drop();
+    await expect(result).resolves.toBe(false);
+  });
+
+  it('gives up on a relay that never answers', async () => {
+    const socket = new FakeSocket('wss://slow.example.org/gun');
     await expect(
-      probeRelay('https://slow/gun', {
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        timeoutMs: 5,
+      probeRelay('https://slow.example.org/gun', { socketFactory: () => socket, timeoutMs: 5 }),
+    ).resolves.toBe(false);
+  });
+
+  it('reports a throwing socket constructor as unhealthy', async () => {
+    await expect(
+      probeRelay('https://boom.example.org/gun', {
+        socketFactory: () => {
+          throw new Error('bad url');
+        },
       }),
     ).resolves.toBe(false);
   });
 });
 
 describe('probeRelays', () => {
-  it('keeps only the relays that answered, preserving order', async () => {
-    const fetchImpl = jest.fn(async (url: string) => {
-      if (url.includes('dead')) throw new Error('offline');
-      return { status: 200 } as Response;
-    });
+  it('keeps only the relays that completed a handshake, preserving order', async () => {
+    const sockets: FakeSocket[] = [];
+    const socketFactory = (url: string) => {
+      const socket = new FakeSocket(url);
+      sockets.push(socket);
+      return socket;
+    };
 
-    const healthy = await probeRelays(
+    const pending = probeRelays(
       [
         'https://dead.one/gun',
         'https://alive.one/gun',
         'https://dead.two/gun',
         'https://alive.two/gun',
       ],
-      { fetchImpl: fetchImpl as unknown as typeof fetch },
+      { socketFactory },
     );
 
-    expect(healthy).toEqual(['https://alive.one/gun', 'https://alive.two/gun']);
+    // Let every probe register its handlers before driving them.
+    await Promise.resolve();
+    for (const socket of sockets) {
+      if (socket.url.includes('dead')) socket.fail();
+      else {
+        socket.open();
+        socket.emit('{"dam":"?"}');
+      }
+    }
+
+    // Survivors keep the spelling they were configured with, so the cached set
+    // round-trips through MMKV unchanged; only the socket sees the ws(s) form.
+    await expect(pending).resolves.toEqual(['https://alive.one/gun', 'https://alive.two/gun']);
   });
 });
 

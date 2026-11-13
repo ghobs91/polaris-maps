@@ -10,12 +10,33 @@ const RELAY_CACHE_KEY = 'gun:cached_relays';
  * entry is dropped from the working set by the health probe in `relayHealth`
  * (see `resolveRelayPeers`), and `EXPO_PUBLIC_GUN_RELAYS` overrides them
  * entirely.
+ *
+ * Verified live on 2026-11-12 by completing the Gun handshake and by writing a
+ * record on one connection and reading it back on a second (3/3 runs).
+ *
+ * The previous list (`gun-{manhattan,us,eu}.herokuapp.com`) had been dead since
+ * Heroku removed its free tier: all three now answer `404` with an HTML page.
+ * They survived because the old probe treated any status below 500 as healthy —
+ * see the module comment in `relayHealth.ts`.
+ *
+ * ## Adding a seed
+ *
+ * A relay belongs here only if it is *public* infrastructure with a stated
+ * mandate to serve third-party apps. Most hosts that still answer a Gun
+ * handshake are somebody's private deployment (e.g. `gun-relay-3dvr.fly.dev`,
+ * whose own README says "Private 3DVR relay used by the portal and 3DVR
+ * Companion") — pointing a maps app at those is freeloading on one project's
+ * server and they may legitimately cut it off. Verify a candidate with:
+ *
+ *   node scripts/probe-gun-relays.mjs wss://candidate/gun
+ *
+ * which performs the handshake and the round-trip, then add it here.
+ *
+ * A single seed is not a resilient pool; that is the current state of the
+ * public Gun network, not a choice. Gun sync is best-effort by design and every
+ * write path that uses it has to tolerate "no relay answered".
  */
-const SEED_RELAYS = [
-  'https://gun-manhattan.herokuapp.com/gun',
-  'https://gun-us.herokuapp.com/gun',
-  'https://gun-eu.herokuapp.com/gun',
-];
+const SEED_RELAYS = ['wss://try.axe.eco/gun'];
 
 function getMMKVAdapter() {
   return {
