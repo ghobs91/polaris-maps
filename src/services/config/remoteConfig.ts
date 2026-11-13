@@ -15,6 +15,7 @@
 import { isTrustedPublisher } from '../regions/regionManifest';
 import { setOverpassEnabled } from '../overpassClient';
 import { setNominatimEnabled } from '../geocoding/nominatimPolicy';
+import { setTransitousPlanEnabled } from '../transit/transitousPlanPolicy';
 import { createSigningPayload, verify } from '../identity/signing';
 import { TRUSTED_REGION_PUBLISHERS } from '../../constants/regionPublishers';
 import type { MMKV } from 'react-native-mmkv';
@@ -70,6 +71,15 @@ export interface RemoteConfigFlags {
    * published config has to opt in. See `services/geocoding/nominatimPolicy`.
    */
   nominatimFallback: boolean;
+  /**
+   * Transitous `/plan` routing tier.
+   *
+   * Unsigned for the same reason as {@link overpassQuery}. Defaults to
+   * **disabled**: Transitous publishes a 720-requests-per-24h ceiling for the
+   * whole application, so a default-on router cannot stay inside it once the app
+   * has a real user base. See `services/transit/transitousPlanPolicy`.
+   */
+  transitousPlan: boolean;
 }
 
 export interface RemoteConfig {
@@ -89,6 +99,7 @@ export const DEFAULT_REMOTE_FLAGS: RemoteConfigFlags = {
   tomtomBridge: true,
   overpassQuery: true,
   nominatimFallback: false,
+  transitousPlan: false,
 };
 
 /** Fixed flag order for the canonical signing payload. Do not reorder. */
@@ -158,6 +169,7 @@ export function parseRemoteConfig(
   if (typeof rawFlags.nominatimFallback === 'boolean') {
     flags.nominatimFallback = rawFlags.nominatimFallback;
   }
+  if (typeof rawFlags.transitousPlan === 'boolean') flags.transitousPlan = rawFlags.transitousPlan;
 
   const payload = remoteConfigPayload({
     version: config.version,
@@ -201,6 +213,8 @@ export function applyRemoteFlags(flags: RemoteConfigFlags): void {
   setOverpassEnabled(flags.overpassQuery !== false);
   // Nominatim defaults to off; only an explicit flag turns it on.
   setNominatimEnabled(flags.nominatimFallback === true);
+  // Transitous plan routing is off unless a signed config enables it.
+  setTransitousPlanEnabled(flags.transitousPlan === true);
   notify();
 }
 

@@ -21,6 +21,20 @@ jest.mock('react-native', () => ({
 jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: jest.fn().mockReturnValue(true),
 }));
+// `transitRoutingService` reaches the local timetable planner, which opens
+// SQLite and reads its region registry from MMKV. This suite only exercises the
+// park-and-ride decision, so both are stubbed.
+jest.mock('expo-sqlite', () => ({}));
+jest.mock('../../src/services/storage/mmkv', () => {
+  const store = new Map<string, string>();
+  const api = {
+    getString: (key: string) => store.get(key),
+    set: (key: string, value: string) => store.set(key, value),
+    delete: (key: string) => store.delete(key),
+    getAllKeys: () => [...store.keys()],
+  };
+  return { getStorageSync: () => api, storage: api, getStorage: async () => api };
+});
 
 import { shouldOfferParkAndRide } from '../../src/services/routing/parkAndRideService';
 import * as transitRouting from '../../src/services/transit/transitRoutingService';
