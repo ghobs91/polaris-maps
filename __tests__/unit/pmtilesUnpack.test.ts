@@ -223,6 +223,88 @@ describe('unpackPmtiles', () => {
   });
 });
 
+/**
+ * The reader must never hold the archive in memory.
+ *
+ * The previous implementation read the whole file, which is why pack size was
+ * capped by device RAM rather than device storage. `--stats` reports the range
+ * requests so the invariant is asserted, not assumed.
+ */
+describe('bounded memory', () => {
+  const tiles: Tile[] = [
+    { z: 0, x: 0, y: 0, body: 'tile-0-0-0' },
+    { z: 1, x: 0, y: 0, body: 'tile-1-0-0' },
+    { z: 1, x: 1, y: 1, body: 'tile-1-1-1' },
+    { z: 2, x: 3, y: 2, body: 'tile-2-3-2' },
+  ];
+
+  function unpackStats(archive: Buffer) {
+    const dir = mkdtempSync(join(tmpdir(), 'pmtiles-'));
+    const src = join(dir, 'tiles.pmtiles');
+    const dest = join(dir, 'out');
+    writeFileSync(src, archive);
+    try {
+      const stdout = execFileSync(process.execPath, [SCRIPT, src, dest, '--stats'], {
+        encoding: 'utf8',
+      });
+      return {
+        archiveSize: archive.length,
+        summary: JSON.parse(stdout) as {
+          tiles: number;
+          stats: { reads: number; maxReadLength: number };
+        },
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('caps a single read at the window size regardless of archive size', () => {
+    const { summary } = unpackStats(buildArchive(tiles));
+    expect(summary.stats.maxReadLength).toBeLessThanOrEqual(4 * 1024 * 1024);
+  });
+
+  it('streams an archive larger than the read window instead of buffering it', () => {
+    // Uncompressed so the archive on disk really is bigger than the window:
+    // 12 tiles of 400 kB is ~4.8 MB, past the 4 MB window.
+    const big: Tile[] = Array.from({ length: 12 }, (_, i) => ({
+      z: 4,
+      x: i,
+      y: 0,
+      body: 'x'.repeat(400 * 1024),
+    }));
+    const archive = buildArchive(big, { internalCompression: 1, tileCompression: 1 });
+    expect(archive.length).toBeGreaterThan(4 * 1024 * 1024);
+
+    const { archiveSize, summary } = unpackStats(archive);
+
+    // Several refills, and no read ever covers the archive.
+    expect(summary.stats.reads).toBeGreaterThan(1);
+    expect(summary.stats.maxReadLength).toBeLessThan(archiveSize);
+    expect(summary.stats.maxReadLength).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(summary.tiles).toBe(12);
+  });
+
+  it('still expands every tile correctly through the window', () => {
+    const { summary } = unpackStats(buildArchive(tiles));
+    expect(summary.tiles).toBe(4);
+  });
+
+  it('fails loudly on a truncated archive instead of writing empty tiles', () => {
+    const archive = buildArchive(tiles);
+    const dir = mkdtempSync(join(tmpdir(), 'pmtiles-'));
+    const src = join(dir, 'tiles.pmtiles');
+    writeFileSync(src, archive.subarray(0, archive.length - 4));
+    try {
+      expect(() =>
+        execFileSync(process.execPath, [SCRIPT, src, join(dir, 'out')], { stdio: 'pipe' }),
+      ).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('archive integrity', () => {
   it('produces deterministic archives for a fixed tile set', () => {
     const a = createHash('sha256')

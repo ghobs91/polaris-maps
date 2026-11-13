@@ -446,7 +446,19 @@ async function handleUnpackPmtiles(req) {
   try {
     const result = await unpackPmtiles(
       {
-        readFile: (p) => fs.readFileSync(p),
+        // Range handle, not a whole-file read: the archive is expanded through
+        // a bounded window so pack size is limited by storage, not by RAM.
+        open: (p) => {
+          const fd = fs.openSync(p, 'r');
+          return {
+            read: (offset, length) => {
+              const buffer = Buffer.allocUnsafe(length);
+              const bytesRead = fs.readSync(fd, buffer, 0, length, offset);
+              return buffer.subarray(0, bytesRead);
+            },
+            close: () => fs.closeSync(fd),
+          };
+        },
         writeFile: (p, data) => fs.writeFileSync(p, data),
         mkdir: (p) => fs.mkdirSync(p, { recursive: true }),
       },

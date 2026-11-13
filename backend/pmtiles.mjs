@@ -191,69 +191,130 @@ export function decompressBlock(buf, compression) {
   throw new Error(`pmtiles: unsupported compression code ${compression}`);
 }
 
+// ── Range reading ───────────────────────────────────────────────────
+
+/**
+ * Bytes fetched per range read.
+ *
+ * Caps peak memory at roughly one window plus one tile, instead of the whole
+ * archive. That is the difference between "a pack can be at most what the
+ * device can hold in RAM" and "a pack can be any size the device can store".
+ */
+export const READ_WINDOW_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Sequential range reader with a bounded window.
+ *
+ * A clustered archive stores tiles in tile-id order, so the walk reads forward;
+ * a window turns thousands of per-tile reads into a handful of sequential ones
+ * without ever holding the archive.
+ */
+function createWindowReader(reader) {
+  let base = 0;
+  let window = null;
+
+  return async (offset, length) => {
+    if (length === 0) return new Uint8Array(0);
+
+    if (window && offset >= base && offset + length <= base + window.length) {
+      return window.subarray(offset - base, offset - base + length);
+    }
+    if (length > READ_WINDOW_BYTES) return reader.read(offset, length);
+
+    const got = await reader.read(offset, Math.max(READ_WINDOW_BYTES, length));
+    window = got;
+    base = offset;
+
+    if (got.length < length) {
+      // Short read at end of file. Ask for exactly what the directory promised
+      // so a truncated archive fails loudly instead of writing an empty tile.
+      const exact = await reader.read(offset, length);
+      if (exact.length < length) {
+        throw new Error(`pmtiles: short read at ${offset} (${exact.length}/${length})`);
+      }
+      return exact;
+    }
+    return got.subarray(0, length);
+  };
+}
+
 // ── Unpacking ───────────────────────────────────────────────────────
 
 /**
  * Expand a PMTiles archive into a `{z}/{x}/{y}.pbf` tree.
  *
- * @param io          { readFile, writeFile, mkdir } — injected so the same code
- *                    runs on bare-fs (worklet) and node:fs (tests).
- * @param srcPath     Path to the .pmtiles file.
- * @param destDir     Directory that receives `{z}/{x}/{y}.pbf` (trailing slash
- *                    optional).
- * @param options     { maxZoom } — tiles above this zoom are skipped.
- * @returns { tiles, skipped, bytes }
+ * The archive is read through range requests, never loaded whole: header, then
+ * the root directory, then one leaf directory or tile at a time. Peak memory is
+ * `READ_WINDOW_BYTES`, independent of pack size.
+ *
+ * @param io        `{ open(path), writeFile(path, data), mkdir(path) }`, where
+ *                  `open` resolves to `{ read(offset, length), close() }`.
+ *                  Injected so the same code runs on bare-fs (worklet) and
+ *                  node:fs (tests and the CLI wrapper).
+ * @param srcPath   Path to the .pmtiles file.
+ * @param destDir   Directory that receives `{z}/{x}/{y}.pbf` (trailing slash
+ *                  optional).
+ * @param options   `{ maxZoom }` — tiles above this zoom are skipped.
+ * @returns `{ tiles, skipped, bytes, minZoom, maxZoom }`
  */
 export async function unpackPmtiles(io, srcPath, destDir, options = {}) {
   const maxZoom = options.maxZoom ?? MAX_SUPPORTED_ZOOM;
-  const buf = await io.readFile(srcPath);
-  const header = parseHeader(buf);
   const base = destDir.endsWith('/') ? destDir : `${destDir}/`;
+  const reader = await io.open(srcPath);
 
-  const rootRaw = buf.subarray(header.rootDirOffset, header.rootDirOffset + header.rootDirLength);
-  const rootEntries = parseDirectory(decompressBlock(rootRaw, header.internalCompression));
+  try {
+    const read = createWindowReader(reader);
 
-  let tiles = 0;
-  let skipped = 0;
-  let bytes = 0;
-  const createdDirs = new Set();
+    const header = parseHeader(await read(0, HEADER_SIZE));
+    const rootEntries = parseDirectory(
+      decompressBlock(
+        await read(header.rootDirOffset, header.rootDirLength),
+        header.internalCompression,
+      ),
+    );
 
-  const writeEntry = async (entry) => {
-    for (let i = 0; i < entry.runLength; i++) {
-      const { z, x, y } = tileIdToZxy(entry.tileId + i);
-      if (z > maxZoom) {
-        skipped++;
-        continue;
+    let tiles = 0;
+    let skipped = 0;
+    let bytes = 0;
+    const createdDirs = new Set();
+
+    const writeEntry = async (entry) => {
+      for (let i = 0; i < entry.runLength; i++) {
+        const { z, x, y } = tileIdToZxy(entry.tileId + i);
+        if (z > maxZoom) {
+          skipped++;
+          continue;
+        }
+        const blob = await read(header.tileDataOffset + entry.offset, entry.length);
+        const tile = decompressBlock(blob, header.tileCompression);
+
+        const dir = `${base}${z}/${x}/`;
+        if (!createdDirs.has(dir)) {
+          await io.mkdir(dir);
+          createdDirs.add(dir);
+        }
+        await io.writeFile(`${dir}${y}.pbf`, tile);
+        tiles++;
+        bytes += tile.length;
       }
-      const start = header.tileDataOffset + entry.offset;
-      const blob = buf.subarray(start, start + entry.length);
-      const tile = decompressBlock(blob, header.tileCompression);
+    };
 
-      const dir = `${base}${z}/${x}/`;
-      if (!createdDirs.has(dir)) {
-        await io.mkdir(dir);
-        createdDirs.add(dir);
+    const walk = async (entries) => {
+      for (const entry of entries) {
+        if (entry.runLength === 0) {
+          // Leaf directory pointer (offset relative to the leaf-dirs section).
+          const raw = await read(header.leafDirsOffset + entry.offset, entry.length);
+          await walk(parseDirectory(decompressBlock(raw, header.internalCompression)));
+          continue;
+        }
+        await writeEntry(entry);
       }
-      await io.writeFile(`${dir}${y}.pbf`, tile);
-      tiles++;
-      bytes += tile.length;
-    }
-  };
+    };
 
-  const walk = async (entries) => {
-    for (const entry of entries) {
-      if (entry.runLength === 0) {
-        // Leaf directory pointer (offset relative to the leaf-dirs section).
-        const start = header.leafDirsOffset + entry.offset;
-        const raw = buf.subarray(start, start + entry.length);
-        await walk(parseDirectory(decompressBlock(raw, header.internalCompression)));
-        continue;
-      }
-      await writeEntry(entry);
-    }
-  };
+    await walk(rootEntries);
 
-  await walk(rootEntries);
-
-  return { tiles, skipped, bytes, minZoom: header.minZoom, maxZoom: header.maxZoom };
+    return { tiles, skipped, bytes, minZoom: header.minZoom, maxZoom: header.maxZoom };
+  } finally {
+    await reader.close();
+  }
 }
