@@ -249,5 +249,12 @@
       "operator": "National Authority for Tunnels",
       "blocked_by": "no official GTFS is published; the only feed comes from an NGO, which is out of policy"
     }
-  }
+  },
+  "_unmapped_reasons": [
+    "24 of the 39 curated metro regions now have a verified official feed; the other 15 are recorded under `candidates` with the reason each is blocked.",
+    "Needs an API key (official feed exists, but not anonymously downloadable): Seoul, Singapore, Auckland.",
+    "Blocked by the host, not by policy — retry from a runner or supply a key: London (TfL 403s datacenter IPs), Moscow, Istanbul, Warsaw (Cloudflare challenge), Mexico City (TLS reset), Nairobi, Delhi.",
+    "No official GTFS published at all: Mumbai (BEST has none), Cairo (only an NGO feed), Cape Town (GIS layers, no GTFS), Manila (only community feeds).",
+    "Bogotá: official portal unreachable, and the only reachable copy sits in an unattributable storage bucket."
+  ]
 }
