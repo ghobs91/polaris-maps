@@ -222,6 +222,21 @@ export const TRANSIT_FETCH_DEBOUNCE_MS = 500;
 /** Cache TTL (ms) for transit feed discovery results. */
 export const TRANSIT_FEED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/**
+ * Largest GTFS zip the app will download at runtime.
+ *
+ * Consolidated country feeds are far past this: Germany's is 495 MiB, the
+ * Netherlands' 159 MiB, Switzerland's 209 MiB. Fetching one buffers the whole
+ * zip in memory before a single row is parsed, which terminates the app on a
+ * phone — and it lands on a volunteer host. Feeds above the cap are skipped
+ * and the caller falls through to the on-device timetable, a regional OTP
+ * endpoint, or the DOT registry, all of which are bounded.
+ *
+ * A city feed is a few MB, so 32 MiB leaves room for a large metro without
+ * admitting a national one.
+ */
+export const GTFS_MAX_FEED_BYTES = 32 * 1024 * 1024;
+
 // ── Offline Region Data ─────────────────────────────────────────────
 
 /**

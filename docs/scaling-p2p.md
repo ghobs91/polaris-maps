@@ -124,15 +124,29 @@ To measure real seeding behaviour, run the same region on two devices:
 Every remaining third-party origin is somebody else's donation-funded server, so
 the app treats them as optional and asks nothing of them at scale:
 
-| Origin                 | Default                       | Why                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenFreeMap (tiles)    | on, until a pack is installed | Unlimited requests, but ~150–300 MB per install of egress. Packs exist to remove it entirely (see above). Offline downloads stay inside their published 3,000-tile / 50 MB / 4-parallel budget.                                                                                                                                                                                                   |
-| Overpass               | on, gap-filler only           | Volunteer mirrors. No hedging, sequential with cooldowns, one request in flight, and cooldowns **persist across launches** so a device that learned a mirror is down does not re-probe it. Inside a downloaded pack it is not consulted at all: the pack publishes the tag shapes it indexed (`poi_index_shapes`), so a category with zero matches is a final answer rather than a reason to ask. |
-| Nominatim              | **off**                       | OSMF caps the whole _application_ at 1 req/s, so a shipped fallback cannot scale. Addresses come from the local index; the network path needs `EXPO_PUBLIC_NOMINATIM_FALLBACK=1` or `nominatimFallback: true`.                                                                                                                                                                                    |
-| FOSSGIS Valhalla, OSRM | last-resort tiers             | Demo services. On-device Valhalla answers first (`fff7a1b`).                                                                                                                                                                                                                                                                                                                                      |
-| Transitous             | on                            | Community MOTIS instance, no published quota and no client-side budget yet.                                                                                                                                                                                                                                                                                                                       |
-| Nostr relays           | on, bounded                   | 240 probe + 60 profile publishes per device per day, and probes only leave the mesh when a device has zero swarm peers.                                                                                                                                                                                                                                                                           |
-| GitHub Releases        | primary pack origin           | Polaris runs no CDN. Packs, catalog and the signed config all live there.                                                                                                                                                                                                                                                                                                                         |
+| Origin              | Default                       | Why                                                                                                                                                                                             |
+| ------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenFreeMap (tiles) | on, until a pack is installed | Unlimited requests, but ~150–300 MB per install of egress. Packs exist to remove it entirely (see above). Offline downloads stay inside their published 3,000-tile / 50 MB / 4-parallel budget. |
+
+### Transit lines and schedules
+
+The transit layer used to have one way to get route geometry: ask a live source.
+For most of Europe that meant downloading a consolidated national GTFS zip —
+495 MiB for Germany, 209 MiB for Switzerland, 159 MiB for the Netherlands — and
+buffering all of it before parsing, which terminates the app on a phone.
+
+Two changes bound that. `fetchLocalTransitLines` answers a covered viewport from
+the pack's `osm_transit_routes`, so a downloaded region never requests a feed at
+all. For everything else, `GTFS_MAX_FEED_BYTES` (32 MiB) rejects a feed from its
+`content-length` before a byte is buffered, and aborts a streamed body that
+grows past the cap. A national feed belongs in a pack, not a viewport fetch.
+
+| Overpass | on, gap-filler only | Volunteer mirrors. No hedging, sequential with cooldowns, one request in flight, and cooldowns **persist across launches** so a device that learned a mirror is down does not re-probe it. Inside a downloaded pack it is not consulted at all: the pack publishes the tag shapes it indexed (`poi_index_shapes`), so a category with zero matches is a final answer rather than a reason to ask. |
+| Nominatim | **off** | OSMF caps the whole _application_ at 1 req/s, so a shipped fallback cannot scale. Addresses come from the local index; the network path needs `EXPO_PUBLIC_NOMINATIM_FALLBACK=1` or `nominatimFallback: true`. |
+| FOSSGIS Valhalla, OSRM | last-resort tiers | Demo services. On-device Valhalla answers first (`fff7a1b`). |
+| Transitous | on | Community MOTIS instance, no published quota and no client-side budget yet. |
+| Nostr relays | on, bounded | 240 probe + 60 profile publishes per device per day, and probes only leave the mesh when a device has zero swarm peers. |
+| GitHub Releases | primary pack origin | Polaris runs no CDN. Packs, catalog and the signed config all live there. |
 
 Because none of these are ours, two things have to be true before a release
 ships:

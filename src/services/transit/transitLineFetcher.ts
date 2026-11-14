@@ -21,6 +21,7 @@ import { fetchGtfsStaticLines, type GtfsFetcherConfig } from './gtfsStaticFetche
 import { fetchDotGtfsLines } from './dotGtfsFetcher';
 import { overpassFetch } from '../overpassClient';
 import { localRoutesAtPoint } from './localTransitIndex';
+import { fetchLocalTransitLines } from './localTransitLines';
 import { storage } from '../storage/mmkv';
 
 const OVERPASS_TIMEOUT_MS = 75_000;
@@ -1359,6 +1360,28 @@ export async function fetchTransitLines(
 
   // Hydrate only the tiles this viewport can render before touching caches.
   hydratePersistentCacheForBounds(minLat, minLng, maxLat, maxLng);
+
+  // ── Pack-backed lines first ───────────────────────────────────────
+  // A downloaded region already holds the route relations and their geometry,
+  // so a covered viewport is answered with zero network calls. This is what
+  // keeps a consolidated national GTFS zip (495 MiB for Germany) from being
+  // requested at all: `fetchLocalTransitLines` returns null only when no pack
+  // covers the box, and an empty array when the pack genuinely has no routes
+  // here — both are answers the live sources cannot improve on.
+  const localLines = await fetchLocalTransitLines({
+    south: minLat,
+    west: minLng,
+    north: maxLat,
+    east: maxLng,
+  });
+  if (localLines !== null) {
+    if (localLines.length > 0) {
+      tileData.set(OTP_CACHE_KEY, localLines);
+      wrappedProgress(getAllCachedLines());
+    }
+    onSettled?.();
+    return localLines;
+  }
 
   // ── Start Overpass fetch in parallel ──────────────────────────────
   const overpassPromise = fetchOverpassForViewport(

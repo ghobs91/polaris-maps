@@ -330,6 +330,41 @@ export async function queryTransitRoutesInBounds(
   });
 }
 
+/**
+ * Stops by OSM node id, for materialising route lines from a pack.
+ *
+ * `queryTransitRoutesInBounds` returns stop *ids* only; the transit layer wants
+ * names and coordinates. Batched because SQLite caps bound parameters per
+ * statement, and a dense city route can reference hundreds of stops.
+ */
+export async function queryTransitStopsByIds(
+  ids: readonly number[],
+): Promise<Map<number, Pick<LocalTransitStop, 'osmId' | 'name' | 'lat' | 'lng'>>> {
+  const out = new Map<number, Pick<LocalTransitStop, 'osmId' | 'name' | 'lat' | 'lng'>>();
+  if (ids.length === 0) return out;
+  await ensureLocalTransitSchema();
+  const db = await getDatabase();
+
+  const BATCH = 500;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    const placeholders = batch.map(() => '?').join(',');
+    const rows = await db.getAllAsync<{
+      osm_id: number;
+      name: string;
+      lat: number;
+      lng: number;
+    }>(
+      `SELECT osm_id, name, lat, lng FROM osm_transit_stops WHERE osm_id IN (${placeholders})`,
+      batch as unknown as Array<number>,
+    );
+    for (const row of rows) {
+      out.set(row.osm_id, { osmId: row.osm_id, name: row.name, lat: row.lat, lng: row.lng });
+    }
+  }
+  return out;
+}
+
 /** True when an imported region covers the box. */
 export async function hasLocalTransitCoverage(bounds: TransitBounds): Promise<boolean> {
   await ensureLocalTransitSchema();
