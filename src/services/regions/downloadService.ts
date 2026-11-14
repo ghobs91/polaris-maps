@@ -1,9 +1,24 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
-import { downloadFromPeers, gunzipFile, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
+import {
+  downloadFromPeers,
+  gunzipFile,
+  seedRegion,
+  unseedRegion,
+  unpackPmtiles,
+} from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
-import { OPENFREEMAP_TILEJSON_URL } from '../../constants/config';
+import {
+  OPENFREEMAP_TILEJSON_URL,
+  OPENFREEMAP_USER_AGENT,
+  TRANSIT_TIMETABLE_ASSET,
+} from '../../constants/config';
+import {
+  OPENFREEMAP_MAX_DOWNLOAD_BYTES,
+  OPENFREEMAP_MAX_PARALLEL_DOWNLOADS,
+  planOfflineTileDownload,
+} from './tileDownloadPlan';
 import { downloadOfflineFonts } from '../map/offlineFonts';
 import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
@@ -14,9 +29,21 @@ import {
   importRegionOverturePlacesFromSqlite,
 } from './overtureImporter';
 import { importRegionPlaceDetails } from './placeDetailImporter';
+import { importPackSearchIndices, registerPackTimetable } from './packIndices';
+import { registerPackShards } from './shardCatalog';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
+import {
+  buildSourceList,
+  downloadResumable,
+  localAssetState,
+  planAssetDownloads,
+} from './assetDownload';
+import { orderMirrorSources, recordMirrorFailure, recordMirrorSuccess } from './mirrorHealth';
+import type { RegionAsset } from '../../models/region';
+import { isFeatureEnabled } from '../config/remoteConfig';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -53,7 +80,10 @@ async function fetchTileJson(): Promise<TileJsonResult | null> {
 
   try {
     const res = await fetch(OPENFREEMAP_TILEJSON_URL, {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': OPENFREEMAP_USER_AGENT,
+      },
     });
     if (!res.ok) return null;
     const json = (await res.json()) as { tiles?: string[] };
@@ -108,7 +138,7 @@ export interface DownloadProgress {
   totalBytes: number;
   downloadedBytes: number;
   percent: number;
-  stage: 'tiles' | 'places' | 'routing' | 'geocoding' | 'complete' | 'error';
+  stage: 'tiles' | 'places' | 'routing' | 'geocoding' | 'indices' | 'complete' | 'error';
   error?: string;
 }
 
@@ -128,6 +158,10 @@ export async function downloadRegion(
   onProgress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (!isFeatureEnabled('regionDownloads')) {
+    throw new Error('Offline downloads are temporarily unavailable. Please try again later.');
+  }
+
   const destDir = `${FileSystem.documentDirectory}regions/${region.id}/`;
   await FileSystem.makeDirectoryAsync(destDir, { intermediates: true });
 
@@ -163,7 +197,15 @@ export async function downloadRegion(
     checkAborted(signal);
 
     if (!usedP2P) {
-      await downloadViaHttp(region, destDir, onProgress, signal);
+      const shippedTiles = (region.assets ?? []).find((a) => a.name === TILES_PMTILES);
+      if (shippedTiles) {
+        // The pack carries a base-map PMTiles archive: expand it into the
+        // per-tile tree the local tile server serves, so a downloaded region
+        // renders from local bytes with no third-party tile requests.
+        await downloadAndUnpackTilesArchive(region, destDir, shippedTiles, onProgress, signal);
+      } else {
+        await downloadViaHttp(region, destDir, onProgress, signal);
+      }
     }
 
     checkAborted(signal);
@@ -186,6 +228,23 @@ export async function downloadRegion(
     // Seed the place-detail cache from an optional region-pack payload. Region
     // seeds use sourceVersion 0 so they never clobber fresher live snapshots.
     await importRegionPlaceDetails(destDir).catch(() => {});
+
+    checkAborted(signal);
+
+    // Fetch and import the pack's on-device search indices (POIs + transit).
+    // These are what let a covered viewport answer without Overpass; a pack
+    // that omits them still works, it just keeps the network fallback.
+    await downloadPackSearchIndices(region, destDir, onProgress, signal).catch(() => {});
+    await importPackSearchIndices(region.id, destDir, region.bounds).catch(() => {});
+    // The timetable is registered where it lies rather than imported — see
+    // `registerPackTimetable`. Absent in most packs today, so this is a no-op
+    // until a region publishes one.
+    await registerPackTimetable(region.id, destDir, region.bounds).catch(() => {});
+
+    // Shards let a viewport just outside the pack's coverage be answered from
+    // the pack's own verified bytes instead of a network query service. They are
+    // part of the pack, so peers seeding it already serve them.
+    await registerPackShards(region.id, destDir).catch(() => {});
 
     checkAborted(signal);
 
@@ -245,6 +304,11 @@ export async function downloadRegion(
       return;
     }
 
+    if ((error as Error).name === 'DownloadLimitError') {
+      // Over-limit downloads are refused rather than completed non-conformantly.
+      await FileSystem.deleteAsync(destDir, { idempotent: true }).catch(() => {});
+    }
+
     await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
       'failed',
       Math.floor(Date.now() / 1000),
@@ -260,6 +324,9 @@ export async function downloadRegion(
       error: (error as Error).message,
     });
 
+    logDiagnostic('regions', 'error', `download failed: ${region.id}`, {
+      message: (error as Error).message,
+    });
     throw error;
   }
 }
@@ -410,17 +477,26 @@ async function downloadViaHttp(
     );
   }
 
+  // Stay inside OpenFreeMap's offline-download allowance: at most 3,000 tiles
+  // per download. Lowering max zoom cuts the tile count ~4x per level, so a
+  // too-large region degrades to a coarser pack instead of an over-limit one.
+  const plan = planOfflineTileDownload(region.bounds);
+  if (plan.reduced) {
+    console.warn(
+      `[Regions] ${region.id}: capped offline detail at z${plan.maxZoom} to stay within OpenFreeMap's tile limit.`,
+    );
+    logDiagnostic('regions', 'warn', `capped offline detail for ${region.id}`, {
+      maxZoom: plan.maxZoom,
+      tiles: plan.tiles.length,
+    });
+  }
+
   const tilesDir = `${destDir}tiles/`;
   await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
 
-  // Calculate tile coordinates for the region bounds at zoom levels 0-12.
-  // z12 gives city-level detail in vector tiles (MapLibre renders z13+ from z12 data).
-  // Going to z14 multiplies tile count by 16× — far too many for region-scale downloads.
-  const minZoom = 0;
-  const maxZoom = 12;
-  const tileCoords = getTilesForBounds(region.bounds, minZoom, maxZoom);
-  const totalTiles = tileCoords.length;
+  const totalTiles = plan.tiles.length;
   let downloaded = 0;
+  let downloadedBytes = 0;
 
   onProgress?.({
     regionId: region.id,
@@ -430,12 +506,13 @@ async function downloadViaHttp(
     stage: 'tiles',
   });
 
-  // Download tiles in batches of 50 concurrent requests
-  const BATCH_SIZE = 50;
-  for (let i = 0; i < tileCoords.length; i += BATCH_SIZE) {
+  // OpenFreeMap's policy permits at most 4 parallel requests per offline
+  // download. Batches stay small deliberately.
+  const BATCH_SIZE = OPENFREEMAP_MAX_PARALLEL_DOWNLOADS;
+  for (let i = 0; i < plan.tiles.length; i += BATCH_SIZE) {
     checkAborted(signal);
-    const batch = tileCoords.slice(i, i + BATCH_SIZE);
-    await Promise.all(
+    const batch = plan.tiles.slice(i, i + BATCH_SIZE);
+    const batchBytes = await Promise.all(
       batch.map(async ({ z, x, y }) => {
         const url = urlTemplate
           .replace('{z}', String(z))
@@ -445,12 +522,25 @@ async function downloadViaHttp(
         await FileSystem.makeDirectoryAsync(tileDir, { intermediates: true });
         const dest = `${tileDir}${y}.pbf`;
         try {
-          await FileSystem.downloadAsync(url, dest);
+          await FileSystem.downloadAsync(url, dest, {
+            headers: { 'User-Agent': OPENFREEMAP_USER_AGENT },
+          });
+          const info = await FileSystem.getInfoAsync(dest);
+          return (info as { size?: number }).size ?? 0;
         } catch {
           // Skip individual tile failures (ocean tiles, etc.)
+          return 0;
         }
       }),
     );
+    downloadedBytes += batchBytes.reduce((sum, bytes) => sum + bytes, 0);
+    if (downloadedBytes > OPENFREEMAP_MAX_DOWNLOAD_BYTES) {
+      const err = new Error(
+        "Offline map exceeded OpenFreeMap's 50 MB per-download limit. Try a smaller region.",
+      );
+      err.name = 'DownloadLimitError';
+      throw err;
+    }
     downloaded += batch.length;
     onProgress?.({
       regionId: region.id,
@@ -462,32 +552,116 @@ async function downloadViaHttp(
   }
 }
 
-/** Convert lat/lng to tile coordinates at a given zoom level. */
-function latLngToTile(lat: number, lng: number, zoom: number): { x: number; y: number } {
-  const n = Math.pow(2, zoom);
-  const x = Math.floor(((lng + 180) / 360) * n);
-  const latRad = (lat * Math.PI) / 180;
-  const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
-  return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)) };
+/** File name of a pack's base-map archive. */
+const TILES_PMTILES = 'tiles.pmtiles';
+
+/**
+ * Order an asset's origins for one transfer.
+ *
+ * The pack is served by GitHub Releases, Cloudflare R2, Backblaze B2 and the
+ * Internet Archive. Rotation spreads first attempts across all four instead of
+ * funnelling every client at the primary, and origins that recently failed are
+ * pushed to the back so their timeout is not paid again.
+ */
+function orderedSourcesFor(asset: RegionAsset): string[] {
+  return orderMirrorSources(buildSourceList(asset.url, asset.mirrors ?? []));
 }
 
-/** Get all tile coordinates covering a bounding box across zoom levels. */
-function getTilesForBounds(
-  bounds: Region['bounds'],
-  minZoom: number,
-  maxZoom: number,
-): { z: number; x: number; y: number }[] {
-  const tiles: { z: number; x: number; y: number }[] = [];
-  for (let z = minZoom; z <= maxZoom; z++) {
-    const topLeft = latLngToTile(bounds.maxLat, bounds.minLng, z);
-    const bottomRight = latLngToTile(bounds.minLat, bounds.maxLng, z);
-    for (let x = topLeft.x; x <= bottomRight.x; x++) {
-      for (let y = topLeft.y; y <= bottomRight.y; y++) {
-        tiles.push({ z, x, y });
-      }
+/**
+ * Checksum verification for a transferred asset.
+ *
+ * The catalog's `md5` describes the published file (the `.gz` for gzipped
+ * assets), so this runs against the transfer target before any expansion. A
+ * mirror that serves the wrong bytes is rejected and demoted rather than
+ * expanded into the region directory.
+ */
+function verifierFor(asset: RegionAsset): ((path: string) => Promise<void>) | undefined {
+  if (!asset.md5) return undefined;
+  const expected = asset.md5.toLowerCase();
+  return async (path: string) => {
+    const info = await FileSystem.getInfoAsync(path, { md5: true });
+    const actual = (info as { md5?: string }).md5?.toLowerCase();
+    if (!actual || actual !== expected) {
+      throw new Error(
+        `checksum mismatch for ${asset.name} (expected ${expected}, got ${actual ?? 'none'})`,
+      );
     }
-  }
-  return tiles;
+  };
+}
+
+function reportSourceOutcome(source: string, outcome: 'success' | 'failure'): void {
+  if (outcome === 'success') recordMirrorSuccess(source);
+  else recordMirrorFailure(source);
+}
+
+/**
+ * Highest zoom expanded out of the pack archive.
+ *
+ * The render path serves one file per tile, so this bounds both the file count
+ * and the on-disk size. It matches the zoom the previous per-tile download
+ * path fetched from OpenFreeMap, so a downloaded region looks the same while
+ * needing no third-party tile requests.
+ */
+const UNPACK_MAX_ZOOM = 12;
+
+/**
+ * Download a pack's base-map archive and expand it into `{z}/{x}/{y}.pbf`.
+ *
+ * The archive is removed after a successful expansion: the tile tree is what
+ * peers seed and what the tile server serves, so keeping both would double
+ * every pack's footprint.
+ */
+async function downloadAndUnpackTilesArchive(
+  region: Region,
+  destDir: string,
+  asset: RegionAsset,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: asset.sizeBytes ?? 0,
+    downloadedBytes: 0,
+    percent: 0,
+    stage: 'tiles',
+  });
+
+  const archivePath = `${destDir}${TILES_PMTILES}`;
+  const sources = orderedSourcesFor(asset);
+  const startedAt = Date.now();
+
+  await downloadResumable({
+    destPath: archivePath,
+    sources,
+    signal,
+    verify: verifierFor(asset),
+    onSourceSettled: reportSourceOutcome,
+    onProgress: (p) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: p.totalBytes ?? asset.sizeBytes ?? 0,
+        downloadedBytes: p.bytesWritten,
+        percent: p.totalBytes ? Math.round((p.bytesWritten / p.totalBytes) * 100) : 0,
+        stage: 'tiles',
+      });
+    },
+  });
+
+  checkAborted(signal);
+
+  const tilesDir = `${destDir}tiles/`;
+  await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
+
+  const result = await unpackPmtiles(archivePath, tilesDir, { maxZoom: UNPACK_MAX_ZOOM });
+  logDiagnostic('regions', 'info', 'expanded base-map archive', {
+    regionId: region.id,
+    tiles: result.tiles,
+    skipped: result.skipped,
+    ms: Date.now() - startedAt,
+  });
+
+  // Tile tree is now the offline source of truth; drop the archive.
+  await FileSystem.deleteAsync(archivePath, { idempotent: true }).catch(() => {});
 }
 
 /** Seed a downloaded region in the background and persist the canonical key. */
@@ -582,6 +756,120 @@ import * as SQLite from 'expo-sqlite';
 /**
  * Gunzip a file via the Bare worklet (replaces the dead Node sidecar).
  */
+/**
+ * Fetch the pack's optional on-device search indices.
+ *
+ * `search.sqlite` (named POIs) and `transit.sqlite` (stops + route relations)
+ * are what let a covered region answer POI and transit queries with no network
+ * call. Both are optional and both are served by whatever community/third-party
+ * origin hosts the rest of the pack — Polaris runs no CDN; a missing index just
+ * leaves the network fallback in place.
+ */
+async function downloadPackSearchIndices(
+  region: Region,
+  destDir: string,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  const assets = packAssetsFor(region, [
+    'search.sqlite',
+    'transit.sqlite',
+    TRANSIT_TIMETABLE_ASSET,
+  ]);
+  for (const asset of assets) {
+    checkAborted(signal);
+
+    onProgress?.({
+      regionId: region.id,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      percent: 0,
+      stage: 'indices',
+    });
+
+    await fetchPackAsset(region, destDir, asset, onProgress, signal);
+  }
+}
+
+/**
+ * Resolve the pack manifest for a region, falling back to the per-URL fields
+ * for packs published before `assets` existed.
+ */
+function packAssetsFor(region: Region, names: readonly string[]): RegionAsset[] {
+  const declared = (region.assets ?? []).filter((a) => names.includes(a.name));
+  if (declared.length > 0) return declared;
+
+  const legacy: RegionAsset[] = [];
+  const add = (name: string, url: string | null | undefined) => {
+    if (!url) return;
+    legacy.push({ name, url, gzip: url.endsWith('.gz') });
+  };
+  if (names.includes('search.sqlite')) add('search.sqlite', region.searchIndexUrl);
+  if (names.includes('transit.sqlite')) add('transit.sqlite', region.transitIndexUrl);
+  if (names.includes('geocoding-data.sqlite')) add('geocoding-data.sqlite', region.geocodingUrl);
+  return legacy;
+}
+
+/**
+ * Download one pack asset: skip when the local copy already matches the
+ * published checksum (delta), otherwise transfer resumably across mirrors and
+ * expand gzipped payloads.
+ */
+async function fetchPackAsset(
+  region: Region,
+  destDir: string,
+  asset: RegionAsset,
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<void> {
+  const finalPath = `${destDir}${asset.name}`;
+
+  // Delta: an unchanged asset costs nothing.
+  const local = await localAssetState(destDir, [asset]);
+  const { skipped } = planAssetDownloads([asset], local);
+  if (skipped.length > 0) {
+    logDiagnostic('regions', 'info', `asset unchanged, skipping download`, {
+      regionId: region.id,
+      asset: asset.name,
+    });
+    return;
+  }
+
+  const tempPath = asset.gzip ? `${finalPath}.gz` : finalPath;
+  const sources = orderedSourcesFor(asset);
+  const startedAt = Date.now();
+
+  await downloadResumable({
+    destPath: tempPath,
+    sources,
+    signal,
+    verify: verifierFor(asset),
+    onSourceSettled: reportSourceOutcome,
+    onProgress: (p) => {
+      onProgress?.({
+        regionId: region.id,
+        totalBytes: p.totalBytes ?? 0,
+        downloadedBytes: p.bytesWritten,
+        percent: p.totalBytes ? Math.round((p.bytesWritten / p.totalBytes) * 100) : 0,
+        stage: 'indices',
+      });
+    },
+  });
+
+  checkAborted(signal);
+  if (asset.gzip) {
+    await gunzipViaNode(tempPath, finalPath);
+    await FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+  }
+
+  logDiagnostic('regions', 'info', `asset downloaded`, {
+    regionId: region.id,
+    asset: asset.name,
+    ms: Date.now() - startedAt,
+    sources: sources.length,
+  });
+}
+
 function gunzipViaNode(inputPath: string, outputPath: string): Promise<void> {
   return gunzipFile(inputPath, outputPath);
 }
@@ -613,13 +901,28 @@ async function downloadAndImportGeocodingBundle(
   const gzPath = `${destDir}geocoding-data.sqlite.gz`;
   const dbPath = `${destDir}geocoding-data.sqlite`;
 
-  // Download the gzipped bundle
+  // Download the gzipped bundle (resumable + mirror-aware + delta-skipped).
   checkAborted(signal);
-  await FileSystem.downloadAsync(region.geocodingUrl, gzPath);
+  await fetchPackAsset(
+    region,
+    destDir,
+    packAssetsFor(region, ['geocoding-data.sqlite'])[0] ?? {
+      name: 'geocoding-data.sqlite',
+      url: region.geocodingUrl,
+      gzip: true,
+    },
+    onProgress,
+    signal,
+  );
 
-  // Decompress via Node.js IPC
+  // Decompress via Node.js IPC (skipped when the delta check already left an
+  // expanded copy in place).
   checkAborted(signal);
-  await gunzipViaNode(gzPath, dbPath);
+  const gzInfo = await FileSystem.getInfoAsync(gzPath);
+  if (gzInfo.exists) {
+    await gunzipViaNode(gzPath, dbPath);
+    await FileSystem.deleteAsync(gzPath, { idempotent: true }).catch(() => {});
+  }
 
   // Open the downloaded SQLite as read-only
   const srcDb = await SQLite.openDatabaseAsync(dbPath, {

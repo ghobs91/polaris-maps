@@ -22,7 +22,7 @@ declare -A REGIONS=(
   ["us-il-chicago"]="https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf"
   ["us-tx-houston"]="https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf"
   ["us-wa-seattle"]="https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf"
-  ["gb-england-london"]="https://download.geofabrik.de/europe/great-britain/england-latest.osm.pbf"
+  ["gb-england-london"]="https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf"
   ["de-berlin"]="https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf"
 )
 

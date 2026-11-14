@@ -22,8 +22,8 @@ export type StreetViewCaptureStream = 'wide' | 'detail';
 
 /**
  * Capture one detail frame per N wide frames. Wide frames are distance-gated
- * (20 m in standard mode), so this is ~100 m of detail coverage, while only
- * one tick in N pays the extra capture latency.
+ * (3 m in town, 20 m on the highway), so this is ~15-100 m of detail coverage,
+ * while only one tick in N pays the extra capture latency.
  */
 export const STREET_VIEW_DETAIL_EVERY_NTH = 5;
 
@@ -99,32 +99,43 @@ export interface StreetViewFix {
   timestamp: number;
 }
 
+/** Speed at which Mapillary's mobile apps switch from urban to highway spacing. */
+export const STREET_VIEW_HIGHWAY_SPEED_MPS = 50 / 3.6;
+
+/** Above this speed Mapillary's apps lock focus at infinity to stop AF hunting. */
+export const STREET_VIEW_INFINITY_FOCUS_SPEED_MPS = 10 * 0.44704;
+
 export interface StreetViewCaptureConfig {
-  distanceMeters: number;
+  /** Frame spacing below the highway speed, matching the Mapillary app's urban 3 m. */
+  urbanDistanceMeters: number;
+  /** Frame spacing at or above the highway speed, matching the Mapillary app's 20 m. */
+  highwayDistanceMeters: number;
   minIntervalMs: number;
   minSpeedMps: number;
   maxAccuracyMeters: number;
   quality: number;
-  /** Preferred still size; null means the camera default / full resolution. */
-  pictureSize: string | null;
 }
 
 export const STREET_VIEW_MODE_CONFIG: Record<StreetViewCaptureMode, StreetViewCaptureConfig> = {
   standard: {
-    distanceMeters: 20,
-    minIntervalMs: 1500,
-    minSpeedMps: 4,
+    urbanDistanceMeters: 3,
+    highwayDistanceMeters: 20,
+    // At 3 m spacing the camera, not the clock, sets the cadence. This floor
+    // only debounces duplicate GPS ticks.
+    minIntervalMs: 250,
+    // Skip a parked car, but keep covering stop-and-go traffic: the Mapillary
+    // app captures every 3 m at any moving speed, not just above 14 km/h.
+    minSpeedMps: 1.5,
     maxAccuracyMeters: 50,
-    quality: 0.8,
-    pictureSize: '1920x1080',
+    quality: 0.7,
   },
   threeD: {
-    distanceMeters: 8,
-    minIntervalMs: 900,
-    minSpeedMps: 4,
+    urbanDistanceMeters: 3,
+    highwayDistanceMeters: 20,
+    minIntervalMs: 250,
+    minSpeedMps: 1.5,
     maxAccuracyMeters: 50,
     quality: 0.9,
-    pictureSize: null,
   },
 };
 

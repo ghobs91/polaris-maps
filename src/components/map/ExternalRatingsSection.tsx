@@ -1,25 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
-import { WebView } from 'react-native-webview';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
 import { GlassView } from '../common/GlassView';
 import {
   useExternalRatings,
-  type ExternalRatingWebViewStage,
+  type ExternalRatingProviderState,
 } from '../../hooks/useExternalRatings';
 import { assemblePoiAddress } from '../../services/poi/poiAddress';
-import {
-  EXTERNAL_RATINGS_USER_AGENT,
-  isAllowedExternalRatingUrl,
-} from '../../services/poi/externalRatings';
 import {
   combineExternalRatings,
   type CombinedRating,
@@ -36,7 +24,7 @@ import type {
   ExternalRatingSummary,
 } from '../../services/poi/externalRatings/types';
 import { borderRadius, spacing, typography } from '../../constants/theme';
-import { GEOLOCATION_GUARD_JS } from '../../constants/webViewScripts';
+import { hiddenBrowserHandlers, setHiddenBrowserSpec } from './HiddenRatingsBrowserHost';
 
 /**
  * External aggregate ratings from TripAdvisor and Yelp, resolved via the
@@ -57,11 +45,15 @@ const PROVIDER_LABEL: Record<ExternalRatingProviderId, string> = {
   yelp: 'Yelp',
 };
 
+/** No provider state while the gate is closed (avoids stale ratings flashing). */
+const NO_STATES: ExternalRatingProviderState[] = [];
+
 export function ExternalRatingsSection({
   poi,
   enrichedFormattedAddress,
   website,
   onWriteReview,
+  enabled = true,
 }: {
   poi: OsmPoi;
   enrichedFormattedAddress?: string | null;
@@ -69,9 +61,14 @@ export function ExternalRatingsSection({
   website?: string | null;
   /** Opens the write-a-review surface when no external rating is found. */
   onWriteReview?: () => void;
+  /**
+   * False while the card is still opening or already closing: the section
+   * renders its loading placeholder but starts no fetch and loads no provider
+   * page, so the sheet's spring animation is not competing with a page load.
+   */
+  enabled?: boolean;
 }) {
   const { colors } = useTheme();
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
   const query = useMemo<ExternalRatingQuery>(
     () => ({
@@ -86,24 +83,37 @@ export function ExternalRatingsSection({
     [poi, enrichedFormattedAddress, website],
   );
 
-  const { states, handleMessage, handleError } = useExternalRatings(query, poi.id);
+  const { states, handleMessage, handleError } = useExternalRatings(query, poi.id, enabled);
+
+  // Ignore any state left over from a previous place while the gate is closed,
+  // so a stale rating can't flash before the new pass starts. While the same
+  // place is closing, keep showing what its pass last settled on, so the card
+  // does not flash "Loading ratings…" as the sheet slides away.
+  const activeStates = enabled ? states : NO_STATES;
+  const lastShownRef = useRef<{
+    placeId: string | number;
+    states: ExternalRatingProviderState[];
+  } | null>(null);
+  useEffect(() => {
+    if (enabled) lastShownRef.current = { placeId: poi.id, states };
+  }, [enabled, states, poi.id]);
+  const shownStates = enabled
+    ? states
+    : lastShownRef.current?.placeId === poi.id
+      ? lastShownRef.current.states
+      : NO_STATES;
 
   // Serialize hidden browsing: at most one stage is active at a time, in
-  // registry order. The WebView itself is kept mounted (with its warmed cookie
-  // store) across stages and providers while the card is open, so a cleared
-  // DataDome session is not lost to a cold remount.
-  const activeWebView = states.find((s) => s.webView)?.webView ?? null;
-  const lastWebViewRef = useRef<ExternalRatingWebViewStage | null>(null);
-  useEffect(() => {
-    if (activeWebView) lastWebViewRef.current = activeWebView;
-  }, [activeWebView]);
-  const mountedWebView = activeWebView ?? lastWebViewRef.current;
+  // registry order. There is no kept-alive browser: each stage mounts a fresh
+  // WKWebView (see HiddenRatingsBrowserHost) — cookies persist in the shared
+  // website-data store, so nothing is lost between stages.
+  const activeWebView = activeStates.find((s) => s.webView)?.webView ?? null;
   const loaded = useMemo(
     () =>
-      states
+      shownStates
         .filter((s) => s.status === 'loaded' && s.summary)
         .map((s) => s.summary as ExternalRatingSummary),
-    [states],
+    [shownStates],
   );
   const combined = useMemo(() => combineExternalRatings(loaded), [loaded]);
 
@@ -120,59 +130,71 @@ export function ExternalRatingsSection({
   }, [combined, poi]);
 
   // Idle counts as resolving too, so the empty state never flashes before the
-  // first resolution pass starts.
-  const resolving = states.some(
-    (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
-  );
-  const blockedState = states.find((s) => s.status === 'blocked') ?? null;
+  // first resolution pass starts. A closed gate with nothing remembered also
+  // counts as resolving: the section shows its loading placeholder while it
+  // waits for the sheet.
+  const resolving =
+    shownStates.length === 0 ||
+    shownStates.some(
+      (s) => s.status === 'idle' || s.status === 'searching' || s.status === 'loading',
+    );
+  const blockedState = shownStates.find((s) => s.status === 'blocked') ?? null;
 
-  // A real browser viewport, not a 0×0 frame: `innerWidth`/`innerHeight` are
-  // part of every bot-detection fingerprint, and a zero-size viewport is an
-  // unambiguous headless signal. The view is positioned outside the card's
-  // clipped bounds so it stays invisible without distorting layout.
-  const hiddenBrowserStyle = useMemo(
-    () => ({
-      position: 'absolute' as const,
-      left: -windowWidth * 2,
-      top: 0,
-      width: windowWidth,
-      height: windowHeight,
-      opacity: 0,
-    }),
-    [windowWidth, windowHeight],
+  // "No ratings yet" is a claim about the providers' answer; a transient
+  // failure (timeout, pacing, network) is not one. Only a provider that
+  // actually answered — a remembered verdict — may offer the write-a-review
+  // CTA; a pass that died on retries gets an honest "couldn't load" row.
+  const settledVerdict = shownStates.some(
+    (s) => s.status === 'failed' && s.failedKind === 'verdict',
   );
-
-  const handleMessageEvent = useCallback(
-    (provider: ExternalRatingProviderId) => (event: { nativeEvent: { data: string } }) => {
-      handleMessage(provider, event.nativeEvent.data);
-    },
-    [handleMessage],
-  );
+  const settledRetry = shownStates.some((s) => s.status === 'failed' && s.failedKind === 'retry');
 
   // HTTP failures carry the status that distinguishes a block/rate limit from a
   // transient network error, so the controller can back the host off properly.
+  // The hidden browser host reads these at event time; they must not re-render
+  // it, so they live in a ref-shaped module slot.
   const handleHttpErrorEvent = useCallback(
-    (event: { nativeEvent: { statusCode: number } }) => {
-      if (!activeWebView) return;
-      const statusCode = event.nativeEvent.statusCode;
+    (provider: ExternalRatingProviderId, statusCode: number) => {
       // A 403 may still carry the block/challenge body; let the collector read
       // it instead of tearing the stage down. Subresource 4xx responses are
       // likewise not a verdict about the page.
       if (statusCode === 429 || statusCode >= 500) {
-        handleError(activeWebView.provider, statusCode);
+        handleError(provider, statusCode);
       }
     },
-    [activeWebView, handleError],
+    [handleError],
   );
+  useEffect(() => {
+    hiddenBrowserHandlers.current = {
+      onMessage: handleMessage,
+      onError: (provider) => handleError(provider),
+      onHttpError: handleHttpErrorEvent,
+    };
+  });
 
-  // Reject any navigation that leaves the provider host allowlist or uses a
-  // non-web scheme (`headless-browse-policy`). `about:blank` is the WebView's
-  // own initial document.
-  const handleShouldStartLoad = useCallback(
-    (request: { url: string }) =>
-      request.url === 'about:blank' || isAllowedExternalRatingUrl(request.url),
-    [],
-  );
+  // The hidden browser is rendered OUTSIDE the sheet's subtree (see
+  // HiddenRatingsBrowserHost) — an actively loading WKWebView inside the
+  // sheet's animated, clipped, Liquid Glass surface stalls the card for as
+  // long as provider pages keep loading. This section publishes the live stage
+  // while one runs and tears the browser down at every other moment — between
+  // providers, after the pass settles, and while the card opens or closes.
+  const browserSpecKey =
+    enabled && activeWebView
+      ? `${activeWebView.provider}|${activeWebView.stage}|${activeWebView.uri}`
+      : 'off';
+  useEffect(() => {
+    if (browserSpecKey === 'off' || !activeWebView) {
+      setHiddenBrowserSpec(null);
+      return;
+    }
+    setHiddenBrowserSpec({
+      uri: activeWebView.uri,
+      provider: activeWebView.provider,
+      injectedJavaScript: activeWebView.injectedJavaScript,
+    });
+    // The key fully describes the published spec; the values it was derived
+    // from are intentionally not dependencies.
+  }, [browserSpecKey]);
 
   return (
     <GlassView
@@ -185,32 +207,6 @@ export function ExternalRatingsSection({
         <Text style={[styles.title, { color: colors.text }]}>Reviews</Text>
       </View>
 
-      {mountedWebView ? (
-        <View style={hiddenBrowserStyle} pointerEvents="none">
-          <WebView
-            source={{ uri: mountedWebView.uri }}
-            style={hiddenBrowserStyle}
-            userAgent={EXTERNAL_RATINGS_USER_AGENT}
-            injectedJavaScript={mountedWebView.injectedJavaScript}
-            injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
-            injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
-            javaScriptEnabled
-            domStorageEnabled
-            cacheEnabled
-            sharedCookiesEnabled
-            thirdPartyCookiesEnabled
-            mediaPlaybackRequiresUserAction
-            javaScriptCanOpenWindowsAutomatically={false}
-            allowsLinkPreview={false}
-            setSupportMultipleWindows={false}
-            onShouldStartLoadWithRequest={handleShouldStartLoad}
-            onMessage={activeWebView ? handleMessageEvent(activeWebView.provider) : undefined}
-            onError={activeWebView ? () => handleError(activeWebView.provider) : undefined}
-            onHttpError={activeWebView ? handleHttpErrorEvent : undefined}
-          />
-        </View>
-      ) : null}
-
       {combined ? (
         <CombinedRatingBlock combined={combined} sources={loaded} colors={colors} />
       ) : resolving ? (
@@ -222,6 +218,10 @@ export function ExternalRatingsSection({
           reason={blockedState.blockReason ?? 'blocked'}
           testID="external-ratings-blocked"
         />
+      ) : settledVerdict ? (
+        <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
+      ) : settledRetry ? (
+        <UnavailableBlock colors={colors} />
       ) : (
         <EmptyBlock colors={colors} onWriteReview={onWriteReview} />
       )}
@@ -289,6 +289,17 @@ function LoadingBlock({ colors }: { colors: ReturnType<typeof useTheme>['colors'
     <View style={styles.statusRow} testID="external-ratings-loading">
       <ActivityIndicator size="small" color={colors.textSecondary} />
       <Text style={[styles.statusText, { color: colors.textSecondary }]}>Loading ratings…</Text>
+    </View>
+  );
+}
+
+function UnavailableBlock({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={styles.statusRow} testID="external-ratings-unavailable">
+      <MaterialCommunityIcons name="wifi-off" size={16} color={colors.textSecondary} />
+      <Text style={[styles.statusText, { color: colors.textSecondary, flexShrink: 1 }]}>
+        Ratings couldn’t load right now. Reopen this place to try again.
+      </Text>
     </View>
   );
 }

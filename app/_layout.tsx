@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { hideAsync, preventAutoHideAsync } from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -31,11 +32,22 @@ import {
   disposeProbeCollection,
 } from '@/services/traffic/probeCollectionCoordinator';
 import { initRerouteMonitor, disposeRerouteMonitor } from '@/services/traffic/rerouteCoordinator';
+import { startSeedInstrumentation, stopSeedInstrumentation } from '@/services/sync/seedDiagnostics';
+import {
+  initAutoRegionDownload,
+  disposeAutoRegionDownload,
+} from '@/services/regions/autoRegionDownloadCoordinator';
 import {
   initIncidentExchange,
   disposeIncidentExchange,
 } from '@/services/traffic/incidentExchangeService';
 import { startMonitoring as startConnectivityMonitoring } from '@/services/regions/connectivityService';
+import {
+  initRemoteConfig,
+  isFeatureEnabled,
+  subscribeRemoteConfig,
+} from '@/services/config/remoteConfig';
+import { logDiagnostic } from '@/services/diagnostics/diagnosticsLog';
 import { scheduleGeonamesDownload } from '@/services/geocoding/geonamesDownloadScheduler';
 import { useAtprotoAuthStore } from '@/stores/atprotoAuthStore';
 import { useOsmAuthStore } from '@/stores/osmAuthStore';
@@ -54,6 +66,8 @@ function RootLayoutInner() {
   useICloudSync();
 
   useEffect(() => {
+    // Portrait-first app: only the navigation screen unlocks landscape.
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     useAtprotoAuthStore.getState().restore();
     // Restore the persisted OSM session so a signed-in user is recognized
     // app-wide (auto-seeding gates on it) instead of only on the edit screen.
@@ -77,6 +91,10 @@ function RootLayoutInner() {
     // Show aggregate offline-download progress in a Live Activity while the
     // app is backgrounded during an active region download.
     initDownloadLiveActivity();
+    // Load the signed kill-switch config in the background. Defaults apply if
+    // the static file is unreachable; a verified config can disable features
+    // without an App Store release.
+    void initRemoteConfig();
   }, []);
 
   useEffect(() => {
@@ -98,26 +116,69 @@ function RootLayoutInner() {
 
   useEffect(() => {
     // Start the P2P traffic mesh (Hyperswarm worklet + Nostr fallback) after
-    // initial interactions so the map's first paint isn't delayed.
+    // initial interactions so the map's first paint isn't delayed. A verified
+    // remote config can keep it off (or turn it off later) without a release.
     let cancelled = false;
+    let trafficStarted = false;
+
+    const startTraffic = () => {
+      if (cancelled || trafficStarted) return;
+      trafficStarted = true;
+      void initTrafficP2P().catch((error) => {
+        logDiagnostic('traffic-mesh', 'error', 'P2P init failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+      // Consent-gated probe contribution. The coordinator owns its own
+      // foreground/background lifecycle and reacts to consent changes.
+      initProbeCollection();
+      // Receive, verify, and persist crowd-reported incidents.
+      initIncidentExchange();
+    };
+
+    const stopTraffic = () => {
+      if (!trafficStarted) return;
+      trafficStarted = false;
+      disposeProbeCollection();
+      disposeIncidentExchange();
+      disposeTrafficP2P();
+    };
+
+    const applyTrafficFlag = () => {
+      if (isFeatureEnabled('trafficP2P')) startTraffic();
+      else stopTraffic();
+    };
+
     const task = InteractionManager.runAfterInteractions(() => {
-      if (!cancelled) void initTrafficP2P().catch(() => {});
+      if (cancelled) return;
+      void initRemoteConfig().finally(() => {
+        if (!cancelled) applyTrafficFlag();
+      });
     });
 
-    // Consent-gated probe contribution. The coordinator owns its own
-    // foreground/background lifecycle and reacts to consent changes.
-    initProbeCollection();
-
-    // Congestion rerouting follows the navigation lifecycle.
+    // Congestion rerouting follows the navigation lifecycle and only reads
+    // whatever traffic data is available.
     initRerouteMonitor();
 
-    // Receive, verify, and persist crowd-reported incidents from both transports.
-    initIncidentExchange();
+    // Download the offline pack for whatever region the map is looking at, so
+    // a first open (panned to the user's location) renders from local bytes
+    // instead of the shared tile servers.
+    initAutoRegionDownload();
+
+    const unsubscribeConfig = subscribeRemoteConfig(applyTrafficFlag);
 
     // Suspend/resume the mesh with the app lifecycle to save battery.
+    // Seed instrumentation samples the Hyperdrive swarm while foregrounded so
+    // seeding availability is measured rather than assumed (iOS suspends
+    // backgrounded apps, so a phone is a weak seed).
     const onAppStateChange = (state: AppStateStatus) => {
-      if (state === 'active') resumeTrafficP2P();
-      else if (state === 'background') suspendTrafficP2P();
+      if (state === 'active') {
+        resumeTrafficP2P();
+        startSeedInstrumentation();
+      } else if (state === 'background') {
+        suspendTrafficP2P();
+        stopSeedInstrumentation();
+      }
     };
     const sub = AppState.addEventListener('change', onAppStateChange);
 
@@ -125,10 +186,11 @@ function RootLayoutInner() {
       cancelled = true;
       task.cancel();
       sub.remove();
-      disposeProbeCollection();
+      unsubscribeConfig();
+      stopTraffic();
+      stopSeedInstrumentation();
+      disposeAutoRegionDownload();
       disposeRerouteMonitor();
-      disposeIncidentExchange();
-      disposeTrafficP2P();
       teardownFixDrivenRefresh();
     };
   }, []);
@@ -225,8 +287,12 @@ export default function RootLayout() {
  * consent exists. Re-consent after a version change re-enters this gate.
  */
 function ConsentGate() {
+  // `showOnboardingOnLaunch` was gated on `__DEV__`, so the setting did nothing
+  // in a TestFlight or App Store build — flipping it appeared to have no effect
+  // on a cold start because it genuinely had none. It is a user-facing preview
+  // switch, so it has to work in release builds too.
   const [consentComplete, setConsentComplete] = useState(
-    () => hasCompletedConsent() && !(__DEV__ && useSettingsStore.getState().showOnboardingOnLaunch),
+    () => hasCompletedConsent() && !useSettingsStore.getState().showOnboardingOnLaunch,
   );
 
   if (!consentComplete) {

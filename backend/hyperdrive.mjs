@@ -26,6 +26,8 @@ import path from 'bare-path';
 import goodbye from 'graceful-goodbye';
 import { ungzip } from 'pako';
 import { sha256 } from './node_modules/@noble/hashes/sha256.js';
+import { answerQuery, parseJsonl, shardPathFor, shardTopic } from './shard-answer.mjs';
+import { unpackPmtiles } from './pmtiles.mjs';
 
 // ── RPC command IDs (shared with src/services/sync/hdRpcCommands.ts) ─
 
@@ -35,6 +37,8 @@ const CMD_HD_STATUS = 2; // RN → worklet
 const CMD_HD_UNSEED = 3; // RN → worklet
 const CMD_HD_GUNZIP = 4; // RN → worklet: gunzip a file in place
 const CMD_HD_EXTRACT_TAR = 5; // RN → worklet: extract a (gzipped) tar archive
+const CMD_HD_SHARD_QUERY = 6; // RN → worklet: ask peers for a shard answer
+const CMD_HD_UNPACK_PMTILES = 7; // RN → worklet: expand tiles.pmtiles into {z}/{x}/{y}.pbf
 const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN
 
 // ── State ───────────────────────────────────────────────────────────
@@ -89,6 +93,7 @@ function ensureSwarm() {
   swarm = new Hyperswarm();
   swarm.on('connection', (conn) => {
     for (const { store } of seededDrives.values()) store.replicate(conn);
+    attachShardProtocol(conn);
   });
   goodbye(() => swarm.destroy());
   return swarm;
@@ -115,12 +120,154 @@ async function handleRequest(req) {
       case CMD_HD_EXTRACT_TAR:
         handleExtractTar(req);
         break;
+      case CMD_HD_SHARD_QUERY:
+        await handleShardQuery(req);
+        break;
+      case CMD_HD_UNPACK_PMTILES:
+        await handleUnpackPmtiles(req);
+        break;
       default:
         reply(req, { error: `unknown command ${req.command}` });
     }
   } catch (err) {
     console.error('[hyperdrive] RPC error:', err);
     reply(req, { error: err && err.message ? err.message : String(err) });
+  }
+}
+
+// ── Shard query protocol (peer answers, tier 2) ─────────────────────
+//
+// A peer that seeds a pack already holds `shards/<cell>.jsonl`, so it can answer
+// a predicate query from those bytes and return Merkle inclusion proofs. Frames
+// are length-prefixed JSON over the Hyperswarm connection. Nothing here is
+// trusted by the requester: the app verifies every proof against the root in the
+// signed shard manifest before using a row.
+
+const FRAME_MAX_BYTES = 8 * 1024 * 1024;
+const pendingShardRequests = new Map(); // requestId → { resolve, timeout }
+
+function encodeFrame(message) {
+  const payload = b4a.from(JSON.stringify(message));
+  const header = b4a.alloc(4);
+  header.writeUInt32BE(payload.length, 0);
+  return b4a.concat([header, payload]);
+}
+
+function randomId() {
+  return b4a.toString(sha256(b4a.from(String(Date.now()) + Math.random())), 'hex').slice(0, 32);
+}
+
+/** Answer a shard query from whichever seeded drive contains that shard. */
+async function answerFromSeededDrives(query) {
+  if (!query || typeof query.shardId !== 'string') return null;
+  const rel = shardPathFor(query.shardId);
+
+  for (const { drive } of seededDrives.values()) {
+    try {
+      const buf = await drive.get(rel);
+      if (!buf) continue;
+      return answerQuery(parseJsonl(b4a.toString(buf)), query);
+    } catch {
+      // Not in this drive (or unreadable) — try the next one.
+    }
+  }
+  return null;
+}
+
+async function handleShardMessage(conn, message) {
+  if (!message || typeof message !== 'object') return;
+
+  if (message.type === 'shard-answer') {
+    const pending = pendingShardRequests.get(message.requestId);
+    if (pending) {
+      pendingShardRequests.delete(message.requestId);
+      clearTimeout(pending.timeout);
+      pending.resolve(message.answer ?? null);
+    }
+    return;
+  }
+
+  if (message.type === 'shard-query') {
+    const answer = await answerFromSeededDrives(message.query);
+    if (!answer) return; // we do not seed that shard; stay silent
+    conn.write(encodeFrame({ type: 'shard-answer', requestId: message.requestId, answer }));
+  }
+}
+
+function attachShardProtocol(conn) {
+  let buffer = b4a.alloc(0);
+
+  conn.on('data', (chunk) => {
+    buffer = b4a.concat([buffer, chunk]);
+    while (buffer.length >= 4) {
+      const length = buffer.readUInt32BE(0);
+      if (length > FRAME_MAX_BYTES) {
+        buffer = b4a.alloc(0);
+        return;
+      }
+      if (buffer.length < 4 + length) return;
+      const payload = buffer.subarray(4, 4 + length);
+      buffer = buffer.subarray(4 + length);
+      let message;
+      try {
+        message = JSON.parse(b4a.toString(payload));
+      } catch {
+        continue;
+      }
+      handleShardMessage(conn, message).catch((err) => {
+        console.error('[hyperdrive] shard message failed:', err);
+      });
+    }
+  });
+
+  // A connection may open after the request was issued; replay any pending query.
+  for (const [requestId, pending] of pendingShardRequests) {
+    conn.write(encodeFrame({ type: 'shard-query', requestId, query: pending.query }));
+  }
+}
+
+/**
+ * Ask peers on a shard's topic for an answer.
+ *
+ * Returns the first reply verbatim (unverified). Times out with `null` so the
+ * caller can fall back instead of hanging a search.
+ */
+async function handleShardQuery(req) {
+  const { shardId, query, timeoutMs } = JSON.parse(b4a.toString(req.data));
+  const budget = Math.max(1_000, Number(timeoutMs) || 20_000);
+  const requestId = randomId();
+  const sw = ensureSwarm();
+
+  let discovery = null;
+  let timer = null;
+
+  try {
+    discovery = sw.join(shardTopic(shardId), { server: false, client: true });
+
+    const answer = await new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), budget);
+      pendingShardRequests.set(requestId, { resolve, timeout: timer, query });
+
+      // Existing connections may already carry this topic.
+      const frame = encodeFrame({ type: 'shard-query', requestId, query });
+      for (const conn of sw.connections) {
+        try {
+          conn.write(frame);
+        } catch {
+          // Connection closed mid-write; the next peer will answer.
+        }
+      }
+    });
+
+    reply(req, { answer: answer ?? null });
+  } finally {
+    pendingShardRequests.delete(requestId);
+    if (timer) clearTimeout(timer);
+    try {
+      await discovery?.destroy();
+    } catch {
+      // Already gone.
+    }
   }
 }
 
@@ -283,6 +430,46 @@ function handleGunzip(req) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, out);
   reply(req, { outputPath });
+}
+
+/**
+ * Expand a region pack's base-map `tiles.pmtiles` into the `{z}/{x}/{y}.pbf`
+ * tree the on-device tile server serves. This is what makes a downloaded
+ * region render from local bytes instead of the shared OpenFreeMap tile
+ * servers, so it runs once at install time.
+ */
+async function handleUnpackPmtiles(req) {
+  const { srcPath, destDir, maxZoom } = JSON.parse(b4a.toString(req.data));
+  if (!fs.existsSync(srcPath)) {
+    return reply(req, { error: `Source file not found: ${srcPath}` });
+  }
+  try {
+    const result = await unpackPmtiles(
+      {
+        // Range handle, not a whole-file read: the archive is expanded through
+        // a bounded window so pack size is limited by storage, not by RAM.
+        open: (p) => {
+          const fd = fs.openSync(p, 'r');
+          return {
+            read: (offset, length) => {
+              const buffer = Buffer.allocUnsafe(length);
+              const bytesRead = fs.readSync(fd, buffer, 0, length, offset);
+              return buffer.subarray(0, bytesRead);
+            },
+            close: () => fs.closeSync(fd),
+          };
+        },
+        writeFile: (p, data) => fs.writeFileSync(p, data),
+        mkdir: (p) => fs.mkdirSync(p, { recursive: true }),
+      },
+      srcPath,
+      destDir,
+      maxZoom === undefined ? {} : { maxZoom },
+    );
+    reply(req, result);
+  } catch (err) {
+    reply(req, { error: err && err.message ? err.message : String(err) });
+  }
 }
 
 /**

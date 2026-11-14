@@ -2,8 +2,11 @@ import type { PlaceCategory } from '../../models/poi';
 import type { OsmPoi } from './osmFetcher';
 import { searchPlacesByCategory } from './poiService';
 import { fetchOsmPoisByTags } from './osmFetcher';
+import { hasLocalPoiCoverage, hasLocalPoiShapeCoverage, queryLocalPois } from './localPoiIndex';
+import { isOverpassEnabled } from '../overpassClient';
 import { isAbortError, throwIfAborted, withTimeout } from '../search/abortUtils';
 import { nominatimThrottle } from '../search/requestThrottle';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import { placeToOsmPoi } from '../../utils/placeToOsmPoi';
 import {
   resolveSearchCategories,
@@ -13,6 +16,9 @@ import {
 
 /** Minimum local results before triggering an Overpass fallback. */
 const LOCAL_SUFFICIENCY_THRESHOLD = 5;
+
+/** How many indexed POIs to pull before ranking against the limit. */
+const LOCAL_INDEX_MIN_RESULTS = 100;
 
 /** Nominatim search terms for each PlaceCategory */
 const CATEGORY_NOMINATIM_QUERY: Partial<Record<PlaceCategory, string>> = {
@@ -112,6 +118,40 @@ export async function searchByCategory(
 
   let localPois = localPlaces.map(placeToOsmPoi);
 
+  // Step 1b: On-device OSM index (shipped in region packs).
+  //
+  // This is the reason Overpass is no longer on the critical path: for a
+  // covered area the same answer is computed locally, so a category search
+  // neither waits on a stranger's server nor leaks the viewport to one.
+  const allTags = categories.flatMap(categoryToOverpassTags);
+  const bounds = { south, west, north, east };
+  let indexPois: OsmPoi[] = [];
+  // True when the pack indexed every tag shape this search asks for. Then an
+  // empty local answer is the real answer: no third-party request can improve
+  // it, and asking anyway is exactly the load a pack is supposed to remove.
+  let shapesCovered = false;
+  try {
+    if (await hasLocalPoiCoverage(bounds)) {
+      const shapeFilters = allTags.map(([key, value]) => ({ key, value }));
+      shapesCovered = await hasLocalPoiShapeCoverage(bounds, shapeFilters, false).catch(
+        () => false,
+      );
+      indexPois = await queryLocalPois({
+        ...bounds,
+        keys: shapeFilters,
+        limit: Math.max(limit, LOCAL_INDEX_MIN_RESULTS),
+      });
+    }
+  } catch {
+    // No index yet (fresh install, or a platform without SQLite in tests):
+    // behave exactly as before this layer existed.
+    indexPois = [];
+    shapesCovered = false;
+  }
+  if (indexPois.length > 0) {
+    localPois = deduplicateCategoryResults(localPois, indexPois);
+  }
+
   // When a specific cuisine/food type is requested, filter & rank local
   // results by relevance so generic restaurants don't drown out matches.
   // Otherwise order nearest-first so the limit keeps local places.
@@ -119,43 +159,44 @@ export async function searchByCategory(
     ? rankByCuisineRelevance(localPois, cuisineHint, anchor)
     : keepNearest(localPois, anchor);
 
-  const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD;
+  // Two independent reasons to stop here: enough local rows that a network
+  // answer would only add noise, or a pack that indexed every shape this
+  // search asks for — in which case zero rows is the answer, not a shortfall.
+  const localPrimary = localPois.length >= LOCAL_SUFFICIENCY_THRESHOLD || shapesCovered;
 
   if (localPrimary || opts?.localOnly) {
-    // Report the honest flag: a local-only pass with too few rows is not
-    // "local is primary", it is "local is all we have so far".
     return { categories, pois: localPois.slice(0, limit), localPrimary };
   }
   throwIfAborted(opts?.signal);
 
-  // Step 2: Overpass fallback — build tag pairs for all resolved categories
-  const allTags = categories.flatMap(categoryToOverpassTags);
-
-  // When a cuisine hint exists, first try a narrow query with cuisine= ANDed
-  // onto each tag pair. If that yields nothing, retry without the AND filter.
+  // Step 2: Overpass fallback — the escape hatch for areas with no local pack.
+  // Skipped entirely when the signed remote config disables it, or when the
+  // local index already answered.
   let overpassPois: OsmPoi[] = [];
-  try {
-    if (cuisineHint) {
-      overpassPois = await fetchOsmPoisByTags(
-        south,
-        west,
-        north,
-        east,
-        allTags,
-        [['cuisine', cuisineHint]],
-        { requireName: false, signal: opts?.signal },
-      );
+  if (isOverpassEnabled()) {
+    try {
+      if (cuisineHint) {
+        overpassPois = await fetchOsmPoisByTags(
+          south,
+          west,
+          north,
+          east,
+          allTags,
+          [['cuisine', cuisineHint]],
+          { requireName: false, signal: opts?.signal },
+        );
+      }
+      // Broaden to all category results if narrow query was empty or no hint
+      if (overpassPois.length === 0) {
+        overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, undefined, {
+          requireName: false,
+          signal: opts?.signal,
+        });
+      }
+    } catch (err) {
+      // A caller abort must propagate; Overpass outages fall through to Nominatim.
+      if (isAbortError(err) || opts?.signal?.aborted) throw err;
     }
-    // Broaden to all category results if narrow query was empty or no hint
-    if (overpassPois.length === 0) {
-      overpassPois = await fetchOsmPoisByTags(south, west, north, east, allTags, undefined, {
-        requireName: false,
-        signal: opts?.signal,
-      });
-    }
-  } catch (err) {
-    // A caller abort must propagate; Overpass outages fall through to Nominatim.
-    if (isAbortError(err) || opts?.signal?.aborted) throw err;
   }
 
   if (overpassPois.length > 0) {
@@ -389,7 +430,10 @@ async function fetchNominatimPoiSingle(
       },
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      logDiagnostic('nominatim', 'warn', `category search failed: HTTP ${response.status}`);
+      return [];
+    }
 
     const data: NominatimSearchResult[] = await response.json();
 

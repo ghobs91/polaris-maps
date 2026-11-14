@@ -2,7 +2,15 @@ import { inflate as pakoInflate } from 'pako';
 import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { TILE_MAX_AGE_SEC } from '../../models/trafficTile';
 import { TtlCache } from '../../utils/ttlCache';
-import { tomtomApiKey, TOMTOM_FLOW_TILES_BASE_URL } from '../../constants/config';
+import { encode as geohashEncode } from '../../utils/geohash';
+import { TOMTOM_FLOW_TILES_BASE_URL, tomtomApiKey } from '../../constants/config';
+import {
+  canCallTomTom,
+  isTomTomConfigured,
+  noteTomTomNetworkError,
+  noteTomTomRequest,
+  noteTomTomResponse,
+} from './tomtomAccess';
 
 // ── TomTom traffic tile color centroids ────────────────────────────
 // Exact hex matching fails because TomTom renders anti-aliased road
@@ -245,12 +253,15 @@ async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<Deco
   const cached = tileCache.get(key);
   if (cached) return cached;
 
+  if (!canCallTomTom()) return null;
+  noteTomTomRequest();
   const url = `${TOMTOM_FLOW_TILES_BASE_URL}/${z}/${x}/${y}.png?key=${encodeURIComponent(tomtomApiKey)}&tileSize=256&thickness=3`;
   const redactedUrl = url.replace(/key=[^&]+/, 'key=REDACTED');
 
   try {
     if (__DEV__) console.log(`[TileSampler] fetching tile ${key}: ${redactedUrl}`);
     const res = await fetch(url);
+    noteTomTomResponse(res.status);
     if (!res.ok) {
       console.warn(`[TileSampler] tile ${key} HTTP ${res.status} for ${redactedUrl}`);
       return null;
@@ -275,6 +286,7 @@ async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<Deco
     tileCache.set(key, decoded);
     return decoded;
   } catch (err) {
+    noteTomTomNetworkError();
     console.warn(`[TileSampler] tile ${key} fetch error:`, err);
     return null;
   }
@@ -293,9 +305,9 @@ async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<Deco
  */
 export async function sampleRouteTileColors(
   routeCoords: [number, number][],
+  cells?: readonly string[],
 ): Promise<NormalizedTrafficSegment[]> {
-  if (!tomtomApiKey) {
-    console.warn('[TileSampler] No TomTom API key configured. Traffic route colors unavailable.');
+  if (!isTomTomConfigured()) {
     return [];
   }
 
@@ -321,9 +333,16 @@ export async function sampleRouteTileColors(
     }
   }
 
+  // Only sample route points that fall in cells the earlier tiers missed.
+  const allowedCells = cells ? new Set(cells) : null;
+  const inScope = allowedCells
+    ? sampled.filter((pt) => allowedCells.has(geohashEncode(pt.lat, pt.lng, 5)))
+    : sampled;
+  if (inScope.length === 0) return [];
+
   // Convert to tile+px,py. Use zoom 14 for a good balance of detail vs tile count.
   const zoom = 14;
-  const tilePoints: TilePoint[] = sampled.map((pt) => {
+  const tilePoints: TilePoint[] = inScope.map((pt) => {
     const tp = lngLatToTile(pt.lng, pt.lat, zoom);
     tp.coordIndex = pt.coordIndex;
     return tp;

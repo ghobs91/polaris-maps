@@ -36,6 +36,13 @@ jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: (...args: unknown[]) => mockIsOnline(...args),
 }));
 
+// This suite targets the online Valhalla request/response shape, so the OSRM
+// tier is disabled — otherwise it would consume the mocked fetch first.
+jest.mock('../../src/services/routing/osrmClient', () => ({
+  computeOsrmRoute: jest.fn().mockRejectedValue(new Error('OSRM disabled for this suite')),
+  isOsrmSupported: () => false,
+}));
+
 jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
   TurboModuleRegistry: { get: () => null },

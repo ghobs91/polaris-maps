@@ -3,87 +3,1790 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Polaris Maps</title>
-    <meta name="description" content="A peer-to-peer navigation app built on open map data." />
+    <title>Polaris Maps — peer-to-peer navigation with no cloud, no ads, no tracking</title>
+    <meta
+      name="description"
+      content="Polaris Maps is a peer-to-peer navigation app built on OpenStreetMap: turn-by-turn directions, live traffic from nearby drivers, offline regions, transit, and street-level imagery. No ads, no tracking, no account required."
+    />
+    <link rel="canonical" href="https://polarismaps.app/" />
+    <meta name="theme-color" content="#05070c" />
+    <meta name="color-scheme" content="dark" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Polaris Maps" />
+    <meta property="og:url" content="https://polarismaps.app/" />
+    <meta
+      property="og:title"
+      content="Polaris Maps — maps owned by the people who use them"
+    />
+    <meta
+      property="og:description"
+      content="Turn-by-turn navigation, live traffic, offline maps, transit, and street-level imagery — shared between devices instead of a corporate cloud."
+    />
+    <meta property="og:image" content="https://polarismaps.app/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Polaris Maps app icon and navigation screenshot" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://polarismaps.app/assets/og.png" />
+
+    <link rel="icon" href="/assets/favicon.png" sizes="64x64" type="image/png" />
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+    <link rel="preload" as="image" href="/assets/shots/navigation.webp" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Polaris Maps",
+        "applicationCategory": "NavigationApplication",
+        "operatingSystem": "iOS 16.4 or later",
+        "url": "https://polarismaps.app/",
+        "installUrl": "https://apps.apple.com/app/id6760763483",
+        "description": "Peer-to-peer navigation built on OpenStreetMap: turn-by-turn directions, live traffic, offline maps, transit, and street-level imagery. No ads, no tracking, no account.",
+        "license": "https://github.com/ghobs91/polaris-maps/blob/main/LICENSE",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+
     <style>
+      /* ── tokens ─────────────────────────────────────────────────────── */
       :root {
-        color-scheme: light dark;
-        --fg: #111;
-        --muted: #555;
-        --bg: #fff;
-        --accent: #0a68ff;
+        color-scheme: dark;
+        --bg: #05070c;
+        --bg-soft: #080c14;
+        --card: rgba(255, 255, 255, 0.035);
+        --card-hi: rgba(255, 255, 255, 0.06);
+        --line: rgba(255, 255, 255, 0.09);
+        --line-hi: rgba(255, 255, 255, 0.16);
+        --fg: #eef2f7;
+        --muted: #98a5b8;
+        --cyan: #4fd8ea;
+        --blue: #4c8df6;
+        --violet: #8b7bff;
+        --pink: #f17ad0;
+        --radius: 18px;
+        --max: 1120px;
+        --font:
+          -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial,
+          sans-serif;
       }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --fg: #f2f2f7;
-          --muted: #a1a1a6;
-          --bg: #0b0b0c;
-        }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
       }
+
+      html {
+        scroll-behavior: smooth;
+        -webkit-text-size-adjust: 100%;
+      }
+
       body {
         margin: 0;
         background: var(--bg);
         color: var(--fg);
-        font:
-          16px/1.6 -apple-system,
-          BlinkMacSystemFont,
-          'Segoe UI',
-          Roboto,
-          Helvetica,
-          Arial,
-          sans-serif;
+        font: 16px/1.65 var(--font);
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
       }
-      main {
-        max-width: 640px;
-        margin: 0 auto;
-        padding: 64px 20px 80px;
+
+      img {
+        max-width: 100%;
+        height: auto;
+        display: block;
       }
+
+      a {
+        color: var(--cyan);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        letter-spacing: -0.022em;
+        line-height: 1.1;
+        margin: 0;
+        font-weight: 700;
+        text-wrap: balance;
+      }
+
       h1 {
-        font-size: 32px;
-        margin: 0 0 8px;
+        font-size: clamp(2.35rem, 5.1vw, 3.9rem);
       }
+
       h2 {
-        font-size: 20px;
-        margin: 32px 0 8px;
+        font-size: clamp(1.7rem, 3.1vw, 2.5rem);
       }
-      p,
-      li {
+
+      p {
+        margin: 0;
+        text-wrap: pretty;
+      }
+
+      h3 {
+        font-size: 1.0625rem;
+        letter-spacing: -0.01em;
+      }
+
+      .wrap {
+        width: 100%;
+        max-width: var(--max);
+        margin-inline: auto;
+        padding-inline: 24px;
+      }
+
+      section {
+        position: relative;
+        padding-block: clamp(64px, 9vw, 112px);
+      }
+
+      section[id] {
+        scroll-margin-top: 84px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--card);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--muted);
+        letter-spacing: 0;
+      }
+
+      .eyebrow .dot {
+        width: 7px;
+        height: 7px;
+        margin-left: 2px;
+        border-radius: 50%;
+        background: var(--cyan);
+        box-shadow: 0 0 0 4px rgba(79, 216, 234, 0.14);
+      }
+
+      .lede {
+        color: var(--muted);
+        font-size: clamp(1rem, 1.5vw, 1.125rem);
+        max-width: 56ch;
+      }
+
+      .skip {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        z-index: 100;
+        padding: 12px 18px;
+        background: var(--fg);
+        color: #05070c;
+        border-radius: 0 0 12px 0;
+        font-weight: 600;
+      }
+
+      .skip:focus {
+        left: 0;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--cyan);
+        outline-offset: 3px;
+        border-radius: 6px;
+      }
+
+      /* ── header ─────────────────────────────────────────────────────── */
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        border-bottom: 1px solid transparent;
+        transition:
+          background 0.25s ease,
+          border-color 0.25s ease,
+          backdrop-filter 0.25s ease;
+      }
+
+      .site-header.is-stuck {
+        background: rgba(5, 7, 12, 0.72);
+        border-bottom-color: var(--line);
+        backdrop-filter: saturate(160%) blur(14px);
+        -webkit-backdrop-filter: saturate(160%) blur(14px);
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        height: 68px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--fg);
+        font-weight: 650;
+        font-size: 1rem;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+
+      .brand:hover {
+        text-decoration: none;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        margin-left: auto;
+      }
+
+      .nav-links a {
+        color: var(--muted);
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+
+      .nav-links a:hover {
+        color: var(--fg);
+        text-decoration: none;
+      }
+
+      .nav-cta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-left: 6px;
+      }
+
+      /* ── buttons ────────────────────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+        height: 46px;
+        padding: 0 20px;
+        border-radius: 12px;
+        border: 1px solid var(--line-hi);
+        background: var(--card);
+        color: var(--fg);
+        font-size: 0.9375rem;
+        font-weight: 600;
+        letter-spacing: -0.006em;
+        transition:
+          transform 0.16s ease,
+          background 0.16s ease,
+          border-color 0.16s ease;
+      }
+
+      .btn:hover {
+        text-decoration: none;
+        background: var(--card-hi);
+        border-color: rgba(255, 255, 255, 0.26);
+      }
+
+      .btn:active {
+        transform: translateY(1px);
+      }
+
+      .btn svg {
+        width: 17px;
+        height: 17px;
+        flex: none;
+      }
+
+      .btn-sm {
+        height: 36px;
+        padding: 0 14px;
+        font-size: 0.84375rem;
+        border-radius: 10px;
+      }
+
+      .store-badge {
+        display: inline-flex;
+        border-radius: 11px;
+        transition:
+          transform 0.16s ease,
+          opacity 0.16s ease;
+      }
+
+      .store-badge img {
+        height: 46px;
+        width: auto;
+      }
+
+      .store-badge:hover {
+        text-decoration: none;
+        opacity: 0.88;
+      }
+
+      .store-badge:active {
+        transform: translateY(1px);
+      }
+
+      .store-badge.sm img {
+        height: 40px;
+      }
+
+      /* ── hero ───────────────────────────────────────────────────────── */
+      .hero {
+        position: relative;
+        overflow: hidden;
+        padding-top: clamp(48px, 7vw, 84px);
+        padding-bottom: clamp(64px, 9vw, 120px);
+      }
+
+      .hero::before {
+        content: '';
+        position: absolute;
+        inset: -30% -10% auto;
+        height: 780px;
+        background:
+          radial-gradient(46% 52% at 22% 34%, rgba(76, 141, 246, 0.22), transparent 70%),
+          radial-gradient(42% 46% at 82% 18%, rgba(139, 123, 255, 0.2), transparent 70%),
+          radial-gradient(38% 40% at 62% 72%, rgba(79, 216, 234, 0.12), transparent 72%);
+        filter: blur(6px);
+        pointer-events: none;
+      }
+
+      .hero::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+        background-size: 68px 68px;
+        mask-image: radial-gradient(70% 60% at 50% 30%, #000 0%, transparent 78%);
+        -webkit-mask-image: radial-gradient(70% 60% at 50% 30%, #000 0%, transparent 78%);
+        pointer-events: none;
+      }
+
+      .hero .wrap {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+        gap: clamp(32px, 5vw, 72px);
+        align-items: center;
+      }
+
+      .hero-copy > * + * {
+        margin-top: 22px;
+      }
+
+      .hero h1 span {
+        background: linear-gradient(104deg, #cfeeff 6%, var(--cyan) 44%, var(--violet) 96%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 14px;
+        margin-top: 30px;
+      }
+
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        color: var(--muted);
+        font-size: 0.84375rem;
+        margin-top: 18px;
+      }
+
+      .hero-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .hero-meta svg {
+        width: 14px;
+        height: 14px;
+        color: var(--cyan);
+        flex: none;
+      }
+
+      /* phone */
+      .hero-art {
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 420px;
+      }
+
+      .orbit {
+        position: absolute;
+        width: min(112%, 480px);
+        aspect-ratio: 1;
+        color: rgba(160, 210, 255, 0.5);
+        pointer-events: none;
+      }
+
+      .orbit circle {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 0.7;
+        opacity: 0.5;
+      }
+
+      .phone {
+        position: relative;
+        width: min(272px, 72vw);
+        padding: 9px;
+        border-radius: 40px;
+        background: linear-gradient(155deg, #313c4c 0%, #121821 46%, #0a0f16 100%);
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.12),
+          0 34px 70px -22px rgba(0, 0, 0, 0.92),
+          0 0 90px -18px rgba(79, 216, 234, 0.28);
+        animation: float 9s ease-in-out infinite;
+      }
+
+      .phone img {
+        width: 100%;
+        height: auto;
+        border-radius: 32px;
+        aspect-ratio: 620 / 1347;
+        object-fit: cover;
+      }
+
+      .phone::after {
+        content: '';
+        position: absolute;
+        inset: 9px;
+        border-radius: 32px;
+        pointer-events: none;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(-6px);
+        }
+        50% {
+          transform: translateY(8px);
+        }
+      }
+
+      .hero-badge {
+        position: absolute;
+        left: max(-30px, 0px);
+        bottom: 128px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 10px 10px;
+        border-radius: 14px;
+        border: 1px solid var(--line-hi);
+        background: rgba(10, 15, 22, 0.82);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.9);
+        font-size: 0.8125rem;
         color: var(--fg);
       }
-      ul {
-        padding-left: 20px;
+
+      .hero-badge .pulse {
+        position: relative;
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: rgba(79, 216, 234, 0.14);
+        color: var(--cyan);
+        flex: none;
       }
-      a {
-        color: var(--accent);
+
+      .hero-badge .pulse svg {
+        width: 15px;
+        height: 15px;
       }
-      .muted {
+
+      .hero-badge small {
+        display: block;
         color: var(--muted);
-        font-size: 14px;
+        font-size: 0.6875rem;
+        letter-spacing: 0.01em;
+      }
+
+      /* ── built-on strip ─────────────────────────────────────────────── */
+      .strip {
+        padding-block: 28px;
+        border-block: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent);
+      }
+
+      .strip .wrap {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 14px;
+      }
+
+      .strip p {
+        color: var(--muted);
+        font-size: 0.8125rem;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        margin-right: 6px;
+      }
+
+      .strip ul {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 22px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        font-size: 0.875rem;
+        color: #cdd6e3;
+        font-weight: 500;
+      }
+
+      /* ── section headers ────────────────────────────────────────────── */
+      .sec-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: clamp(30px, 4vw, 52px);
+      }
+
+      .sec-head > div {
+        max-width: 62ch;
+      }
+
+      .sec-head h2 + p {
+        margin-top: 14px;
+      }
+
+      /* ── features ───────────────────────────────────────────────────── */
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        position: relative;
+        padding: 26px 24px 28px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+        overflow: hidden;
+        transition:
+          border-color 0.2s ease,
+          transform 0.2s ease,
+          background 0.2s ease;
+      }
+
+      .card::before {
+        content: '';
+        position: absolute;
+        inset: 0 0 auto;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          rgba(79, 216, 234, 0.5),
+          rgba(139, 123, 255, 0.4),
+          transparent
+        );
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
+
+      .card:hover {
+        border-color: var(--line-hi);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+        transform: translateY(-2px);
+      }
+
+      .card:hover::before {
+        opacity: 1;
+      }
+
+      .ico {
+        width: 40px;
+        height: 40px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: rgba(79, 216, 234, 0.09);
+        color: var(--cyan);
+        margin-bottom: 16px;
+      }
+
+      .ico svg {
+        width: 20px;
+        height: 20px;
+      }
+
+      .card:nth-child(3n + 2) .ico {
+        background: rgba(139, 123, 255, 0.12);
+        color: #a99cff;
+        border-color: rgba(139, 123, 255, 0.2);
+      }
+
+      .card:nth-child(3n + 3) .ico {
+        background: rgba(241, 122, 208, 0.1);
+        color: var(--pink);
+        border-color: rgba(241, 122, 208, 0.18);
+      }
+
+      .card p {
+        margin-top: 9px;
+        color: var(--muted);
+        font-size: 0.9375rem;
+      }
+
+      .extras {
+        margin-top: 22px;
+        padding: 22px 24px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--card);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+      }
+
+      .extras h3 {
+        font-size: 0.8125rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        font-size: 0.8125rem;
+        color: #cfd8e5;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .chip svg {
+        width: 13px;
+        height: 13px;
+        color: var(--muted);
+        flex: none;
+      }
+
+      /* ── screens ────────────────────────────────────────────────────── */
+      .screens {
+        background:
+          radial-gradient(60% 50% at 50% 0%, rgba(139, 123, 255, 0.1), transparent 70%),
+          var(--bg-soft);
+        border-block: 1px solid var(--line);
+      }
+
+      .rail-hint {
+        color: var(--muted);
+        font-size: 0.8125rem;
+        letter-spacing: 0.01em;
+        padding-bottom: 4px;
+      }
+
+      .rail {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: clamp(196px, 26vw, 236px);
+        gap: 20px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scroll-padding-inline: 24px;
+        padding: 6px 24px 26px;
+        margin-inline: -24px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+      }
+
+      .rail::-webkit-scrollbar {
+        height: 6px;
+      }
+
+      .rail::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 99px;
+      }
+
+      .shot {
+        scroll-snap-align: center;
+        margin: 0;
+      }
+
+      .shot .phone {
+        width: 100%;
+        padding: 7px;
+        border-radius: 32px;
+        animation: none;
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.1),
+          0 22px 44px -20px rgba(0, 0, 0, 0.9);
+      }
+
+      .shot .phone img {
+        border-radius: 26px;
+      }
+
+      .shot figcaption {
+        margin-top: 14px;
+        font-size: 0.875rem;
+        color: #dbe3ee;
+        font-weight: 550;
+        letter-spacing: -0.006em;
+      }
+
+      .shot figcaption span {
+        display: block;
+        color: var(--muted);
+        font-weight: 400;
+        font-size: 0.8125rem;
+        margin-top: 3px;
+      }
+
+      /* ── how it works ───────────────────────────────────────────────── */
+      .mesh-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: clamp(28px, 5vw, 64px);
+        align-items: center;
+      }
+
+      .mesh-art {
+        position: relative;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background:
+          radial-gradient(70% 70% at 50% 40%, rgba(79, 216, 234, 0.1), transparent 72%),
+          var(--card);
+      }
+
+      .mesh-art svg {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+
+      .mesh-art figcaption {
+        margin-top: 14px;
+        text-align: center;
+        font-size: 0.78125rem;
+        color: var(--muted);
+      }
+
+      .steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 22px;
+      }
+
+      .steps li {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      .steps .num {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        border: 1px solid var(--line-hi);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--cg, var(--cyan));
+        font-size: 0.8125rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .steps li:nth-child(2) .num {
+        --cg: #a99cff;
+      }
+
+      .steps li:nth-child(3) .num {
+        --cg: var(--pink);
+      }
+
+      .steps p {
+        color: var(--muted);
+        font-size: 0.9375rem;
+        margin-top: 6px;
+      }
+
+      .deep-link {
+        margin-top: 28px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+      }
+
+      .deep-link svg {
+        width: 15px;
+        height: 15px;
+        transition: transform 0.16s ease;
+      }
+
+      .deep-link:hover svg {
+        transform: translateX(3px);
+      }
+
+      /* ── privacy ────────────────────────────────────────────────────── */
+      .privacy {
+        border-block: 1px solid var(--line);
+        background: var(--bg-soft);
+      }
+
+      .privacy-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+        gap: clamp(28px, 5vw, 64px);
+        align-items: center;
+      }
+
+      .promises {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .promise {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--card);
+      }
+
+      .promise svg {
+        width: 18px;
+        height: 18px;
+        color: var(--cyan);
+        margin-bottom: 10px;
+      }
+
+      .promise h3 {
+        font-size: 0.9375rem;
+        margin-bottom: 6px;
+      }
+
+      .promise p {
+        color: var(--muted);
+        font-size: 0.84375rem;
+        line-height: 1.55;
+      }
+
+      /* ── download ───────────────────────────────────────────────────── */
+      .download-card {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 22px;
+        padding: clamp(38px, 6vw, 68px) clamp(24px, 4vw, 56px);
+        border: 1px solid var(--line-hi);
+        border-radius: 26px;
+        background:
+          radial-gradient(80% 120% at 12% 0%, rgba(76, 141, 246, 0.22), transparent 62%),
+          radial-gradient(70% 110% at 92% 100%, rgba(241, 122, 208, 0.16), transparent 60%),
+          linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+      }
+
+      .download-card .app-icon {
+        width: 76px;
+        height: 76px;
+        border-radius: 18px;
+        box-shadow: 0 14px 34px -12px rgba(0, 0, 0, 0.85);
+      }
+
+      .download-card h2 {
+        max-width: 20ch;
+      }
+
+      .download-card .lede {
+        max-width: 52ch;
+      }
+
+      .download-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        margin-top: 6px;
+      }
+
+      .download-actions .store-badge img {
+        height: 52px;
+      }
+
+      .download-actions .btn {
+        height: 52px;
+        padding-inline: 22px;
+      }
+
+      .qr-note {
+        width: 100%;
+        margin-top: 4px;
+        font-size: 0.78125rem;
+        color: var(--muted);
+        letter-spacing: 0.01em;
+      }
+
+      /* ── footer ─────────────────────────────────────────────────────── */
+      footer {
+        border-top: 1px solid var(--line);
+        padding-block: 56px 40px;
+        background: var(--bg);
+      }
+
+      .foot-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr));
+        gap: 32px;
+      }
+
+      .foot-brand p {
+        color: var(--muted);
+        font-size: 0.875rem;
+        max-width: 34ch;
+        margin-top: 12px;
+      }
+
+      .foot-col h3 {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 14px;
+        font-weight: 600;
+      }
+
+      .foot-col ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 10px;
+        font-size: 0.875rem;
+      }
+
+      .foot-col a {
+        color: #cdd6e3;
+      }
+
+      .foot-col a:hover {
+        color: var(--fg);
+      }
+
+      .legal {
+        margin-top: 44px;
+        padding-top: 22px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 22px;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 0.78125rem;
+      }
+
+      /* ── reveal ─────────────────────────────────────────────────────── */
+      @media (prefers-reduced-motion: no-preference) {
+        [data-reveal] {
+          opacity: 0;
+          transform: translateY(16px);
+          transition:
+            opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+            transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        [data-reveal].is-in {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* ── responsive ─────────────────────────────────────────────────── */
+      @media (max-width: 1100px) {
+        .hero-badge {
+          display: none;
+        }
+      }
+
+      @media (max-width: 900px) {
+        .hero .wrap,
+        .mesh-grid,
+        .privacy-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .hero-art {
+          order: -1;
+          min-height: 0;
+        }
+
+        .phone {
+          width: min(240px, 66vw);
+        }
+
+        .hero-badge {
+          display: none;
+        }
+        .download-card {
+          align-items: center;
+        }
+
+        .foot-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 28px;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .nav-links {
+          display: none;
+        }
+
+        .rail-hint {
+          display: none;
+        }
+
+        .promises {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      @media (max-width: 480px) {
+        .nav-cta .btn {
+          display: none;
+        }
+      }
+
+      @media (max-width: 420px) {
+        .foot-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .download-actions .btn {
+          width: 100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .phone {
+          animation: none;
+        }
       }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Polaris Maps</h1>
-      <p>
-        A peer-to-peer navigation app built on open map data — turn-by-turn guidance, live
-        traffic, transit, offline maps, and community street-level imagery, without routing your
-        every move through a corporate cloud. Coming to the App Store.
-      </p>
+    <a class="skip" href="#main">Skip to content</a>
 
-      <h2>Support</h2>
-      <p>
-        Questions, bug reports, or data requests:
-        <a href="mailto:support@polarismaps.app">support@polarismaps.app</a>
-      </p>
+    <header class="site-header" id="site-header">
+      <div class="wrap nav">
+        <a class="brand" href="/">
+          <img src="/assets/icon-192.png" alt="" width="30" height="30" />
+          Polaris Maps
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="#features">Features</a>
+          <a href="#screens">Screens</a>
+          <a href="#how">How it works</a>
+          <a href="#privacy">Privacy</a>
+        </nav>
+        <div class="nav-cta">
+          <a
+            class="btn btn-sm"
+            href="https://github.com/ghobs91/polaris-maps"
+            rel="noopener"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path
+                d="M12 1.75a10.25 10.25 0 0 0-3.24 19.98c.51.09.7-.22.7-.49v-1.9c-2.85.62-3.45-1.2-3.45-1.2-.47-1.19-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.92 1.57 2.4 1.12 2.98.86.09-.67.36-1.12.65-1.38-2.28-.26-4.67-1.14-4.67-5.07 0-1.12.4-2.03 1.05-2.75-.1-.26-.46-1.3.1-2.71 0 0 .86-.28 2.81 1.05a9.7 9.7 0 0 1 5.12 0c1.95-1.33 2.81-1.05 2.81-1.05.56 1.41.21 2.45.1 2.71.65.72 1.05 1.63 1.05 2.75 0 3.94-2.4 4.8-4.68 5.06.37.32.7.94.7 1.9v2.81c0 .27.18.59.7.49A10.25 10.25 0 0 0 12 1.75Z"
+              />
+            </svg>
+            Source
+          </a>
+          <!-- App Store listing: App Store Connect app id 6760763483 (com.polarismaps.app). -->
+          <a
+            class="store-badge sm"
+            href="https://apps.apple.com/app/id6760763483"
+            rel="noopener"
+            aria-label="Download Polaris Maps on the App Store"
+          >
+            <img
+              src="/assets/badges/download-on-the-app-store-white.svg"
+              alt="Download on the App Store"
+              width="108"
+              height="36"
+            />
+          </a>
+        </div>
+      </div>
+    </header>
 
-      <h2>Legal</h2>
-      <ul>
-        <li><a href="/privacy/">Privacy Policy</a></li>
-        <li><a href="/terms/">Terms of Service</a></li>
-      </ul>
+    <main id="main">
+      <!-- ── hero ─────────────────────────────────────────────────── -->
+      <section class="hero">
+        <div class="wrap">
+          <div class="hero-copy">
+            <span class="eyebrow"><span class="dot" aria-hidden="true"></span> Peer-to-peer · Open data · Open source</span>
+            <h1>Maps owned by the people who <span>use them</span>.</h1>
+            <p class="lede">
+              Turn-by-turn navigation, live traffic, offline regions, transit, and street-level
+              imagery — shared directly between devices instead of a corporate cloud. No ads, no
+              tracking, no account required.
+            </p>
+            <div class="hero-actions">
+              <a
+                class="store-badge"
+                href="https://apps.apple.com/app/id6760763483"
+                rel="noopener"
+              >
+                <img
+                  src="/assets/badges/download-on-the-app-store-white.svg"
+                  alt="Download on the App Store"
+                  width="138"
+                  height="46"
+                />
+              </a>
+              <a class="btn" href="https://github.com/ghobs91/polaris-maps" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    d="M12 1.75a10.25 10.25 0 0 0-3.24 19.98c.51.09.7-.22.7-.49v-1.9c-2.85.62-3.45-1.2-3.45-1.2-.47-1.19-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.92 1.57 2.4 1.12 2.98.86.09-.67.36-1.12.65-1.38-2.28-.26-4.67-1.14-4.67-5.07 0-1.12.4-2.03 1.05-2.75-.1-.26-.46-1.3.1-2.71 0 0 .86-.28 2.81 1.05a9.7 9.7 0 0 1 5.12 0c1.95-1.33 2.81-1.05 2.81-1.05.56 1.41.21 2.45.1 2.71.65.72 1.05 1.63 1.05 2.75 0 3.94-2.4 4.8-4.68 5.06.37.32.7.94.7 1.9v2.81c0 .27.18.59.7.49A10.25 10.25 0 0 0 12 1.75Z"
+                  />
+                </svg>
+                Read the source
+              </a>
+            </div>
+            <p class="hero-meta">
+              <span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M4 12.5 9 17.5 20 6.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                iOS 16.4+
+              </span>
+              <span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M4 12.5 9 17.5 20 6.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                No account, ever
+              </span>
+              <span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M4 12.5 9 17.5 20 6.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                MIT licensed
+              </span>
+            </p>
+          </div>
 
-      <p class="muted">Map data © OpenStreetMap contributors (ODbL).</p>
+          <div class="hero-art">
+            <svg class="orbit" viewBox="0 0 400 400" aria-hidden="true">
+              <circle cx="200" cy="200" r="196" />
+              <circle cx="200" cy="200" r="150" />
+              <circle cx="200" cy="200" r="104" />
+              <circle cx="200" cy="4" r="5" fill="#f17ad0" stroke="none" />
+              <circle cx="340" cy="340" r="5" fill="#f17ad0" stroke="none" />
+              <circle cx="60" cy="340" r="5" fill="#f17ad0" stroke="none" />
+              <circle cx="340" cy="60" r="5" fill="#f17ad0" stroke="none" />
+            </svg>
+            <div class="phone">
+              <img
+                src="/assets/shots/navigation.webp"
+                width="760"
+                height="1651"
+                alt="Polaris Maps turn-by-turn navigation screen showing a 0.6 mile turn instruction, 3D buildings, and a live-traffic ETA bar."
+                fetchpriority="high"
+              />
+            </div>
+            <div class="hero-badge" aria-hidden="true">
+              <span class="pulse">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4.5 12a7.5 7.5 0 0 1 15 0" stroke-linecap="round" />
+                  <path d="M8 14a4 4 0 0 1 8 0" stroke-linecap="round" />
+                  <circle cx="12" cy="17.5" r="1.4" fill="currentColor" stroke="none" />
+                </svg>
+              </span>
+              <span>
+                Live traffic
+                <small>from nearby drivers</small>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── built on ─────────────────────────────────────────────── -->
+      <div class="strip">
+        <div class="wrap">
+          <p>Built on</p>
+          <ul>
+            <li>OpenStreetMap</li>
+            <li>Valhalla</li>
+            <li>MapLibre</li>
+            <li>Overture Maps</li>
+            <li>Panoramax</li>
+            <li>OpenTripPlanner</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── features ─────────────────────────────────────────────── -->
+      <section id="features">
+        <div class="wrap">
+          <div class="sec-head">
+            <div>
+              <h2>Everything you expect from a map app — minus the middleman</h2>
+              <p class="lede">
+                Polaris looks and feels like the navigation app you already know. Underneath, the
+                data comes from open projects and the people around you.
+              </p>
+            </div>
+          </div>
+
+          <div class="features">
+            <article class="card" data-reveal>
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="M12 3.2 4.4 20.3l7.6-3.4 7.6 3.4L12 3.2Z" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <h3>Directions that keep up</h3>
+              <p>
+                Voice-guided turns, off-route detection, and automatic rerouting. ETAs adjust as
+                traffic changes — and a faster route is suggested before you commit to the jam.
+              </p>
+            </article>
+
+            <article class="card" data-reveal>
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="M3.5 12a8.5 8.5 0 0 1 17 0" stroke-linecap="round" />
+                  <path d="M7 12a5 5 0 0 1 10 0" stroke-linecap="round" />
+                  <circle cx="12" cy="16.5" r="1.6" />
+                  <path d="M12 16.5v4.2" stroke-linecap="round" />
+                </svg>
+              </div>
+              <h3>Live traffic from the road</h3>
+              <p>
+                Colour-coded congestion fused from open feeds and anonymous speed probes shared by
+                nearby devices — plus accidents, closures and hazards you can report yourself.
+              </p>
+            </article>
+
+            <article class="card" data-reveal>
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="M12 3.5v10.5" stroke-linecap="round" />
+                  <path d="m8 10 4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M4 16.5v2A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5v-2" stroke-linecap="round" />
+                </svg>
+              </div>
+              <h3>Maps that outlive the signal</h3>
+              <p>
+                Download a region once — tiles, places, routing graphs and search indexes — and
+                keep navigating on a plane, a trail, or a dead-zone highway.
+              </p>
+            </article>
+
+            <article class="card" data-reveal>
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <circle cx="10.8" cy="10.8" r="6.3" />
+                  <path d="m15.5 15.5 4.3 4.3" stroke-linecap="round" />
+                </svg>
+              </div>
+              <h3>Search that answers instantly</h3>
+              <p>
+                Local indexes answer first, then open data fills in the rest. Find coffee shops open
+                now, or a place you half-remember by name, category, or what's nearby.
+              </p>
+            </article>
+
+            <article class="card" data-reveal>
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <rect x="5" y="3.5" width="14" height="13" rx="3.2" />
+                  <path d="M5 10.5h14" stroke-linecap="round" />
+                  <circle cx="8.6" cy="13.6" r="1" fill="currentColor" stroke="none" />
+                  <circle cx="15.4" cy="13.6" r="1" fill="currentColor" stroke="none" />
+                  <path d="m7.5 16.5-1.4 4M16.5 16.5l1.4 4" stroke-linecap="round" />
+                </svg>
+              </div>
+              <h3>Every mode, one trip</h3>
+              <p>
+                Bus, train, subway and ferry in a single itinerary, with live departures, route
+                lines on the map, and park-and-ride plans that mix driving with transit.
+              </p>
+            </article>
+
+            <article class="card" data-reveal>
+              <div class="ico">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <rect x="2.8" y="6.5" width="18.4" height="12" rx="3" />
+                  <circle cx="12" cy="12.5" r="3.1" />
+                  <path d="M7.6 6.5 9 4h6l1.4 2.5" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <h3>Look before you go</h3>
+              <p>
+                Street-level photos from Panoramax, Mapillary and Street View, or capture your own
+                as you travel — geotagged, privacy-blurred and signed on your device.
+              </p>
+            </article>
+          </div>
+
+          <div class="extras" data-reveal>
+            <h3>Also in the app</h3>
+            <span class="chip">Place lists &amp; favourites</span>
+            <span class="chip">Google Maps import</span>
+            <span class="chip">iCloud sync</span>
+            <span class="chip">OpenStreetMap editing</span>
+            <span class="chip">CarPlay</span>
+            <span class="chip">Satellite, terrain &amp; 3D</span>
+            <span class="chip">Incident reporting</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── screens ──────────────────────────────────────────────── -->
+      <section class="screens" id="screens">
+        <div class="wrap">
+          <div class="sec-head">
+            <div>
+              <h2>A real app, not a prototype</h2>
+              <p class="lede">
+                Polaris is built in the open as a native iOS app — every screen below is from the
+                shipping build.
+              </p>
+            </div>
+            <p class="rail-hint" aria-hidden="true">Scroll to browse →</p>
+          </div>
+        </div>
+
+        <div class="wrap">
+          <div class="rail" role="region" aria-label="App screenshots" tabindex="0">
+            <figure class="shot">
+              <div class="phone">
+                <img
+                  src="/assets/shots/navigation.webp"
+                  width="620"
+                  height="1347"
+                  loading="lazy"
+                  alt="Turn-by-turn navigation with a large upcoming-turn banner, 3D buildings and an ETA bar."
+                />
+              </div>
+              <figcaption>
+                Calm, glanceable guidance
+                <span>Next turn, traffic and ETA in one line</span>
+              </figcaption>
+            </figure>
+
+            <figure class="shot">
+              <div class="phone">
+                <img
+                  src="/assets/shots/traffic.webp"
+                  width="620"
+                  height="1347"
+                  loading="lazy"
+                  alt="Live traffic layer over the New York area, with green, amber and red congestion lines."
+                />
+              </div>
+              <figcaption>
+                Live traffic layer
+                <span>Fused from open feeds and nearby drivers</span>
+              </figcaption>
+            </figure>
+
+            <figure class="shot">
+              <div class="phone">
+                <img
+                  src="/assets/shots/transit.webp"
+                  width="620"
+                  height="1347"
+                  loading="lazy"
+                  alt="Transit trip planner listing rail, subway and tram departures with travel times."
+                />
+              </div>
+              <figcaption>
+                Every mode, one trip
+                <span>Rail, subway, tram and walking combined</span>
+              </figcaption>
+            </figure>
+
+            <figure class="shot">
+              <div class="phone">
+                <img
+                  src="/assets/shots/place.webp"
+                  width="620"
+                  height="1347"
+                  loading="lazy"
+                  alt="Place details sheet for Washington Square Park with directions, reviews, photos and hours."
+                />
+              </div>
+              <figcaption>
+                Rich details, less clutter
+                <span>Hours, reviews, photos and one-tap directions</span>
+              </figcaption>
+            </figure>
+
+            <figure class="shot">
+              <div class="phone">
+                <img
+                  src="/assets/shots/regions.webp"
+                  width="620"
+                  height="1347"
+                  loading="lazy"
+                  alt="Download Your Region screen listing countries with per-region download buttons."
+                />
+              </div>
+              <figcaption>
+                Offline regions
+                <span>Download once, navigate without a signal</span>
+              </figcaption>
+            </figure>
+
+            <figure class="shot">
+              <div class="phone">
+                <img
+                  src="/assets/shots/street.webp"
+                  width="620"
+                  height="1347"
+                  loading="lazy"
+                  alt="Street View 3D panorama of a tree-lined city street."
+                />
+              </div>
+              <figcaption>
+                Walk the street first
+                <span>Street-level imagery, right on the map</span>
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── how it works ─────────────────────────────────────────── -->
+      <section id="how">
+        <div class="wrap">
+          <div class="sec-head">
+            <div>
+              <h2>No servers in the middle</h2>
+              <p class="lede">
+                Most map apps route everything through a data centre. Polaris treats every phone as
+                a node in an encrypted mesh, so map data travels between the people who need it.
+              </p>
+            </div>
+          </div>
+
+          <div class="mesh-grid">
+            <figure class="mesh-art" data-reveal>
+              <svg viewBox="0 0 360 300" role="img" aria-label="Diagram of devices connected directly to each other in a mesh">
+                <defs>
+                  <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#4fd8ea" stop-opacity=".75" />
+                    <stop offset="100%" stop-color="#8b7bff" stop-opacity=".55" />
+                  </linearGradient>
+                </defs>
+                <g stroke="url(#edge)" stroke-width="1.3" opacity=".85">
+                  <line x1="180" y1="62" x2="78" y2="140" />
+                  <line x1="180" y1="62" x2="282" y2="140" />
+                  <line x1="78" y1="140" x2="282" y2="140" />
+                  <line x1="78" y1="140" x2="128" y2="242" />
+                  <line x1="282" y1="140" x2="232" y2="242" />
+                  <line x1="128" y1="242" x2="232" y2="242" />
+                  <line x1="78" y1="140" x2="232" y2="242" stroke-dasharray="3 5" opacity=".6" />
+                  <line x1="282" y1="140" x2="128" y2="242" stroke-dasharray="3 5" opacity=".6" />
+                </g>
+                <g>
+                  <circle cx="180" cy="62" r="15" fill="#0b1017" stroke="#4fd8ea" stroke-width="1.6" />
+                  <circle cx="180" cy="62" r="4.6" fill="#4fd8ea" />
+                  <circle cx="78" cy="140" r="15" fill="#0b1017" stroke="#8b7bff" stroke-width="1.6" />
+                  <circle cx="78" cy="140" r="4.6" fill="#8b7bff" />
+                  <circle cx="282" cy="140" r="15" fill="#0b1017" stroke="#8b7bff" stroke-width="1.6" />
+                  <circle cx="282" cy="140" r="4.6" fill="#8b7bff" />
+                  <circle cx="128" cy="242" r="15" fill="#0b1017" stroke="#f17ad0" stroke-width="1.6" />
+                  <circle cx="128" cy="242" r="4.6" fill="#f17ad0" />
+                  <circle cx="232" cy="242" r="15" fill="#0b1017" stroke="#4fd8ea" stroke-width="1.6" />
+                  <circle cx="232" cy="242" r="4.6" fill="#4fd8ea" />
+                </g>
+              </svg>
+              <figcaption>Peers discover each other directly — no central server to trust.</figcaption>
+            </figure>
+
+            <div>
+              <ol class="steps">
+                <li>
+                  <span class="num" aria-hidden="true">1</span>
+                  <div>
+                    <h3>Your device is the node</h3>
+                    <p>
+                      A keypair generated on your phone is your identity. Contributions are signed
+                      locally, so nothing leaves your device unsigned or unattributed to you.
+                    </p>
+                  </div>
+                </li>
+                <li>
+                  <span class="num" aria-hidden="true">2</span>
+                  <div>
+                    <h3>Data finds its way to you</h3>
+                    <p>
+                      Peers discover each other over a distributed hash table, then exchange signed
+                      traffic reports, region packs and map data over encrypted connections.
+                    </p>
+                  </div>
+                </li>
+                <li>
+                  <span class="num" aria-hidden="true">3</span>
+                  <div>
+                    <h3>It gets better as it grows</h3>
+                    <p>
+                      Regions you download are re-seeded to neighbours, and the map you edit is the
+                      map everyone sees. Add a device, add capacity — not another bill.
+                    </p>
+                  </div>
+                </li>
+              </ol>
+
+              <a
+                class="deep-link"
+                href="https://github.com/ghobs91/polaris-maps#-how-the-p2p-layer-works"
+                rel="noopener"
+              >
+                How the P2P layer works
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M5 12h13M13 6.5 18.5 12 13 17.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── privacy ──────────────────────────────────────────────── -->
+      <section class="privacy" id="privacy">
+        <div class="wrap privacy-grid">
+          <div>
+            <h2>Nothing phones home, because there’s no “home”</h2>
+            <p class="lede" style="margin-top: 16px">
+              There are no advertising or analytics SDKs in Polaris, and no account to create. Your
+              traffic, imagery and place contributions are yours to switch off at any time in
+              Settings → Privacy.
+            </p>
+            <p style="margin-top: 18px; font-size: 0.9375rem">
+              <a href="/privacy/">Read the full privacy policy</a>
+            </p>
+          </div>
+
+          <div class="promises">
+            <div class="promise">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path d="M4 6.5h16M4 12h16M4 17.5h10" stroke-linecap="round" />
+                <path d="m17 15.5 1.6 1.6L22 13.7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <h3>No ad or analytics SDKs</h3>
+              <p>Nothing in the app exists to profile you or sell your attention.</p>
+            </div>
+            <div class="promise">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <rect x="4.5" y="10.5" width="15" height="9.5" rx="2.6" />
+                <path d="M8.2 10.5V8a3.8 3.8 0 0 1 7.6 0v2.5" stroke-linecap="round" />
+              </svg>
+              <h3>Anonymous by design</h3>
+              <p>Traffic probes are speed and location only — signed, rotated, never tied to you.</p>
+            </div>
+            <div class="promise">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path d="M12 3.8 5 6.6v5.2c0 4.2 2.9 7.3 7 8.4 4.1-1.1 7-4.2 7-8.4V6.6l-7-2.8Z" stroke-linejoin="round" />
+                <path d="m9.2 11.9 2 2 3.6-3.9" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <h3>You control the tap</h3>
+              <p>Traffic telemetry, imagery and place contributions are opt-out, any time.</p>
+            </div>
+            <div class="promise">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.4" />
+                <path d="M3.7 12h16.6" stroke-linecap="round" />
+                <path d="M12 3.6c2.3 2.4 3.5 5.3 3.5 8.4s-1.2 6-3.5 8.4c-2.3-2.4-3.5-5.3-3.5-8.4S9.7 6 12 3.6Z" />
+              </svg>
+              <h3>Open map data</h3>
+              <p>Built on OpenStreetMap and Overture — data you can inspect, edit and reuse.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── download ─────────────────────────────────────────────── -->
+      <section id="download">
+        <div class="wrap">
+          <div class="download-card" data-reveal>
+            <img class="app-icon" src="/assets/icon-192.png" width="76" height="76" alt="Polaris Maps app icon" loading="lazy" />
+            <h2>Take the map with you</h2>
+            <p class="lede">
+              Download Polaris Maps for iPhone and iPad — free, no account, and no ads. Prefer to
+              build it yourself? The whole app is MIT licensed on GitHub.
+            </p>
+            <div class="download-actions">
+              <a
+                class="store-badge"
+                href="https://apps.apple.com/app/id6760763483"
+                rel="noopener"
+              >
+                <img
+                  src="/assets/badges/download-on-the-app-store-white.svg"
+                  alt="Download on the App Store"
+                  width="156"
+                  height="52"
+                />
+              </a>
+              <a class="btn" href="https://github.com/ghobs91/polaris-maps" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    d="M12 1.75a10.25 10.25 0 0 0-3.24 19.98c.51.09.7-.22.7-.49v-1.9c-2.85.62-3.45-1.2-3.45-1.2-.47-1.19-1.14-1.5-1.14-1.5-.93-.64.07-.63.07-.63 1.03.07 1.57 1.06 1.57 1.06.92 1.57 2.4 1.12 2.98.86.09-.67.36-1.12.65-1.38-2.28-.26-4.67-1.14-4.67-5.07 0-1.12.4-2.03 1.05-2.75-.1-.26-.46-1.3.1-2.71 0 0 .86-.28 2.81 1.05a9.7 9.7 0 0 1 5.12 0c1.95-1.33 2.81-1.05 2.81-1.05.56 1.41.21 2.45.1 2.71.65.72 1.05 1.63 1.05 2.75 0 3.94-2.4 4.8-4.68 5.06.37.32.7.94.7 1.9v2.81c0 .27.18.59.7.49A10.25 10.25 0 0 0 12 1.75Z"
+                  />
+                </svg>
+                View on GitHub
+              </a>
+              <span class="qr-note">iPhone &amp; iPad · Free · No ads · No account</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
+
+    <footer>
+      <div class="wrap">
+        <div class="foot-grid">
+          <div class="foot-brand">
+            <a class="brand" href="/">
+              <img src="/assets/icon-192.png" alt="" width="30" height="30" />
+              Polaris Maps
+            </a>
+            <p>A peer-to-peer maps app built on open data, open source, and the devices already in your pocket.</p>
+          </div>
+
+          <div class="foot-col">
+            <h3>App</h3>
+            <ul>
+              <li><a href="#features">Features</a></li>
+              <li><a href="#screens">Screenshots</a></li>
+              <li><a href="#how">How it works</a></li>
+              <li><a href="https://apps.apple.com/app/id6760763483" rel="noopener">App Store</a></li>
+            </ul>
+          </div>
+
+          <div class="foot-col">
+            <h3>Source &amp; support</h3>
+            <ul>
+              <li><a href="https://github.com/ghobs91/polaris-maps" rel="noopener">GitHub repository</a></li>
+              <li><a href="https://github.com/ghobs91/polaris-maps/issues" rel="noopener">Report an issue</a></li>
+              <li><a href="mailto:support@polarismaps.app">support@polarismaps.app</a></li>
+            </ul>
+          </div>
+
+          <div class="foot-col">
+            <h3>Legal</h3>
+            <ul>
+              <li><a href="/privacy/">Privacy Policy</a></li>
+              <li><a href="/terms/">Terms of Service</a></li>
+              <li><a href="https://github.com/ghobs91/polaris-maps/blob/main/LICENSE" rel="noopener">MIT License</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="legal">
+          <span>© Andrew Ghobrial. Map data © OpenStreetMap contributors (ODbL). Places from Overture Maps.</span>
+          <span>Imagery via Panoramax, Mapillary and Street View.</span>
+        </div>
+      </div>
+    </footer>
+
+    <noscript>
+      <style>
+        [data-reveal] { opacity: 1 !important; transform: none !important; }
+      </style>
+    </noscript>
+
+    <script>
+      (function () {
+        var header = document.getElementById('site-header');
+        var onScroll = function () {
+          header.classList.toggle('is-stuck', window.scrollY > 8);
+        };
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+
+        var items = document.querySelectorAll('[data-reveal]');
+        if (!('IntersectionObserver' in window)) {
+          items.forEach(function (el) {
+            el.classList.add('is-in');
+          });
+          return;
+        }
+        var io = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-in');
+                io.unobserve(entry.target);
+              }
+            });
+          },
+          { rootMargin: '0px 0px -8% 0px', threshold: 0.08 },
+        );
+        items.forEach(function (el) {
+          io.observe(el);
+        });
+      })();
+    </script>
   </body>
 </html>

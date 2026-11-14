@@ -3,8 +3,10 @@
 #
 # Usage: ./scripts/build-region-bundle.sh us/new-york
 #
-# Prerequisites: osmium, duckdb, node (>=18), gzip
-# Output: geocoding-data.sqlite.gz, overture-places.sqlite.gz, manifest-entry.json
+# Prerequisites: osmium + python3 osmium bindings, duckdb, node (>=22), gzip
+# Output: geocoding-data.sqlite.gz, overture-places.sqlite.gz,
+#         search.sqlite.gz, transit.sqlite.gz, shards.json, shards/,
+#         manifest-entry.json
 
 set -euo pipefail
 
@@ -37,6 +39,21 @@ echo "==> Building geocoding-data.sqlite …"
 node "$(dirname "$0")/osm-to-geocoding-sqlite.mjs" \
   "$WORK_DIR/filtered.osm.pbf" "$REGION_ID"
 mv geocoding-data.sqlite "$WORK_DIR/geocoding-data.sqlite"
+
+# ── 3b. Build on-device POI + transit indices ───────────────────────────────
+# These are what keep Overpass/transit queries off the network for a downloaded
+# region (see src/services/poi/localPoiIndex.ts). Run against the *unfiltered*
+# extract: POIs are indexed by tag shape (including unnamed features like
+# parking lots) and transit route relations need unnamed railway ways and their
+# geometry. POIs are extracted by DuckDB, transit by osmium.
+echo "==> Building search.sqlite + transit.sqlite …"
+python3 "$(dirname "$0")/osm-to-search-sqlite.py" \
+  "$WORK_DIR/input.osm.pbf" "$REGION_ID" "$WORK_DIR"
+
+# ── 3c. Split POIs into content-addressed shards ────────────────────────────
+echo "==> Building POI shards …"
+node "$(dirname "$0")/build-search-shards.mjs" \
+  "$WORK_DIR/search.sqlite" "$WORK_DIR"
 
 # ── 4. Extract bounding box from PBF metadata ───────────────────────────────
 BBOX_JSON=$(osmium fileinfo -e -j "$WORK_DIR/input.osm.pbf" \
@@ -97,17 +114,41 @@ duckdb -c "
   DETACH places_db;
 "
 
-# ── 6. Gzip outputs ─────────────────────────────────────────────────────────
+# ── 6. Optional transit timetable ───────────────────────────────────────────
+# Scheduled connections for offline journey planning (Tier 0). Opt-in because a
+# pack build does not necessarily have the region's GTFS zip to hand; without it
+# the pack still works, the planner just falls through to a live source.
+TIMETABLE_GZ=""
+TIMETABLE_SIZE=0
+if [ -n "${GTFS_ZIP:-}" ]; then
+  echo "==> Building transit-timetable.sqlite from ${GTFS_ZIP} …"
+  python3 "$(dirname "$0")/build-transit-timetable.py" \
+    "$GTFS_ZIP" "$WORK_DIR" --region-id "$REGION_ID"
+  gzip -9 -k "$WORK_DIR/transit-timetable.sqlite"
+  TIMETABLE_GZ="$WORK_DIR/transit-timetable.sqlite.gz"
+  TIMETABLE_SIZE=$(stat -f%z "$TIMETABLE_GZ" 2>/dev/null \
+    || stat -c%s "$TIMETABLE_GZ")
+else
+  echo "==> Skipping transit timetable (set GTFS_ZIP to build one)"
+fi
+
+# ── 7. Gzip outputs ─────────────────────────────────────────────────────────
 echo "==> Compressing outputs …"
 gzip -9 -k "$WORK_DIR/geocoding-data.sqlite"
 gzip -9 -k "$WORK_DIR/overture-places.sqlite"
+gzip -9 -k "$WORK_DIR/search.sqlite"
+gzip -9 -k "$WORK_DIR/transit.sqlite"
 
 GEOCODING_SIZE=$(stat -f%z "$WORK_DIR/geocoding-data.sqlite.gz" 2>/dev/null \
   || stat -c%s "$WORK_DIR/geocoding-data.sqlite.gz")
 PLACES_SIZE=$(stat -f%z "$WORK_DIR/overture-places.sqlite.gz" 2>/dev/null \
   || stat -c%s "$WORK_DIR/overture-places.sqlite.gz")
+SEARCH_SIZE=$(stat -f%z "$WORK_DIR/search.sqlite.gz" 2>/dev/null \
+  || stat -c%s "$WORK_DIR/search.sqlite.gz")
+TRANSIT_SIZE=$(stat -f%z "$WORK_DIR/transit.sqlite.gz" 2>/dev/null \
+  || stat -c%s "$WORK_DIR/transit.sqlite.gz")
 
-# ── 7. Write manifest entry ─────────────────────────────────────────────────
+# ── 8. Write manifest entry ─────────────────────────────────────────────────
 cat > "$WORK_DIR/manifest-entry.json" <<EOF
 {
   "id": "${REGION_ID}",
@@ -117,24 +158,44 @@ cat > "$WORK_DIR/manifest-entry.json" <<EOF
   "geocodingUrl": "https://cdn.example.com/regions/${REGION_ID}/geocoding-data.sqlite.gz",
   "geocodingSizeBytes": ${GEOCODING_SIZE},
   "placesUrl": "https://cdn.example.com/regions/${REGION_ID}/overture-places.sqlite.gz",
-  "placesSizeBytes": ${PLACES_SIZE}
+  "placesSizeBytes": ${PLACES_SIZE},
+  "searchIndexUrl": "https://cdn.example.com/regions/${REGION_ID}/search.sqlite.gz",
+  "searchIndexSizeBytes": ${SEARCH_SIZE},
+  "transitIndexUrl": "https://cdn.example.com/regions/${REGION_ID}/transit.sqlite.gz",
+  "transitIndexSizeBytes": ${TRANSIT_SIZE}
 }
 EOF
 
-# ── 8. Copy outputs to current directory ─────────────────────────────────────
+# ── 9. Copy outputs to current directory ─────────────────────────────────────
 cp "$WORK_DIR/geocoding-data.sqlite.gz" .
 cp "$WORK_DIR/overture-places.sqlite.gz" .
+cp "$WORK_DIR/search.sqlite.gz" .
+cp "$WORK_DIR/transit.sqlite.gz" .
+if [ -n "$TIMETABLE_GZ" ]; then
+  cp "$TIMETABLE_GZ" .
+fi
+cp -R "$WORK_DIR/shards" .
+cp "$WORK_DIR/shards.json" .
 cp "$WORK_DIR/manifest-entry.json" .
 
 echo ""
 echo "=== BUILD COMPLETE ==="
 echo "  geocoding-data.sqlite.gz  (${GEOCODING_SIZE} bytes)"
 echo "  overture-places.sqlite.gz  (${PLACES_SIZE} bytes)"
+echo "  search.sqlite.gz           (${SEARCH_SIZE} bytes)"
+echo "  transit.sqlite.gz          (${TRANSIT_SIZE} bytes)"
+if [ -n "$TIMETABLE_GZ" ]; then
+  echo "  transit-timetable.sqlite.gz (${TIMETABLE_SIZE} bytes)"
+fi
+echo "  shards.json + shards/      (content-addressed POI shards)"
 echo "  manifest-entry.json"
 echo ""
 echo "Upload instructions:"
 echo "  1. Upload geocoding-data.sqlite.gz → https://cdn.example.com/regions/${REGION_ID}/geocoding-data.sqlite.gz"
 echo "  2. Upload overture-places.sqlite.gz → https://cdn.example.com/regions/${REGION_ID}/overture-places.sqlite.gz"
+echo "  2b. Upload search.sqlite.gz, transit.sqlite.gz, shards.json and shards/"
+echo "      alongside them. Polaris hosts none of this — use whatever community"
+echo "      or third-party origin serves the rest of the pack."
 echo "  3. Merge manifest-entry.json into the master regions-catalog.json:"
 echo "     jq '.regions += [input]' regions-catalog.json manifest-entry.json > tmp.json && mv tmp.json regions-catalog.json"
 echo "  4. Upload regions-catalog.json → https://cdn.example.com/regions/catalog.json"

@@ -8,11 +8,29 @@
  * available from peers, they are fetched on-demand from OpenFreeMap.
  */
 
+/**
+ * Identifying User-Agent for OpenFreeMap requests.
+ *
+ * Their offline-download policy requires a unique User-Agent naming the app;
+ * unidentified bulk downloads may be blocked.
+ */
+export const OPENFREEMAP_USER_AGENT = 'PolarisMaps/1.0 (+https://app.polarismaps.app)';
+
 /** OpenFreeMap MapLibre style URL — global vector tiles, no download needed. */
 export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 /** OpenFreeMap TileJSON endpoint for the planet vector tile source. */
 export const OPENFREEMAP_TILEJSON_URL = 'https://tiles.openfreemap.org/planet';
+
+/**
+ * OSRM base URL — tier 2 of the routing cascade, used only when the on-device
+ * Valhalla engine cannot answer. Defaults to the public OSRM demo server; point
+ * `EXPO_PUBLIC_OSRM_BASE_URL` at a self-hosted instance for production volume
+ * (the demo server is rate-limited and driving-only, so other profiles fail
+ * over to tier 3 on their own).
+ */
+export const OSRM_BASE_URL: string =
+  process.env.EXPO_PUBLIC_OSRM_BASE_URL ?? 'https://router.project-osrm.org';
 
 /** TomTom Traffic Flow API base URL (bounded cold-start bridge only). */
 export const TOMTOM_FLOW_BASE_URL =
@@ -75,6 +93,15 @@ export const OVERTURE_PLACES_PM_TILES_URL: string =
   process.env.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL ?? overturePmtilesUrl(OVERTURE_RELEASE);
 
 /** Overture GeoParquet S3 path for places. */
+/**
+ * Pack asset name for the scheduled transit timetable.
+ *
+ * Lives here rather than in `services/transit/transitTimetable` so the download
+ * path can name the asset without pulling the SQLite/storage stack into its
+ * module graph.
+ */
+export const TRANSIT_TIMETABLE_ASSET = 'transit-timetable.sqlite';
+
 export const OVERTURE_PLACES_S3 = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}/theme=places/type=place/*`;
 
 // ── Transit ─────────────────────────────────────────────────────────
@@ -195,23 +222,62 @@ export const TRANSIT_FETCH_DEBOUNCE_MS = 500;
 /** Cache TTL (ms) for transit feed discovery results. */
 export const TRANSIT_FEED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-// ── Offline Region Data CDN ─────────────────────────────────────────
+/**
+ * Largest GTFS zip the app will download at runtime.
+ *
+ * Consolidated country feeds are far past this: Germany's is 495 MiB, the
+ * Netherlands' 159 MiB, Switzerland's 209 MiB. Fetching one buffers the whole
+ * zip in memory before a single row is parsed, which terminates the app on a
+ * phone — and it lands on a volunteer host. Feeds above the cap are skipped
+ * and the caller falls through to the on-device timetable, a regional OTP
+ * endpoint, or the DOT registry, all of which are bounded.
+ *
+ * A city feed is a few MB, so 32 MiB leaves room for a large metro without
+ * admitting a national one.
+ */
+export const GTFS_MAX_FEED_BYTES = 32 * 1024 * 1024;
 
-/** URL for the master region catalog manifest (JSON). */
+// ── Offline Region Data ─────────────────────────────────────────────
+
+/**
+ * GitHub repository publishing pre-built packs, routing graphs and the catalog
+ * via Releases.
+ *
+ * `build-region-data.yml` uploads `<regionId>-routing.tar` and the pack assets
+ * here; the app downloads and extracts them during region download so on-device
+ * Valhalla works offline. Set to an empty string to disable GitHub Releases
+ * routing downloads (P2P packs still work).
+ */
+export const REGION_DATA_REPO: string =
+  process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-maps';
+
+/**
+ * Release tag that carries the pack data, the catalog and the signed config.
+ *
+ * A fixed tag rather than `latest`: GitHub's `releases/latest` resolves to the
+ * most recent release of *any* kind, so an iOS release published after a data
+ * refresh would silently point every install at a release with no packs in it.
+ * The pack workflow re-publishes this tag instead.
+ */
+export const REGION_DATA_TAG = 'map-data-latest';
+
+/** Base URL for assets published on the pack release tag. */
+export const REGION_DATA_BASE_URL = REGION_DATA_REPO
+  ? `https://github.com/${REGION_DATA_REPO}/releases/download/${REGION_DATA_TAG}`
+  : '';
+
+/**
+ * URL for the master region catalog manifest (JSON).
+ *
+ * Polaris runs no CDN, so this is a third-party origin — the pack release.
+ * When it does not resolve, every install streams live third-party tiles
+ * instead of downloading a pack, which is the load profile packs exist to
+ * remove. `pnpm packs:verify` fails a release build in that case.
+ */
 export const REGION_CATALOG_URL =
-  process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? 'https://cdn.example.com/regions/catalog.json';
+  process.env.EXPO_PUBLIC_REGION_CATALOG_URL ??
+  (REGION_DATA_BASE_URL ? `${REGION_DATA_BASE_URL}/catalog.json` : '');
 
 /** URL for the global GeoNames SQLite database (gzipped). */
 export const GEONAMES_DB_URL =
   process.env.EXPO_PUBLIC_GEONAMES_DB_URL ?? 'https://cdn.example.com/global/geonames.sqlite.gz';
-
-/**
- * GitHub repository publishing pre-built offline routing graphs via Releases.
- *
- * `build-region-data.yml` uploads `<regionId>-routing.tar` assets to a
- * `map-data-*` release here; the app downloads and extracts them during region
- * download so on-device Valhalla works offline. Set to an empty string to
- * disable GitHub Releases routing downloads (P2P packs still work).
- */
-export const REGION_DATA_REPO: string =
-  process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-maps';

@@ -7,6 +7,13 @@
  * worldwide). This queries the OAM STAC search for the viewport and returns the
  * union of the footprints it finds, so runtime imagery only layers OAM where
  * HOT has contributed it.
+ *
+ * OAM normally holds drone imagery (centimetres per pixel), which is the finest
+ * layer in the stack. It also carries continent-scale satellite scenes — the
+ * `newyork_cog_sentine_clean` footprint covers all of New York City at 10 m/px —
+ * and mounting one of those above the base would replace sharp NAIP imagery
+ * with 10 m blur. Footprints whose known GSD is coarser than
+ * `MAX_OAM_GSD_M` are therefore ignored.
  */
 
 import type { RegionalOrthophotoSource } from '../../constants/orthophotoSources';
@@ -15,9 +22,27 @@ import { createTileMetadataCache, type BBox } from './tileRouter';
 
 interface OamFeature {
   bbox?: unknown;
+  properties?: { gsd?: unknown };
 }
 
 const coverageCache = createTileMetadataCache<BBox | null>({ ttlMs: 300_000, max: 200 });
+
+/**
+ * Coarsest GSD (metres per pixel) still worth layering over the base imagery.
+ *
+ * OAM is the finest layer by design; the cached USGS NAIP mosaic beneath it is
+ * ~2.4 m/px, so a scene at or coarser than that has no detail to contribute and
+ * would only mask sharper imagery when overzoomed.
+ */
+const MAX_OAM_GSD_M = 2;
+
+/** True when the feature is at least as fine as the imagery it would cover. */
+function isFinerThanBase(feature: OamFeature | null | undefined): boolean {
+  const gsd = feature?.properties?.gsd;
+  // Unknown resolution keeps the feature: real drone footprints occasionally
+  // omit `gsd`, and dropping them would lose coverage that is probably finer.
+  return typeof gsd !== 'number' || !Number.isFinite(gsd) || gsd <= MAX_OAM_GSD_M;
+}
 
 /**
  * Below this zoom OAM's Global TMS renders a density grid rather than imagery
@@ -91,6 +116,7 @@ export async function findOamCoverage(
     const body = (await response.json()) as { features?: OamFeature[] };
     let union: BBox | null = null;
     for (const feature of body.features ?? []) {
+      if (!isFinerThanBase(feature)) continue;
       const footprint = normalizeBBox(feature?.bbox);
       if (!footprint) continue;
       const clipped = intersectBBox(footprint, bbox);

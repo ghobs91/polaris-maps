@@ -10,8 +10,9 @@ import { isOnline } from './connectivityService';
 import { upsertRegion, getRegionById } from './regionRepository';
 import { setRemoteRegionManifests } from './regionManifestResolver';
 import { REGION_CATALOG_URL } from '../../constants/config';
+import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import type { RegionManifest } from './regionManifest';
-import type { Region, RegionDownloadStatus } from '../../models/region';
+import type { Region, RegionAsset, RegionDownloadStatus } from '../../models/region';
 
 const MMKV_CATALOG_KEY = 'region_catalog_v1';
 
@@ -21,6 +22,15 @@ interface CatalogManifest {
   regions: CatalogEntry[];
   /** Verified remote region-pack manifests, merged over the bundled set. */
   manifests?: RegionManifest[];
+  /** Release tag the asset URLs were stamped from, when published. */
+  assetTag?: string;
+  /**
+   * Origins serving `<base>/<assetTag>/<assetName>` — the pack CDN, as a list.
+   * GitHub Releases is first; Cloudflare R2, Backblaze B2 and the Internet
+   * Archive follow. The downloader rotates between them and verifies each
+   * transfer against the catalog's checksum.
+   */
+  assetBaseUrls?: string[];
 }
 
 interface CatalogEntry {
@@ -32,8 +42,52 @@ interface CatalogEntry {
   geocodingSizeBytes?: number;
   placesUrl?: string;
   placesSizeBytes?: number;
+  /** Optional on-device POI index asset (see Region.searchIndexUrl). */
+  searchIndexUrl?: string;
+  searchIndexSizeBytes?: number;
+  /** Optional on-device transit index asset (see Region.transitIndexUrl). */
+  transitIndexUrl?: string;
+  transitIndexSizeBytes?: number;
+  /**
+   * Per-asset pack manifest stamped by `scripts/update-region-asset-urls.mjs`.
+   *
+   * Load-bearing: `downloadRegion` picks the pack path over the capped
+   * per-tile path from these, and auto-download needs their sizes. Dropping
+   * them here silently sends every download to OpenFreeMap tiles.
+   */
+  assets?: RegionAsset[];
   /** Optional per-entry signed manifest with the region's canonical drive key. */
   manifest?: RegionManifest;
+}
+
+/**
+ * Hosts that only ever appear in examples and documentation.
+ *
+ * A build that ships one of these cannot fetch a catalog, and it fails quietly
+ * (the fetch is best-effort), which is exactly the sort of thing that reaches
+ * users. Detect it explicitly instead.
+ */
+const PLACEHOLDER_HOSTS = ['example.com', 'example.net', 'example.org'];
+
+/** True when a URL points at a documented placeholder (or is unusable). */
+export function isPlaceholderUrl(url: string | null | undefined): boolean {
+  if (!url) return true;
+  try {
+    const { hostname } = new URL(url);
+    return PLACEHOLDER_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * True when a real catalog origin is configured.
+ *
+ * Polaris hosts no CDN, so this is whatever community/third-party origin serves
+ * the packs — but it must not be a placeholder.
+ */
+export function isRegionCatalogConfigured(url: string = REGION_CATALOG_URL): boolean {
+  return !isPlaceholderUrl(url);
 }
 
 /**
@@ -58,6 +112,14 @@ export async function fetchAndSeedCatalog(): Promise<void> {
   // 2. If online, fetch fresh catalog
   if (!isOnline()) return;
 
+  if (!isRegionCatalogConfigured()) {
+    // A cached catalog still works; a placeholder origin can never be fetched.
+    logDiagnostic('regions', 'warn', 'region catalog origin is a placeholder', {
+      url: REGION_CATALOG_URL,
+    });
+    return;
+  }
+
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
@@ -68,7 +130,19 @@ export async function fetchAndSeedCatalog(): Promise<void> {
     });
     clearTimeout(timer);
 
-    if (!res.ok) return;
+    if (!res.ok) {
+      // A 404 here means no pack release is published at this origin, so every
+      // install falls back to live third-party tiles — exactly the load profile
+      // the region packs exist to remove. Say so instead of failing quietly.
+      logDiagnostic('regions', 'warn', `region catalog fetch failed: HTTP ${res.status}`, {
+        url: REGION_CATALOG_URL,
+        hint:
+          res.status === 404
+            ? 'no region-pack release published at this origin; running on live tiles'
+            : undefined,
+      });
+      return;
+    }
 
     const raw = await res.text();
     const manifest: CatalogManifest = JSON.parse(raw);
@@ -93,6 +167,34 @@ export function getCatalogIds(): string[] {
     return manifest.regions.map((r) => r.id);
   } catch {
     return [];
+  }
+}
+
+export interface CatalogAssetOrigins {
+  /** Release tag the catalog's asset URLs were stamped from (null when absent). */
+  tag: string | null;
+  /** Base URLs serving `<base>/<tag>/<assetName>`, primary first. */
+  baseUrls: string[];
+}
+
+/**
+ * Multi-origin publication metadata from the cached catalog.
+ *
+ * Lets the routing-graph downloader resolve a tarball against every mirror
+ * (GitHub, R2, B2, Internet Archive) instead of hard-coding the GitHub
+ * Releases path, and without a GitHub API round trip for the current tag.
+ */
+export function getCatalogAssetOrigins(): CatalogAssetOrigins {
+  const cached = storage.getString(MMKV_CATALOG_KEY);
+  if (!cached) return { tag: null, baseUrls: [] };
+  try {
+    const manifest = JSON.parse(cached) as CatalogManifest;
+    const baseUrls = (manifest.assetBaseUrls ?? [])
+      .filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+      .map((url) => url.trim().replace(/\/+$/, ''));
+    return { tag: manifest.assetTag ?? null, baseUrls };
+  } catch {
+    return { tag: null, baseUrls: [] };
   }
 }
 
@@ -127,7 +229,15 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       geocodingUrl: entry.geocodingUrl ?? null,
       placesUrl: entry.placesUrl ?? null,
       placesSizeBytes: entry.placesSizeBytes ?? null,
+      searchIndexUrl: entry.searchIndexUrl ?? null,
+      searchIndexSizeBytes: entry.searchIndexSizeBytes ?? null,
+      transitIndexUrl: entry.transitIndexUrl ?? null,
+      transitIndexSizeBytes: entry.transitIndexSizeBytes ?? null,
       tileVersion: existing?.tileVersion ?? null,
+      // Without this the row is persisted with no manifest, `downloadRegion`
+      // falls back to the 50 MB-capped per-tile path, and auto-download skips
+      // with `size-unknown` because there is nothing to size.
+      assets: entry.assets,
     };
 
     await upsertRegion(region);

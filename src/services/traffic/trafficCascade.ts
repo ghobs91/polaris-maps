@@ -2,6 +2,7 @@ import type {
   TimeBucket,
   TrafficAreaCondition,
   TrafficResolveSource,
+  ConditionObservationSource,
   WireConditionEntry,
 } from '../../models/trafficHistory';
 import { SOURCE_CONFIDENCE } from '../../models/trafficHistory';
@@ -51,10 +52,16 @@ export interface CascadeRequest {
    */
   seedFromTomTom: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
   /**
-   * Indexes TomTom-observed segments into the history index for the current
-   * bucket. Provided by the caller so the aggregation policy stays in one place.
+   * Indexes observed segments into the history index for the current
+   * bucket. Provided by the caller so the aggregation policy stays in one
+   * place. The source labels provenance, which feeds the profile
+   * republish gate (upstream-seeded rows are never republished).
    */
-  indexObservations: (bucket: TimeBucket, observations: ConditionObservation[]) => Promise<void>;
+  indexObservations: (
+    bucket: TimeBucket,
+    observations: ConditionObservation[],
+    source: ConditionObservationSource,
+  ) => Promise<void>;
   /** Request P2P data; injectable for tests. Defaults to the real bridge. */
   p2pQuery?: (cells: string[], bucket: TimeBucket) => Promise<WireConditionEntry[]>;
 }
@@ -188,16 +195,26 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
   // Tier 3: P2P peers
   if (missing.length > 0) {
     // Default query is lazy-required so this module stays testable without
-    // the Bare worklet bridge (which pulls in native modules).
+    // the Bare worklet bridge (which pulls in native modules). The hybrid
+    // query covers the Hyperswarm mesh and the Nostr relay profile store in
+    // one call.
     const query =
       req.p2pQuery ??
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      (require('./trafficP2pQuery') as typeof import('./trafficP2pQuery')).queryPeersForConditions;
+      (require('./trafficP2pQuery') as typeof import('./trafficP2pQuery')).queryConditionsHybrid;
     const entries = await query(missing, req.bucket);
     for (const w of entries) {
       const entry = wireToEntry(w);
-      await req.history.recordObservation(req.bucket, entry);
-      conditions.set(entry.geohash5, entry);
+      // Peer answers originate from other devices' probe histories — count
+      // toward the row's probe share so locally-merged peer data can later
+      // be republished.
+      await req.history.recordObservation(req.bucket, { ...entry, source: 'p2p' });
+      conditions.set(entry.geohash5, {
+        ...entry,
+        probeSamples: w.p ?? 0,
+        observedSpanDays: 0,
+        lastObservedDay: Math.floor(Date.now() / 86_400_000),
+      });
     }
     missing = missing.filter((c) => !conditions.has(c));
     // P2P is a lower tier than the open feed and TomTom cold-start bridge.
@@ -209,7 +226,7 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     const segments = await req.openFeed(missing).catch(() => [] as NormalizedTrafficSegment[]);
     if (segments.length > 0) {
       const observations = observationsFromSegments(segments, geohash5ForCoord);
-      await req.indexObservations(req.bucket, Array.from(observations.values()));
+      await req.indexObservations(req.bucket, Array.from(observations.values()), 'open_feed');
 
       let resolvedAny = false;
       for (const [cell, obs] of observations) {
@@ -222,6 +239,9 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
             avgCongestionRatio: obs.avgCongestionRatio,
             freeFlowSpeedMph: obs.freeFlowSpeedMph,
             sampleCount: 1,
+            probeSamples: 0,
+            observedSpanDays: 0,
+            lastObservedDay: Math.floor(Date.now() / 86_400_000),
             lastUpdated: Math.floor(Date.now() / 1000),
           });
           resolvedAny = true;
@@ -236,9 +256,10 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
   if (missing.length > 0) {
     const segments = await req.seedFromTomTom(missing);
     if (segments.length > 0) {
-      // Index what we observed so future requests hit tiers 1–3.
+      // Index what we observed so future requests hit tiers 1–3. Sourced as
+      // 'tomtom' so the row's probe share stays 0 and it is never republished.
       const observations = observationsFromSegments(segments, geohash5ForCoord);
-      await req.indexObservations(req.bucket, Array.from(observations.values()));
+      await req.indexObservations(req.bucket, Array.from(observations.values()), 'tomtom');
       // TomTom is the highest tier — whenever it ran and found data,
       // that is the authoritative source label for this resolution.
       source = 'tomtom';
@@ -253,6 +274,9 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
             avgCongestionRatio: obs.avgCongestionRatio,
             freeFlowSpeedMph: obs.freeFlowSpeedMph,
             sampleCount: 1,
+            probeSamples: 0,
+            observedSpanDays: 0,
+            lastObservedDay: Math.floor(Date.now() / 86_400_000),
             lastUpdated: Math.floor(Date.now() / 1000),
           });
         }

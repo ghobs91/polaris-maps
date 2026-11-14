@@ -10,5 +10,7 @@ export const CMD_HD_STATUS = 2; // RN → worklet: seeded-drive status
 export const CMD_HD_UNSEED = 3; // RN → worklet: release a seeded region
 export const CMD_HD_GUNZIP = 4; // RN → worklet: gunzip a file in place
 export const CMD_HD_EXTRACT_TAR = 5; // RN → worklet: extract a (gzipped) tar
+export const CMD_HD_SHARD_QUERY = 6; // RN → worklet: ask peers for a shard answer
+export const CMD_HD_UNPACK_PMTILES = 7; // RN → worklet: expand tiles.pmtiles into tile files
 
 export const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN: byte progress

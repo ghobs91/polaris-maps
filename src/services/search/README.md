@@ -9,15 +9,17 @@ Search is a staged multi-source pipeline:
 1. **Query parser** extracts intent — brand names, cuisine hints, modifiers ("near me", "open now", "best", "cheap"), and resolved POI categories
 2. **Staged emission** delivers results as each source stage completes: `local` → `cities` → `photon` → `category` → `remaining` (final)
 3. **Sources**
-   - Local FTS5 over Overture places (weighted bm25: name ≫ brand ≫ category ≫ city)
-   - Offline GeoNames cities1000 (~140k cities) for instant city results
+   - **Unified local index** (`search_docs`, weighted bm25) over Overture/OSM places _and_ addresses — see "The unified index" below
+   - Offline GeoNames cities1000 (~140k cities) for instant city results, with
+     the bundled ~6k-city asset (`geocoding/coarseGeocoder`) answering the same
+     stage when that database has not been downloaded
    - Photon (Komoot) for fuzzy, typo-tolerant address/POI search
    - Overpass for category POIs and, as a **gap-filler**, name matches: Overpass is
      routinely congested (HTTP 406/403 from every mirror), so Photon + Overture +
      MapKit are load-bearing for name search and Overpass runs only after they
      settle — and only when their candidates leave the query thin (≤1 strong
      match within 15 km of the camera)
-   - Nominatim for structured address geocoding (shared 1 req/s throttle)
+   - Nominatim for structured address geocoding (off unless enabled; shared 1 req/s throttle)
    - Overture PMTiles for viewport/user-location place freshness
    - Apple MapKit nearby POIs (iOS) for commercial place coverage that open data lacks
 4. **Result cache** (LRU + TTL) serves repeated/concurrent queries without re-hitting the network; local writes invalidate overlapping areas
@@ -57,7 +59,7 @@ queryParser.ts → { categories, brand, cuisine, modifiers }
     ↓
 unifiedSearch.ts — staged emission
     │
-    ├─ local stage  ── searchPlacesFts (bm25) + category (local) + address (local)
+    ├─ local stage  ── searchDocs (one ranked index: POIs + addresses) + category (local)
     ├─ cities stage ── globalGeocoderService (offline GeoNames)
     │                  [cachedFetch: Photon | category+Overpass | address+Nominatim | Overture ×2 | MapKit | Overpass name (gap-filler)]
     ├─ photon stage
@@ -98,17 +100,78 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 
 ### Geocoding (`src/services/geocoding/`)
 
-| File                           | Description                                                                                                                     |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `geocodingService.ts`          | Local structured/free-text geocoding with distance ranking + trigram typo fallback, then Nominatim (rate-limited, 8 s timeout). |
-| `globalGeocoderService.ts`     | Offline GeoNames cities1000 geocoder (download, FTS5 + population + proximity ranking).                                         |
-| `geonamesDownloadScheduler.ts` | Opportunistic Wi-Fi-preferred download on first online idle; silent no-op when no URL is configured.                            |
+| File                           | Description                                                                                                                                                                                              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `geocodingService.ts`          | Local address search over the unified index (structured query → prefix → trigram → query-time interpolation), then Nominatim strictly as an opt-in fallback (off by default, rate-limited, 8 s timeout). |
+| `globalGeocoderService.ts`     | Offline GeoNames cities1000 geocoder (download, FTS5 + population + proximity ranking).                                                                                                                  |
+| `geonamesDownloadScheduler.ts` | Opportunistic Wi-Fi-preferred download on first online idle; silent no-op when no URL is configured.                                                                                                     |
 
-### Indexes (`src/services/database/init.ts`)
+### The unified index (`searchIndex.ts`, `database/init.ts`)
 
-- `places_fts` — external-content FTS5 with `prefix='2 3 4'` and unicode61 diacritics stripping; maintained incrementally by Overture upserts (no full rebuild on the search path), with a row-count consistency fallback.
-- `geocoding_entries` — FTS5 over structured address columns; supports column filters (`{street}:"main"*`).
-- `geocoding_trigram` — trigram FTS5 for offline typo/substring street/locality matching.
+Place search and address geocoding share **one** ranked index. `search_docs`
+is the document table; `places` and `geocoding_data` stay the data stores, and
+triggers on both keep the index in sync on every write path (Overture import,
+region-pack import, review/POI edits).
+
+- `search_docs` — one row per searchable document: `kind` (`poi` / `address` /
+  `street` / `locality` / `admin`), the address columns, `lat`/`lng`,
+  `importance`, and `interpolated`.
+- `search_docs_fts` — external-content FTS5 over `name, brand, category,
+street, city, housenumber` with `prefix='2 3 4'` and unicode61 diacritics
+  stripping. bm25 weights `10/8/3/6/4/5` (a name hit is what the user typed; a
+  category hit is a hint).
+- `search_docs_trigram` — trigram projection for offline typo/substring
+  matching, always ranked below prefix hits.
+- Backfill: `migrateUnifiedSearchIndex` populates the index once for databases
+  created before it existed, then the triggers take over.
+
+Ordering is `bm25, importance DESC`: text relevance always wins, and importance
+(major city > incidental street, and `review_count` for places) only breaks a
+tie. Proximity is blended in `rankHits` only when a search anchor is known.
+
+`searchDocs` is the single primitive; `poiService.searchPlacesFts` and
+`geocodingService` are thin adapters that hydrate their own row shapes (a place
+by `uuid`, an address straight from the document), so nothing merges two
+independently-ranked result sets any more.
+
+### Address interpolation
+
+Two layers, because OSM coverage is never complete:
+
+- **Pack build** — `addr:interpolation` ways are expanded into
+  `address_interpolated` rows (`scripts/osm-to-geocoding-sqlite.mjs` and the CI
+  builder). Endpoint numbers and coordinates come from the way's two address
+  nodes; interior points are linearly interpolated (straight-block
+  approximation) and capped at 200 numbers per way. Interpolated rows carry a
+  lower `importance` and `interpolated = 1`, so they rank below surveyed
+  addresses.
+- **Query time** — `addressInterpolation.ts` resolves a number the index does
+  not have by interpolating between the nearest known numbers on the same
+  street (`geocodingService.interpolateMissingNumber`). The result is marked
+  approximate and labelled with the range it sits between. It refuses when the
+  street has fewer than two numbered points, and snaps to an endpoint only for
+  a small overshoot (~10% of the mapped span) rather than inventing a position.
+
+### Network geocoding is fallback-only
+
+The local index is the primary path for **both** POIs and addresses:
+
+- **Photon** runs only when the local pass produced no strong match
+  (`strongLocalMatches === 0`), or for an address query with zero local address
+  results. Previously it ran on every keystroke.
+- **Nominatim** runs only when the local address pass returned nothing at all
+  — a structured hit is no longer required to suppress it. It stays
+  rate-limited (1 req/s) and abortable.
+
+Nominatim is additionally **off unless a build or a signed remote config turns
+it on** (`EXPO_PUBLIC_NOMINATIM_FALLBACK=1` / `nominatimFallback: true`, see
+`geocoding/nominatimPolicy.ts`). OSMF's policy caps the _application_ at one
+request per second across every user, so a shipped fallback cannot scale: an
+empty local result is answered as empty rather than by turning 1M devices into
+one geocoding client.
+
+Both log through `diagnosticsLog`, so a degraded local index is visible rather
+than silently answered by the network.
 
 ## Key Constants
 

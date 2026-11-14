@@ -492,6 +492,67 @@ describe('unifiedSearch', () => {
     expect(results.some((r) => r.name === "Joe's Deli")).toBe(true);
     expect(results.some((r) => r.name === 'Delisle Avenue')).toBe(false);
   });
+
+  /**
+   * The `cities` stage has two providers: the optional GeoNames download and the
+   * bundled coarse asset. Only one of them exists on a cold install, and "search
+   * for Tokyo" has to work in both states without a network geocoder.
+   */
+  describe('unifiedSearch cities stage', () => {
+    afterEach(() => {
+      (globalGeocoder.isGeonamesReady as jest.Mock).mockReturnValue(false);
+      (globalGeocoder.searchGlobalPlaces as jest.Mock).mockReset();
+    });
+
+    it('answers a city query from the bundled asset when GeoNames is not downloaded', async () => {
+      (globalGeocoder.isGeonamesReady as jest.Mock).mockReturnValue(false);
+
+      const results = await unifiedSearch('Paris', defaultOpts);
+
+      expect(globalGeocoder.searchGlobalPlaces).not.toHaveBeenCalled();
+      const paris = results.find((r) => r.name === 'Paris');
+      expect(paris).toBeDefined();
+      expect(paris!.osmSubtype).toBe('city');
+    });
+
+    it('survives the area gate even when the city is on another continent', async () => {
+      (globalGeocoder.isGeonamesReady as jest.Mock).mockReturnValue(false);
+
+      // defaultOpts centres on New York; Tokyo is ~10,000 km away.
+      const results = await unifiedSearch('Tokyo', defaultOpts);
+
+      expect(results.some((r) => r.name === 'Tokyo')).toBe(true);
+    });
+
+    it('prefers the downloaded GeoNames tier when it is available', async () => {
+      (globalGeocoder.isGeonamesReady as jest.Mock).mockReturnValue(true);
+      (globalGeocoder.searchGlobalPlaces as jest.Mock).mockResolvedValue([
+        {
+          geonameId: 2988507,
+          name: 'Paris',
+          displayName: 'Paris, Île-de-France, France',
+          lat: 48.85341,
+          lng: 2.3488,
+          population: 2138551,
+          countryCode: 'FR',
+        },
+      ]);
+
+      const results = await unifiedSearch('Paris', defaultOpts);
+
+      expect(globalGeocoder.searchGlobalPlaces).toHaveBeenCalled();
+      expect(results.some((r) => r.name === 'Paris')).toBe(true);
+    });
+
+    it('falls back to the bundled tier when the downloaded database fails', async () => {
+      (globalGeocoder.isGeonamesReady as jest.Mock).mockReturnValue(true);
+      (globalGeocoder.searchGlobalPlaces as jest.Mock).mockRejectedValue(new Error('corrupt'));
+
+      const results = await unifiedSearch('Paris', defaultOpts);
+
+      expect(results.some((r) => r.name === 'Paris')).toBe(true);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -589,8 +650,11 @@ describe('unifiedSearch progressive + cancellation', () => {
   });
 
   it('onPartial emits local results before the network phase completes', async () => {
+    // ~30 km out: inside the 75 km search area so it is returned locally, but
+    // outside the 15 km strong-match radius — so the Photon fallback still runs
+    // and the test can hold the network phase open.
     (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
-      makePlace({ name: 'Starbucks', uuid: 'p-starbucks' }),
+      makePlace({ name: 'Starbucks', uuid: 'p-starbucks', lat: 40.98, lng: -73.985 }),
     ]);
     let resolvePhoton!: (value: ReturnType<typeof makePhotonResult>[]) => void;
     (photonGeocoder.searchPhoton as jest.Mock).mockImplementation(

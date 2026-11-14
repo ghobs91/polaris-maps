@@ -2,11 +2,16 @@ import { haversineMeters } from '../../utils/routeSnap';
 import { navigationModeForCosting } from '../../utils/navigationMode';
 import type { CostingModel } from '../../models/route';
 import {
+  STREET_VIEW_HIGHWAY_SPEED_MPS,
+  STREET_VIEW_INFINITY_FOCUS_SPEED_MPS,
   STREET_VIEW_MODE_CONFIG,
   type StreetViewCaptureConfig,
   type StreetViewCaptureMode,
   type StreetViewFix,
 } from '../../models/streetViewCapture';
+
+/** The four orientations VisionCamera reports for a captured photo. */
+export type CaptureOrientation = 'up' | 'down' | 'left' | 'right';
 
 export interface LastCapture {
   lat: number;
@@ -29,6 +34,39 @@ export function captureConfigForMode(mode: StreetViewCaptureMode): StreetViewCap
   return STREET_VIEW_MODE_CONFIG[mode] ?? STREET_VIEW_MODE_CONFIG.standard;
 }
 
+/**
+ * Frame spacing for a GPS speed. Mirrors the Mapillary mobile apps: 3 m in
+ * built-up areas, 20 m once the vehicle is at 50 km/h or faster (highways are
+ * sparse, so the extra frames there cost space without adding coverage).
+ */
+export function captureDistanceForSpeed(
+  speedMps: number | null | undefined,
+  config: StreetViewCaptureConfig,
+): number {
+  const speed = Number.isFinite(speedMps) ? (speedMps as number) : 0;
+  return speed >= STREET_VIEW_HIGHWAY_SPEED_MPS
+    ? config.highwayDistanceMeters
+    : config.urbanDistanceMeters;
+}
+
+/**
+ * True when a frame was captured in portrait, which Mapillary rejects.
+ * `undefined` means the orientation is not known yet, so it must not block a
+ * capture; the caller re-checks the orientation the camera reports afterwards.
+ */
+export function isPortraitOrientation(orientation: CaptureOrientation | undefined): boolean {
+  return orientation === 'up' || orientation === 'down';
+}
+
+/**
+ * Mapillary's apps lock the lens at infinity above 10 mph so autofocus cannot
+ * hunt on the windscreen or bonnet. Below that, normal autofocus is better.
+ */
+export function shouldLockInfinityFocus(speedMps: number | null | undefined): boolean {
+  if (!Number.isFinite(speedMps)) return false;
+  return (speedMps as number) >= STREET_VIEW_INFINITY_FOCUS_SPEED_MPS;
+}
+
 export interface CaptureModeCapabilities {
   /** The back camera exposes an ultra-wide lens. */
   hasUltraWide: boolean;
@@ -39,10 +77,10 @@ export interface CaptureModeCapabilities {
 /**
  * Picks the capture cadence without asking the user.
  *
- * Standard (20 m, 1080p, wide lens) is what the paired telephoto detail stream
- * needs, so it wins whenever that is enabled. Otherwise the denser 3D cadence
- * runs on devices that expose an ultra-wide lens, and standard is the best a
- * wide-only camera can do.
+ * Standard (adaptive 3 m / 20 m spacing, wide lens) is what the paired
+ * telephoto detail stream needs, so it wins whenever that is enabled.
+ * Otherwise the denser 3D path runs on devices that expose an ultra-wide lens,
+ * and standard is the best a wide-only camera can do.
  */
 export function resolveCaptureMode(capabilities: CaptureModeCapabilities): StreetViewCaptureMode {
   if (capabilities.detailStream) return 'standard';
@@ -148,7 +186,8 @@ export function shouldCapture(
   }
 
   const distanceMeters = haversineMeters([lastCapture.lng, lastCapture.lat], [fix.lng, fix.lat]);
-  if (distanceMeters < config.distanceMeters) {
+  const requiredMeters = captureDistanceForSpeed(fix.speedMps, config);
+  if (distanceMeters < requiredMeters) {
     return { capture: false, reason: 'not-far-enough', distanceMeters };
   }
   return { capture: true, reason: 'ok', distanceMeters };

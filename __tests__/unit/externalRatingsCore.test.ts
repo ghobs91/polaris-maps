@@ -81,13 +81,72 @@ describe('buildCollectorScript', () => {
       }),
       {
         body: {
-          innerHTML: '',
+          innerHTML: 'You have been blocked. Why? Something about the behaviour of the browser.',
           innerText: 'You have been blocked. Why? Something about the behaviour of the browser.',
         },
       },
     );
 
     expect(JSON.parse(posted[0]!).blocked).toBe(true);
+  });
+
+  it('does not force a layout read when the page carries no anti-bot markers', () => {
+    let innerTextReads = 0;
+    const body = { innerHTML: '<div>ordinary listing</div>' } as Record<string, unknown>;
+    Object.defineProperty(body, 'innerText', {
+      get: () => {
+        innerTextReads += 1;
+        return 'ordinary listing';
+      },
+    });
+
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 2,
+      }),
+      { body },
+    );
+
+    jest.advanceTimersByTime(100);
+
+    expect(posted).toHaveLength(1);
+    expect(innerTextReads).toBe(0);
+    const msg = JSON.parse(posted[0]!);
+    expect(msg.challenge).toBe(false);
+    expect(msg.blocked).toBe(false);
+  });
+
+  it('skips the page scans entirely once data is available', () => {
+    let innerHtmlReads = 0;
+    const body = {} as Record<string, unknown>;
+    Object.defineProperty(body, 'innerHTML', {
+      get: () => {
+        innerHtmlReads += 1;
+        return '';
+      },
+    });
+
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'true',
+        collectBodyJs: '    out.ldRating = 4.2;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 3,
+      }),
+      { body },
+    );
+
+    expect(posted).toHaveLength(1);
+    expect(innerHtmlReads).toBe(0);
   });
 
   it('does not treat block copy inside inline scripts as a hard block', () => {
@@ -112,7 +171,16 @@ describe('buildCollectorScript', () => {
     expect(JSON.parse(posted[0]!).blocked).toBe(false);
   });
 
-  it('flags a terminal challenge when markers are present and no data was found', () => {
+  it('flags a challenge from a protection interstitial iframe, with no layout read', () => {
+    let innerTextReads = 0;
+    const body = { innerHTML: '' } as Record<string, unknown>;
+    Object.defineProperty(body, 'innerText', {
+      get: () => {
+        innerTextReads += 1;
+        return '';
+      },
+    });
+
     const posted = runCollector(
       buildCollectorScript({
         providerId: 'yelp',
@@ -123,13 +191,116 @@ describe('buildCollectorScript', () => {
         retryIntervalMs: 10,
         maxAttempts: 2,
       }),
-      { body: { innerHTML: '<div id="datadome">verify you are human</div>' } },
+      {
+        body,
+        querySelectorAll: (sel: string) =>
+          sel === 'iframe'
+            ? [
+                {
+                  getAttribute: (n: string) =>
+                    n === 'src' ? 'https://geo.captcha-delivery.com/captcha/initial?cid=x' : null,
+                },
+              ]
+            : [],
+      },
     );
 
     jest.advanceTimersByTime(100);
 
     expect(posted).toHaveLength(1);
     expect(JSON.parse(posted[0]!).challenge).toBe(true);
+    // The iframe verdict skips the layout-forcing innerText read entirely.
+    expect(innerTextReads).toBe(0);
+  });
+
+  it('flags a challenge from interstitial copy in the visible text', () => {
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'tripadvisor',
+        payloadType: 'rating-search',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.candidates = [];',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 2,
+      }),
+      {
+        body: {
+          innerHTML: '<div>Just a moment...</div>',
+          innerText: 'Just a moment...',
+        },
+      },
+    );
+
+    jest.advanceTimersByTime(100);
+
+    expect(posted).toHaveLength(1);
+    const msg = JSON.parse(posted[0]!);
+    expect(msg.challenge).toBe(true);
+    expect(msg.blocked).toBe(false);
+  });
+
+  it('stays verdict-free on a page that merely embeds anti-bot script markers without hydrating', () => {
+    // Regression: provider pages embed DataDome/Akamai bundles in their valid
+    // documents. A slow JS-app page (markers, no data yet) used to be branded
+    // a challenge verdict and remembered as "no ratings yet" for the session.
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'rating-search',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.candidates = [];',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 2,
+      }),
+      {
+        body: {
+          innerHTML: '<script src="https://js.datadome.co/tags.js"></script><div id="app"></div>',
+          innerText: '',
+        },
+      },
+    );
+
+    jest.advanceTimersByTime(100);
+
+    expect(posted).toHaveLength(1);
+    const msg = JSON.parse(posted[0]!);
+    expect(msg.challenge).toBe(false);
+    expect(msg.blocked).toBe(false);
+  });
+
+  it('classifies a protection iframe as a challenge even when block copy is present', () => {
+    const posted = runCollector(
+      buildCollectorScript({
+        providerId: 'yelp',
+        payloadType: 'external-rating',
+        hasDataJs: 'false',
+        collectBodyJs: '    out.ldRating = null;',
+        initialDelayMs: 0,
+        retryIntervalMs: 10,
+        maxAttempts: 1,
+      }),
+      {
+        body: {
+          innerHTML: 'You have been blocked.',
+          innerText:
+            'You have been blocked. Why? Behaviour of the browser has caught our attention.',
+        },
+        querySelectorAll: (sel: string) =>
+          sel === 'iframe'
+            ? [
+                {
+                  getAttribute: (n: string) =>
+                    n === 'src' ? 'https://geo.captcha-delivery.com/x' : null,
+                },
+              ]
+            : [],
+      },
+    );
+
+    expect(JSON.parse(posted[0]!).challenge).toBe(true);
+    expect(JSON.parse(posted[0]!).blocked).toBe(false);
   });
 });
 
@@ -234,10 +405,13 @@ describe('isAllowedExternalRatingUrl', () => {
 });
 
 describe('EXTERNAL_RATINGS_USER_AGENT', () => {
-  it('is a real mobile Safari UA so providers serve mobile markup on every platform', () => {
-    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('iPad');
+  it('is a real mobile browser UA so providers serve mobile markup on every platform', () => {
+    expect(EXTERNAL_RATINGS_USER_AGENT).toMatch(/\((iPhone|iPad|Linux); /);
     expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Mobile/');
-    expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Safari/');
     expect(EXTERNAL_RATINGS_USER_AGENT).not.toContain('Macintosh');
+    if (EXTERNAL_RATINGS_USER_AGENT.includes('Safari/604.1')) {
+      expect(EXTERNAL_RATINGS_USER_AGENT).toMatch(/CPU OS \d+_\d+/);
+      expect(EXTERNAL_RATINGS_USER_AGENT).toContain('Safari/');
+    }
   });
 });

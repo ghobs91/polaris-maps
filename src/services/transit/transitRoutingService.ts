@@ -1,6 +1,26 @@
 import { OTP_BASE_URL, OTP_GRAPHQL_PATH } from '../../constants/config';
 import type { OtpItinerary, OtpStop, NearbyStop, TransitMode, LegMode } from '../../models/transit';
 import { findEndpointForCoords, OTP_ENDPOINTS, type OtpEndpoint } from './otpEndpointRegistry';
+import {
+  TransitPlanError,
+  decideTransitPlanTier,
+  describeTransitPlanFailure,
+  eligibleTransitPlanTiers,
+  type LocalTimetableState,
+  type TransitPlanFailureReason,
+  type TransitPlanTier,
+  type TransitousTierState,
+} from './transitPlanTiers';
+import { localTimetableAvailability, planWithLocalTimetable } from './transitTimetablePlanner';
+import { planTransitousTrip } from './transitousRouting';
+import { canUseTransitousPlan, noteTransitousPlan } from './transitousPlanBudget';
+import { isTransitousPlanEnabled } from './transitousPlanPolicy';
+import {
+  applyRealtimeToItineraries,
+  toLiveDepartures,
+  firstTransitLegIndex,
+} from './transitRealtimeOverlay';
+import { fetchDepartures } from './transitDepartureFetcher';
 
 // ── GraphQL query fragments (OTP2 GTFS GraphQL — used by user-configured endpoint) ──
 
@@ -620,6 +640,14 @@ export interface PlanTransitOptions {
   modes?: TransitMode[];
   /** Number of itineraries to request. Defaults to 5. */
   numItineraries?: number;
+  /**
+   * Ask a live source for the boarding leg's delay and apply it to the plan.
+   *
+   * Off by default: a Tier 0 plan is schedule-accurate and costs zero requests,
+   * which is the whole point of the offline timetable. Callers that already have
+   * a live departure source (the stop card does) opt in.
+   */
+  realtime?: boolean;
 }
 
 /**
@@ -631,40 +659,147 @@ export interface PlanTransitOptions {
  *   3. Throws — caller should fall back to local planner
  */
 export async function planTransitTrip(options: PlanTransitOptions): Promise<OtpItinerary[]> {
-  // 1. Try registry endpoint for origin coordinates
-  const registryEndpoint = findEndpointForCoords(options.from.lat, options.from.lng);
-  if (registryEndpoint) {
+  const when = options.departureTime ? new Date(options.departureTime) : new Date();
+
+  // Decide the eligible tiers *before* issuing any request, so an uncovered area
+  // costs zero third-party calls. A try-then-fall-back chain would reach a
+  // remote server for every uncovered user, which is the load profile the
+  // offline packs exist to remove (see docs/scaling-p2p.md).
+  const availability = await localTimetableAvailability(options.from, options.to, when);
+  // The registry's last entry is a world-bbox Transitous catch-all. It is not a
+  // regional endpoint — it is the `transitous` tier, reached only through its own
+  // policy gate — so it must not be treated as one.
+  const matched = findEndpointForCoords(options.from.lat, options.from.lng);
+  const registryEndpoint = matched && matched.apiStyle !== 'transitous-v1' ? matched : null;
+  const regional = registryEndpoint !== null || OTP_BASE_URL.length > 0;
+  const transitous = transitousTierState();
+
+  const input = {
+    local: availability.state as LocalTimetableState,
+    regional,
+    transitous,
+  };
+  const tiers = eligibleTransitPlanTiers(input);
+
+  if (tiers.length === 0) {
+    const decision = decideTransitPlanTier(input);
+    const reason: TransitPlanFailureReason = decision.reason ?? 'no-coverage';
+    throw new TransitPlanError(reason, describeTransitPlanFailure(reason));
+  }
+
+  let lastError: unknown = null;
+
+  for (const tier of tiers) {
     try {
-      if (registryEndpoint.apiStyle === 'rest-v1') {
-        return await planViaOtp1Rest(registryEndpoint, options);
-      }
-      if (registryEndpoint.apiStyle === 'transmodel-v3') {
-        return await planViaTransmodelV3(registryEndpoint, options);
-      }
-      if (registryEndpoint.apiStyle === 'transitous-v1') {
-        // Transitous routing is handled separately via the MOTIS API.
-        // Skip here so the caller falls through to user-configured OTP.
-      } else {
-        // gtfs-graphql-v2 and unknown styles — use existing GraphQL client
-        return await planViaGtfsGraphql(registryEndpoint, options);
+      const itineraries = await planWithTier(tier, options, when, registryEndpoint);
+      if (itineraries.length > 0) {
+        return options.realtime ? await withRealtime(itineraries) : itineraries;
       }
     } catch (err) {
-      // Registry endpoint failed; try user-configured fallback. If there is
-      // none, surface the real cause instead of a misleading "no endpoint".
-      if (!OTP_BASE_URL) {
-        const detail = err instanceof Error ? err.message : String(err);
-        throw new Error(`Transit service unavailable for this region: ${detail}`);
-      }
+      lastError = err;
     }
   }
 
-  // 2. User-configured OTP_BASE_URL
-  if (OTP_BASE_URL) {
-    return planViaUserConfiguredOtp(options);
+  // A tier answered but found no route: that is an empty result, not missing
+  // data, so the caller keeps the "no itineraries" path it has always had.
+  // Only a source that actually failed becomes an error.
+  if (lastError) {
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new TransitPlanError('upstream-failed', detail);
   }
+  return [];
+}
 
-  // 3. No endpoint available
-  throw new Error('No OTP endpoint available for this region');
+/** Current state of the Transitous tier for this device. */
+function transitousTierState(): TransitousTierState {
+  if (!isTransitousPlanEnabled()) return 'disabled';
+  return canUseTransitousPlan() ? 'allowed' : 'budget-exhausted';
+}
+
+/** Run one tier. Throws on upstream failure; returns [] when it simply finds nothing. */
+async function planWithTier(
+  tier: TransitPlanTier,
+  options: PlanTransitOptions,
+  when: Date,
+  registryEndpoint: OtpEndpoint | null,
+): Promise<OtpItinerary[]> {
+  switch (tier) {
+    case 'local':
+      return planWithLocalTimetable({
+        from: options.from,
+        to: options.to,
+        departureTime: when,
+        numItineraries: options.numItineraries,
+      });
+
+    case 'regional': {
+      // A user-configured endpoint is what `EXPO_PUBLIC_OTP_BASE_URL` has always
+      // meant, and it stays the fallback when a registry endpoint fails.
+      if (!registryEndpoint) {
+        return OTP_BASE_URL ? planViaUserConfiguredOtp(options) : [];
+      }
+      try {
+        if (registryEndpoint.apiStyle === 'rest-v1') {
+          return await planViaOtp1Rest(registryEndpoint, options);
+        }
+        if (registryEndpoint.apiStyle === 'transmodel-v3') {
+          return await planViaTransmodelV3(registryEndpoint, options);
+        }
+        return await planViaGtfsGraphql(registryEndpoint, options);
+      } catch (err) {
+        if (!OTP_BASE_URL) throw err;
+        return planViaUserConfiguredOtp(options);
+      }
+    }
+
+    case 'transitous': {
+      // Spend from the device budget only when a request is actually issued.
+      noteTransitousPlan();
+      const planned = await planTransitousTrip({
+        originLat: options.from.lat,
+        originLon: options.from.lng,
+        destLat: options.to.lat,
+        destLon: options.to.lng,
+        time: when,
+        arriveBy: options.isDepartAt === false,
+        numItineraries: options.numItineraries,
+      });
+      return planned ?? [];
+    }
+
+    default:
+      return [];
+  }
+}
+
+/**
+ * Apply live delays to the first boarding leg.
+ *
+ * Best-effort by construction: a live source that is slow, empty or broken must
+ * leave the schedule-accurate plan untouched rather than fail the request.
+ */
+async function withRealtime(itineraries: OtpItinerary[]): Promise<OtpItinerary[]> {
+  const index = firstTransitLegIndex(itineraries[0]);
+  if (index === -1) return itineraries;
+
+  const leg = itineraries[0].legs[index];
+  const routeName = leg.route?.shortName ?? leg.route?.longName;
+  if (!routeName) return itineraries;
+
+  try {
+    const info = await fetchDepartures(
+      leg.from.name,
+      leg.from.lat,
+      leg.from.lon,
+      [routeName],
+      [leg.route?.color],
+      [leg.route?.mode ?? 'RAIL'],
+    );
+    const live = toLiveDepartures(info.departures);
+    return applyRealtimeToItineraries(itineraries, live);
+  } catch {
+    return itineraries;
+  }
 }
 
 /** Plan via a GTFS GraphQL v2 registry endpoint. */

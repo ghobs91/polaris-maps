@@ -1,7 +1,36 @@
 # Map accessibility crash (MapLibre, iOS)
 
-Status: **diagnosed, not fixed**. Tracked here so it is not lost; needs a product
-decision before any code changes.
+Status: **mitigated in-app** (crash path removed; per-place VoiceOver labels
+lost). Upstream MapLibre still index-checks nothing, and the full fix needs a
+source build. Details below.
+
+## Mitigation (shipped in this repo)
+
+`plugins/native/PolarisMaps/PolarisMapAccessibility.m`, installed by
+`plugins/withMapAccessibility`, replaces `MLNMapView`'s accessibility container at
+runtime (`NSClassFromString` + `method_setImplementation`, no MapLibre headers
+required). The replacement never queries rendered features, so the crashing call
+cannot be reached:
+
+- one synthetic `Map` element (label + zoom value + hint),
+- the compass,
+- the attribution button.
+
+Confirm it is active in any build — the app logs once at launch:
+
+```
+[PolarisMaps] MapLibre accessibility container replaced (no rendered-feature queries).
+```
+
+Tradeoff: VoiceOver no longer gets MapLibre's per-place / per-road labels, because
+those were derived from `visiblePlaceFeatures` / `visibleRoadFeatures` — the exact
+queries that aborted. Follow-up work: expose the app's own POI names to VoiceOver
+from JS (accessible overlay driven by `osmPoiStore`), which is also a better
+experience than basemap feature names.
+
+`queryRenderedFeaturesAtPoint` in `MapView.tsx:837` is a separate instance of the
+same native query family (maplibre-react-native#1118) and is **not** covered by
+this patch; it runs on every map tap.
 
 ## Symptom
 
@@ -70,7 +99,13 @@ This matches the observed trigger pattern: every crash followed content churn
   reports crashing on iOS 10.x; it was fixed for MLRN 11.0.0-alpha.16, but the
   accessibility container in MapLibre native itself is unchanged through 6.20.0.
 
-## Options (need a decision)
+## Options considered
+
+The shipped mitigation is a narrowed version of option 3: replace the container
+instead of hiding the whole map, so VoiceOver still gets a named map element
+plus the compass and attribution. Options 1 and 2 remain the path to restoring
+per-place labels; option 4 was rejected because the crash only needs a
+screen-reader user to pan once.
 
 1. **Upgrade `@maplibre/maplibre-react-native` 10.4.2 → 11.x.**
    Fixes the JS-facing `queryRenderedFeatures` crash (#1118), which is the tap
@@ -87,8 +122,8 @@ This matches the observed trigger pattern: every crash followed content churn
 4. **Do nothing.** Crash surface is VoiceOver/automation-only; sighted users are
    unaffected. Cheapest, but leaves a likely crash for screen-reader users.
 
-Recommendation: 2 for correctness, with 3 as a stopgap only if a release has to
-ship before 2 lands. Option 1 alone does not fix this crash.
+Recommendation: 2 for correctness, with the shipped container replacement as the
+stopgap until 2 lands. Option 1 alone does not fix this crash.
 
 ## Reproducing
 

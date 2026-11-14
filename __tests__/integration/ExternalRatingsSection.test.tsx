@@ -1,10 +1,19 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- jest.mock factories may only reference `mock*`-prefixed bindings
+const { useEffect: mockUseEffect } = require('react') as typeof import('react');
+
 jest.mock('react-native-webview', () => ({
   WebView: (props: Record<string, unknown>) => {
-    // Expose the last-mounted WebView props so the test can simulate onMessage.
-    (global as any).__lastWebViewProps = props;
+    // Expose the last-mounted WebView props so the test can simulate onMessage,
+    // and clear them on unmount so "no hidden browser mounted" is assertable.
+    mockUseEffect(() => {
+      (global as any).__lastWebViewProps = props;
+      return () => {
+        (global as any).__lastWebViewProps = null;
+      };
+    });
     return null;
   },
 }));
@@ -49,6 +58,32 @@ jest.mock('../../src/services/poi/externalRatings', () => {
 });
 
 import { ExternalRatingsSection } from '../../src/components/map/ExternalRatingsSection';
+import { HiddenRatingsBrowserHost } from '../../src/components/map/HiddenRatingsBrowserHost';
+
+/**
+ * The hidden browser is hosted OUTSIDE the sheet's subtree, so the tests mount
+ * the host beside the section — the module-level spec bus connects them.
+ */
+function renderSection(props: Parameters<typeof ExternalRatingsSection>[0]) {
+  return render(
+    <>
+      <ExternalRatingsSection {...props} />
+      <HiddenRatingsBrowserHost />
+    </>,
+  );
+}
+
+function rerenderSection(
+  screen: ReturnType<typeof renderSection>,
+  props: Parameters<typeof ExternalRatingsSection>[0],
+) {
+  screen.rerender(
+    <>
+      <ExternalRatingsSection {...props} />
+      <HiddenRatingsBrowserHost />
+    </>,
+  );
+}
 import { GEOLOCATION_GUARD_JS } from '../../src/constants/webViewScripts';
 import { EXTERNAL_RATINGS_USER_AGENT } from '../../src/services/poi/externalRatings';
 import { browseScheduler } from '../../src/services/poi/externalRatings/antiBot';
@@ -83,8 +118,13 @@ function onMessage(data: unknown): void {
   });
 }
 
+/** The hidden browser runs in its own modal window; no stage, no window. */
+function expectNoMountedBrowser(): void {
+  expect((global as any).__lastWebViewProps).toBeNull();
+}
+
 const ADDRESS = '123 Main St, New York';
-const TA_SEARCH_URL = `https://www.tripadvisor.com/Search?q=${encodeURIComponent(`Foo Bar ${ADDRESS}`)}`;
+const TA_SEARCH_URL = `https://www.tripadvisor.com/Search?q=${encodeURIComponent('Foo Bar')}`;
 const YELP_SEARCH_URL = `https://www.yelp.com/search?${new URLSearchParams({ find_desc: 'Foo Bar', find_loc: ADDRESS }).toString()}`;
 
 describe('ExternalRatingsSection', () => {
@@ -106,7 +146,7 @@ describe('ExternalRatingsSection', () => {
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
     );
 
-    const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
 
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
     expect(webViewProps().userAgent).toBe(EXTERNAL_RATINGS_USER_AGENT);
@@ -135,7 +175,7 @@ describe('ExternalRatingsSection', () => {
   it('passes the enriched website into the provider query when OSM carries none', async () => {
     mockResolveKnownListing.mockResolvedValue(null);
 
-    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} website="https://foo.example.com" />);
+    renderSection({ poi: makePoi('Foo Bar'), website: 'https://foo.example.com' });
 
     await waitFor(() => expect(mockResolveKnownListing).toHaveBeenCalled());
     expect(mockResolveKnownListing.mock.calls[0][1]).toMatchObject({
@@ -146,15 +186,13 @@ describe('ExternalRatingsSection', () => {
   it('falls back to search for both providers and matches by identity', async () => {
     mockResolveKnownListing.mockResolvedValue(null);
 
-    const screen = render(
-      <ExternalRatingsSection
-        poi={makePoi('Foo Bar', {
-          'addr:housenumber': '123',
-          'addr:street': 'Main St',
-          'addr:city': 'New York',
-        })}
-      />,
-    );
+    const screen = renderSection({
+      poi: makePoi('Foo Bar', {
+        'addr:housenumber': '123',
+        'addr:street': 'Main St',
+        'addr:city': 'New York',
+      }),
+    });
 
     // TripAdvisor search runs first.
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_SEARCH_URL }));
@@ -225,15 +263,13 @@ describe('ExternalRatingsSection', () => {
   it('resolves from the search card itself when it carries rating + identity', async () => {
     mockResolveKnownListing.mockResolvedValue(null);
 
-    const screen = render(
-      <ExternalRatingsSection
-        poi={makePoi('Foo Bar', {
-          'addr:housenumber': '123',
-          'addr:street': 'Main St',
-          'addr:city': 'New York',
-        })}
-      />,
-    );
+    const screen = renderSection({
+      poi: makePoi('Foo Bar', {
+        'addr:housenumber': '123',
+        'addr:street': 'Main St',
+        'addr:city': 'New York',
+      }),
+    });
 
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_SEARCH_URL }));
     onMessage({
@@ -263,7 +299,7 @@ describe('ExternalRatingsSection', () => {
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
     );
 
-    const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
     onMessage({
       type: 'external-rating',
@@ -293,27 +329,38 @@ describe('ExternalRatingsSection', () => {
     // Never resolves: the row stays in the loading state.
     mockResolveKnownListing.mockImplementation(() => new Promise(() => {}));
 
-    const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
     await waitFor(() => expect(screen.getByTestId('external-ratings-loading')).toBeTruthy());
     expect(screen.queryByTestId('external-ratings-combined')).toBeNull();
     expect(screen.queryByTestId('external-ratings-empty')).toBeNull();
   });
 
-  it('offers "write the first review" when no rating is found', async () => {
-    mockResolveKnownListing.mockResolvedValue(null);
+  it('offers "write the first review" only when a provider answered no rating', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
     const onWriteReview = jest.fn();
 
-    const screen = render(
-      <ExternalRatingsSection poi={makePoi('Foo Bar')} onWriteReview={onWriteReview} />,
-    );
+    const screen = renderSection({ poi: makePoi('Foo Bar'), onWriteReview });
 
-    // Settle both providers by failing their WebView stages.
+    // Settle both providers: TripAdvisor's listing page rendered but carries
+    // no rating data (a real "no rating" answer); Yelp's search stage fails
+    // transiently (nothing learned about the place).
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: null,
+      ldCount: null,
+      ldName: null,
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
     await waitFor(() => expect(webViewProps()?.source).toBeTruthy());
-    const firstError = webViewProps().onError as () => void;
-    act(() => firstError());
-    await waitFor(() => expect(webViewProps()?.source).toBeTruthy());
-    const secondError = webViewProps().onError as () => void;
-    act(() => secondError());
+    const yelpError = webViewProps().onError as () => void;
+    act(() => yelpError());
 
     await waitFor(() => {
       expect(screen.getByTestId('external-ratings-empty')).toBeTruthy();
@@ -326,12 +373,32 @@ describe('ExternalRatingsSection', () => {
     expect(onWriteReview).toHaveBeenCalledTimes(1);
   });
 
+  it('shows an unavailable row — not "no ratings yet" — when the pass dies on transient failures', async () => {
+    mockResolveKnownListing.mockResolvedValue(null);
+
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
+
+    // Settle both providers with WebView errors: nothing was learned about the
+    // place, so the section must not claim "no ratings yet".
+    await waitFor(() => expect(webViewProps()?.source).toBeTruthy());
+    const firstError = webViewProps().onError as () => void;
+    act(() => firstError());
+    await waitFor(() => expect(webViewProps()?.source).toBeTruthy());
+    const secondError = webViewProps().onError as () => void;
+    act(() => secondError());
+
+    await waitFor(() => {
+      expect(screen.getByTestId('external-ratings-unavailable')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('external-ratings-empty')).toBeNull();
+  });
+
   it('neutralizes web geolocation before the provider page loads', async () => {
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
     );
 
-    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    renderSection({ poi: makePoi('Foo Bar') });
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
 
     expect(webViewProps().injectedJavaScriptBeforeContentLoaded).toBe(GEOLOCATION_GUARD_JS);
@@ -343,7 +410,7 @@ describe('ExternalRatingsSection', () => {
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
     );
 
-    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    renderSection({ poi: makePoi('Foo Bar') });
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
 
     const shouldStart = webViewProps().onShouldStartLoadWithRequest as (r: {
@@ -360,7 +427,7 @@ describe('ExternalRatingsSection', () => {
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
     );
 
-    render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    renderSection({ poi: makePoi('Foo Bar') });
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
 
     const style = webViewProps().style as { width?: number; height?: number };
@@ -368,20 +435,131 @@ describe('ExternalRatingsSection', () => {
     expect(style.height).toBeGreaterThan(0);
   });
 
+  it('unloads the provider page once the pass settles', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : YELP_LISTING_URL),
+    );
+
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.5,
+      ldCount: 2345,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: YELP_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'yelp',
+      ldRating: 4.2,
+      ldCount: 321,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
+
+    // After the pass settles the hidden browser is torn down entirely: each
+    // stage mounts a fresh WKWebView (cookies persist in the shared
+    // website-data store), so no provider page keeps rendering behind the card.
+    await waitFor(expectNoMountedBrowser);
+  });
+
+  it('unloads the provider page while the gate is closed for a closing card', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    const poi = makePoi('Foo Bar');
+    const screen = renderSection({ poi });
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+
+    // Closing the card tears the modal window (and the hidden browser with it)
+    // down entirely — cookies persist in the shared website-data store.
+    rerenderSection(screen, { poi, enabled: false });
+    await waitFor(expectNoMountedBrowser);
+  });
+
+  it('keeps a resolved rating on screen while a closing card stays mounted', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    const poi = makePoi('Foo Bar');
+    const screen = renderSection({ poi });
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.5,
+      ldCount: 2345,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
+
+    rerenderSection(screen, { poi, enabled: false });
+    expect(screen.getByTestId('external-ratings-combined')).toBeTruthy();
+    expect(screen.queryByTestId('external-ratings-loading')).toBeNull();
+  });
+
+  it('never flashes a previous place rating while a new card is opening', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
+    );
+
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.5,
+      ldCount: 2345,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
+
+    mockResolveKnownListing.mockReset();
+    mockResolveKnownListing.mockImplementation(() => new Promise(() => {}));
+    rerenderSection(screen, { poi: { ...makePoi('Bar Baz'), id: 2 }, enabled: false });
+
+    expect(screen.queryByTestId('external-ratings-combined')).toBeNull();
+    expect(screen.getByTestId('external-ratings-loading')).toBeTruthy();
+  });
+
+  it('mounts no hidden browser at all while a card is still opening', () => {
+    renderSection({ poi: makePoi('Foo Bar'), enabled: false });
+    expect((global as any).__lastWebViewProps).toBeNull();
+  });
+
   it('shows an honest blocked state after a hard block page', async () => {
     mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
       Promise.resolve(provider.id === 'yelp' ? YELP_LISTING_URL : null),
     );
 
-    const screen = render(
-      <ExternalRatingsSection
-        poi={makePoi('Foo Bar', {
-          'addr:housenumber': '123',
-          'addr:street': 'Main St',
-          'addr:city': 'New York',
-        })}
-      />,
-    );
+    const screen = renderSection({
+      poi: makePoi('Foo Bar', {
+        'addr:housenumber': '123',
+        'addr:street': 'Main St',
+        'addr:city': 'New York',
+      }),
+    });
 
     // TripAdvisor holds the single hidden-WebView slot first.
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_SEARCH_URL }));
@@ -420,7 +598,7 @@ describe('ExternalRatingsSection', () => {
       Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : null),
     );
 
-    const screen = render(<ExternalRatingsSection poi={makePoi('Foo Bar')} />);
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
 
     onMessage({

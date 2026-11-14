@@ -1,12 +1,23 @@
 {
-  "comment": "Canonical catalog of metro regions built by CI and seeded in the app. Each entry becomes a GitHub Release asset and an entry in the in-app regions list. To add a new city: append a new object here and CI will auto-build it on the next weekly run (or trigger manually).",
+  "comment": [
+    "Canonical catalog of regions built by CI and seeded in the app.",
+    "Generated + curated: the metro entries below are hand-maintained (better",
+    "bounds, GTFS feeds, release history); the rest are generated from the",
+    "Geofabrik tree by scripts/generate-pack-catalog.mjs — re-run that after",
+    "editing src/constants/geofabrikCatalog.ts."
+  ],
   "include": [
     {
       "id": "us-ny-new-york",
       "name": "New York Metro",
       "geofabrik": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
       "bbox": "-74.3,40.4,-73.2,41.0",
-      "bounds": { "minLat": 40.4, "maxLat": 41.0, "minLng": -74.3, "maxLng": -73.2 },
+      "bounds": {
+        "minLat": 40.4,
+        "maxLat": 41,
+        "minLng": -74.3,
+        "maxLng": -73.2
+      },
       "tilesSizeBytes": 440401920,
       "routingSizeBytes": 125829120,
       "geocodingSizeBytes": 194035200
@@ -16,7 +27,12 @@
       "name": "Los Angeles",
       "geofabrik": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
       "bbox": "-118.7,33.7,-117.9,34.4",
-      "bounds": { "minLat": 33.7, "maxLat": 34.4, "minLng": -118.7, "maxLng": -117.9 },
+      "bounds": {
+        "minLat": 33.7,
+        "maxLat": 34.4,
+        "minLng": -118.7,
+        "maxLng": -117.9
+      },
       "tilesSizeBytes": 188743680,
       "routingSizeBytes": 99614720,
       "geocodingSizeBytes": 136314880
@@ -26,7 +42,12 @@
       "name": "San Francisco Bay Area",
       "geofabrik": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
       "bbox": "-122.6,37.2,-121.5,38.0",
-      "bounds": { "minLat": 37.2, "maxLat": 38.0, "minLng": -122.6, "maxLng": -121.5 },
+      "bounds": {
+        "minLat": 37.2,
+        "maxLat": 38,
+        "minLng": -122.6,
+        "maxLng": -121.5
+      },
       "tilesSizeBytes": 104857600,
       "routingSizeBytes": 57671680,
       "geocodingSizeBytes": 83886080
@@ -36,7 +57,12 @@
       "name": "Chicago",
       "geofabrik": "https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf",
       "bbox": "-88.0,41.6,-87.5,42.1",
-      "bounds": { "minLat": 41.6, "maxLat": 42.1, "minLng": -88.0, "maxLng": -87.5 },
+      "bounds": {
+        "minLat": 41.6,
+        "maxLat": 42.1,
+        "minLng": -88,
+        "maxLng": -87.5
+      },
       "tilesSizeBytes": 125829120,
       "routingSizeBytes": 68157440,
       "geocodingSizeBytes": 94371840
@@ -46,7 +72,12 @@
       "name": "Houston",
       "geofabrik": "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
       "bbox": "-95.6,29.5,-95.0,30.1",
-      "bounds": { "minLat": 29.5, "maxLat": 30.1, "minLng": -95.6, "maxLng": -95.0 },
+      "bounds": {
+        "minLat": 29.5,
+        "maxLat": 30.1,
+        "minLng": -95.6,
+        "maxLng": -95
+      },
       "tilesSizeBytes": 115343360,
       "routingSizeBytes": 60817408,
       "geocodingSizeBytes": 78643200
@@ -56,7 +87,12 @@
       "name": "Seattle",
       "geofabrik": "https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf",
       "bbox": "-122.5,47.3,-122.1,47.8",
-      "bounds": { "minLat": 47.3, "maxLat": 47.8, "minLng": -122.5, "maxLng": -122.1 },
+      "bounds": {
+        "minLat": 47.3,
+        "maxLat": 47.8,
+        "minLng": -122.5,
+        "maxLng": -122.1
+      },
       "tilesSizeBytes": 73400320,
       "routingSizeBytes": 39845888,
       "geocodingSizeBytes": 57671680
@@ -66,7 +102,12 @@
       "name": "Miami",
       "geofabrik": "https://download.geofabrik.de/north-america/us/florida-latest.osm.pbf",
       "bbox": "-80.5,25.5,-80.0,25.9",
-      "bounds": { "minLat": 25.5, "maxLat": 25.9, "minLng": -80.5, "maxLng": -80.0 },
+      "bounds": {
+        "minLat": 25.5,
+        "maxLat": 25.9,
+        "minLng": -80.5,
+        "maxLng": -80
+      },
       "tilesSizeBytes": 62914560,
       "routingSizeBytes": 33554432,
       "geocodingSizeBytes": 47185920
@@ -76,7 +117,12 @@
       "name": "Boston",
       "geofabrik": "https://download.geofabrik.de/north-america/us/massachusetts-latest.osm.pbf",
       "bbox": "-71.2,42.2,-70.9,42.5",
-      "bounds": { "minLat": 42.2, "maxLat": 42.5, "minLng": -71.2, "maxLng": -70.9 },
+      "bounds": {
+        "minLat": 42.2,
+        "maxLat": 42.5,
+        "minLng": -71.2,
+        "maxLng": -70.9
+      },
       "tilesSizeBytes": 52428800,
       "routingSizeBytes": 28311552,
       "geocodingSizeBytes": 41943040
@@ -86,7 +132,12 @@
       "name": "Phoenix",
       "geofabrik": "https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf",
       "bbox": "-112.5,33.2,-111.7,33.8",
-      "bounds": { "minLat": 33.2, "maxLat": 33.8, "minLng": -112.5, "maxLng": -111.7 },
+      "bounds": {
+        "minLat": 33.2,
+        "maxLat": 33.8,
+        "minLng": -112.5,
+        "maxLng": -111.7
+      },
       "tilesSizeBytes": 78643200,
       "routingSizeBytes": 41943040,
       "geocodingSizeBytes": 57671680
@@ -96,7 +147,12 @@
       "name": "Toronto",
       "geofabrik": "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf",
       "bbox": "-79.7,43.5,-79.1,43.9",
-      "bounds": { "minLat": 43.5, "maxLat": 43.9, "minLng": -79.7, "maxLng": -79.1 },
+      "bounds": {
+        "minLat": 43.5,
+        "maxLat": 43.9,
+        "minLng": -79.7,
+        "maxLng": -79.1
+      },
       "tilesSizeBytes": 94371840,
       "routingSizeBytes": 50331648,
       "geocodingSizeBytes": 68157440
@@ -106,7 +162,12 @@
       "name": "Vancouver",
       "geofabrik": "https://download.geofabrik.de/north-america/canada/british-columbia-latest.osm.pbf",
       "bbox": "-123.3,49.1,-122.9,49.4",
-      "bounds": { "minLat": 49.1, "maxLat": 49.4, "minLng": -123.3, "maxLng": -122.9 },
+      "bounds": {
+        "minLat": 49.1,
+        "maxLat": 49.4,
+        "minLng": -123.3,
+        "maxLng": -122.9
+      },
       "tilesSizeBytes": 62914560,
       "routingSizeBytes": 33554432,
       "geocodingSizeBytes": 47185920
@@ -116,7 +177,12 @@
       "name": "Mexico City",
       "geofabrik": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf",
       "bbox": "-99.4,19.1,-98.8,19.7",
-      "bounds": { "minLat": 19.1, "maxLat": 19.7, "minLng": -99.4, "maxLng": -98.8 },
+      "bounds": {
+        "minLat": 19.1,
+        "maxLat": 19.7,
+        "minLng": -99.4,
+        "maxLng": -98.8
+      },
       "tilesSizeBytes": 104857600,
       "routingSizeBytes": 55574528,
       "geocodingSizeBytes": 73400320
@@ -126,7 +192,12 @@
       "name": "São Paulo",
       "geofabrik": "https://download.geofabrik.de/south-america/brazil-latest.osm.pbf",
       "bbox": "-46.8,-24.0,-46.3,-23.4",
-      "bounds": { "minLat": -24.0, "maxLat": -23.4, "minLng": -46.8, "maxLng": -46.3 },
+      "bounds": {
+        "minLat": -24,
+        "maxLat": -23.4,
+        "minLng": -46.8,
+        "maxLng": -46.3
+      },
       "tilesSizeBytes": 136314880,
       "routingSizeBytes": 71303168,
       "geocodingSizeBytes": 94371840
@@ -136,7 +207,12 @@
       "name": "Buenos Aires",
       "geofabrik": "https://download.geofabrik.de/south-america/argentina-latest.osm.pbf",
       "bbox": "-58.6,-34.7,-58.2,-34.5",
-      "bounds": { "minLat": -34.7, "maxLat": -34.5, "minLng": -58.6, "maxLng": -58.2 },
+      "bounds": {
+        "minLat": -34.7,
+        "maxLat": -34.5,
+        "minLng": -58.6,
+        "maxLng": -58.2
+      },
       "tilesSizeBytes": 78643200,
       "routingSizeBytes": 41943040,
       "geocodingSizeBytes": 57671680
@@ -146,7 +222,12 @@
       "name": "Bogotá",
       "geofabrik": "https://download.geofabrik.de/south-america/colombia-latest.osm.pbf",
       "bbox": "-74.2,4.5,-73.9,4.8",
-      "bounds": { "minLat": 4.5, "maxLat": 4.8, "minLng": -74.2, "maxLng": -73.9 },
+      "bounds": {
+        "minLat": 4.5,
+        "maxLat": 4.8,
+        "minLng": -74.2,
+        "maxLng": -73.9
+      },
       "tilesSizeBytes": 62914560,
       "routingSizeBytes": 33554432,
       "geocodingSizeBytes": 47185920
@@ -154,9 +235,14 @@
     {
       "id": "gb-england-london",
       "name": "London",
-      "geofabrik": "https://download.geofabrik.de/europe/great-britain/england-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf",
       "bbox": "-0.5,51.3,0.3,51.7",
-      "bounds": { "minLat": 51.3, "maxLat": 51.7, "minLng": -0.5, "maxLng": 0.3 },
+      "bounds": {
+        "minLat": 51.3,
+        "maxLat": 51.7,
+        "minLng": -0.5,
+        "maxLng": 0.3
+      },
       "tilesSizeBytes": 220200960,
       "routingSizeBytes": 110100480,
       "geocodingSizeBytes": 162529280
@@ -166,7 +252,12 @@
       "name": "Berlin",
       "geofabrik": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf",
       "bbox": "13.1,52.3,13.7,52.7",
-      "bounds": { "minLat": 52.3, "maxLat": 52.7, "minLng": 13.1, "maxLng": 13.7 },
+      "bounds": {
+        "minLat": 52.3,
+        "maxLat": 52.7,
+        "minLng": 13.1,
+        "maxLng": 13.7
+      },
       "tilesSizeBytes": 94371840,
       "routingSizeBytes": 50331648,
       "geocodingSizeBytes": 68157440
@@ -176,7 +267,12 @@
       "name": "Paris",
       "geofabrik": "https://download.geofabrik.de/europe/france/ile-de-france-latest.osm.pbf",
       "bbox": "2.0,48.5,3.0,49.1",
-      "bounds": { "minLat": 48.5, "maxLat": 49.1, "minLng": 2.0, "maxLng": 3.0 },
+      "bounds": {
+        "minLat": 48.5,
+        "maxLat": 49.1,
+        "minLng": 2,
+        "maxLng": 3
+      },
       "tilesSizeBytes": 188743680,
       "routingSizeBytes": 99614720,
       "geocodingSizeBytes": 136314880
@@ -186,7 +282,12 @@
       "name": "Madrid",
       "geofabrik": "https://download.geofabrik.de/europe/spain-latest.osm.pbf",
       "bbox": "-3.9,40.2,-3.5,40.6",
-      "bounds": { "minLat": 40.2, "maxLat": 40.6, "minLng": -3.9, "maxLng": -3.5 },
+      "bounds": {
+        "minLat": 40.2,
+        "maxLat": 40.6,
+        "minLng": -3.9,
+        "maxLng": -3.5
+      },
       "tilesSizeBytes": 78643200,
       "routingSizeBytes": 41943040,
       "geocodingSizeBytes": 57671680
@@ -196,7 +297,12 @@
       "name": "Rome",
       "geofabrik": "https://download.geofabrik.de/europe/italy-latest.osm.pbf",
       "bbox": "12.3,41.7,12.6,42.0",
-      "bounds": { "minLat": 41.7, "maxLat": 42.0, "minLng": 12.3, "maxLng": 12.6 },
+      "bounds": {
+        "minLat": 41.7,
+        "maxLat": 42,
+        "minLng": 12.3,
+        "maxLng": 12.6
+      },
       "tilesSizeBytes": 73400320,
       "routingSizeBytes": 39845888,
       "geocodingSizeBytes": 57671680
@@ -206,7 +312,12 @@
       "name": "Amsterdam",
       "geofabrik": "https://download.geofabrik.de/europe/netherlands-latest.osm.pbf",
       "bbox": "4.7,52.2,5.1,52.5",
-      "bounds": { "minLat": 52.2, "maxLat": 52.5, "minLng": 4.7, "maxLng": 5.1 },
+      "bounds": {
+        "minLat": 52.2,
+        "maxLat": 52.5,
+        "minLng": 4.7,
+        "maxLng": 5.1
+      },
       "tilesSizeBytes": 57671680,
       "routingSizeBytes": 30408704,
       "geocodingSizeBytes": 41943040
@@ -216,7 +327,12 @@
       "name": "Istanbul",
       "geofabrik": "https://download.geofabrik.de/europe/turkey-latest.osm.pbf",
       "bbox": "28.7,40.8,29.3,41.2",
-      "bounds": { "minLat": 40.8, "maxLat": 41.2, "minLng": 28.7, "maxLng": 29.3 },
+      "bounds": {
+        "minLat": 40.8,
+        "maxLat": 41.2,
+        "minLng": 28.7,
+        "maxLng": 29.3
+      },
       "tilesSizeBytes": 104857600,
       "routingSizeBytes": 55574528,
       "geocodingSizeBytes": 73400320
@@ -224,9 +340,14 @@
     {
       "id": "ru-moscow",
       "name": "Moscow",
-      "geofabrik": "https://download.geofabrik.de/europe/russia/central-fed-district-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/russia/central-fed-district-latest.osm.pbf",
       "bbox": "37.3,55.5,37.9,56.0",
-      "bounds": { "minLat": 55.5, "maxLat": 56.0, "minLng": 37.3, "maxLng": 37.9 },
+      "bounds": {
+        "minLat": 55.5,
+        "maxLat": 56,
+        "minLng": 37.3,
+        "maxLng": 37.9
+      },
       "tilesSizeBytes": 125829120,
       "routingSizeBytes": 66060288,
       "geocodingSizeBytes": 88080384
@@ -236,7 +357,12 @@
       "name": "Warsaw",
       "geofabrik": "https://download.geofabrik.de/europe/poland-latest.osm.pbf",
       "bbox": "20.8,52.0,21.3,52.4",
-      "bounds": { "minLat": 52.0, "maxLat": 52.4, "minLng": 20.8, "maxLng": 21.3 },
+      "bounds": {
+        "minLat": 52,
+        "maxLat": 52.4,
+        "minLng": 20.8,
+        "maxLng": 21.3
+      },
       "tilesSizeBytes": 57671680,
       "routingSizeBytes": 30408704,
       "geocodingSizeBytes": 41943040
@@ -246,7 +372,12 @@
       "name": "Tokyo",
       "geofabrik": "https://download.geofabrik.de/asia/japan-latest.osm.pbf",
       "bbox": "139.5,35.5,140.0,35.9",
-      "bounds": { "minLat": 35.5, "maxLat": 35.9, "minLng": 139.5, "maxLng": 140.0 },
+      "bounds": {
+        "minLat": 35.5,
+        "maxLat": 35.9,
+        "minLng": 139.5,
+        "maxLng": 140
+      },
       "tilesSizeBytes": 262144000,
       "routingSizeBytes": 136314880,
       "geocodingSizeBytes": 188743680
@@ -256,7 +387,12 @@
       "name": "Delhi",
       "geofabrik": "https://download.geofabrik.de/asia/india-latest.osm.pbf",
       "bbox": "76.8,28.4,77.4,28.9",
-      "bounds": { "minLat": 28.4, "maxLat": 28.9, "minLng": 76.8, "maxLng": 77.4 },
+      "bounds": {
+        "minLat": 28.4,
+        "maxLat": 28.9,
+        "minLng": 76.8,
+        "maxLng": 77.4
+      },
       "tilesSizeBytes": 94371840,
       "routingSizeBytes": 50331648,
       "geocodingSizeBytes": 68157440
@@ -266,7 +402,12 @@
       "name": "Mumbai",
       "geofabrik": "https://download.geofabrik.de/asia/india-latest.osm.pbf",
       "bbox": "72.7,18.9,73.0,19.3",
-      "bounds": { "minLat": 18.9, "maxLat": 19.3, "minLng": 72.7, "maxLng": 73.0 },
+      "bounds": {
+        "minLat": 18.9,
+        "maxLat": 19.3,
+        "minLng": 72.7,
+        "maxLng": 73
+      },
       "tilesSizeBytes": 78643200,
       "routingSizeBytes": 41943040,
       "geocodingSizeBytes": 57671680
@@ -276,7 +417,12 @@
       "name": "Seoul",
       "geofabrik": "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf",
       "bbox": "126.7,37.4,127.2,37.7",
-      "bounds": { "minLat": 37.4, "maxLat": 37.7, "minLng": 126.7, "maxLng": 127.2 },
+      "bounds": {
+        "minLat": 37.4,
+        "maxLat": 37.7,
+        "minLng": 126.7,
+        "maxLng": 127.2
+      },
       "tilesSizeBytes": 125829120,
       "routingSizeBytes": 66060288,
       "geocodingSizeBytes": 88080384
@@ -286,7 +432,12 @@
       "name": "Singapore",
       "geofabrik": "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf",
       "bbox": "103.6,1.1,104.1,1.5",
-      "bounds": { "minLat": 1.1, "maxLat": 1.5, "minLng": 103.6, "maxLng": 104.1 },
+      "bounds": {
+        "minLat": 1.1,
+        "maxLat": 1.5,
+        "minLng": 103.6,
+        "maxLng": 104.1
+      },
       "tilesSizeBytes": 52428800,
       "routingSizeBytes": 28311552,
       "geocodingSizeBytes": 41943040
@@ -296,7 +447,12 @@
       "name": "Bangkok",
       "geofabrik": "https://download.geofabrik.de/asia/thailand-latest.osm.pbf",
       "bbox": "100.3,13.6,101.0,14.0",
-      "bounds": { "minLat": 13.6, "maxLat": 14.0, "minLng": 100.3, "maxLng": 101.0 },
+      "bounds": {
+        "minLat": 13.6,
+        "maxLat": 14,
+        "minLng": 100.3,
+        "maxLng": 101
+      },
       "tilesSizeBytes": 73400320,
       "routingSizeBytes": 39845888,
       "geocodingSizeBytes": 52428800
@@ -306,7 +462,12 @@
       "name": "Jakarta",
       "geofabrik": "https://download.geofabrik.de/asia/indonesia-latest.osm.pbf",
       "bbox": "106.6,-6.4,107.1,-6.1",
-      "bounds": { "minLat": -6.4, "maxLat": -6.1, "minLng": 106.6, "maxLng": 107.1 },
+      "bounds": {
+        "minLat": -6.4,
+        "maxLat": -6.1,
+        "minLng": 106.6,
+        "maxLng": 107.1
+      },
       "tilesSizeBytes": 73400320,
       "routingSizeBytes": 39845888,
       "geocodingSizeBytes": 52428800
@@ -316,7 +477,12 @@
       "name": "Manila",
       "geofabrik": "https://download.geofabrik.de/asia/philippines-latest.osm.pbf",
       "bbox": "120.8,14.4,121.1,14.8",
-      "bounds": { "minLat": 14.4, "maxLat": 14.8, "minLng": 120.8, "maxLng": 121.1 },
+      "bounds": {
+        "minLat": 14.4,
+        "maxLat": 14.8,
+        "minLng": 120.8,
+        "maxLng": 121.1
+      },
       "tilesSizeBytes": 52428800,
       "routingSizeBytes": 28311552,
       "geocodingSizeBytes": 41943040
@@ -326,7 +492,12 @@
       "name": "Cairo",
       "geofabrik": "https://download.geofabrik.de/africa/egypt-latest.osm.pbf",
       "bbox": "31.1,29.9,31.5,30.3",
-      "bounds": { "minLat": 29.9, "maxLat": 30.3, "minLng": 31.1, "maxLng": 31.5 },
+      "bounds": {
+        "minLat": 29.9,
+        "maxLat": 30.3,
+        "minLng": 31.1,
+        "maxLng": 31.5
+      },
       "tilesSizeBytes": 73400320,
       "routingSizeBytes": 39845888,
       "geocodingSizeBytes": 52428800
@@ -336,7 +507,12 @@
       "name": "Lagos",
       "geofabrik": "https://download.geofabrik.de/africa/nigeria-latest.osm.pbf",
       "bbox": "3.1,6.4,3.5,6.7",
-      "bounds": { "minLat": 6.4, "maxLat": 6.7, "minLng": 3.1, "maxLng": 3.5 },
+      "bounds": {
+        "minLat": 6.4,
+        "maxLat": 6.7,
+        "minLng": 3.1,
+        "maxLng": 3.5
+      },
       "tilesSizeBytes": 47185920,
       "routingSizeBytes": 25165824,
       "geocodingSizeBytes": 36700160
@@ -346,7 +522,12 @@
       "name": "Nairobi",
       "geofabrik": "https://download.geofabrik.de/africa/kenya-latest.osm.pbf",
       "bbox": "36.7,-1.4,37.1,-1.1",
-      "bounds": { "minLat": -1.4, "maxLat": -1.1, "minLng": 36.7, "maxLng": 37.1 },
+      "bounds": {
+        "minLat": -1.4,
+        "maxLat": -1.1,
+        "minLng": 36.7,
+        "maxLng": 37.1
+      },
       "tilesSizeBytes": 47185920,
       "routingSizeBytes": 25165824,
       "geocodingSizeBytes": 36700160
@@ -356,7 +537,12 @@
       "name": "Cape Town",
       "geofabrik": "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf",
       "bbox": "18.3,-34.2,19.0,-33.8",
-      "bounds": { "minLat": -34.2, "maxLat": -33.8, "minLng": 18.3, "maxLng": 19.0 },
+      "bounds": {
+        "minLat": -34.2,
+        "maxLat": -33.8,
+        "minLng": 18.3,
+        "maxLng": 19
+      },
       "tilesSizeBytes": 62914560,
       "routingSizeBytes": 33554432,
       "geocodingSizeBytes": 47185920
@@ -366,7 +552,12 @@
       "name": "Sydney",
       "geofabrik": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
       "bbox": "150.9,-34.0,151.3,-33.7",
-      "bounds": { "minLat": -34.0, "maxLat": -33.7, "minLng": 150.9, "maxLng": 151.3 },
+      "bounds": {
+        "minLat": -34,
+        "maxLat": -33.7,
+        "minLng": 150.9,
+        "maxLng": 151.3
+      },
       "tilesSizeBytes": 104857600,
       "routingSizeBytes": 55574528,
       "geocodingSizeBytes": 73400320
@@ -376,7 +567,12 @@
       "name": "Melbourne",
       "geofabrik": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
       "bbox": "144.8,-38.0,145.2,-37.7",
-      "bounds": { "minLat": -38.0, "maxLat": -37.7, "minLng": 144.8, "maxLng": 145.2 },
+      "bounds": {
+        "minLat": -38,
+        "maxLat": -37.7,
+        "minLng": 144.8,
+        "maxLng": 145.2
+      },
       "tilesSizeBytes": 94371840,
       "routingSizeBytes": 50331648,
       "geocodingSizeBytes": 68157440
@@ -386,10 +582,1961 @@
       "name": "Auckland",
       "geofabrik": "https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf",
       "bbox": "174.6,-37.0,175.0,-36.7",
-      "bounds": { "minLat": -37.0, "maxLat": -36.7, "minLng": 174.6, "maxLng": 175.0 },
+      "bounds": {
+        "minLat": -37,
+        "maxLat": -36.7,
+        "minLng": 174.6,
+        "maxLng": 175
+      },
       "tilesSizeBytes": 47185920,
       "routingSizeBytes": 25165824,
       "geocodingSizeBytes": 36700160
+    },
+    {
+      "id": "africa-algeria",
+      "name": "Algeria",
+      "bbox": "-8.7,19,12,37.2",
+      "geofabrik": "https://download.geofabrik.de/africa/algeria-latest.osm.pbf"
+    },
+    {
+      "id": "africa-angola",
+      "name": "Angola",
+      "bbox": "11.7,-18.1,24.1,-4.4",
+      "geofabrik": "https://download.geofabrik.de/africa/angola-latest.osm.pbf"
+    },
+    {
+      "id": "africa-benin",
+      "name": "Benin",
+      "bbox": "0.8,6.1,3.9,12.4",
+      "geofabrik": "https://download.geofabrik.de/africa/benin-latest.osm.pbf"
+    },
+    {
+      "id": "africa-botswana",
+      "name": "Botswana",
+      "bbox": "19.9,-26.9,29.4,-17.8",
+      "geofabrik": "https://download.geofabrik.de/africa/botswana-latest.osm.pbf"
+    },
+    {
+      "id": "africa-burkina-faso",
+      "name": "Burkina Faso",
+      "bbox": "-5.5,9.4,2.4,15.1",
+      "geofabrik": "https://download.geofabrik.de/africa/burkina-faso-latest.osm.pbf"
+    },
+    {
+      "id": "africa-burundi",
+      "name": "Burundi",
+      "bbox": "29,-4.5,30.9,-2.3",
+      "geofabrik": "https://download.geofabrik.de/africa/burundi-latest.osm.pbf"
+    },
+    {
+      "id": "africa-cameroon",
+      "name": "Cameroon",
+      "bbox": "8.5,1.7,16.2,13.1",
+      "geofabrik": "https://download.geofabrik.de/africa/cameroon-latest.osm.pbf"
+    },
+    {
+      "id": "africa-canary-islands",
+      "name": "Canary Islands",
+      "bbox": "-18.2,27.6,-13.4,29.5",
+      "geofabrik": "https://download.geofabrik.de/africa/canary-islands-latest.osm.pbf"
+    },
+    {
+      "id": "africa-cape-verde",
+      "name": "Cape Verde",
+      "bbox": "-25.4,14.8,-22.7,17.2",
+      "geofabrik": "https://download.geofabrik.de/africa/cape-verde-latest.osm.pbf"
+    },
+    {
+      "id": "africa-central-african-republic",
+      "name": "Central African Republic",
+      "bbox": "14.4,2.2,27.5,11",
+      "geofabrik": "https://download.geofabrik.de/africa/central-african-republic-latest.osm.pbf"
+    },
+    {
+      "id": "africa-chad",
+      "name": "Chad",
+      "bbox": "13.5,7.5,24.1,23.5",
+      "geofabrik": "https://download.geofabrik.de/africa/chad-latest.osm.pbf"
+    },
+    {
+      "id": "africa-comoros",
+      "name": "Comoros",
+      "bbox": "43.2,-12.4,44.5,-11.3",
+      "geofabrik": "https://download.geofabrik.de/africa/comoros-latest.osm.pbf"
+    },
+    {
+      "id": "africa-congo-brazzaville",
+      "name": "Congo (Republic of)",
+      "bbox": "11.2,-5.1,18.7,3.8",
+      "geofabrik": "https://download.geofabrik.de/africa/congo-brazzaville-latest.osm.pbf"
+    },
+    {
+      "id": "africa-congo-kinshasa",
+      "name": "Congo (Democratic Republic)",
+      "bbox": "12.2,-13.5,31.3,5.4",
+      "geofabrik": "https://download.geofabrik.de/africa/congo-kinshasa-latest.osm.pbf"
+    },
+    {
+      "id": "africa-djibouti",
+      "name": "Djibouti",
+      "bbox": "41.8,10.9,43.4,12.7",
+      "geofabrik": "https://download.geofabrik.de/africa/djibouti-latest.osm.pbf"
+    },
+    {
+      "id": "africa-egypt",
+      "name": "Egypt",
+      "bbox": "24.7,21.9,37.1,31.7",
+      "geofabrik": "https://download.geofabrik.de/africa/egypt-latest.osm.pbf"
+    },
+    {
+      "id": "africa-equatorial-guinea",
+      "name": "Equatorial Guinea",
+      "bbox": "8.4,0.9,11.4,3.8",
+      "geofabrik": "https://download.geofabrik.de/africa/equatorial-guinea-latest.osm.pbf"
+    },
+    {
+      "id": "africa-eritrea",
+      "name": "Eritrea",
+      "bbox": "36.4,12.4,43.2,18",
+      "geofabrik": "https://download.geofabrik.de/africa/eritrea-latest.osm.pbf"
+    },
+    {
+      "id": "africa-ethiopia",
+      "name": "Ethiopia",
+      "bbox": "33,3.4,48,15",
+      "geofabrik": "https://download.geofabrik.de/africa/ethiopia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-gabon",
+      "name": "Gabon",
+      "bbox": "8.7,-3.9,14.6,2.3",
+      "geofabrik": "https://download.geofabrik.de/africa/gabon-latest.osm.pbf"
+    },
+    {
+      "id": "africa-gambia",
+      "name": "Gambia",
+      "bbox": "-16.8,13.1,-13.8,13.8",
+      "geofabrik": "https://download.geofabrik.de/africa/gambia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-ghana",
+      "name": "Ghana",
+      "bbox": "-3.3,4.7,1.2,11.2",
+      "geofabrik": "https://download.geofabrik.de/africa/ghana-latest.osm.pbf"
+    },
+    {
+      "id": "africa-guinea",
+      "name": "Guinea",
+      "bbox": "-15.1,7.2,-7.7,12.7",
+      "geofabrik": "https://download.geofabrik.de/africa/guinea-latest.osm.pbf"
+    },
+    {
+      "id": "africa-guinea-bissau",
+      "name": "Guinea-Bissau",
+      "bbox": "-16.8,10.9,-13.7,12.7",
+      "geofabrik": "https://download.geofabrik.de/africa/guinea-bissau-latest.osm.pbf"
+    },
+    {
+      "id": "africa-ivory-coast",
+      "name": "Ivory Coast",
+      "bbox": "-8.6,4.3,-2.5,10.8",
+      "geofabrik": "https://download.geofabrik.de/africa/ivory-coast-latest.osm.pbf"
+    },
+    {
+      "id": "africa-kenya",
+      "name": "Kenya",
+      "bbox": "34,-4.7,42,4.6",
+      "geofabrik": "https://download.geofabrik.de/africa/kenya-latest.osm.pbf"
+    },
+    {
+      "id": "africa-lesotho",
+      "name": "Lesotho",
+      "bbox": "27,-30.7,29.5,-28.6",
+      "geofabrik": "https://download.geofabrik.de/africa/lesotho-latest.osm.pbf"
+    },
+    {
+      "id": "africa-liberia",
+      "name": "Liberia",
+      "bbox": "-11.5,4.3,-7.4,8.6",
+      "geofabrik": "https://download.geofabrik.de/africa/liberia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-libya",
+      "name": "Libya",
+      "bbox": "9.4,19.5,25.2,33.2",
+      "geofabrik": "https://download.geofabrik.de/africa/libya-latest.osm.pbf"
+    },
+    {
+      "id": "africa-madagascar",
+      "name": "Madagascar",
+      "bbox": "43.2,-25.6,50.5,-12",
+      "geofabrik": "https://download.geofabrik.de/africa/madagascar-latest.osm.pbf"
+    },
+    {
+      "id": "africa-malawi",
+      "name": "Malawi",
+      "bbox": "32.7,-17.1,36,-9.4",
+      "geofabrik": "https://download.geofabrik.de/africa/malawi-latest.osm.pbf"
+    },
+    {
+      "id": "africa-mali",
+      "name": "Mali",
+      "bbox": "-12.3,10.1,4.3,25",
+      "geofabrik": "https://download.geofabrik.de/africa/mali-latest.osm.pbf"
+    },
+    {
+      "id": "africa-mauritania",
+      "name": "Mauritania",
+      "bbox": "-17.1,14.7,-4.8,27.3",
+      "geofabrik": "https://download.geofabrik.de/africa/mauritania-latest.osm.pbf"
+    },
+    {
+      "id": "africa-mauritius",
+      "name": "Mauritius",
+      "bbox": "57.3,-20.5,57.8,-20",
+      "geofabrik": "https://download.geofabrik.de/africa/mauritius-latest.osm.pbf"
+    },
+    {
+      "id": "africa-morocco",
+      "name": "Morocco",
+      "bbox": "-13.2,27.7,-1,35.9",
+      "geofabrik": "https://download.geofabrik.de/africa/morocco-latest.osm.pbf"
+    },
+    {
+      "id": "africa-mozambique",
+      "name": "Mozambique",
+      "bbox": "30.2,-26.9,40.9,-10.5",
+      "geofabrik": "https://download.geofabrik.de/africa/mozambique-latest.osm.pbf"
+    },
+    {
+      "id": "africa-namibia",
+      "name": "Namibia",
+      "bbox": "11.7,-29.1,25.3,-17",
+      "geofabrik": "https://download.geofabrik.de/africa/namibia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-niger",
+      "name": "Niger",
+      "bbox": "0.2,11.7,16,23.5",
+      "geofabrik": "https://download.geofabrik.de/africa/niger-latest.osm.pbf"
+    },
+    {
+      "id": "africa-nigeria",
+      "name": "Nigeria",
+      "bbox": "2.7,4.3,14.7,13.9",
+      "geofabrik": "https://download.geofabrik.de/africa/nigeria-latest.osm.pbf"
+    },
+    {
+      "id": "africa-rwanda",
+      "name": "Rwanda",
+      "bbox": "28.9,-2.8,30.9,-1",
+      "geofabrik": "https://download.geofabrik.de/africa/rwanda-latest.osm.pbf"
+    },
+    {
+      "id": "africa-senegal-and-gambia",
+      "name": "Senegal and Gambia",
+      "bbox": "-17.6,12.3,-11.4,16.7",
+      "geofabrik": "https://download.geofabrik.de/africa/senegal-and-gambia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-sierra-leone",
+      "name": "Sierra Leone",
+      "bbox": "-13.3,6.9,-10.3,10",
+      "geofabrik": "https://download.geofabrik.de/africa/sierra-leone-latest.osm.pbf"
+    },
+    {
+      "id": "africa-somalia",
+      "name": "Somalia",
+      "bbox": "40.9,-1.7,51.4,12",
+      "geofabrik": "https://download.geofabrik.de/africa/somalia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-south-africa",
+      "name": "South Africa",
+      "bbox": "16.5,-34.9,33,-22.1",
+      "geofabrik": "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf"
+    },
+    {
+      "id": "africa-south-sudan",
+      "name": "South Sudan",
+      "bbox": "24.1,3.5,35.5,12.2",
+      "geofabrik": "https://download.geofabrik.de/africa/south-sudan-latest.osm.pbf"
+    },
+    {
+      "id": "africa-sudan",
+      "name": "Sudan",
+      "bbox": "21.8,8.7,38.7,23.1",
+      "geofabrik": "https://download.geofabrik.de/africa/sudan-latest.osm.pbf"
+    },
+    {
+      "id": "africa-tanzania",
+      "name": "Tanzania",
+      "bbox": "29.3,-11.7,40.4,-1",
+      "geofabrik": "https://download.geofabrik.de/africa/tanzania-latest.osm.pbf"
+    },
+    {
+      "id": "africa-togo",
+      "name": "Togo",
+      "bbox": "0,6.1,1.9,11.1",
+      "geofabrik": "https://download.geofabrik.de/africa/togo-latest.osm.pbf"
+    },
+    {
+      "id": "africa-tunisia",
+      "name": "Tunisia",
+      "bbox": "7.5,30.2,11.6,37.6",
+      "geofabrik": "https://download.geofabrik.de/africa/tunisia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-uganda",
+      "name": "Uganda",
+      "bbox": "29.5,-1.5,35.1,4.3",
+      "geofabrik": "https://download.geofabrik.de/africa/uganda-latest.osm.pbf"
+    },
+    {
+      "id": "africa-western-sahara",
+      "name": "Western Sahara",
+      "bbox": "-17.1,20.8,-8.7,27.7",
+      "geofabrik": "https://download.geofabrik.de/africa/western-sahara-latest.osm.pbf"
+    },
+    {
+      "id": "africa-zambia",
+      "name": "Zambia",
+      "bbox": "21.9,-18.1,33.7,-8.2",
+      "geofabrik": "https://download.geofabrik.de/africa/zambia-latest.osm.pbf"
+    },
+    {
+      "id": "africa-zimbabwe",
+      "name": "Zimbabwe",
+      "bbox": "25.2,-22.4,33.1,-15.6",
+      "geofabrik": "https://download.geofabrik.de/africa/zimbabwe-latest.osm.pbf"
+    },
+    {
+      "id": "asia-afghanistan",
+      "name": "Afghanistan",
+      "bbox": "60.5,29.4,74.9,38.5",
+      "geofabrik": "https://download.geofabrik.de/asia/afghanistan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-armenia",
+      "name": "Armenia",
+      "bbox": "43.5,38.8,46.7,41.3",
+      "geofabrik": "https://download.geofabrik.de/asia/armenia-latest.osm.pbf"
+    },
+    {
+      "id": "asia-azerbaijan",
+      "name": "Azerbaijan",
+      "bbox": "44.8,38.4,50.4,41.9",
+      "geofabrik": "https://download.geofabrik.de/asia/azerbaijan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-bangladesh",
+      "name": "Bangladesh",
+      "bbox": "88,20.7,92.7,26.7",
+      "geofabrik": "https://download.geofabrik.de/asia/bangladesh-latest.osm.pbf"
+    },
+    {
+      "id": "asia-bhutan",
+      "name": "Bhutan",
+      "bbox": "88.8,26.7,92.1,28.3",
+      "geofabrik": "https://download.geofabrik.de/asia/bhutan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-cambodia",
+      "name": "Cambodia",
+      "bbox": "102.3,10.4,107.7,14.7",
+      "geofabrik": "https://download.geofabrik.de/asia/cambodia-latest.osm.pbf"
+    },
+    {
+      "id": "asia-gcc-states",
+      "name": "GCC States",
+      "bbox": "50.8,14,56.4,26.2",
+      "geofabrik": "https://download.geofabrik.de/asia/gcc-states-latest.osm.pbf"
+    },
+    {
+      "id": "asia-iran",
+      "name": "Iran",
+      "bbox": "44,25.1,63.3,39.8",
+      "geofabrik": "https://download.geofabrik.de/asia/iran-latest.osm.pbf"
+    },
+    {
+      "id": "asia-iraq",
+      "name": "Iraq",
+      "bbox": "38.8,29.1,48.6,37.4",
+      "geofabrik": "https://download.geofabrik.de/asia/iraq-latest.osm.pbf"
+    },
+    {
+      "id": "asia-israel-and-palestine",
+      "name": "Israel and Palestine",
+      "bbox": "34.2,29.5,35.9,33.3",
+      "geofabrik": "https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf"
+    },
+    {
+      "id": "asia-japan",
+      "name": "Japan",
+      "bbox": "122.9,24.2,153.1,45.6",
+      "geofabrik": "https://download.geofabrik.de/asia/japan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-jordan",
+      "name": "Jordan",
+      "bbox": "35,29.2,39.3,33.4",
+      "geofabrik": "https://download.geofabrik.de/asia/jordan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-kazakhstan",
+      "name": "Kazakhstan",
+      "bbox": "50.3,40.6,87.4,55.4",
+      "geofabrik": "https://download.geofabrik.de/asia/kazakhstan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-kyrgyzstan",
+      "name": "Kyrgyzstan",
+      "bbox": "69.3,39.2,80.3,43.3",
+      "geofabrik": "https://download.geofabrik.de/asia/kyrgyzstan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-laos",
+      "name": "Laos",
+      "bbox": "100.1,13.9,107.7,22.5",
+      "geofabrik": "https://download.geofabrik.de/asia/laos-latest.osm.pbf"
+    },
+    {
+      "id": "asia-lebanon",
+      "name": "Lebanon",
+      "bbox": "35.1,33.1,36.6,34.7",
+      "geofabrik": "https://download.geofabrik.de/asia/lebanon-latest.osm.pbf"
+    },
+    {
+      "id": "asia-malaysia-singapore-brunei",
+      "name": "Malaysia, Singapore, and Brunei",
+      "bbox": "99.6,0.9,119.3,7.4",
+      "geofabrik": "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf"
+    },
+    {
+      "id": "asia-maldives",
+      "name": "Maldives",
+      "bbox": "72.7,-0.7,73.8,7.2",
+      "geofabrik": "https://download.geofabrik.de/asia/maldives-latest.osm.pbf"
+    },
+    {
+      "id": "asia-mongolia",
+      "name": "Mongolia",
+      "bbox": "87.6,41.6,120,52.2",
+      "geofabrik": "https://download.geofabrik.de/asia/mongolia-latest.osm.pbf"
+    },
+    {
+      "id": "asia-myanmar",
+      "name": "Myanmar",
+      "bbox": "92.2,9.6,101.2,28.6",
+      "geofabrik": "https://download.geofabrik.de/asia/myanmar-latest.osm.pbf"
+    },
+    {
+      "id": "asia-nepal",
+      "name": "Nepal",
+      "bbox": "80.1,26.4,88.2,30.5",
+      "geofabrik": "https://download.geofabrik.de/asia/nepal-latest.osm.pbf"
+    },
+    {
+      "id": "asia-north-korea",
+      "name": "North Korea",
+      "bbox": "124.2,37.7,130.7,43",
+      "geofabrik": "https://download.geofabrik.de/asia/north-korea-latest.osm.pbf"
+    },
+    {
+      "id": "asia-oman",
+      "name": "Oman",
+      "bbox": "52,16.6,59.9,26.4",
+      "geofabrik": "https://download.geofabrik.de/asia/oman-latest.osm.pbf"
+    },
+    {
+      "id": "asia-pakistan",
+      "name": "Pakistan",
+      "bbox": "60.9,23.7,77.1,37.1",
+      "geofabrik": "https://download.geofabrik.de/asia/pakistan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-philippines",
+      "name": "Philippines",
+      "bbox": "117.2,5,126.6,21.1",
+      "geofabrik": "https://download.geofabrik.de/asia/philippines-latest.osm.pbf"
+    },
+    {
+      "id": "asia-south-korea",
+      "name": "South Korea",
+      "bbox": "125.9,33.1,129.6,38.6",
+      "geofabrik": "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
+    },
+    {
+      "id": "asia-sri-lanka",
+      "name": "Sri Lanka",
+      "bbox": "79.7,5.9,81.9,9.8",
+      "geofabrik": "https://download.geofabrik.de/asia/sri-lanka-latest.osm.pbf"
+    },
+    {
+      "id": "asia-syria",
+      "name": "Syria",
+      "bbox": "35.7,32.3,42.4,37.3",
+      "geofabrik": "https://download.geofabrik.de/asia/syria-latest.osm.pbf"
+    },
+    {
+      "id": "asia-taiwan",
+      "name": "Taiwan",
+      "bbox": "120,21.9,122.1,25.3",
+      "geofabrik": "https://download.geofabrik.de/asia/taiwan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-tajikistan",
+      "name": "Tajikistan",
+      "bbox": "67.4,36.7,75.2,41.1",
+      "geofabrik": "https://download.geofabrik.de/asia/tajikistan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-thailand",
+      "name": "Thailand",
+      "bbox": "97.3,5.6,105.7,20.5",
+      "geofabrik": "https://download.geofabrik.de/asia/thailand-latest.osm.pbf"
+    },
+    {
+      "id": "asia-east-timor",
+      "name": "Timor-Leste",
+      "bbox": "124,-9.5,127.3,-8.1",
+      "geofabrik": "https://download.geofabrik.de/asia/east-timor-latest.osm.pbf"
+    },
+    {
+      "id": "asia-turkmenistan",
+      "name": "Turkmenistan",
+      "bbox": "52.5,35.1,66.7,42.8",
+      "geofabrik": "https://download.geofabrik.de/asia/turkmenistan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-uzbekistan",
+      "name": "Uzbekistan",
+      "bbox": "56,37.2,73.1,45.6",
+      "geofabrik": "https://download.geofabrik.de/asia/uzbekistan-latest.osm.pbf"
+    },
+    {
+      "id": "asia-vietnam",
+      "name": "Vietnam",
+      "bbox": "102.1,8.5,109.5,23.3",
+      "geofabrik": "https://download.geofabrik.de/asia/vietnam-latest.osm.pbf"
+    },
+    {
+      "id": "asia-yemen",
+      "name": "Yemen",
+      "bbox": "42.7,12.6,54.9,19",
+      "geofabrik": "https://download.geofabrik.de/asia/yemen-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-american-oceania",
+      "name": "American Oceania",
+      "bbox": "-171.1,-14.5,-168.1,-11",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/american-oceania-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-cook-islands",
+      "name": "Cook Islands",
+      "bbox": "-160,-21.9,-157.3,-18.8",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/cook-islands-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-fiji",
+      "name": "Fiji",
+      "bbox": "177,-20.7,180,-12.5",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/fiji-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-kiribati",
+      "name": "Kiribati",
+      "bbox": "-175,-11.5,177,3.9",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/kiribati-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-marshall-islands",
+      "name": "Marshall Islands",
+      "bbox": "160.8,4.6,172,14.6",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/marshall-islands-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-micronesia",
+      "name": "Micronesia",
+      "bbox": "138,1,163,10",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/micronesia-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-nauru",
+      "name": "Nauru",
+      "bbox": "166.8,-0.6,167,-0.3",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/nauru-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-new-caledonia",
+      "name": "New Caledonia",
+      "bbox": "163.6,-22.7,168.1,-19.6",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/new-caledonia-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-new-zealand",
+      "name": "New Zealand",
+      "bbox": "166.4,-47.3,178.6,-34.4",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-niue",
+      "name": "Niue",
+      "bbox": "-170,-19.2,-169.8,-18.9",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/niue-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-norfolk-island",
+      "name": "Norfolk Island",
+      "bbox": "167.9,-29.1,168,-28.9",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/norfolk-island-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-palau",
+      "name": "Palau",
+      "bbox": "131.1,3,134.7,8.2",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/palau-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-papua-new-guinea",
+      "name": "Papua New Guinea",
+      "bbox": "140.8,-11.5,156,0",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/papua-new-guinea-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-samoa",
+      "name": "Samoa",
+      "bbox": "-172.8,-14.1,-171.4,-13.4",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/samoa-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-solomon-islands",
+      "name": "Solomon Islands",
+      "bbox": "155.5,-11.3,163.2,-6.6",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/solomon-islands-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-tokelau",
+      "name": "Tokelau",
+      "bbox": "-172.5,-9.5,-171.2,-8.5",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/tokelau-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-tonga",
+      "name": "Tonga",
+      "bbox": "-176.2,-22.3,-173.9,-15.6",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/tonga-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-tuvalu",
+      "name": "Tuvalu",
+      "bbox": "176.1,-10.8,179.9,-5.7",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/tuvalu-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-vanuatu",
+      "name": "Vanuatu",
+      "bbox": "166.5,-20.3,170.3,-13.1",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/vanuatu-latest.osm.pbf"
+    },
+    {
+      "id": "australia-oceania-wallis-et-futuna",
+      "name": "Wallis et Futuna",
+      "bbox": "-178.2,-14.4,-176.1,-13.2",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/wallis-et-futuna-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-bahamas",
+      "name": "Bahamas",
+      "bbox": "-79.3,20.9,-72.7,27.3",
+      "geofabrik": "https://download.geofabrik.de/central-america/bahamas-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-belize",
+      "name": "Belize",
+      "bbox": "-89.2,15.9,-87.8,18.5",
+      "geofabrik": "https://download.geofabrik.de/central-america/belize-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-costa-rica",
+      "name": "Costa Rica",
+      "bbox": "-85.9,8,-82.6,11.2",
+      "geofabrik": "https://download.geofabrik.de/central-america/costa-rica-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-cuba",
+      "name": "Cuba",
+      "bbox": "-85,19.8,-74.1,23.2",
+      "geofabrik": "https://download.geofabrik.de/central-america/cuba-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-el-salvador",
+      "name": "El Salvador",
+      "bbox": "-90.2,13.1,-87.7,14.5",
+      "geofabrik": "https://download.geofabrik.de/central-america/el-salvador-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-guatemala",
+      "name": "Guatemala",
+      "bbox": "-92.2,13.7,-88.2,18",
+      "geofabrik": "https://download.geofabrik.de/central-america/guatemala-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-haiti-and-domrep",
+      "name": "Haiti and Dominican Republic",
+      "bbox": "-74.5,17.5,-68.3,20.2",
+      "geofabrik": "https://download.geofabrik.de/central-america/haiti-and-domrep-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-honduras",
+      "name": "Honduras",
+      "bbox": "-89.4,12.9,-83.2,16",
+      "geofabrik": "https://download.geofabrik.de/central-america/honduras-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-jamaica",
+      "name": "Jamaica",
+      "bbox": "-78.4,17.7,-76.2,18.5",
+      "geofabrik": "https://download.geofabrik.de/central-america/jamaica-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-nicaragua",
+      "name": "Nicaragua",
+      "bbox": "-87.7,11,-83.2,15",
+      "geofabrik": "https://download.geofabrik.de/central-america/nicaragua-latest.osm.pbf"
+    },
+    {
+      "id": "central-america-panama",
+      "name": "Panama",
+      "bbox": "-83,7.2,-77.2,9.7",
+      "geofabrik": "https://download.geofabrik.de/central-america/panama-latest.osm.pbf"
+    },
+    {
+      "id": "europe-albania",
+      "name": "Albania",
+      "bbox": "19.3,39.6,21.1,42.7",
+      "geofabrik": "https://download.geofabrik.de/europe/albania-latest.osm.pbf"
+    },
+    {
+      "id": "europe-andorra",
+      "name": "Andorra",
+      "bbox": "1.4,42.4,1.8,42.7",
+      "geofabrik": "https://download.geofabrik.de/europe/andorra-latest.osm.pbf"
+    },
+    {
+      "id": "europe-austria",
+      "name": "Austria",
+      "bbox": "9.5,46.4,17.2,49",
+      "geofabrik": "https://download.geofabrik.de/europe/austria-latest.osm.pbf"
+    },
+    {
+      "id": "europe-azores",
+      "name": "Azores",
+      "bbox": "-31.3,36.9,-25,39.8",
+      "geofabrik": "https://download.geofabrik.de/europe/azores-latest.osm.pbf"
+    },
+    {
+      "id": "europe-belarus",
+      "name": "Belarus",
+      "bbox": "23.2,51.3,32.8,56.2",
+      "geofabrik": "https://download.geofabrik.de/europe/belarus-latest.osm.pbf"
+    },
+    {
+      "id": "europe-belgium",
+      "name": "Belgium",
+      "bbox": "2.5,49.5,6.4,51.5",
+      "geofabrik": "https://download.geofabrik.de/europe/belgium-latest.osm.pbf"
+    },
+    {
+      "id": "europe-bosnia-herzegovina",
+      "name": "Bosnia-Herzegovina",
+      "bbox": "15.7,42.6,19.7,45.3",
+      "geofabrik": "https://download.geofabrik.de/europe/bosnia-herzegovina-latest.osm.pbf"
+    },
+    {
+      "id": "europe-bulgaria",
+      "name": "Bulgaria",
+      "bbox": "22.4,41.2,28.6,44.2",
+      "geofabrik": "https://download.geofabrik.de/europe/bulgaria-latest.osm.pbf"
+    },
+    {
+      "id": "europe-croatia",
+      "name": "Croatia",
+      "bbox": "13.5,42.4,19.5,46.6",
+      "geofabrik": "https://download.geofabrik.de/europe/croatia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-cyprus",
+      "name": "Cyprus",
+      "bbox": "32.3,34.6,34.6,35.7",
+      "geofabrik": "https://download.geofabrik.de/europe/cyprus-latest.osm.pbf"
+    },
+    {
+      "id": "europe-czech-republic",
+      "name": "Czech Republic",
+      "bbox": "12.1,48.6,18.9,51.1",
+      "geofabrik": "https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf"
+    },
+    {
+      "id": "europe-denmark",
+      "name": "Denmark",
+      "bbox": "8.1,54.6,15.2,57.8",
+      "geofabrik": "https://download.geofabrik.de/europe/denmark-latest.osm.pbf"
+    },
+    {
+      "id": "europe-estonia",
+      "name": "Estonia",
+      "bbox": "21.8,57.5,28.2,59.7",
+      "geofabrik": "https://download.geofabrik.de/europe/estonia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-faroe-islands",
+      "name": "Faroe Islands",
+      "bbox": "-7.7,61.3,-6.2,62.4",
+      "geofabrik": "https://download.geofabrik.de/europe/faroe-islands-latest.osm.pbf"
+    },
+    {
+      "id": "europe-finland",
+      "name": "Finland",
+      "bbox": "20,59.8,31.6,70.1",
+      "geofabrik": "https://download.geofabrik.de/europe/finland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-alsace",
+      "name": "Alsace",
+      "bbox": "7.1,47.4,8.3,48.9",
+      "geofabrik": "https://download.geofabrik.de/europe/france/alsace-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-aquitaine",
+      "name": "Aquitaine",
+      "bbox": "-1.8,43.3,1.1,45.7",
+      "geofabrik": "https://download.geofabrik.de/europe/france/aquitaine-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-auvergne",
+      "name": "Auvergne",
+      "bbox": "2.1,44.7,4.1,46.8",
+      "geofabrik": "https://download.geofabrik.de/europe/france/auvergne-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-basse-normandie",
+      "name": "Basse-Normandie",
+      "bbox": "-1.8,48.3,0.8,49.7",
+      "geofabrik": "https://download.geofabrik.de/europe/france/basse-normandie-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-bourgogne",
+      "name": "Bourgogne",
+      "bbox": "3.4,46.2,5.5,48.2",
+      "geofabrik": "https://download.geofabrik.de/europe/france/bourgogne-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-bretagne",
+      "name": "Bretagne",
+      "bbox": "-5.2,47.3,-1.1,48.9",
+      "geofabrik": "https://download.geofabrik.de/europe/france/bretagne-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-centre",
+      "name": "Centre",
+      "bbox": "0.1,46.4,3.2,48.5",
+      "geofabrik": "https://download.geofabrik.de/europe/france/centre-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-champagne-ardenne",
+      "name": "Champagne Ardenne",
+      "bbox": "3,47.6,5.9,50.2",
+      "geofabrik": "https://download.geofabrik.de/europe/france/champagne-ardenne-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-corse",
+      "name": "Corse",
+      "bbox": "8.5,41.3,9.6,43",
+      "geofabrik": "https://download.geofabrik.de/europe/france/corse-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-franche-comte",
+      "name": "Franche Comte",
+      "bbox": "5.8,46.3,7.1,48",
+      "geofabrik": "https://download.geofabrik.de/europe/france/franche-comte-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-guadeloupe",
+      "name": "Guadeloupe",
+      "bbox": "-61.9,15.8,-61,16.5",
+      "geofabrik": "https://download.geofabrik.de/europe/france/guadeloupe-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-guyane",
+      "name": "Guyane",
+      "bbox": "-54.6,2.1,-51.7,5.8",
+      "geofabrik": "https://download.geofabrik.de/europe/france/guyane-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-haute-normandie",
+      "name": "Haute-Normandie",
+      "bbox": "0.1,48.7,1.9,50",
+      "geofabrik": "https://download.geofabrik.de/europe/france/haute-normandie-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-ile-de-france",
+      "name": "Ile-de-France",
+      "bbox": "1.4,48.1,3.2,49.2",
+      "geofabrik": "https://download.geofabrik.de/europe/france/ile-de-france-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-languedoc-roussillon",
+      "name": "Languedoc-Roussillon",
+      "bbox": "2,42.3,4.9,44.8",
+      "geofabrik": "https://download.geofabrik.de/europe/france/languedoc-roussillon-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-limousin",
+      "name": "Limousin",
+      "bbox": "0.8,44.9,2.5,46.4",
+      "geofabrik": "https://download.geofabrik.de/europe/france/limousin-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-lorraine",
+      "name": "Lorraine",
+      "bbox": "5.7,48,7.7,50",
+      "geofabrik": "https://download.geofabrik.de/europe/france/lorraine-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-martinique",
+      "name": "Martinique",
+      "bbox": "-61.3,14.4,-60.9,14.9",
+      "geofabrik": "https://download.geofabrik.de/europe/france/martinique-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-mayotte",
+      "name": "Mayotte",
+      "bbox": "44.9,-13.1,45.3,-12.6",
+      "geofabrik": "https://download.geofabrik.de/europe/france/mayotte-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-midi-pyrenees",
+      "name": "Midi-Pyrenees",
+      "bbox": "0.2,42.6,3.3,45.1",
+      "geofabrik": "https://download.geofabrik.de/europe/france/midi-pyrenees-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-nord-pas-de-calais",
+      "name": "Nord-Pas-de-Calais",
+      "bbox": "1.7,50,4.3,51.1",
+      "geofabrik": "https://download.geofabrik.de/europe/france/nord-pas-de-calais-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-pays-de-la-loire",
+      "name": "Pays de la Loire",
+      "bbox": "-2.6,46.5,0.2,48.5",
+      "geofabrik": "https://download.geofabrik.de/europe/france/pays-de-la-loire-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-picardie",
+      "name": "Picardie",
+      "bbox": "1.6,48.9,4.2,50.5",
+      "geofabrik": "https://download.geofabrik.de/europe/france/picardie-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-poitou-charentes",
+      "name": "Poitou-Charentes",
+      "bbox": "-1.5,45,0.6,47.3",
+      "geofabrik": "https://download.geofabrik.de/europe/france/poitou-charentes-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-provence-alpes-cote-d-azur",
+      "name": "Provence Alpes-Cote-d'Azur",
+      "bbox": "4.2,43.3,7.8,45.1",
+      "geofabrik": "https://download.geofabrik.de/europe/france/provence-alpes-cote-d-azur-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-reunion",
+      "name": "Reunion",
+      "bbox": "55.2,-21.4,55.8,-20.9",
+      "geofabrik": "https://download.geofabrik.de/europe/france/reunion-latest.osm.pbf"
+    },
+    {
+      "id": "europe-france-rhone-alpes",
+      "name": "Rhone-Alpes",
+      "bbox": "4.3,44.1,7.3,46.8",
+      "geofabrik": "https://download.geofabrik.de/europe/france/rhone-alpes-latest.osm.pbf"
+    },
+    {
+      "id": "europe-georgia",
+      "name": "Georgia",
+      "bbox": "40,41,46.7,43.6",
+      "geofabrik": "https://download.geofabrik.de/europe/georgia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-baden-wuerttemberg",
+      "name": "Baden-Württemberg",
+      "bbox": "7.5,47.5,10.5,49.8",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/baden-wuerttemberg-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-bayern",
+      "name": "Bayern",
+      "bbox": "9,47.3,13.9,50.6",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-berlin",
+      "name": "Berlin",
+      "bbox": "13.1,52.3,13.8,52.7",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-brandenburg",
+      "name": "Brandenburg",
+      "bbox": "11.3,51.4,15,53.6",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-bremen",
+      "name": "Bremen",
+      "bbox": "8.5,53,9,53.6",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/bremen-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-hamburg",
+      "name": "Hamburg",
+      "bbox": "9.7,53.3,10.4,53.7",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-hessen",
+      "name": "Hessen",
+      "bbox": "7.8,49.4,10.2,51.7",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/hessen-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-mecklenburg-vorpommern",
+      "name": "Mecklenburg-Vorpommern",
+      "bbox": "10.6,53.1,14.5,54.7",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-niedersachsen",
+      "name": "Niedersachsen",
+      "bbox": "6.7,51.3,11.6,53.9",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-nordrhein-westfalen",
+      "name": "Nordrhein-Westfalen",
+      "bbox": "5.9,50.3,9.5,52.5",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-rheinland-pfalz",
+      "name": "Rheinland-Pfalz",
+      "bbox": "6.1,49.1,8.5,51",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/rheinland-pfalz-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-saarland",
+      "name": "Saarland",
+      "bbox": "6.4,49.1,7.4,49.6",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/saarland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-sachsen",
+      "name": "Sachsen",
+      "bbox": "11.9,50.2,15.1,51.7",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-sachsen-anhalt",
+      "name": "Sachsen-Anhalt",
+      "bbox": "10.6,51,13.2,53.1",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-schleswig-holstein",
+      "name": "Schleswig-Holstein",
+      "bbox": "8,53.4,11,55.1",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/schleswig-holstein-latest.osm.pbf"
+    },
+    {
+      "id": "europe-germany-thueringen",
+      "name": "Thüringen",
+      "bbox": "9.9,50.2,12.7,51.7",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/thueringen-latest.osm.pbf"
+    },
+    {
+      "id": "europe-greece",
+      "name": "Greece",
+      "bbox": "20,34.8,26.6,42",
+      "geofabrik": "https://download.geofabrik.de/europe/greece-latest.osm.pbf"
+    },
+    {
+      "id": "europe-hungary",
+      "name": "Hungary",
+      "bbox": "16.1,45.7,22.9,48.6",
+      "geofabrik": "https://download.geofabrik.de/europe/hungary-latest.osm.pbf"
+    },
+    {
+      "id": "europe-iceland",
+      "name": "Iceland",
+      "bbox": "-24.6,63.3,-13.5,66.6",
+      "geofabrik": "https://download.geofabrik.de/europe/iceland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-ireland-and-northern-ireland",
+      "name": "Ireland and Northern Ireland",
+      "bbox": "-10.5,51.4,-6,55.4",
+      "geofabrik": "https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-isle-of-man",
+      "name": "Isle of Man",
+      "bbox": "-4.8,54,-4.3,54.5",
+      "geofabrik": "https://download.geofabrik.de/europe/isle-of-man-latest.osm.pbf"
+    },
+    {
+      "id": "europe-italy-centro",
+      "name": "Centro",
+      "bbox": "10.8,41.2,15,44.2",
+      "geofabrik": "https://download.geofabrik.de/europe/italy/centro-latest.osm.pbf"
+    },
+    {
+      "id": "europe-italy-isole",
+      "name": "Isole",
+      "bbox": "8.2,36.6,15.7,41.7",
+      "geofabrik": "https://download.geofabrik.de/europe/italy/isole-latest.osm.pbf"
+    },
+    {
+      "id": "europe-italy-nord-est",
+      "name": "Nord-Est",
+      "bbox": "10.6,44.8,13.9,47.1",
+      "geofabrik": "https://download.geofabrik.de/europe/italy/nord-est-latest.osm.pbf"
+    },
+    {
+      "id": "europe-italy-nord-ovest",
+      "name": "Nord-Ovest",
+      "bbox": "6.6,43.8,10.4,46.2",
+      "geofabrik": "https://download.geofabrik.de/europe/italy/nord-ovest-latest.osm.pbf"
+    },
+    {
+      "id": "europe-italy-sud",
+      "name": "Sud",
+      "bbox": "14.1,37.9,18.5,41.6",
+      "geofabrik": "https://download.geofabrik.de/europe/italy/sud-latest.osm.pbf"
+    },
+    {
+      "id": "europe-kosovo",
+      "name": "Kosovo",
+      "bbox": "20,41.9,21.8,43.3",
+      "geofabrik": "https://download.geofabrik.de/europe/kosovo-latest.osm.pbf"
+    },
+    {
+      "id": "europe-latvia",
+      "name": "Latvia",
+      "bbox": "20.9,55.7,28.2,58.1",
+      "geofabrik": "https://download.geofabrik.de/europe/latvia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-liechtenstein",
+      "name": "Liechtenstein",
+      "bbox": "9.5,47.1,9.6,47.3",
+      "geofabrik": "https://download.geofabrik.de/europe/liechtenstein-latest.osm.pbf"
+    },
+    {
+      "id": "europe-lithuania",
+      "name": "Lithuania",
+      "bbox": "21,53.9,26.8,56.5",
+      "geofabrik": "https://download.geofabrik.de/europe/lithuania-latest.osm.pbf"
+    },
+    {
+      "id": "europe-luxembourg",
+      "name": "Luxembourg",
+      "bbox": "5.7,49.4,6.5,50.2",
+      "geofabrik": "https://download.geofabrik.de/europe/luxembourg-latest.osm.pbf"
+    },
+    {
+      "id": "europe-macedonia",
+      "name": "Macedonia",
+      "bbox": "20.5,40.9,23,42.4",
+      "geofabrik": "https://download.geofabrik.de/europe/macedonia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-malta",
+      "name": "Malta",
+      "bbox": "14.2,35.8,14.6,36.1",
+      "geofabrik": "https://download.geofabrik.de/europe/malta-latest.osm.pbf"
+    },
+    {
+      "id": "europe-moldova",
+      "name": "Moldova",
+      "bbox": "26.6,45.5,30.2,48.2",
+      "geofabrik": "https://download.geofabrik.de/europe/moldova-latest.osm.pbf"
+    },
+    {
+      "id": "europe-monaco",
+      "name": "Monaco",
+      "bbox": "7.4,43.7,7.5,43.8",
+      "geofabrik": "https://download.geofabrik.de/europe/monaco-latest.osm.pbf"
+    },
+    {
+      "id": "europe-montenegro",
+      "name": "Montenegro",
+      "bbox": "18.4,41.9,20.4,43.6",
+      "geofabrik": "https://download.geofabrik.de/europe/montenegro-latest.osm.pbf"
+    },
+    {
+      "id": "europe-netherlands",
+      "name": "Netherlands",
+      "bbox": "3.4,50.8,7.2,53.6",
+      "geofabrik": "https://download.geofabrik.de/europe/netherlands-latest.osm.pbf"
+    },
+    {
+      "id": "europe-norway",
+      "name": "Norway",
+      "bbox": "4.1,57.9,31.1,71.2",
+      "geofabrik": "https://download.geofabrik.de/europe/norway-latest.osm.pbf"
+    },
+    {
+      "id": "europe-poland",
+      "name": "Poland",
+      "bbox": "14.1,49,24.2,54.9",
+      "geofabrik": "https://download.geofabrik.de/europe/poland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-portugal",
+      "name": "Portugal",
+      "bbox": "-9.5,36.9,-6.2,42.2",
+      "geofabrik": "https://download.geofabrik.de/europe/portugal-latest.osm.pbf"
+    },
+    {
+      "id": "europe-romania",
+      "name": "Romania",
+      "bbox": "20.3,43.6,30,48.3",
+      "geofabrik": "https://download.geofabrik.de/europe/romania-latest.osm.pbf"
+    },
+    {
+      "id": "russia-central-fed-district",
+      "name": "Central Federal District",
+      "bbox": "32,53.5,41,58.5",
+      "geofabrik": "https://download.geofabrik.de/russia/central-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-crimean-fed-district",
+      "name": "Crimean Federal District",
+      "bbox": "32.5,44.4,36.7,46.2",
+      "geofabrik": "https://download.geofabrik.de/russia/crimean-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-far-eastern-fed-district",
+      "name": "Far Eastern Federal District",
+      "bbox": "131,42,180,72",
+      "geofabrik": "https://download.geofabrik.de/russia/far-eastern-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-north-caucasus-fed-district",
+      "name": "North Caucasus Federal District",
+      "bbox": "40,41,48,46",
+      "geofabrik": "https://download.geofabrik.de/russia/north-caucasus-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-northwestern-fed-district",
+      "name": "Northwestern Federal District",
+      "bbox": "26,58,62,70",
+      "geofabrik": "https://download.geofabrik.de/russia/northwestern-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-siberian-fed-district",
+      "name": "Siberian Federal District",
+      "bbox": "60,50,111,72",
+      "geofabrik": "https://download.geofabrik.de/russia/siberian-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-south-fed-district",
+      "name": "South Federal District",
+      "bbox": "36,44,50,51",
+      "geofabrik": "https://download.geofabrik.de/russia/south-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-ural-fed-district",
+      "name": "Ural Federal District",
+      "bbox": "58,54.5,68,70",
+      "geofabrik": "https://download.geofabrik.de/russia/ural-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-volga-fed-district",
+      "name": "Volga Federal District",
+      "bbox": "44,51,57,59.5",
+      "geofabrik": "https://download.geofabrik.de/russia/volga-fed-district-latest.osm.pbf"
+    },
+    {
+      "id": "russia-kaliningrad",
+      "name": "Kaliningrad",
+      "bbox": "19.6,54.3,22.9,55.3",
+      "geofabrik": "https://download.geofabrik.de/russia/kaliningrad-latest.osm.pbf"
+    },
+    {
+      "id": "europe-san-marino",
+      "name": "San Marino",
+      "bbox": "12.4,43.9,12.5,44",
+      "geofabrik": "https://download.geofabrik.de/europe/san-marino-latest.osm.pbf"
+    },
+    {
+      "id": "europe-serbia",
+      "name": "Serbia",
+      "bbox": "18.8,42.2,23,46.2",
+      "geofabrik": "https://download.geofabrik.de/europe/serbia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-slovakia",
+      "name": "Slovakia",
+      "bbox": "16.8,47.7,22.6,49.6",
+      "geofabrik": "https://download.geofabrik.de/europe/slovakia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-slovenia",
+      "name": "Slovenia",
+      "bbox": "13.4,45.4,16.6,46.9",
+      "geofabrik": "https://download.geofabrik.de/europe/slovenia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-andalucia",
+      "name": "Andalucía",
+      "bbox": "-7.5,36,-1.6,38.7",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/andalucia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-aragon",
+      "name": "Aragón",
+      "bbox": "-1.9,40,0.7,42.9",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/aragon-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-asturias",
+      "name": "Asturias",
+      "bbox": "-7.1,42.9,-4.6,43.7",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/asturias-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-cantabria",
+      "name": "Cantabria",
+      "bbox": "-4.9,42.8,-3.6,43.6",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/cantabria-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-castilla-la-mancha",
+      "name": "Castilla-La Mancha",
+      "bbox": "-5.4,37.9,-0.9,41.4",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/castilla-la-mancha-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-castilla-y-leon",
+      "name": "Castilla y León",
+      "bbox": "-7,40.5,-2,43.1",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/castilla-y-leon-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-cataluna",
+      "name": "Cataluña",
+      "bbox": "0.2,40.5,3.3,42.9",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/cataluna-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-ceuta",
+      "name": "Ceuta",
+      "bbox": "-5.4,35.8,-5.3,35.9",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/ceuta-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-extremadura",
+      "name": "Extremadura",
+      "bbox": "-7.6,37.9,-4.6,40.5",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/extremadura-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-galicia",
+      "name": "Galicia",
+      "bbox": "-9.3,41.8,-6.7,43.8",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/galicia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-islas-baleares",
+      "name": "Islas Baleares",
+      "bbox": "1.2,38.7,4.4,40.1",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/islas-baleares-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-la-rioja",
+      "name": "La Rioja",
+      "bbox": "-3.2,41.9,-1.8,42.7",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/la-rioja-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-madrid",
+      "name": "Madrid",
+      "bbox": "-4.6,39.9,-3,41.2",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/madrid-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-melilla",
+      "name": "Melilla",
+      "bbox": "-3,35.3,-2.9,35.4",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/melilla-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-murcia",
+      "name": "Murcia",
+      "bbox": "-2.2,37.4,-0.7,38.8",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/murcia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-navarra",
+      "name": "Navarra",
+      "bbox": "-2.5,41.9,-0.5,43.3",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/navarra-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-pais-vasco",
+      "name": "País Vasco",
+      "bbox": "-3.5,42.4,-1.8,43.5",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/pais-vasco-latest.osm.pbf"
+    },
+    {
+      "id": "europe-spain-valencia",
+      "name": "Valencia",
+      "bbox": "-1.5,37.8,0.5,40.8",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/valencia-latest.osm.pbf"
+    },
+    {
+      "id": "europe-sweden",
+      "name": "Sweden",
+      "bbox": "11.1,55.3,24.2,69.1",
+      "geofabrik": "https://download.geofabrik.de/europe/sweden-latest.osm.pbf"
+    },
+    {
+      "id": "europe-switzerland",
+      "name": "Switzerland",
+      "bbox": "5.9,45.8,10.5,47.9",
+      "geofabrik": "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-turkey",
+      "name": "Turkey",
+      "bbox": "26,35.8,44.8,42.2",
+      "geofabrik": "https://download.geofabrik.de/europe/turkey-latest.osm.pbf"
+    },
+    {
+      "id": "europe-ukraine",
+      "name": "Ukraine",
+      "bbox": "22.1,44.4,40.2,52.4",
+      "geofabrik": "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf"
+    },
+    {
+      "id": "europe-united-kingdom-bermuda",
+      "name": "Bermuda",
+      "bbox": "-64.9,32.3,-64.6,32.4",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/bermuda-latest.osm.pbf"
+    },
+    {
+      "id": "europe-united-kingdom-england",
+      "name": "England",
+      "bbox": "-5.7,49.9,1.8,55.8",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf"
+    },
+    {
+      "id": "europe-united-kingdom-falkland-islands",
+      "name": "Falkland Islands",
+      "bbox": "-61.4,-53.2,-57.7,-51",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/falkland-islands-latest.osm.pbf"
+    },
+    {
+      "id": "europe-united-kingdom-scotland",
+      "name": "Scotland",
+      "bbox": "-7.7,54.6,-0.7,60.9",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/scotland-latest.osm.pbf"
+    },
+    {
+      "id": "europe-united-kingdom-wales",
+      "name": "Wales",
+      "bbox": "-5.4,51.3,-2.7,53.4",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/wales-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-alberta",
+      "name": "Alberta",
+      "bbox": "-120,49,-110,60",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-british-columbia",
+      "name": "British Columbia",
+      "bbox": "-139.1,48.3,-114.1,60",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/british-columbia-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-manitoba",
+      "name": "Manitoba",
+      "bbox": "-102,49,-88.9,60",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/manitoba-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-new-brunswick",
+      "name": "New Brunswick",
+      "bbox": "-69,44.6,-63.8,48.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/new-brunswick-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-newfoundland-and-labrador",
+      "name": "Newfoundland and Labrador",
+      "bbox": "-67.8,46.6,-52.6,60.4",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/newfoundland-and-labrador-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-northwest-territories",
+      "name": "Northwest Territories",
+      "bbox": "-136.5,60,-101.9,78.8",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/northwest-territories-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-nova-scotia",
+      "name": "Nova Scotia",
+      "bbox": "-66.3,43.4,-59.7,47",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/nova-scotia-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-nunavut",
+      "name": "Nunavut",
+      "bbox": "-120,60,-61.1,83.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/nunavut-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-ontario",
+      "name": "Ontario",
+      "bbox": "-95.2,41.7,-74.3,56.9",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-prince-edward-island",
+      "name": "Prince Edward Island",
+      "bbox": "-64.5,45.9,-62,47.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/prince-edward-island-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-quebec",
+      "name": "Quebec",
+      "bbox": "-79.8,44.9,-57.1,62.6",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/quebec-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-saskatchewan",
+      "name": "Saskatchewan",
+      "bbox": "-110,49,-101.4,60",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/saskatchewan-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-canada-yukon",
+      "name": "Yukon",
+      "bbox": "-141,60,-124,69.7",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/yukon-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-greenland",
+      "name": "Greenland",
+      "bbox": "-73.1,59.8,-12.1,83.7",
+      "geofabrik": "https://download.geofabrik.de/north-america/greenland-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-mexico",
+      "name": "Mexico",
+      "bbox": "-117.1,14.5,-86.7,32.7",
+      "geofabrik": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-alabama",
+      "name": "Alabama",
+      "bbox": "-88.5,30.1,-84.9,35",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/alabama-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-alaska",
+      "name": "Alaska",
+      "bbox": "-168,51.2,-130,71.4",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/alaska-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-arizona",
+      "name": "Arizona",
+      "bbox": "-114.8,31.3,-109,37",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-arkansas",
+      "name": "Arkansas",
+      "bbox": "-94.6,33,-89.6,36.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/arkansas-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-california",
+      "name": "California",
+      "bbox": "-124.5,32.5,-114.1,42",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-colorado",
+      "name": "Colorado",
+      "bbox": "-109.1,37,-102,41.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/colorado-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-connecticut",
+      "name": "Connecticut",
+      "bbox": "-73.7,40.9,-71.8,42.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/connecticut-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-delaware",
+      "name": "Delaware",
+      "bbox": "-75.8,38.4,-75,39.8",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/delaware-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-district-of-columbia",
+      "name": "District of Columbia",
+      "bbox": "-77.1,38.8,-76.9,39",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/district-of-columbia-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-florida",
+      "name": "Florida",
+      "bbox": "-87.6,24.4,-80,31",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/florida-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-georgia",
+      "name": "Georgia",
+      "bbox": "-85.6,30.4,-81,35",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/georgia-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-hawaii",
+      "name": "Hawaii",
+      "bbox": "-160.3,18.9,-154.8,22.2",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/hawaii-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-idaho",
+      "name": "Idaho",
+      "bbox": "-117.2,41.9,-111,49",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/idaho-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-illinois",
+      "name": "Illinois",
+      "bbox": "-91.5,36.9,-87,42.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-indiana",
+      "name": "Indiana",
+      "bbox": "-88.1,37.8,-84.8,41.8",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/indiana-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-iowa",
+      "name": "Iowa",
+      "bbox": "-96.6,40.4,-90.1,43.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/iowa-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-kansas",
+      "name": "Kansas",
+      "bbox": "-102.1,36.9,-94.6,40.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/kansas-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-kentucky",
+      "name": "Kentucky",
+      "bbox": "-89.6,36.5,-82,39.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/kentucky-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-louisiana",
+      "name": "Louisiana",
+      "bbox": "-94.1,28.9,-89,33",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/louisiana-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-maine",
+      "name": "Maine",
+      "bbox": "-71.1,43.1,-67,47.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/maine-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-maryland",
+      "name": "Maryland",
+      "bbox": "-79.5,37.9,-75,39.7",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/maryland-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-massachusetts",
+      "name": "Massachusetts",
+      "bbox": "-73.5,41.2,-69.9,42.9",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/massachusetts-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-michigan",
+      "name": "Michigan",
+      "bbox": "-90.4,41.7,-82.4,47.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/michigan-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-minnesota",
+      "name": "Minnesota",
+      "bbox": "-97.2,43.5,-89.5,49.4",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/minnesota-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-mississippi",
+      "name": "Mississippi",
+      "bbox": "-91.7,30.2,-88.1,35",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/mississippi-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-missouri",
+      "name": "Missouri",
+      "bbox": "-95.8,36,-89.1,40.6",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/missouri-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-montana",
+      "name": "Montana",
+      "bbox": "-116.1,44.4,-104,49",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/montana-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-nebraska",
+      "name": "Nebraska",
+      "bbox": "-104.1,40,-95.3,43",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/nebraska-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-nevada",
+      "name": "Nevada",
+      "bbox": "-120,35,-114,42",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/nevada-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-new-hampshire",
+      "name": "New Hampshire",
+      "bbox": "-72.6,42.7,-70.6,45.3",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/new-hampshire-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-new-jersey",
+      "name": "New Jersey",
+      "bbox": "-75.6,38.9,-73.9,41.4",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/new-jersey-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-new-mexico",
+      "name": "New Mexico",
+      "bbox": "-109.1,31.3,-103,37",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/new-mexico-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-new-york",
+      "name": "New York",
+      "bbox": "-79.8,40.5,-71.8,45",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-north-carolina",
+      "name": "North Carolina",
+      "bbox": "-84.3,33.8,-75.5,36.6",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/north-carolina-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-north-dakota",
+      "name": "North Dakota",
+      "bbox": "-104.1,45.9,-96.6,49",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/north-dakota-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-ohio",
+      "name": "Ohio",
+      "bbox": "-84.8,38.4,-80.5,42.3",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/ohio-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-oklahoma",
+      "name": "Oklahoma",
+      "bbox": "-103,33.6,-94.4,37",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/oklahoma-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-oregon",
+      "name": "Oregon",
+      "bbox": "-124.6,42,-116.5,46.3",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/oregon-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-pennsylvania",
+      "name": "Pennsylvania",
+      "bbox": "-80.5,39.7,-74.7,42.3",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/pennsylvania-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-puerto-rico",
+      "name": "Puerto Rico",
+      "bbox": "-67.3,17.9,-65.6,18.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/puerto-rico-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-rhode-island",
+      "name": "Rhode Island",
+      "bbox": "-71.9,41.1,-71.1,42",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/rhode-island-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-south-carolina",
+      "name": "South Carolina",
+      "bbox": "-83.4,32,-78.5,35.2",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/south-carolina-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-south-dakota",
+      "name": "South Dakota",
+      "bbox": "-104.1,42.5,-96.4,45.9",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/south-dakota-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-tennessee",
+      "name": "Tennessee",
+      "bbox": "-90.3,35,-81.6,36.7",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/tennessee-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-texas",
+      "name": "Texas",
+      "bbox": "-106.6,25.8,-93.5,36.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-us-virgin-islands",
+      "name": "US Virgin Islands",
+      "bbox": "-65.1,17.7,-64.6,18.4",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/us-virgin-islands-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-utah",
+      "name": "Utah",
+      "bbox": "-114.1,36.9,-109,42",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/utah-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-vermont",
+      "name": "Vermont",
+      "bbox": "-73.4,42.7,-71.5,45",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/vermont-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-virginia",
+      "name": "Virginia",
+      "bbox": "-83.7,36.5,-75.2,39.5",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/virginia-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-washington",
+      "name": "Washington",
+      "bbox": "-124.7,45.5,-116.9,49",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-west-virginia",
+      "name": "West Virginia",
+      "bbox": "-82.6,37.2,-77.7,40.6",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/west-virginia-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-wisconsin",
+      "name": "Wisconsin",
+      "bbox": "-92.9,42.5,-86.8,47.1",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/wisconsin-latest.osm.pbf"
+    },
+    {
+      "id": "north-america-us-wyoming",
+      "name": "Wyoming",
+      "bbox": "-111.1,41,-104.1,45",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/wyoming-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-argentina",
+      "name": "Argentina",
+      "bbox": "-73.6,-55.1,-53.6,-21.8",
+      "geofabrik": "https://download.geofabrik.de/south-america/argentina-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-bolivia",
+      "name": "Bolivia",
+      "bbox": "-69.7,-22.9,-57.5,-9.7",
+      "geofabrik": "https://download.geofabrik.de/south-america/bolivia-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-chile",
+      "name": "Chile",
+      "bbox": "-75.6,-55.9,-66.4,-17.5",
+      "geofabrik": "https://download.geofabrik.de/south-america/chile-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-colombia",
+      "name": "Colombia",
+      "bbox": "-79,-4.2,-66.9,12.5",
+      "geofabrik": "https://download.geofabrik.de/south-america/colombia-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-ecuador",
+      "name": "Ecuador",
+      "bbox": "-81.1,-5,-75.2,1.5",
+      "geofabrik": "https://download.geofabrik.de/south-america/ecuador-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-guyana",
+      "name": "Guyana",
+      "bbox": "-61.4,1.2,-57.2,8.5",
+      "geofabrik": "https://download.geofabrik.de/south-america/guyana-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-paraguay",
+      "name": "Paraguay",
+      "bbox": "-62.7,-27.6,-54.2,-19.3",
+      "geofabrik": "https://download.geofabrik.de/south-america/paraguay-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-peru",
+      "name": "Peru",
+      "bbox": "-81.4,-18.4,-68.7,-0.1",
+      "geofabrik": "https://download.geofabrik.de/south-america/peru-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-suriname",
+      "name": "Suriname",
+      "bbox": "-58.1,1.8,-53.9,6",
+      "geofabrik": "https://download.geofabrik.de/south-america/suriname-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-uruguay",
+      "name": "Uruguay",
+      "bbox": "-58.5,-34.9,-53.1,-30.1",
+      "geofabrik": "https://download.geofabrik.de/south-america/uruguay-latest.osm.pbf"
+    },
+    {
+      "id": "south-america-venezuela",
+      "name": "Venezuela",
+      "bbox": "-73.4,0.7,-60,12.2",
+      "geofabrik": "https://download.geofabrik.de/south-america/venezuela-latest.osm.pbf"
     }
-  ]
+  ],
+  "generatedCount": 324,
+  "curatedCount": 39
 }

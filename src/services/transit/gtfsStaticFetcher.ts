@@ -15,7 +15,7 @@
 import { discoverFeeds } from './transitFeedService';
 import type { TransitFeed } from '../../models/transit';
 import type { TransitRouteLine } from '../../models/transit';
-import { TRANSIT_FEED_CACHE_TTL_MS } from '../../constants/config';
+import { GTFS_MAX_FEED_BYTES, TRANSIT_FEED_CACHE_TTL_MS } from '../../constants/config';
 import { storage } from '../storage/mmkv';
 
 // Re-export shared types (used by callers like transitLineFetcher.ts)
@@ -92,6 +92,65 @@ const FEED_DATA_CACHE_TTL = TRANSIT_FEED_CACHE_TTL_MS;
 /** GTFS route_type values we consider "rail": 1=subway, 2=rail */
 const RAIL_ROUTE_TYPES = new Set([1, 2]);
 
+// ── Bounded download ────────────────────────────────────────────────
+
+/**
+ * Read a GTFS zip into memory, refusing anything larger than
+ * {@link GTFS_MAX_FEED_BYTES}.
+ *
+ * `res.arrayBuffer()` on a consolidated country feed is what actually breaks
+ * the app: Germany's is 495 MiB, so the allocation either terminates the
+ * process or the 30 s timeout aborts a download that had no chance of
+ * finishing. Checking `content-length` first costs nothing and rejects the
+ * whole class before a byte is buffered; the streaming fallback covers origins
+ * that omit the header or lie about it.
+ *
+ * Returns `null` (with a log line) rather than throwing: every caller treats a
+ * missing feed as "try the next source".
+ */
+async function readBoundedZip(res: Response, label: string): Promise<ArrayBuffer | null> {
+  const declared = Number(res.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > GTFS_MAX_FEED_BYTES) {
+    console.warn(
+      `[gtfs-static] ${label} is ${(declared / 1048576).toFixed(0)} MB, over the ` +
+        `${(GTFS_MAX_FEED_BYTES / 1048576).toFixed(0)} MB runtime cap — skipping ` +
+        `(a national feed belongs in a region pack, not a viewport fetch)`,
+    );
+    return null;
+  }
+
+  // No usable content-length: stream and stop at the cap.
+  const body = res.body;
+  if (!body) return res.arrayBuffer();
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > GTFS_MAX_FEED_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      console.warn(
+        `[gtfs-static] ${label} exceeded the ${(GTFS_MAX_FEED_BYTES / 1048576).toFixed(0)} MB ` +
+          `runtime cap while streaming — aborted at ${(total / 1048576).toFixed(0)} MB`,
+      );
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out.buffer;
+}
+
 // ── Public API ──────────────────────────────────────────────────────
 
 /**
@@ -153,7 +212,8 @@ async function fetchAndParseMobilityFeed(feed: TransitFeed): Promise<GtfsFeedDat
     clearTimeout(timer);
     if (!res.ok) return null;
 
-    const buffer = await res.arrayBuffer();
+    const buffer = await readBoundedZip(res, feed.feed_name ?? feed.provider ?? feed.id);
+    if (!buffer) return null;
 
     const needed = [
       'agency.txt',
@@ -275,7 +335,8 @@ async function fetchFeedFromUrl(
       console.warn(`[gtfs-static] ${label} HTTP ${res.status}: ${url}`);
       return null;
     }
-    const buffer = await res.arrayBuffer();
+    const buffer = await readBoundedZip(res, label);
+    if (!buffer) return null;
     console.warn(`[gtfs-static] ${label} downloaded ${(buffer.byteLength / 1024).toFixed(0)} KB`);
 
     // Only extract files needed for line geometry (skip stop_times.txt — 192MB uncompressed for CTA, kills perf)

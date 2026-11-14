@@ -22,6 +22,7 @@ import { searchByCategory, type CategorySearchResult } from '../poi/categorySear
 import { searchAddress } from '../geocoding/geocodingService';
 import { throwIfAborted, withSourceTimeout, isAbortError } from './abortUtils';
 import { searchPhoton, type PhotonResult } from './photonGeocoder';
+import { canUsePhotonFallback, notePhotonFallback } from './photonFallbackBudget';
 import {
   parseSearchQuery,
   fuzzyMatchBrand,
@@ -46,6 +47,7 @@ import {
   searchGlobalPlaces,
   type GlobalPlace,
 } from '../geocoding/globalGeocoderService';
+import { isBundledCityName, searchCoarseCities } from '../geocoding/coarseGeocoder';
 import { getPersonalizedPlaceNames, PERSONALIZATION_BOOST } from './searchHistoryService';
 import { searchMapKitPlaces } from './mapKitPlaceSource';
 import { createQueryPlan } from './queryPlan';
@@ -142,6 +144,9 @@ async function queryNamesDistantPlace(coreQuery: string): Promise<boolean> {
   if (words.length < 2) return false;
   const last = words[words.length - 1];
   if (last.length < 3) return false;
+  // Bundled first: it is synchronous and needs no download, so a cold install
+  // recognises "tatte boston" without the GeoNames database.
+  if (isBundledCityName(last)) return true;
   return isKnownCityName(last);
 }
 
@@ -318,15 +323,25 @@ export async function unifiedSearch(
   const signal = options.signal;
   throwIfAborted(signal);
 
-  // Offline GeoNames cities resolve in milliseconds and are emitted right
-  // after the local phase. Fetch them first so the same run can also tell a
-  // bare place search from a city search.
+  // Offline cities resolve in milliseconds and are emitted right after the
+  // local phase. Fetch them first so the same run can also tell a bare place
+  // search from a city search.
+  //
+  // Two tiers answer the same stage: the downloaded GeoNames database when it
+  // is present, otherwise the bundled ~6k-city asset. Falling back here is what
+  // keeps "search for Tokyo" working on a cold install without a network
+  // geocoder.
   let cityPlaces: GlobalPlace[] = [];
-  if (!addressQuery && isGeonamesReady()) {
-    try {
-      cityPlaces = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
-    } catch {
-      // Missing/corrupt GeoNames DB degrades to no city results.
+  if (!addressQuery) {
+    if (isGeonamesReady()) {
+      try {
+        cityPlaces = await searchGlobalPlaces(parsed.coreQuery, lat, lng, 10);
+      } catch {
+        // Missing/corrupt GeoNames DB degrades to the bundled tier below.
+        cityPlaces = searchCoarseCities(parsed.coreQuery, lat, lng, 10);
+      }
+    } else {
+      cityPlaces = searchCoarseCities(parsed.coreQuery, lat, lng, 10);
     }
   }
 
@@ -618,34 +633,54 @@ export async function unifiedSearch(
     }
   };
 
-  // Source 3: Photon geocoder (fuzzy, online)
-  const photonPromise = (() => {
-    const osmTagFilter =
-      parsed.categories?.length === 1
-        ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
-        : undefined;
-    // Pass the actual viewport zoom so Photon's location bias stays local.
-    // Photon already ranks globally-unique names ("Times Square") correctly
-    // even at a high zoom, so lowering it is unnecessary — and harmful, since
-    // it floods generic local queries ("plumbing supply") with distant
-    // matches that outrank the nearby ones.
-    const viewportBounds = { south, north, west, east };
-    return cachedFetch(
-      cacheKey([
-        'photon',
-        parsed.originalQuery,
-        boundsKey(viewportBounds),
-        zoom,
-        limit,
-        osmTagFilter,
-      ]),
-      () =>
-        searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
-          signal,
-        }),
-      { bounds: viewportBounds, signal },
-    );
-  })();
+  // Source 3: Photon geocoder (fuzzy, online) — FALLBACK ONLY.
+  //
+  // The unified local index answers both place and address queries offline, so
+  // Photon is only worth a network hop when local coverage actually failed:
+  // no strong local POI match, and (for an address query) no local address at
+  // all. Running it unconditionally made every keystroke in a downloaded region
+  // pay for a request whose results the local index already had.
+  // Photon is a free public instance run by a commercial company with no
+  // published quota, so it is gated two ways: a signed `photonFallback` flag
+  // (off = never call it) and a per-device daily allowance. Local coverage
+  // failing is the only thing that makes it worth a request at all.
+  const photonNeeded =
+    strongLocalMatches === 0 &&
+    (!addressQuery || localAddressResults.length === 0) &&
+    canUsePhotonFallback();
+  const photonPromise = !photonNeeded
+    ? Promise.resolve([] as PhotonResult[])
+    : (() => {
+        const osmTagFilter =
+          parsed.categories?.length === 1
+            ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
+            : undefined;
+        // Pass the actual viewport zoom so Photon's location bias stays local.
+        // Photon already ranks globally-unique names ("Times Square") correctly
+        // even at a high zoom, so lowering it is unnecessary — and harmful, since
+        // it floods generic local queries ("plumbing supply") with distant
+        // matches that outrank the nearby ones.
+        const viewportBounds = { south, north, west, east };
+        return cachedFetch(
+          cacheKey([
+            'photon',
+            parsed.originalQuery,
+            boundsKey(viewportBounds),
+            zoom,
+            limit,
+            osmTagFilter,
+          ]),
+          () => {
+            // Spend only on a cache miss, i.e. when a request actually leaves
+            // the device.
+            notePhotonFallback();
+            return searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
+              signal,
+            });
+          },
+          { bounds: viewportBounds, signal },
+        );
+      })();
 
   // Source 2 (full): Category search (local + Overpass + Nominatim bounded)
   //
@@ -707,8 +742,9 @@ export async function unifiedSearch(
   const addressQueryText = addressQuery ? parsed.originalQuery : parsed.coreQuery;
   const addressPromise: Promise<GeocodingResult[]> = (() => {
     if (!isAddressPass) return Promise.resolve([] as GeocodingResult[]);
-    // An exact structured local hit skips the Nominatim fallback entirely.
-    if (hasStructuredAddressHit) {
+    // Nominatim is a fallback, never a primary source: skip it whenever the
+    // local unified index already answered, structured hit or not.
+    if (hasStructuredAddressHit || localAddressResults.length > 0) {
       return searchAddress(addressQueryText, 10, lat, lng, { signal, localOnly: true });
     }
     const viewportBounds = { south, north, west, east };

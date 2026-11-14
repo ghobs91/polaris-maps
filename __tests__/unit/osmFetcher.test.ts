@@ -8,7 +8,10 @@ import {
   clearPlaceMatchCache,
 } from '../../src/services/poi/osmFetcher';
 import { isOsmNodePoi } from '../../src/utils/placeToOsmPoi';
-import { __setOverpassMinIntervalMsForTests } from '../../src/services/overpassClient';
+import {
+  __resetOverpassPolicyForTests,
+  __setOverpassMinIntervalMsForTests,
+} from '../../src/services/overpassClient';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,6 +39,7 @@ const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
 beforeEach(() => {
+  __resetOverpassPolicyForTests();
   __setOverpassMinIntervalMsForTests(0);
   clearOsmCache();
   mockFetch.mockReset();
@@ -101,7 +105,8 @@ describe('fetchOsmPois', () => {
   it('throws when all Overpass instances return non-OK HTTP responses', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 429 });
     await expect(fetchOsmPois(40.0, -74.0, 40.1, -73.9)).rejects.toThrow();
-    // overpassClient hedges the query across all instances in parallel.
+    // Every mirror is tried in turn before the query fails; each is then in
+    // cooldown, so a retry will not hammer them.
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
@@ -134,8 +139,8 @@ describe('fetchOsmPois', () => {
     // Different bbox
     await fetchOsmPois(51.5, -0.1, 51.6, 0.0);
 
-    // overpassClient fires all instances in parallel per fetch.
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // One mirror per fetch: the client tries mirrors sequentially, never hedged.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('ignores cache for stale entries (mocked time)', async () => {
@@ -154,7 +159,7 @@ describe('fetchOsmPois', () => {
 
     await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
     nowSpy.mockRestore();
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('cache serves a viewport that sits inside an already-fetched box', async () => {
@@ -184,7 +189,7 @@ describe('fetchOsmPois', () => {
     // A bigger view in the *same* rounded 2-decimal cell: the cached
     // street-level result (one restaurant) must not answer it.
     await fetchOsmPois(40.7451, -73.9949, 40.7549, -73.9851);
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('clearOsmCache forces a fresh network call', async () => {
@@ -198,7 +203,7 @@ describe('fetchOsmPois', () => {
     mockFetch.mockClear();
 
     await fetchOsmPois(40.7, -74.0, 40.8, -73.9);
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('rejects when all Overpass requests time out', async () => {
@@ -439,7 +444,7 @@ describe('checkPoiExistsInOsm', () => {
     await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
     mockFetch.mockClear();
     await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { shop: 'coffee' });
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('rounds coordinates to ~11m in the cache key', async () => {
@@ -461,8 +466,8 @@ describe('checkPoiExistsInOsm', () => {
     clearExistenceCache();
     mockFetch.mockClear();
     await checkPoiExistsInOsm(LAT, LNG, 'Starbucks', { amenity: 'cafe' });
-    // overpassClient fires to 3 Overpass instances in parallel
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // One mirror per fetch (sequential fallback, no hedging).
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 

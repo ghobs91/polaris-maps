@@ -36,6 +36,8 @@ RCT_EXTERN_METHOD(pushSearchResults:(NSArray *)results
 
 RCT_EXTERN_METHOD(updateHomeSuggestions:(NSArray *)items)
 
+RCT_EXTERN_METHOD(updateSearchShortcuts:(NSArray *)shortcuts)
+
 RCT_EXTERN_METHOD(updateDashboardShortcuts:(NSArray *)items)
 
 RCT_EXTERN_METHOD(updateMapCenter:(double)lat

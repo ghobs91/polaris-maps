@@ -121,6 +121,17 @@ export function setCachedListing(
   scheduleSave();
 }
 
+/**
+ * Forget a place's listing for one provider.
+ *
+ * Called when a listing is rejected on identity: a mapping learned from a
+ * search (name-only match) can point at a same-named listing elsewhere, and a
+ * cached wrong URL would keep short-circuiting the search stage on every open.
+ */
+export function removeCachedListing(provider: ExternalRatingProviderId, placeKey: string): void {
+  if (entries.delete(keyFor(provider, placeKey))) scheduleSave();
+}
+
 /** Drop the listing cache (tests / teardown). */
 export function clearListingCache(): void {
   if (saveTimer) {

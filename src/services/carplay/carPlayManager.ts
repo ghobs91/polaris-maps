@@ -38,6 +38,7 @@ import { decodePolyline } from '../../utils/polyline';
 import { getFavorites, subscribeFavorites } from '../favorites/favoritesService';
 import type { FavoriteKind, FavoriteLocation } from '../favorites/favoritesService';
 import { getSearchHistory } from '../search/searchHistoryService';
+import { ADD_STOP_SHORTCUTS } from '../../constants/searchCategories';
 import { useCarPlayStore } from '../../stores/carPlayStore';
 import { useOsmPoiStore } from '../../stores/osmPoiStore';
 import { findIncidentsAhead } from '../traffic/incidentAhead';
@@ -47,6 +48,7 @@ import { haversineMeters } from '../../utils/routeSnap';
 import { guidanceManeuverIndex } from '../../utils/navigationManeuvers';
 import type {
   CarPlayDashboardShortcut,
+  CarPlaySearchShortcut,
   CarPlaySearchResult,
   CarPlayIncidentMarker,
 } from '../../native/carplay';
@@ -223,7 +225,10 @@ function onConnected() {
   syncNavigationState(useNavigationStore.getState());
 
   // Pre-search suggestions for the floating map panel, plus the Dashboard
-  // shortcut card (both mirror the same favorites).
+  // shortcut card (both mirror the same favorites). Shortcuts are pushed
+  // first so the single panel render (iOS 27 shows it once, then only on
+  // change) already has them.
+  pushSearchShortcuts();
   pushHomeSuggestions();
   pushDashboardShortcuts();
 
@@ -251,7 +256,12 @@ async function ensureIdleLocationUpdates(): Promise<void> {
       // Idle map: follow closely enough that the moving 3D view stays smooth
       // (the native follow glide bridges the gaps between fixes). High accuracy
       // because the puck/heading now drive a nav-style camera, not just a dot.
-      { accuracy: Location.Accuracy.High, distanceInterval: 25, timeInterval: 2000 },
+      //
+      // distanceInterval is the only spacing iOS honours (`timeInterval` is
+      // Android-only), so a large value delayed the first heading-up fix until
+      // the car had travelled that far — the map stayed north-up through a
+      // slow start. Keep it short; the native ticker smooths the extra pushes.
+      { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 1000 },
       (location) => {
         if (!connected || !locationPushAllowed()) return;
         carPlayUserLocation = {
@@ -260,19 +270,10 @@ async function ensureIdleLocationUpdates(): Promise<void> {
         };
         // Forward heading + speed so the native host can switch to the pitched
         // heading-up 3D view and nav puck while the car is moving with no
-        // active trip. GPS reports -1 for both when unavailable.
-        const heading =
-          location.coords.heading != null && location.coords.heading >= 0
-            ? location.coords.heading
-            : 0;
-        const speed =
-          location.coords.speed != null && location.coords.speed > 0 ? location.coords.speed : 0;
-        CarPlay.updateMapCenter(
-          location.coords.latitude,
-          location.coords.longitude,
-          heading,
-          speed,
-        );
+        // active trip. An unavailable course is forwarded as -1 so the native
+        // host can tell "no course yet" apart from a real due-north course and
+        // keep its last orientation.
+        pushLocationFix(location.coords);
       },
     );
     if (!connected) {
@@ -1000,6 +1001,22 @@ function onLocateRequest(): void {
 }
 
 /**
+ * Pushes a position to the CarPlay map, preserving a valid GPS course and
+ * speed. An unavailable course is sent as -1 so the native host keeps its last
+ * orientation instead of mistaking "unknown" for due north.
+ */
+function pushLocationFix(coords: {
+  latitude: number;
+  longitude: number;
+  heading?: number | null;
+  speed?: number | null;
+}): void {
+  const heading = coords.heading != null && coords.heading >= 0 ? coords.heading : -1;
+  const speed = coords.speed != null && coords.speed > 0 ? coords.speed : 0;
+  CarPlay.updateMapCenter(coords.latitude, coords.longitude, heading, speed);
+}
+
+/**
  * Centers the CarPlay map on the driver's live position. Runs on connect and
  * when the driver taps Locate/Recenter, since the native map host has no
  * position of its own outside navigation.
@@ -1021,7 +1038,7 @@ async function pushUserLocation(): Promise<void> {
     const last = await Location.getLastKnownPositionAsync();
     if (last && locationPushAllowed()) {
       carPlayUserLocation = { lat: last.coords.latitude, lng: last.coords.longitude };
-      CarPlay.updateMapCenter(last.coords.latitude, last.coords.longitude, 0);
+      pushLocationFix(last.coords);
       pushed = true;
     }
     const current = await Location.getCurrentPositionAsync({
@@ -1029,7 +1046,7 @@ async function pushUserLocation(): Promise<void> {
     });
     if (locationPushAllowed()) {
       carPlayUserLocation = { lat: current.coords.latitude, lng: current.coords.longitude };
-      CarPlay.updateMapCenter(current.coords.latitude, current.coords.longitude, 0);
+      pushLocationFix(current.coords);
       pushed = true;
     }
   } catch {
@@ -1053,7 +1070,7 @@ function locationPushAllowed(): boolean {
 function syncFallbackCenter(): void {
   const { viewport } = useMapStore.getState();
   if (!viewport || (viewport.lat === 0 && viewport.lng === 0)) return;
-  CarPlay.updateMapCenter(viewport.lat, viewport.lng, 0);
+  CarPlay.updateMapCenter(viewport.lat, viewport.lng, -1);
 }
 
 function getSearchSession(): SearchSession {
@@ -1198,6 +1215,33 @@ function ensureSearchUserLocation(): void {
       // Ignore GPS failures during search.
     }
   })();
+}
+
+/**
+ * Native row-icon kinds for the add-stop shortcuts (see the native
+ * `searchIcon(for:)` mapping). The shared category ids are UI ids, not POI
+ * subtypes, so they are translated here instead of in the constants module.
+ */
+const SHORTCUT_ICON_KINDS: Record<string, string> = {
+  gas_stations: 'fuel',
+  ev_charging: 'charging_station',
+  fast_food: 'fast_food',
+  coffee: 'cafe',
+};
+
+/** Add-stop shortcut rows: Gas / EV charging / Fast food / Coffee. */
+function searchShortcutItems(): CarPlaySearchShortcut[] {
+  return ADD_STOP_SHORTCUTS.map((shortcut) => ({
+    name: shortcut.label,
+    query: shortcut.searchQuery,
+    kind: SHORTCUT_ICON_KINDS[shortcut.id] ?? '',
+  }));
+}
+
+/** Pushes the add-stop shortcut rows the native search list renders first. */
+function pushSearchShortcuts(): void {
+  if (!connected) return;
+  CarPlay.updateSearchShortcuts(searchShortcutItems());
 }
 
 /** Pushes the Pinned/Recents suggestions for the floating CarPlay map panel. */
@@ -1352,11 +1396,12 @@ async function onSearchResultSelected(result: { name?: string; lat?: number; lng
     const route = rankedRoutes[0];
     if (!route) return;
 
-    // Show the phone's route preview; the driver compares options and taps Go,
-    // which native reports back via `carPlayRouteStart`.
+    // Start at once: a destination picked on the head unit is the trip. A
+    // route preview would leave the driver waiting on a Go tap they cannot
+    // make from CarPlay.
     useNavigationStore
       .getState()
-      .setRoutePreview(route, rankedRoutes.slice(1), { lat, lng, name }, 'auto');
+      .startNavigation(route, rankedRoutes.slice(1), { lat, lng, name }, 'auto');
   } catch {
     // Route computation failed — silently ignore on CarPlay
   }

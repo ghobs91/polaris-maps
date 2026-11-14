@@ -1,27 +1,56 @@
 /**
- * Shared Overpass API client with parallel hedged requests.
+ * Shared Overpass API client — fallback only.
  *
- * Sends the query to all known Overpass instances simultaneously and
- * resolves with whichever responds first (via `Promise.any`).
+ * POI and transit answers normally come from the on-device indices
+ * (`services/poi/localPoiIndex`, `services/transit/localTransitIndex`), which
+ * are built from signed region packs. This client is the escape hatch for
+ * areas with no local pack coverage, and it is written to be a good citizen of
+ * volunteer-run infrastructure:
+ *
+ * - **No hedging.** The previous implementation fired the same query at all
+ *   three mirrors simultaneously and took the first reply. That is ~3x the
+ *   load on other people's servers for every search — precisely what melts
+ *   `overpass-api.de` when an app gets a traffic spike. Mirrors are now tried
+ *   sequentially, in order, and only when the previous one failed.
+ * - **Cooldowns.** A mirror that rate-limits (429), 5xx's, times out, or is
+ *   unreachable enters exponential cooldown and is skipped entirely until it
+ *   expires. One bad query cannot turn into a request storm.
+ * - **One request in flight, app-wide.** Requests are serialised, so a burst
+ *   of viewport settles cannot exceed one concurrent connection.
+ * - **Identifiable.** Every request carries an app-specific `User-Agent` so
+ *   mirror operators can contact us instead of blocking us silently.
+ * - **Remote kill switch.** `setOverpassEnabled(false)` (wired to the signed
+ *   remote config flag `overpassQuery`) turns the fallback off without a
+ *   release.
  */
 
-import { abortError, sleepWithAbort } from './search/abortUtils';
+import { abortError, isAbortError, sleepWithAbort, throwIfAborted } from './search/abortUtils';
+import { logDiagnostic } from './diagnostics/diagnosticsLog';
 
-const OVERPASS_INSTANCES = [
+/** Public mirrors, tried in this order. Primary (DE) first. */
+export const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
   'https://overpass.openstreetmap.fr/api/interpreter',
-];
+] as const;
+
+/**
+ * Identifying User-Agent. Public Overpass mirrors block anonymous or anonymous-
+ * looking burst traffic; a stable, identifiable UA is how an operator tells the
+ * app apart from a scraper. The URL is the project site only — no service, no
+ * endpoint, nothing that has to stay up for the app to work.
+ */
+export const OVERPASS_USER_AGENT =
+  'PolarisMaps/0.1 (+https://app.polarismaps.app; OSM fallback client)';
 
 /** Minimum gap between successive Overpass requests (ms). */
 const OVERPASS_MIN_INTERVAL_MS = 1_000;
-let _minIntervalMs = OVERPASS_MIN_INTERVAL_MS;
-let _lastOverpassRequestAt = 0;
-
-/** Exposed for testing only: override the inter-request throttle (0 disables). */
-export function __setOverpassMinIntervalMsForTests(ms: number): void {
-  _minIntervalMs = ms;
-}
+/** Cooldown after a 429/5xx: the mirror is telling us to go away. */
+const RATE_LIMIT_COOLDOWN_MS = 5 * 60_000;
+/** Cooldown after a network error/timeout. */
+const FAILURE_COOLDOWN_MS = 30_000;
+/** Upper bound for exponential cooldowns. */
+const MAX_COOLDOWN_MS = 10 * 60_000;
 
 export interface OverpassRequestOptions {
   /** Overpass QL query string (without the `data=` prefix). */
@@ -32,81 +61,306 @@ export interface OverpassRequestOptions {
   signal?: AbortSignal;
 }
 
-/**
- * Send an Overpass QL query with parallel hedging.
- *
- * Fires requests to all instances via POST (avoids URL length limits) and
- * returns the first successful response.  Throws an AggregateError if all
- * instances fail.
- */
-export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
-  // Enforce minimum inter-request gap to respect public API usage policies.
-  // Clamp to 0 so a backward clock change can't produce a huge negative
-  // elapsed and, in turn, an enormous wait.
-  const now = Date.now();
-  const elapsed = Math.max(0, now - _lastOverpassRequestAt);
-  if (elapsed < _minIntervalMs) {
-    // Abort-aware: a superseded keystroke must not sit out the throttle gap
-    // and then fire a request whose results are already stale.
-    await sleepWithAbort(_minIntervalMs - elapsed, opts.signal);
+/** Thrown when the remote kill switch has disabled the fallback. */
+export class OverpassDisabledError extends Error {
+  constructor() {
+    super('Overpass fallback is disabled by remote config');
+    this.name = 'OverpassDisabledError';
   }
-  _lastOverpassRequestAt = Date.now();
+}
 
-  // Hedged requests: the first response wins and the rest are cancelled.
-  // Without the cancel the losing instances keep streaming full payloads for a
-  // query that is already answered — three times the bandwidth and battery per
-  // search, and needless load on the public instances.
-  const controllers: AbortController[] = [];
-  const attempts = OVERPASS_INSTANCES.map(
-    (base) =>
-      new Promise<T>((resolve, reject) => {
-        const ctrl = new AbortController();
-        controllers.push(ctrl);
-        const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+/** Thrown when every mirror is cooling down or failed. */
+export class OverpassUnavailableError extends Error {
+  /** Epoch ms at which the soonest mirror leaves cooldown, if known. */
+  readonly retryAt: number | null;
 
-        // If the caller passed an external signal, abort our controller when it fires.
-        const onExternalAbort = () => ctrl.abort();
-        opts.signal?.addEventListener('abort', onExternalAbort);
+  constructor(message: string, retryAt: number | null) {
+    super(message);
+    this.name = 'OverpassUnavailableError';
+    this.retryAt = retryAt;
+  }
+}
 
-        const cleanup = () => {
-          clearTimeout(timer);
-          opts.signal?.removeEventListener('abort', onExternalAbort);
-        };
+/** A single mirror's health. */
+interface MirrorPolicy {
+  consecutiveFailures: number;
+  cooldownUntil: number;
+}
 
-        fetch(base, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `data=${encodeURIComponent(opts.query)}`,
-          signal: ctrl.signal,
-        })
-          .then((res) => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json() as Promise<T>;
-          })
-          .then(
-            (value) => {
-              cleanup();
-              resolve(value);
-            },
-            (err) => {
-              cleanup();
-              reject(err);
-            },
-          );
-      }),
-  );
+/** Internal error carrying the HTTP status (0 for timeout/network). */
+class OverpassRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'OverpassRequestError';
+    this.status = status;
+  }
+}
+
+let _minIntervalMs = OVERPASS_MIN_INTERVAL_MS;
+let _lastRequestAt = 0;
+let _enabled = true;
+let _now = () => Date.now();
+/** Serialises requests: at most one Overpass request in flight app-wide. */
+let _serial: Promise<unknown> = Promise.resolve();
+const _policies = new Map<string, MirrorPolicy>();
+let _hydrated = false;
+
+/**
+ * Persisted mirror health.
+ *
+ * Cooldowns are device-local state but they describe a *shared* server: when a
+ * volunteer mirror is 429ing or down, a cold start that forgets the cooldown
+ * re-probes it. That is how a small app turns somebody else's outage into a
+ * request storm, so bounded cooldowns survive relaunches.
+ */
+const POLICY_STORAGE_KEY = 'overpass.policy.v1';
+
+interface PolicyCache {
+  getString(key: string): string | undefined;
+  set(key: string, value: string): void;
+  delete(key: string): void;
+}
+
+/** Lazy MMKV lookup; importing it eagerly pulls native modules into Jest. */
+function getPolicyCache(): PolicyCache | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('./storage/mmkv') as typeof import('./storage/mmkv');
+    return mod.storage as unknown as PolicyCache;
+  } catch {
+    return null;
+  }
+}
+
+/** Restore unexpired cooldowns recorded before the last launch. */
+function loadPersistedPolicies(): void {
+  const cache = getPolicyCache();
+  if (!cache) return;
+  try {
+    const raw = cache.getString(POLICY_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, Partial<MirrorPolicy>>;
+    const now = _now();
+    for (const [mirror, entry] of Object.entries(parsed)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const cooldownUntil = Number(entry.cooldownUntil);
+      if (!Number.isFinite(cooldownUntil) || cooldownUntil <= now) continue;
+      _policies.set(mirror, {
+        consecutiveFailures: Math.max(0, Number(entry.consecutiveFailures) || 0),
+        cooldownUntil: Math.min(cooldownUntil, now + MAX_COOLDOWN_MS),
+      });
+    }
+  } catch {
+    // Corrupt or stale cache — start clean.
+  }
+}
+
+/** Persist only the cooldowns still in force. Best-effort by design. */
+function savePersistedPolicies(): void {
+  const cache = getPolicyCache();
+  if (!cache) return;
+  try {
+    const now = _now();
+    const active: Record<string, MirrorPolicy> = {};
+    for (const [mirror, policy] of _policies) {
+      if (policy.cooldownUntil > now) active[mirror] = { ...policy };
+    }
+    if (Object.keys(active).length === 0) {
+      cache.delete(POLICY_STORAGE_KEY);
+      return;
+    }
+    cache.set(POLICY_STORAGE_KEY, JSON.stringify(active));
+  } catch {
+    // Persistence is an optimisation; the in-memory policy still holds.
+  }
+}
+
+/** Remote kill switch. */
+export function setOverpassEnabled(enabled: boolean): void {
+  _enabled = enabled;
+}
+
+export function isOverpassEnabled(): boolean {
+  return _enabled;
+}
+
+/** Exposed for testing only: override the inter-request throttle (0 disables). */
+export function __setOverpassMinIntervalMsForTests(ms: number): void {
+  _minIntervalMs = ms;
+}
+
+/** Exposed for testing only: replace the clock. */
+export function __setOverpassClockForTests(now: () => number): void {
+  _now = now;
+}
+
+/** Exposed for testing only: reset all mirrors, throttle and kill switch. */
+export function __resetOverpassPolicyForTests(): void {
+  _minIntervalMs = OVERPASS_MIN_INTERVAL_MS;
+  _lastRequestAt = 0;
+  _enabled = true;
+  _now = () => Date.now();
+  _serial = Promise.resolve();
+  _policies.clear();
+  _hydrated = false;
+  try {
+    getPolicyCache()?.delete(POLICY_STORAGE_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+/** Exposed for testing only. */
+export function __getOverpassCooldownsForTests(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [mirror, policy] of _policies) out[mirror] = policy.cooldownUntil;
+  return out;
+}
+
+function policyFor(mirror: string): MirrorPolicy {
+  const existing = _policies.get(mirror);
+  if (existing) return existing;
+  const created: MirrorPolicy = { consecutiveFailures: 0, cooldownUntil: 0 };
+  _policies.set(mirror, created);
+  return created;
+}
+
+function hostOfUrl(url: string): string {
+  return url.replace(/^https?:\/\//, '').split('/')[0] ?? url;
+}
+
+async function throttle(signal?: AbortSignal): Promise<void> {
+  const elapsed = Math.max(0, _now() - _lastRequestAt);
+  if (elapsed < _minIntervalMs) {
+    await sleepWithAbort(_minIntervalMs - elapsed, signal);
+  }
+  _lastRequestAt = _now();
+}
+
+async function requestFrom<T>(mirror: string, opts: OverpassRequestOptions): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, opts.timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  opts.signal?.addEventListener('abort', onExternalAbort);
 
   try {
-    const winner = await Promise.any(attempts);
-    // The winner already settled, so aborting it is a no-op; this only stops
-    // the hedge requests that are still downloading.
-    controllers.forEach((ctrl) => ctrl.abort());
-    return winner;
+    const res = await fetch(mirror, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+        'User-Agent': OVERPASS_USER_AGENT,
+      },
+      body: `data=${encodeURIComponent(opts.query)}`,
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new OverpassRequestError(res.status, `HTTP ${res.status}`);
+    return (await res.json()) as T;
   } catch (err) {
-    // `Promise.any` reports an aborted caller as an AggregateError, which
-    // `isAbortError` cannot recognise — that made a superseded search look like
-    // a failed one, and CarPlay answered it by blanking the driver's list.
     if (opts.signal?.aborted) throw abortError();
+    if (timedOut) throw new OverpassRequestError(0, 'timeout');
+    if (err instanceof OverpassRequestError) throw err;
+    // AbortError raised by the local controller for any other reason is a
+    // mirror failure, not a caller abort — the caller check above already
+    // handled that case.
+    if (isAbortError(err)) throw new OverpassRequestError(0, 'aborted');
     throw err;
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onExternalAbort);
   }
+}
+
+/** Record a failure and compute the mirror's next cooldown window. */
+function penalize(mirror: string, err: unknown): number {
+  const policy = policyFor(mirror);
+  policy.consecutiveFailures += 1;
+  const status = err instanceof OverpassRequestError ? err.status : 0;
+  const base = status === 429 || status >= 500 ? RATE_LIMIT_COOLDOWN_MS : FAILURE_COOLDOWN_MS;
+  const backoff = base * Math.pow(2, Math.min(policy.consecutiveFailures - 1, 4));
+  policy.cooldownUntil = _now() + Math.min(backoff, MAX_COOLDOWN_MS);
+  savePersistedPolicies();
+  return policy.cooldownUntil;
+}
+
+async function attempt<T>(opts: OverpassRequestOptions): Promise<T> {
+  const failures: string[] = [];
+  let earliestRetry: number | null = null;
+
+  for (const mirror of OVERPASS_MIRRORS) {
+    throwIfAborted(opts.signal);
+    const policy = policyFor(mirror);
+    const now = _now();
+    if (policy.cooldownUntil > now) {
+      failures.push(
+        `${hostOfUrl(mirror)}: cooling down ${Math.ceil((policy.cooldownUntil - now) / 1000)}s`,
+      );
+      earliestRetry =
+        earliestRetry === null
+          ? policy.cooldownUntil
+          : Math.min(earliestRetry, policy.cooldownUntil);
+      continue;
+    }
+
+    await throttle(opts.signal);
+
+    try {
+      const value = await requestFrom<T>(mirror, opts);
+      policy.consecutiveFailures = 0;
+      policy.cooldownUntil = 0;
+      savePersistedPolicies();
+      return value;
+    } catch (err) {
+      // A caller abort is terminal: do not try other mirrors.
+      if (isAbortError(err)) throw err;
+      const until = penalize(mirror, err);
+      earliestRetry = earliestRetry === null ? until : Math.min(earliestRetry, until);
+      failures.push(`${hostOfUrl(mirror)}: ${err instanceof Error ? err.message : String(err)}`);
+      logDiagnostic('overpass', 'warn', 'mirror failed', {
+        mirror: hostOfUrl(mirror),
+        error: err instanceof Error ? err.message : String(err),
+        cooldownMs: until - _now(),
+      });
+    }
+  }
+
+  logDiagnostic('overpass', 'warn', 'no mirror answered', { failures });
+  throw new OverpassUnavailableError(
+    `Overpass unavailable (${failures.join('; ')})`,
+    earliestRetry,
+  );
+}
+
+/**
+ * Send an Overpass QL query, trying mirrors in order until one answers.
+ *
+ * Requests are serialised app-wide and throttled to one per
+ * {@link OVERPASS_MIN_INTERVAL_MS}. A mirror in cooldown is never contacted.
+ * Throws {@link OverpassDisabledError} when the remote kill switch is off and
+ * {@link OverpassUnavailableError} when every mirror is unavailable.
+ */
+export async function overpassFetch<T = any>(opts: OverpassRequestOptions): Promise<T> {
+  if (!_enabled) throw new OverpassDisabledError();
+  if (!_hydrated) {
+    _hydrated = true;
+    loadPersistedPolicies();
+  }
+  throwIfAborted(opts.signal);
+
+  const run = _serial.then(
+    () => attempt<T>(opts),
+    () => attempt<T>(opts),
+  );
+  // Keep the chain alive regardless of the outcome, without leaking rejections.
+  _serial = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }

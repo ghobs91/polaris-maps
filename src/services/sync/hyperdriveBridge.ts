@@ -16,7 +16,9 @@ import {
   CMD_HD_STATUS,
   CMD_HD_UNSEED,
   CMD_HD_GUNZIP,
+  CMD_HD_UNPACK_PMTILES,
   CMD_HD_EXTRACT_TAR,
+  CMD_HD_SHARD_QUERY,
   CMD_HD_DOWNLOAD_PROGRESS,
 } from './hdRpcCommands';
 
@@ -261,6 +263,34 @@ export async function getHyperdriveStatus(): Promise<{
   }
 }
 
+/**
+ * Expand a region pack's base-map PMTiles archive into `{z}/{x}/{y}.pbf` files
+ * under `destDir` (region-pack assembly).
+ *
+ * Runs in the worklet so the archive is parsed once with real gzip and the
+ * tiles land as plain MVT files the on-device tile server already serves.
+ */
+export async function unpackPmtiles(
+  srcPath: string,
+  destDir: string,
+  options: { maxZoom?: number } = {},
+): Promise<{ tiles: number; skipped: number; bytes: number }> {
+  const result = await sendRequest(
+    CMD_HD_UNPACK_PMTILES,
+    {
+      srcPath: toFsPath(srcPath),
+      destDir: toFsPath(destDir),
+      maxZoom: options.maxZoom,
+    },
+    TRANSFER_TIMEOUT_MS,
+  );
+  return {
+    tiles: Number(result.tiles ?? 0),
+    skipped: Number(result.skipped ?? 0),
+    bytes: Number(result.bytes ?? 0),
+  };
+}
+
 /** Gunzip a file in place (region-pack assembly). */
 export async function gunzipFile(inputPath: string, outputPath: string): Promise<void> {
   await sendRequest(
@@ -277,6 +307,30 @@ export async function extractTar(srcPath: string, destDir: string): Promise<void
     { srcPath: toFsPath(srcPath), destDir: toFsPath(destDir) },
     TRANSFER_TIMEOUT_MS,
   );
+}
+
+/** How long a peer shard query may take (peer discovery included). */
+const SHARD_QUERY_TIMEOUT_MS = 20_000;
+
+/**
+ * Ask the swarm for a shard answer.
+ *
+ * The worklet joins the shard's topic, broadcasts the query to peers that seed
+ * that pack, and returns the first reply verbatim. It does not verify anything:
+ * the reply is untrusted until `verifiableShardIndex` checks its proofs against
+ * the root from the signed shard manifest.
+ */
+export async function queryShardOverSwarm(
+  shardId: string,
+  query: Record<string, unknown>,
+  opts?: { timeoutMs?: number },
+): Promise<unknown> {
+  const result = await sendRequest(
+    CMD_HD_SHARD_QUERY,
+    { shardId, query, timeoutMs: opts?.timeoutMs ?? SHARD_QUERY_TIMEOUT_MS },
+    (opts?.timeoutMs ?? SHARD_QUERY_TIMEOUT_MS) + 5_000,
+  );
+  return result.answer;
 }
 
 /** Terminate the worklet and clear handlers. */

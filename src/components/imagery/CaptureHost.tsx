@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -11,32 +11,47 @@ import {
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Camera,
-  CommonResolutions,
   useCameraDevice,
+  useCameraDevices,
   useCameraPermission,
   usePhotoOutput,
   useVideoOutput,
+  VisionCamera,
   type CameraRef,
+  type OrientationManager,
   type Recorder,
 } from 'react-native-vision-camera';
 import { createLocation } from 'react-native-vision-camera-location';
 import { captureBandHeight } from './captureBand';
+import {
+  CAPTURE_SPLIT_LEFT_PERCENT,
+  CAPTURE_ZOOM_PRESETS,
+  capturePhotoTargetForZoom,
+  captureVideoTargetForZoom,
+  clampCaptureZoom,
+  nextCaptureZoom,
+  pickRoadCameraDevice,
+  shouldUseSplitCapture,
+} from './captureLayout';
 import { spacing, typography } from '../../constants/theme';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useStreetViewCaptureStore } from '../../stores/streetViewCaptureStore';
 import { useNavigationTrackingStore } from '../../stores/navigationTrackingStore';
 import { dashCamElapsedSeconds, useDashCamStore } from '../../stores/dashCamStore';
+import type { FocusMode } from 'react-native-vision-camera';
 import {
   captureConfigForMode,
   detailZoomForDevice,
-  resolveCaptureMode,
+  isPortraitOrientation,
   shouldCapture,
   shouldCaptureDetail,
+  shouldLockInfinityFocus,
+  type CaptureOrientation,
   type LastCapture,
 } from '../../services/imagery/streetViewCaptureLogic';
 import { STREET_VIEW_DETAIL_EVERY_NTH, type StreetViewFix } from '../../models/streetViewCapture';
@@ -54,6 +69,7 @@ import {
   insertDashCamClip,
   pruneDashCamClips,
 } from '../../services/dashcam/dashCamQueue';
+import { toFilePath, toFileUri } from '../../utils/fileUri';
 
 const PREVIEW_WIDTH = 96;
 const PREVIEW_HEIGHT = 54;
@@ -67,14 +83,48 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function toFileUri(path: string): string {
-  return path.startsWith('file://') ? path : `file://${path}`;
-}
-
 function getImageSize(uri: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
     Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
   });
+}
+
+/**
+ * Device orientation with a fallback for hardware that has no accelerometer
+ * (notably the iOS Simulator, where VisionCamera's `useOrientation` throws).
+ * An unknown orientation never blocks capture; the upload-time portrait check
+ * remains the final safety net.
+ */
+function useCaptureOrientation(enabled: boolean): CaptureOrientation | undefined {
+  const [orientation, setOrientation] = useState<CaptureOrientation | undefined>(undefined);
+
+  useEffect(() => {
+    if (!enabled) {
+      setOrientation(undefined);
+      return;
+    }
+
+    let manager: OrientationManager;
+    try {
+      manager = VisionCamera.createOrientationManager('device');
+      setOrientation(manager.currentOrientation);
+      manager.startOrientationUpdates(setOrientation);
+    } catch {
+      // No accelerometer: leave the orientation unknown.
+      setOrientation(undefined);
+      return;
+    }
+
+    return () => {
+      try {
+        manager.stopOrientationUpdates();
+      } catch {
+        // Already stopped.
+      }
+    };
+  }, [enabled]);
+
+  return orientation;
 }
 
 function formatClock(totalSeconds: number): string {
@@ -98,8 +148,10 @@ function formatClock(totalSeconds: number): string {
  *
  * It is mounted only while something is capturing, but lives at the app root
  * so tab changes and the CarPlay companion screen cannot unmount the camera
- * mid-drive. Frames are triggered by raw GPS fixes from the navigation
- * pipeline, not a timer.
+ * mid-drive. (The phone-display heartbeat below is the one thing that unmounts
+ * it: with CarPlay attached `AppState` never reports locked, so the session is
+ * torn down while the display is asleep instead.) Frames are triggered by raw
+ * GPS fixes from the navigation pipeline, not a timer.
  *
  * The dash cam records in fixed-length segments; each finished segment lands in
  * the documents directory and the oldest segments are pruned once either
@@ -115,34 +167,57 @@ export function CaptureHost() {
   const setDashCamPaused = useDashCamStore((s) => s.setPaused);
   const setDashCamError = useDashCamStore((s) => s.setError);
   const clipSeconds = useSettingsStore((s) => s.dashCam.clipSeconds);
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const cameraRef = useRef<CameraRef>(null);
   const { hasPermission, canRequestPermission, requestPermission } = useCameraPermission();
   const detailStreamEnabled = useSettingsStore((s) => s.streetView.detailStream);
-  const backDevice = useCameraDevice('back');
-  // The filter returns the closest match, so inspect the device it yields for a
-  // real ultra-wide lens rather than trusting the filter alone.
-  const ultraWideDevice = useCameraDevice('back', { physicalDevices: ['ultra-wide-angle'] });
-  const hasUltraWide = Boolean(
-    ultraWideDevice?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'),
+  const zoom = clampCaptureZoom(useSettingsStore((s) => s.streetView.zoom));
+  const setStreetView = useSettingsStore((s) => s.setStreetView);
+  // Use the physical wide-angle lens, not the virtual multi-camera device.
+  // AVCaptureDevice's virtual device often reports
+  // `isLockingFocusWithCustomLensPositionSupported == false`, so
+  // `setFocusLocked(1)` is skipped and AF can settle on the dashboard. The
+  // physical wide lens supports manual infinity focus, which is what a
+  // road-facing capture needs. Select by `type`/`isVirtualDevice`: the
+  // `physicalDevices` filter scores a physical lens and a virtual dual-wide
+  // equally, so it can silently return the virtual device.
+  const allDevices = useCameraDevices();
+  const fallbackBackDevice = useCameraDevice('back');
+  const backDevice = useMemo(
+    () => pickRoadCameraDevice(allDevices) ?? fallbackBackDevice,
+    [allDevices, fallbackBackDevice],
   );
-  // Capture quality is chosen for the device; there is no user-facing mode.
-  const mode = resolveCaptureMode({ hasUltraWide, detailStream: detailStreamEnabled });
-  const device = mode === 'threeD' ? ultraWideDevice : backDevice;
-  const config = captureConfigForMode(mode);
-  // Null on devices without a telephoto lens — zooming a wide-only camera
-  // would just crop the frame the wide stream already has.
+  const device = backDevice;
+  const config = captureConfigForMode('standard');
+  const photoTargetResolution = capturePhotoTargetForZoom(zoom);
+  const videoTargetResolution = captureVideoTargetForZoom(zoom);
+  // The physical wide lens has no telephoto constituent; the paired detail
+  // stream stays off. (Legacy captures keep their `detail` rows.)
   const detailZoom = detailZoomForDevice(backDevice);
+  // A user crop at or past the telephoto switch already gives the detail
+  // stream's field of view; the paired frame would add nothing.
+  const effectiveDetailZoom = detailZoom != null && zoom >= detailZoom ? null : detailZoom;
   const photoOutput = usePhotoOutput({
-    targetResolution: mode === 'standard' ? CommonResolutions.FHD_16_9 : CommonResolutions.UHD_4_3,
+    // Mapillary's app captures 4:3 full-sensor stills. A 16:9 crop loses
+    // detail at the edges and moves the aspect ratio towards 2:1, which
+    // Mapillary treats as an equirectangular panorama.
+    // The resolution target tracks the zoom preset so a digitally zoomed crop
+    // is stored on its native pixels instead of being upscaled back to 12 MP
+    // (which is what made zoomed street imagery uniformly soft).
+    targetResolution: photoTargetResolution,
     containerFormat: 'jpeg',
     quality: config.quality,
-    qualityPrioritization: 'balanced',
+    // Prefer a shorter capture over a lower-noise one: the camera is moving,
+    // so a slow shutter turns the road into light trails (especially at night).
+    qualityPrioritization: device?.supportsSpeedQualityPrioritization ? 'speed' : 'balanced',
   });
   const videoOutput = useVideoOutput({
-    targetResolution: CommonResolutions.FHD_16_9,
+    // Match the stream to the crop's native pixels. A fixed 4K target at 1.5x
+    // makes the ISP upscale the ~2688x1512 crop back to 3840x2160, which is
+    // what kept the preview soft no matter how focus was locked.
+    targetResolution: videoTargetResolution,
     // No police-report audio: clips stay muted, which also avoids needing the
     // microphone permission.
     enableAudio: false,
@@ -150,29 +225,167 @@ export function CaptureHost() {
 
   const [ready, setReady] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  /**
+   * rAF heartbeat for the phone display. CarPlay keeps `AppState` `active`
+   * while the phone screen is locked (the CarPlay scene holds the process
+   * foreground), so `AppState` alone cannot gate camera work: the camera and
+   * recorder kept running against the locked phone and eventually starved the
+   * CarPlay render path. `requestAnimationFrame` stops the moment the phone
+   * display sleeps (the same signal `foregroundActivity.ts` uses), so the
+   * heartbeat only stays fresh while the screen is genuinely interactive.
+   */
+  const [displayBeat, setDisplayBeat] = useState(true);
   const [mountError, setMountError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  /** Live focus indicator: '∞' when locked, 'AF' while autofocus hunts. */
+  const [focusHud, setFocusHud] = useState<{
+    locked: boolean;
+    lensPosition: number | null;
+    mode: FocusMode | undefined;
+  }>({ locked: false, lensPosition: null, mode: undefined });
 
   const busyRef = useRef(false);
   const lastCaptureRef = useRef<LastCapture | null>(null);
   /** Wide frames this drive, for the detail-stream cadence. */
   const wideFrameCountRef = useRef(0);
+  /** True while the lens is locked at infinity for high-speed capture. */
+  const focusLockedRef = useRef(false);
+  /** One-shot diagnostic so a device with no focus-lock support is visible. */
+  const focusLoggedRef = useRef(false);
   const permissionRequestedRef = useRef(false);
   const lastStorageCheckRef = useRef(0);
-  const activeRef = useRef(appActive);
   const recorderRef = useRef<Recorder | null>(null);
-  activeRef.current = appActive;
 
+  // Mapillary only accepts landscape imagery; keep the navigation UI as-is but
+  // stop taking stills while the phone is portrait, exactly like their app.
+  // Only listen to the accelerometer while a capture is actually running.
   const captureActive = Boolean(session) || dashRecording;
-  // Only the navigation screen splits into "directions on top, live camera in
-  // the bottom quarter"; every other screen keeps the compact pill so the map
-  // and lists are not covered while a drive is running.
-  const expanded = captureActive && Boolean(pathname?.includes('navigation'));
+  // The camera pipeline runs on the phone display, not in the CarPlay scene.
+  const phoneActive = appActive && displayBeat;
+  const phoneActiveRef = useRef(phoneActive);
+  phoneActiveRef.current = phoneActive;
+
+  // Drive the display heartbeat while anything is capturing. The rAF callback
+  // does nothing itself; the interval only checks whether frames stopped
+  // arriving (phone display asleep), so it costs one state change per
+  // transition, not per frame.
+  useEffect(() => {
+    if (!captureActive || !appActive) {
+      setDisplayBeat(true);
+      return;
+    }
+    let nextFrame: number | null = null;
+    let lastFrameAt = 0;
+    let cancelled = false;
+    const beat = () => {
+      lastFrameAt = Date.now();
+      if (!cancelled) nextFrame = requestAnimationFrame(beat);
+    };
+    nextFrame = requestAnimationFrame(beat);
+    const timer = setInterval(() => {
+      const fresh = Date.now() - lastFrameAt < 1200;
+      setDisplayBeat((previous) => (previous === fresh ? previous : fresh));
+    }, 500);
+    return () => {
+      cancelled = true;
+      if (nextFrame != null) cancelAnimationFrame(nextFrame);
+      clearInterval(timer);
+    };
+  }, [captureActive, appActive]);
+
+  const deviceOrientation = useCaptureOrientation(session != null);
+  const portrait = isPortraitOrientation(deviceOrientation);
+  const onNavigation = Boolean(pathname?.includes('navigation'));
+  // Landscape navigation with a live capture: the camera becomes the right 70%
+  // pane and the navigation screen renders the directions feed on the left.
+  const splitCapture =
+    onNavigation &&
+    shouldUseSplitCapture({
+      width: windowWidth,
+      height: windowHeight,
+      capturing: captureActive,
+    });
+
+  // Only the navigation screen splits into "directions + camera"; every other
+  // screen keeps the compact pill so the map and lists are not covered.
+  const expanded = captureActive && onNavigation && !splitCapture;
   const bandHeight = captureBandHeight(windowHeight);
-  const usingUltraWide =
-    mode === 'threeD' &&
-    Boolean(device?.physicalDevices?.some((entry) => entry.type === 'ultra-wide-angle'));
-  const lensLabel = usingUltraWide ? '0.5×' : '1×';
+  const zoomLabel = `${Number.isInteger(zoom) ? zoom.toFixed(0) : zoom.toFixed(1)}×`;
+  const setCaptureZoom = (value: number) => setStreetView({ zoom: clampCaptureZoom(value) });
+  /**
+   * Tap-to-relock: the lens moves to infinity and the chip confirms it. This is
+   * the same behavior Mapillary's capture screen surfaces as a level indicator —
+   * the difference is that ours reads back the actual focus mode, so a silent
+   * AF-hunt inside the session cannot be mistaken for an infinity lock.
+   */
+  const focusChipPress = () => {
+    void applyFocusLock();
+  };
+  const focusChip = (
+    <Pressable
+      onPress={focusChipPress}
+      style={({ pressed }) => [
+        styles.zoomChip,
+        focusHud.locked && styles.focusChipLocked,
+        { opacity: pressed ? 0.75 : 1 },
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={
+        focusHud.locked
+          ? 'Focus locked at infinity'
+          : focusHud.mode === 'locked'
+            ? 'Focus locked near, not at infinity'
+            : 'Autofocus is active'
+      }
+      accessibilityHint="Re-locks focus at infinity for the road"
+    >
+      <Text
+        style={[
+          styles.zoomChipText,
+          styles.focusChipText,
+          focusHud.locked ? styles.focusChipTextLocked : styles.focusChipTextAf,
+        ]}
+      >
+        {focusHud.locked ? '∞' : focusHud.mode === 'locked' ? 'Near' : 'AF'}
+      </Text>
+    </Pressable>
+  );
+  const zoomChips = (
+    <View style={styles.zoomRow}>
+      {CAPTURE_ZOOM_PRESETS.map((preset) => {
+        const active = preset === zoom;
+        return (
+          <Pressable
+            key={preset}
+            onPress={() => setCaptureZoom(preset)}
+            style={({ pressed }) => [
+              styles.zoomChip,
+              active && styles.zoomChipActive,
+              { opacity: pressed ? 0.75 : 1 },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Set camera zoom to ${preset} times`}
+            accessibilityState={{ selected: active }}
+          >
+            <Text style={[styles.zoomChipText, active && styles.zoomChipTextActive]}>
+              {Number.isInteger(preset) ? preset.toFixed(0) : preset.toFixed(1)}×
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+  const zoomCycleChip = (
+    <Pressable
+      onPress={() => setCaptureZoom(nextCaptureZoom(zoom))}
+      style={({ pressed }) => [styles.zoomCycleChip, { opacity: pressed ? 0.75 : 1 }]}
+      accessibilityRole="button"
+      accessibilityLabel={`Camera zoom ${zoom} times`}
+      accessibilityHint="Cycles through 1, 1.5, 2 and 3 times zoom"
+    >
+      <Text style={styles.zoomCycleText}>{zoomLabel}</Text>
+    </Pressable>
+  );
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -222,6 +435,108 @@ export function CaptureHost() {
   }, [captureActive, hasPermission, canRequestPermission, requestPermission]);
 
   /**
+   * Hold the lens at infinity for a road-facing capture. The physical wide
+   * lens supports a custom lens-position lock; a virtual multi-camera device
+   * often does not, which is why the previous "above 10 mph" lock could be
+   * skipped entirely and AF settled on the dashboard. Devices with no lock
+   * fall back to metering a point toward the road. Best-effort — a focus
+   * failure must never cost a frame.
+   */
+  const syncInfinityFocus = useCallback(async (speedMps: number, force = false) => {
+    const controller = cameraRef.current?.controller;
+    if (!controller) return;
+    // Capture is a road-facing task: hold infinity for the whole session, not
+    // only above 10 mph. Otherwise a stop lets AF settle on the dashboard.
+    const capturing =
+      useStreetViewCaptureStore.getState().session != null || useDashCamStore.getState().recording;
+    const wantLock = capturing || shouldLockInfinityFocus(speedMps);
+    // Compare against the *actual* lens state, not just our last request. A
+    // session reconfigure can quietly switch focus back to AF; the old
+    // ref-only check then skipped the re-lock forever.
+    const alreadyCorrect = wantLock
+      ? controller.focusMode === 'locked' && controller.lensPosition >= 0.98
+      : controller.focusMode !== 'locked';
+    if (!force && alreadyCorrect) {
+      focusLockedRef.current = wantLock;
+      return;
+    }
+    try {
+      if (wantLock) {
+        if (__DEV__ && !focusLoggedRef.current) {
+          focusLoggedRef.current = true;
+          console.log('[Capture] focus capabilities', {
+            device: controller.device.id,
+            type: controller.device.type,
+            isVirtualDevice: controller.device.isVirtualDevice,
+            supportsFocusLocking: controller.device.supportsFocusLocking,
+            supportsFocusMetering: controller.device.supportsFocusMetering,
+            focusMode: controller.focusMode,
+            lensPosition: controller.lensPosition,
+          });
+        }
+        let locked = false;
+        if (controller.device.supportsFocusLocking) {
+          try {
+            await controller.setFocusLocked(1);
+            // `focusMode` can report 'locked' at a near position; require the
+            // lens to actually reach the far end before calling it infinity.
+            locked = controller.focusMode === 'locked' && controller.lensPosition >= 0.98;
+          } catch {
+            locked = false;
+          }
+        }
+        if (!locked && controller.device.supportsFocusMetering) {
+          // No usable lens-position lock (virtual camera/Android). Meter a
+          // point toward the road/horizon and hold it, rather than letting AF
+          // settle on the dashboard.
+          const point = VisionCamera.createNormalizedMeteringPoint(0.5, 0.32);
+          await controller.focusTo(point, {
+            modes: ['AF'],
+            responsiveness: 'snappy',
+            adaptiveness: 'locked',
+          });
+          locked = controller.focusMode === 'locked';
+        }
+        focusLockedRef.current = locked;
+        if (!locked) return;
+      } else if (focusLockedRef.current || controller.focusMode === 'locked') {
+        await controller.resetFocus();
+        focusLockedRef.current = false;
+      }
+    } catch {
+      // Leave the previous state; the next fix retries.
+    }
+  }, []);
+
+  /** Reads the live focus state for the focus HUD; verifies the lens lock. */
+  const readFocusHud = useCallback(() => {
+    const controller = cameraRef.current?.controller;
+    if (!controller) return false;
+    // `focusMode === 'locked'` alone is not enough: the lock can be at a near
+    // position. A real infinity lock reports the lens at ~1.0 as well.
+    const atInfinity = controller.lensPosition >= 0.98;
+    const locked = controller.focusMode === 'locked' && atInfinity;
+    setFocusHud({ locked, lensPosition: controller.lensPosition, mode: controller.focusMode });
+    return locked;
+  }, []);
+
+  /** Re-locks the lens at infinity from the UI and reports the outcome. */
+  const applyFocusLock = useCallback(async (): Promise<boolean> => {
+    await syncInfinityFocus(0, true);
+    return readFocusHud();
+  }, [readFocusHud, syncInfinityFocus]);
+
+  // Apply the user's crop to the preview and to both the still and video
+  // outputs. A zoom change can reset focus, so re-assert the infinity lock.
+  useEffect(() => {
+    if (!ready) return;
+    const controller = cameraRef.current?.controller;
+    if (!controller) return;
+    void controller.setZoom(zoom).catch(() => {});
+    void syncInfinityFocus(0, true).then(readFocusHud);
+  }, [device?.id, readFocusHud, ready, syncInfinityFocus, zoom]);
+
+  /**
    * Captures the telephoto half of a pair from the same session.
    *
    * This runs *after* the wide frame, not concurrently: iOS gives one capture
@@ -237,6 +552,9 @@ export function CaptureHost() {
       try {
         await controller.setZoom(input.zoom);
         await delay(DETAIL_ZOOM_SETTLE_MS);
+        // Switching to the telephoto constituent resets focus, so re-apply the
+        // infinity lock to the lens that will actually take this frame.
+        await syncInfinityFocus(input.fix.speedMps, true);
         const { filePath } = await photoOutput.capturePhotoToFile(
           {
             enableShutterSound: false,
@@ -277,16 +595,23 @@ export function CaptureHost() {
         // A missed detail frame must never abort the wide stream.
         setSessionError(error instanceof Error ? error.message : String(error));
       } finally {
-        await controller.setZoom(1).catch(() => {});
+        await controller.setZoom(zoom).catch(() => {});
+        // Returning to the wide lens resets focus; restore the infinity lock.
+        if (focusLockedRef.current) {
+          await syncInfinityFocus(input.fix.speedMps, true);
+        }
       }
     },
-    [photoOutput, recordCapture, setSessionError],
+    [photoOutput, recordCapture, setSessionError, syncInfinityFocus, zoom],
   );
 
   const takePicture = useCallback(async () => {
-    if (!ready || busyRef.current || !activeRef.current) return;
+    if (!ready || busyRef.current || !phoneActiveRef.current) return;
     const currentSession = useStreetViewCaptureStore.getState().session;
     if (!currentSession) return;
+    // Mapillary rejects portrait imagery; the band shows a rotate hint while
+    // this is true, so no frames are queued for a drive that cannot upload.
+    if (portrait) return;
 
     const settings = useSettingsStore.getState().streetView;
     const maxStorage = settings.maxStorageBytes;
@@ -366,17 +691,17 @@ export function CaptureHost() {
       wideFrameCountRef.current += 1;
       const detail = shouldCaptureDetail({
         enabled: detailStreamEnabled,
-        detailZoom,
+        detailZoom: effectiveDetailZoom,
         everyNth: STREET_VIEW_DETAIL_EVERY_NTH,
         wideFrameCount: wideFrameCountRef.current,
         dashCamRecording: useDashCamStore.getState().recording,
       });
-      if (detail.capture && detailZoom != null) {
+      if (detail.capture && effectiveDetailZoom != null) {
         await captureDetailFrame({
           driveId: currentSession.driveId,
           fix,
           pairId: id,
-          zoom: detailZoom,
+          zoom: effectiveDetailZoom,
         });
       }
     } catch (error) {
@@ -388,8 +713,9 @@ export function CaptureHost() {
     captureDetailFrame,
     config,
     detailStreamEnabled,
-    detailZoom,
+    effectiveDetailZoom,
     photoOutput,
+    portrait,
     ready,
     recordCapture,
     setSessionError,
@@ -403,14 +729,24 @@ export function CaptureHost() {
   useEffect(() => {
     if (!rawFix || rawFix.timestamp === lastTriggeredFixRef.current) return;
     lastTriggeredFixRef.current = rawFix.timestamp;
-    void takePicture();
-  }, [rawFix, takePicture]);
+    // Re-evaluate focus on every fix, even when no frame is due: slowing below
+    // 10 mph must hand focus back to autofocus so the dash cam stays sharp.
+    void (async () => {
+      await syncInfinityFocus(rawFix.speedMps);
+      await takePicture();
+      readFocusHud();
+    })();
+  }, [rawFix, syncInfinityFocus, takePicture, readFocusHud]);
 
   /** Records one segment straight into the documents directory. */
   const recordSegment = useCallback(
     async (startedAt: number): Promise<{ uri: string; durationMs: number } | null> => {
       const dir = await ensureDashCamDir();
-      const destPath = `${dir}${Crypto.randomUUID()}.mp4`;
+      // VisionCamera wants a filesystem path here, not an Expo file:// URI.
+      // Passing the URI made the native recorder write outside the app's
+      // documents (or fail), so the clip was never found and reconcile removed
+      // its row — the settings list then always said "None".
+      const destPath = toFilePath(`${dir}${Crypto.randomUUID()}.mp4`);
       const fix = useNavigationTrackingStore.getState().rawFix;
       const recorder = await videoOutput.createRecorder({
         maxDuration: clipSeconds,
@@ -465,7 +801,11 @@ export function CaptureHost() {
 
     const run = async () => {
       while (!cancelled) {
-        if (!activeRef.current) {
+        if (!phoneActiveRef.current) {
+          // The phone display is asleep (CarPlay keeps AppState `active`), so
+          // the camera should stand down exactly like when the app
+          // backgrounds: pause the buffer and wait for the display to come
+          // back before touching the recorder again.
           setDashCamPaused(true);
           await delay(500);
           continue;
@@ -513,7 +853,12 @@ export function CaptureHost() {
     };
   }, [dashRecording, ready, recordSegment, persistClip, setDashCamError, setDashCamPaused]);
 
-  if (!session && !dashRecording) return null;
+  // Tear the camera session down while the phone display is asleep, exactly
+  // like the app-backgrounded case: with CarPlay attached the process stays
+  // foreground even locked, so without this the camera session keeps running
+  // and starves the CarPlay UI. The session store survives; the next unlocked
+  // frame recreates the camera and the loop resumes at its next segment.
+  if ((!session && !dashRecording) || !phoneActive) return null;
 
   const stopStreetView = () => {
     void endStreetViewSession();
@@ -523,28 +868,134 @@ export function CaptureHost() {
     void recorderRef.current?.stopRecording().catch(() => {});
   };
 
-  const stopButton = (kind: 'streetview' | 'dashcam') => (
-    <Pressable
-      onPress={kind === 'dashcam' ? stopDashCam : stopStreetView}
-      style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
-      accessibilityRole="button"
-      accessibilityLabel={
-        kind === 'dashcam' ? 'Stop dash cam recording' : 'Stop street imagery capture'
-      }
-      accessibilityHint={
-        kind === 'dashcam'
-          ? 'Stops recording and keeps the footage already captured'
-          : 'Stops capture and opens the upload summary'
-      }
-    >
-      <Ionicons name={kind === 'dashcam' ? 'videocam-off' : 'stop'} size={16} color="#fff" />
-    </Pressable>
+  const modePills = (
+    <>
+      <View style={[styles.modePill, session && styles.modePillActive]}>
+        <MaterialCommunityIcons
+          name="camera-marker"
+          size={13}
+          color={session ? (portrait ? '#FFD60A' : '#fff') : 'rgba(255,255,255,0.5)'}
+        />
+        <Text style={[styles.modePillLabel, !session && styles.modePillLabelMuted]}>
+          Street imagery
+        </Text>
+        <Text style={styles.modePillValue}>
+          {session ? (portrait ? 'Rotate' : session.captureCount) : 'Off'}
+        </Text>
+      </View>
+      <View style={[styles.modePill, dashRecording && styles.modePillActive]}>
+        <Ionicons
+          name="videocam"
+          size={13}
+          color={dashRecording ? '#FF453A' : 'rgba(255,255,255,0.5)'}
+        />
+        <Text style={[styles.modePillLabel, !dashRecording && styles.modePillLabelMuted]}>
+          Dash cam
+        </Text>
+        <Text style={styles.modePillValue}>
+          {dashRecording ? (dashPaused ? 'Paused' : formatClock(elapsed)) : 'Off'}
+        </Text>
+      </View>
+    </>
   );
 
-  const stopControls = (
+  const modeControls = (
+    <View style={styles.modeControlRow}>
+      {session ? (
+        <Pressable
+          onPress={stopStreetView}
+          style={({ pressed }) => [styles.modeControl, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop street imagery capture"
+          accessibilityHint="Stops capture and opens the upload summary"
+        >
+          <MaterialCommunityIcons name="camera-marker" size={16} color="#FF453A" />
+          <Text style={styles.modeControlText}>Stop street</Text>
+        </Pressable>
+      ) : null}
+      {dashRecording ? (
+        <Pressable
+          onPress={stopDashCam}
+          style={({ pressed }) => [styles.modeControl, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop dash cam recording"
+          accessibilityHint="Stops recording and keeps the footage already captured"
+        >
+          <Ionicons name="videocam" size={16} color="#FF453A" />
+          <Text style={styles.modeControlText}>Stop dash</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
+  const compactModeControls = (
     <View style={styles.stopRow}>
-      {session ? stopButton('streetview') : null}
-      {dashRecording ? stopButton('dashcam') : null}
+      {session ? (
+        <Pressable
+          onPress={stopStreetView}
+          style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop street imagery capture"
+        >
+          <MaterialCommunityIcons name="camera-marker" size={18} color="#FF453A" />
+        </Pressable>
+      ) : null}
+      {dashRecording ? (
+        <Pressable
+          onPress={stopDashCam}
+          style={({ pressed }) => [styles.stopButton, { opacity: pressed ? 0.8 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Stop dash cam recording"
+        >
+          <Ionicons name="videocam" size={18} color="#FF453A" />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+
+  const bandHintText =
+    dashRecording && session
+      ? 'Dash cam stays on this device · street photos upload later'
+      : dashRecording
+        ? 'Dash cam stays on this device'
+        : 'Street imagery uploads to Mapillary';
+
+  const rotateOverlay = (
+    <View style={styles.rotateOverlay} accessibilityRole="alert">
+      <View style={styles.rotateCard}>
+        <View style={styles.rotateIconWrap}>
+          <Ionicons name="phone-landscape-outline" size={28} color="#FFD60A" />
+        </View>
+        <View style={styles.rotateText}>
+          <Text style={styles.rotateTitle}>Rotate to landscape</Text>
+          <Text style={styles.rotateBody}>
+            Street imagery needs a sideways camera. Turn your phone to start capturing.
+          </Text>
+          {dashRecording ? <Text style={styles.rotateSub}>Dash cam keeps recording.</Text> : null}
+          <View style={styles.rotateActions}>
+            <Pressable
+              onPress={stopStreetView}
+              style={({ pressed }) => [styles.rotateAction, { opacity: pressed ? 0.8 : 1 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Stop street imagery capture"
+            >
+              <MaterialCommunityIcons name="camera-marker" size={14} color="#fff" />
+              <Text style={styles.rotateActionText}>Stop street imagery</Text>
+            </Pressable>
+            {dashRecording ? (
+              <Pressable
+                onPress={stopDashCam}
+                style={({ pressed }) => [styles.rotateAction, { opacity: pressed ? 0.8 : 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Stop dash cam recording"
+              >
+                <Ionicons name="videocam" size={14} color="#fff" />
+                <Text style={styles.rotateActionText}>Stop dash cam</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      </View>
     </View>
   );
 
@@ -552,7 +1003,11 @@ export function CaptureHost() {
     return (
       <View
         style={[
-          expanded ? styles.expandedPermissionPill : styles.permissionPill,
+          splitCapture
+            ? styles.splitPermission
+            : expanded
+              ? styles.expandedPermissionPill
+              : styles.permissionPill,
           expanded ? { height: bandHeight } : null,
         ]}
       >
@@ -565,15 +1020,21 @@ export function CaptureHost() {
     );
   }
 
-  // One camera tree for both layouts: only the outer/inner styles change, so
-  // switching tabs (expanded band ↔ compact pill) never remounts the camera
-  // and never interrupts a recording.
+  // One camera tree for every layout: only the outer/inner styles change, so
+  // switching between the compact pill, the portrait band, and the landscape
+  // pane never remounts the camera or interrupts a recording.
   return (
     <View
-      style={expanded ? [styles.band, { height: bandHeight }] : styles.wrap}
+      style={
+        splitCapture
+          ? styles.splitPane
+          : expanded
+            ? [styles.band, { height: bandHeight }]
+            : styles.wrap
+      }
       pointerEvents="box-none"
     >
-      <View style={expanded ? styles.bandInner : styles.preview}>
+      <View style={splitCapture ? styles.splitInner : expanded ? styles.bandInner : styles.preview}>
         <Camera
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
@@ -585,7 +1046,11 @@ export function CaptureHost() {
             setReady(true);
             setMountError(null);
           }}
-          onStopped={() => setReady(false)}
+          onStopped={() => {
+            setReady(false);
+            // A new session starts with autofocus until the next fix re-locks.
+            focusLockedRef.current = false;
+          }}
           onError={(error) => {
             setMountError(error.message);
             Alert.alert(
@@ -601,53 +1066,74 @@ export function CaptureHost() {
             }
           }}
         />
-        {expanded ? (
+        {splitCapture ? (
+          <View
+            style={[
+              styles.splitOverlay,
+              {
+                paddingTop: insets.top + spacing.sm,
+                paddingRight: insets.right + spacing.md,
+                paddingBottom: insets.bottom + spacing.md,
+                paddingLeft: spacing.md,
+              },
+            ]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.splitTopRow} pointerEvents="box-none">
+              {modePills}
+              <View style={styles.flexSpacer} />
+              {focusChip}
+              {zoomChips}
+            </View>
+            <View style={styles.splitBottomRow} pointerEvents="box-none">
+              {mountError ? (
+                <Text style={styles.bandError}>Camera unavailable</Text>
+              ) : (
+                <Text style={styles.splitHint} numberOfLines={2}>
+                  {bandHintText}
+                </Text>
+              )}
+              <View style={styles.bandStop}>{modeControls}</View>
+            </View>
+          </View>
+        ) : expanded ? (
           <View
             style={[styles.bandOverlay, { paddingBottom: insets.bottom }]}
             pointerEvents="box-none"
           >
-            <View style={styles.bandTopRow} pointerEvents="none">
-              {dashRecording || session ? <View style={styles.recordingDot} /> : null}
-              {dashRecording ? (
-                <Text style={styles.bandCounter}>{formatClock(elapsed)}</Text>
-              ) : null}
-              {session ? <Text style={styles.bandCounter}>{session.captureCount}</Text> : null}
-              <Text style={styles.bandChip}>
-                {dashRecording && session
-                  ? 'DASH CAM + PHOTOS'
-                  : dashRecording
-                    ? 'DASH CAM'
-                    : lensLabel}
-              </Text>
-              {dashRecording ? (
-                <Text style={styles.bandHint}>{dashPaused ? 'Paused' : 'Recording'}</Text>
-              ) : null}
+            <View style={styles.bandTopRow} pointerEvents="box-none">
+              {modePills}
+              <View style={styles.flexSpacer} />
+              {focusChip}
+              {zoomCycleChip}
             </View>
             <View style={styles.bandBottomRow} pointerEvents="box-none">
               {mountError ? (
                 <Text style={styles.bandError}>Camera unavailable</Text>
               ) : (
                 <Text style={styles.bandHint} numberOfLines={1}>
-                  {dashRecording && session
-                    ? 'Footage stays on this device · photos upload later'
-                    : dashRecording
-                      ? 'Footage stays on this device'
-                      : 'Street imagery · tap stop to review'}
+                  {bandHintText}
                 </Text>
               )}
-              <View style={styles.bandStop}>{stopControls}</View>
+              <View style={styles.bandStop}>{modeControls}</View>
             </View>
           </View>
         ) : (
           <>
             <View style={styles.topRow} pointerEvents="none">
               <View style={styles.recordingDot} />
-              <Text style={styles.count}>
-                {dashRecording ? formatClock(elapsed) : session?.captureCount}
-              </Text>
-              <Text style={styles.lens}>
-                {dashRecording && session ? 'REC+IMG' : dashRecording ? 'REC' : lensLabel}
-              </Text>
+              {dashRecording ? (
+                <>
+                  <Ionicons name="videocam" size={9} color="#fff" />
+                  <Text style={styles.count}>{formatClock(elapsed)}</Text>
+                </>
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="camera-marker" size={9} color="#fff" />
+                  <Text style={styles.count}>{session?.captureCount ?? ''}</Text>
+                </>
+              )}
+              <Text style={styles.lens}>{zoomLabel}</Text>
             </View>
             {mountError ? (
               <View style={styles.errorOverlay} pointerEvents="none">
@@ -656,8 +1142,9 @@ export function CaptureHost() {
             ) : null}
           </>
         )}
+        {expanded && session && portrait ? rotateOverlay : null}
       </View>
-      {!expanded ? stopControls : null}
+      {!expanded && !splitCapture ? compactModeControls : null}
     </View>
   );
 }
@@ -702,21 +1189,68 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.8)',
     textShadowRadius: 3,
   },
-  bandChip: {
+  zoomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  zoomChip: {
+    minWidth: 34,
+    height: 24,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
+  zoomChipActive: {
+    backgroundColor: '#fff',
+    borderColor: '#fff',
+  },
+  zoomChipText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    overflow: 'hidden',
+    fontVariant: ['tabular-nums'],
+  },
+  zoomChipTextActive: {
+    color: '#000',
+  },
+  focusChipLocked: {
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderColor: 'rgba(73,229,106,0.75)',
+  },
+  focusChipText: {
+    fontSize: 13,
+    letterSpacing: 1,
+  },
+  focusChipTextLocked: {
+    color: '#49E56A',
+  },
+  focusChipTextAf: {
+    color: '#FFD60A',
+  },
+  zoomCycleChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  zoomCycleText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   bandHint: {
     ...typography.caption,
     color: 'rgba(255,255,255,0.85)',
     fontSize: 11,
+    flexShrink: 1,
   },
   bandError: {
     ...typography.caption,
@@ -846,5 +1380,174 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: '#fff',
     fontSize: 12,
+  },
+  splitPane: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    left: CAPTURE_SPLIT_LEFT_PERCENT,
+    backgroundColor: '#000',
+    zIndex: 30,
+  },
+  splitInner: { flex: 1 },
+  splitOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'space-between',
+  },
+  splitTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  splitBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  splitHint: {
+    ...typography.caption,
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 11,
+    flex: 1,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 3,
+  },
+  splitPermission: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    left: CAPTURE_SPLIT_LEFT_PERCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(28,28,30,0.95)',
+    zIndex: 30,
+  },
+  flexSpacer: { flex: 1 },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+    flexShrink: 1,
+  },
+  modePillActive: {
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderColor: 'rgba(255,255,255,0.5)',
+  },
+  modePillLabel: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  modePillLabelMuted: {
+    color: 'rgba(255,255,255,0.55)',
+  },
+  modePillValue: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 10,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  modeControlRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  modeControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 17,
+    backgroundColor: 'rgba(28,28,30,0.9)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  modeControlText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rotateOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.84)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    zIndex: 40,
+  },
+  rotateCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 380,
+  },
+  rotateIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,214,10,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,214,10,0.55)',
+    flexShrink: 0,
+  },
+  rotateText: { flexShrink: 1 },
+  rotateTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  rotateBody: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  rotateSub: {
+    color: '#FFD60A',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
+  },
+  rotateActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  rotateAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  rotateActionText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

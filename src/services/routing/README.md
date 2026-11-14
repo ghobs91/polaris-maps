@@ -13,13 +13,31 @@ The routing service provides:
 
 Traffic-aware ETA and automatic rerouting are handled by the [traffic service](../traffic/README.md).
 
+## Routing tiers
+
+Every route and reroute walks the same cascade and stops at the first tier that
+answers. A tier that throws is absorbed, so one slow endpoint cannot end a
+navigation session.
+
+| Tier | Engine                                                   | Network  | Notes                                                                                                               |
+| ---- | -------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
+| 1    | On-device Valhalla (`valhalla-mobile`, iOS)              | none     | Primary. Uses the region graph downloaded with the pack; traffic speeds pushed in via `updateTrafficSpeeds`         |
+| 2    | OSRM (`osrmClient.ts`)                                   | required | Used when no graph is loaded or Valhalla cannot answer. No `transit` profile, so that mode skips straight to tier 3 |
+| 3a   | Apple MapKit `MKDirections`                              | required | iOS only, network-backed                                                                                            |
+| 3b   | FOSSGIS public Valhalla (`valhalla1/2.openstreetmap.de`) | required | Last resort; richest manoeuvres of the two                                                                          |
+
+The tier that produced the route on screen is exposed through
+`getRoutingTierState()` / `useRoutingTier()` and surfaced by
+`RoutingTierBadge` in developer mode (`settingsStore.devMode`).
+
 ## Files
 
-| File                    | Description                                                                                                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `routingService.ts`     | Valhalla API client — computes routes with maneuver-level turn instructions, encoded polyline geometry, and time/distance summaries. Error responses are truncated and API keys redacted.               |
-| `hassleTurns.ts`        | Prefers route candidates whose turns are managed by a stop sign or traffic light, using Mapillary detections only where imagery coverage exists. Never trades more than 5 min / 25% for a calmer route. |
-| `parkAndRideService.ts` | Determines if user is >20 min walk from a rail/subway station. Computes combined drive-to-station + transit trip as a park-and-ride suggestion.                                                         |
+| File                    | Description                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `routingService.ts`     | Valhalla API client and the routing cascade — on-device → OSRM → MapKit / FOSSGIS. Computes routes with maneuver-level turn instructions, encoded polyline geometry, and time/distance summaries. Error responses are truncated and API keys redacted. |
+| `osrmClient.ts`         | Tier-2 OSRM client. Normalises OSRM steps into the app's `ValhallaRoute` shape (synthesized instructions, step-accurate shape indices, toll/ferry flags) so downstream consumers stay engine-agnostic.                                                 |
+| `hassleTurns.ts`        | Prefers route candidates whose turns are managed by a stop sign or traffic light, using Mapillary detections only where imagery coverage exists. Never trades more than 5 min / 25% for a calmer route.                                                |
+| `parkAndRideService.ts` | Determines if user is >20 min walk from a rail/subway station. Computes combined drive-to-station + transit trip as a park-and-ride suggestion.                                                                                                        |
 
 ## Navigation Flow
 

@@ -204,6 +204,31 @@ describe('PlaceMediaCarousel', () => {
     expect(screen.queryByTestId('place-media-empty')).toBeNull();
   });
 
+  it('holds the scrape and hidden WebView until enabled', async () => {
+    mockFetchWebsitePhotos.mockResolvedValue([]);
+    mockDefaultSupplements.mockReturnValue([]);
+
+    const props = {
+      lat: 48.8584,
+      lng: 2.2945,
+      name: "Mongo's Coffee",
+      osmId: '1',
+      websiteUrl: 'https://mongoscoffee.com',
+      tags: {},
+      resetKey: 11,
+    };
+    const screen = render(<PlaceMediaCarousel {...props} enabled={false} />);
+
+    await act(async () => {});
+    expect(mockFetchWebsitePhotos).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('place-media-webview')).toBeNull();
+
+    screen.rerender(<PlaceMediaCarousel {...props} enabled />);
+
+    await waitFor(() => expect(screen.getByTestId('place-media-webview')).toBeTruthy());
+    expect(mockFetchWebsitePhotos).toHaveBeenCalledWith('https://mongoscoffee.com');
+  });
+
   it('merges website photos with open-licensed media into one carousel', async () => {
     mockFetchWebsitePhotos.mockResolvedValue([
       'https://example.com/site/one.jpg',

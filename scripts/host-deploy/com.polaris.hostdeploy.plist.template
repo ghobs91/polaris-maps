@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for com.polaris.hostdeploy. install.sh substitutes
+  __SUPPORT__, __HOME__ and __REPO__ and installs the result at
+  ~/Library/LaunchAgents/com.polaris.hostdeploy.plist.
+
+  WatchPaths fires when the container creates .host-deploy/queue/<job_id>/.
+  StartInterval is the safety net for events missed while the Mac was asleep.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.polaris.hostdeploy</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__SUPPORT__/bin/run-on-mac.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>POLARIS_HOST_DEPLOY_SUPPORT</key>
+    <string>__SUPPORT__</string>
+  </dict>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>__REPO__/.host-deploy/queue</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>120</integer>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <key>StandardOutPath</key>
+  <string>__SUPPORT__/logs/daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>__SUPPORT__/logs/daemon.log</string>
+</dict>
+</plist>

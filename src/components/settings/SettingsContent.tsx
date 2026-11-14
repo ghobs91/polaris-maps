@@ -97,6 +97,8 @@ export function SettingsContent({
   const swarmPeerCount = useTrafficStore((s) => s.swarmPeerCount);
   const swarmTopicCount = useTrafficStore((s) => s.swarmTopicCount);
   const swarmSegmentCount = useTrafficStore((s) => s.swarmSegmentCount);
+  const swarmMetered = useTrafficStore((s) => s.swarmMetered);
+  const swarmPrunedConnections = useTrafficStore((s) => s.swarmPrunedConnections);
   const nostrRelayCount = useTrafficStore((s) => s.nostrRelayCount);
   const trafficMode = useTrafficStore((s) => s.trafficMode);
   const isCollectingProbes = useTrafficStore((s) => s.isCollectingProbes);
@@ -380,6 +382,13 @@ export function SettingsContent({
             <SettingsRow title="Peers" value={String(swarmPeerCount)} />
             <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
             <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
+            <SettingsRow
+              title="Link Profile"
+              value={swarmMetered ? 'Metered (client-only)' : 'Unmetered'}
+            />
+            {swarmPrunedConnections > 0 ? (
+              <SettingsRow title="Density-cap Rejections" value={String(swarmPrunedConnections)} />
+            ) : null}
             <SettingsRow title="Nostr Relays" value={String(nostrRelayCount)} />
             <SettingsRow
               title="Contributing Probes"
@@ -393,6 +402,24 @@ export function SettingsContent({
               onPress={() =>
                 identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
               }
+            />
+            <SettingsRow
+              title="Export Diagnostics"
+              value="Redacted network + mesh log"
+              onPress={() => {
+                void (async () => {
+                  try {
+                    const { exportDiagnostics } =
+                      await import('../../services/diagnostics/diagnosticsExport');
+                    await exportDiagnostics();
+                  } catch (error) {
+                    Alert.alert(
+                      'Export failed',
+                      error instanceof Error ? error.message : 'Unknown error',
+                    );
+                  }
+                })();
+              }}
             />
             <SettingsRow
               title="Show Onboarding on Launch"

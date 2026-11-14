@@ -28,6 +28,7 @@ jest.mock('react-native', () => {
         hideNavigationAlert: jest.fn(),
         pushSearchResults: jest.fn(),
         updateHomeSuggestions: jest.fn(),
+        updateSearchShortcuts: jest.fn(),
         updateDashboardShortcuts: jest.fn(),
         updateMapCenter: jest.fn(),
         updateMapStyle: jest.fn(),
@@ -310,11 +311,11 @@ describe('CarPlayManager', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Connect pushes the phone's position so the map isn't stuck at (0, 0).
-    // (4th arg: speed m/s — 0 for the idle locate, unknown/stationary.)
+    // (3rd arg: -1 = no valid GPS course yet; 4th: speed 0, stationary.)
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(
       40.7128,
       -74.006,
-      0,
+      -1,
       0,
     );
 
@@ -325,7 +326,7 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(
       40.7128,
       -74.006,
-      0,
+      -1,
       0,
     );
   });
@@ -338,6 +339,9 @@ describe('CarPlayManager', () => {
 
     const calls = (Location.watchPositionAsync as jest.Mock).mock.calls;
     expect(calls.length).toBeGreaterThan(0);
+    // iOS only honours distanceInterval, so it must be small enough to deliver
+    // the first moving fix promptly instead of after 25 m.
+    expect(calls[calls.length - 1][0]).toMatchObject({ distanceInterval: 5 });
     const onUpdate = calls[calls.length - 1][1] as (loc: unknown) => void;
     onUpdate({ coords: { latitude: 40.7, longitude: -74.0, heading: 90, speed: 10 } });
 
@@ -347,7 +351,7 @@ describe('CarPlayManager', () => {
     expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 90, 10);
   });
 
-  it('clamps invalid idle GPS heading and speed before pushing them', async () => {
+  it('forwards an unknown idle GPS heading as -1 and clamps its speed', async () => {
     initCarPlay();
     fireEvent('carPlayConnected');
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -355,10 +359,12 @@ describe('CarPlayManager', () => {
 
     const calls = (Location.watchPositionAsync as jest.Mock).mock.calls;
     const onUpdate = calls[calls.length - 1][1] as (loc: unknown) => void;
-    // expo-location reports -1 when course/speed are unavailable.
+    // expo-location reports -1 when course/speed are unavailable. The heading is
+    // kept as -1 so the native host knows there is no course yet instead of
+    // mistaking it for due north and holding the map north-up.
     onUpdate({ coords: { latitude: 40.7, longitude: -74.0, heading: -1, speed: -1 } });
 
-    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, 0, 0);
+    expect(NativeModules.PolarisCarPlay.updateMapCenter).toHaveBeenCalledWith(40.7, -74.0, -1, 0);
   });
 
   it('pushes each fix to the CarPlay map immediately while the phone is locked', () => {
@@ -831,7 +837,7 @@ describe('CarPlayManager', () => {
     expect(useNavigationStore.getState().waypoints[0]).toMatchObject({ name: 'Coffee Shop' });
   });
 
-  it('shows a preview when adding a stop while idle', async () => {
+  it('starts navigation when adding a stop while idle', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
 
@@ -842,10 +848,10 @@ describe('CarPlayManager', () => {
     fireEvent('searchResultAddStop', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
-      expect.objectContaining({ destinationName: 'Coffee Shop' }),
-    );
-    expect(useNavigationStore.getState().routePreview).not.toBeNull();
+    expect(useNavigationStore.getState().isNavigating).toBe(true);
+    expect(useNavigationStore.getState().destination).toMatchObject({ name: 'Coffee Shop' });
+    expect(useNavigationStore.getState().routePreview).toBeNull();
+    expect(NativeModules.PolarisCarPlay.showTripPreview).not.toHaveBeenCalled();
   });
 
   it('shows and hides the rerouting alert on transitions only', () => {
@@ -1229,6 +1235,19 @@ describe('CarPlayManager', () => {
     expect(nav.destination).toEqual({ lat: 41.1, lng: -73.2, name: 'Gym' });
   });
 
+  it('pushes add-stop shortcuts for the CarPlay search list on connect', async () => {
+    initCarPlay();
+    fireEvent('carPlayConnected');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(NativeModules.PolarisCarPlay.updateSearchShortcuts).toHaveBeenCalledWith([
+      { name: 'Gas Stations', query: 'gas stations', kind: 'fuel' },
+      { name: 'EV Charging', query: 'ev charging', kind: 'charging_station' },
+      { name: 'Fast Food', query: 'fast food', kind: 'fast_food' },
+      { name: 'Coffee', query: 'coffee', kind: 'cafe' },
+    ]);
+  });
+
   it('pushes saved places as home suggestions on connect', async () => {
     (getFavorites as jest.Mock).mockReturnValue([
       {
@@ -1329,7 +1348,7 @@ describe('CarPlayManager', () => {
     expect(unifiedSearch).not.toHaveBeenCalled();
   });
 
-  it('shows a trip preview when a search result is selected', async () => {
+  it('starts navigation immediately when a search result is selected', async () => {
     const route = makeRoute();
     (computeRoute as jest.Mock).mockResolvedValue([route]);
 
@@ -1347,20 +1366,12 @@ describe('CarPlayManager', () => {
       'auto',
       expect.objectContaining({ alternates: 2 }),
     );
-    // Preview, not navigation: the driver picks a route and taps Go.
-    expect(useNavigationStore.getState().routePreview).not.toBeNull();
-    expect(useNavigationStore.getState().isNavigating).toBe(false);
-    expect(NativeModules.PolarisCarPlay.showTripPreview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        destinationName: 'Coffee Shop',
-        destinationLat: 40.75,
-        destinationLng: -73.98,
-        routes: expect.arrayContaining([
-          expect.objectContaining({ encodedPolyline: route.geometry }),
-        ]),
-      }),
-    );
-    expect(NativeModules.PolarisCarPlay.startNavigation).not.toHaveBeenCalled();
+    // No preview and no phone-side Go: the head unit destination starts.
+    expect(useNavigationStore.getState().isNavigating).toBe(true);
+    expect(useNavigationStore.getState().destination).toMatchObject({ name: 'Coffee Shop' });
+    expect(useNavigationStore.getState().routePreview).toBeNull();
+    expect(NativeModules.PolarisCarPlay.showTripPreview).not.toHaveBeenCalled();
+    expect(NativeModules.PolarisCarPlay.startNavigation).toHaveBeenCalled();
   });
 
   it('previews the traffic-adjusted ETA on the primary route like the phone header', () => {
@@ -1384,18 +1395,25 @@ describe('CarPlayManager', () => {
     );
   });
 
-  it('starts the selected route when the driver taps Go in the preview', async () => {
+  it('starts the selected alternate when CarPlay reports a route pick from a phone preview', async () => {
     const route = makeRoute();
     const alternate = {
       ...makeRoute(),
       geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`B',
     };
-    (computeRoute as jest.Mock).mockResolvedValue([route, alternate]);
 
     initCarPlay();
     fireEvent('carPlayConnected');
-    fireEvent('searchResultSelected', { name: 'Coffee Shop', lat: 40.75, lng: -73.98 });
-    await new Promise((r) => setTimeout(r, 10));
+    // A phone-side preview (not a CarPlay destination pick) still mirrors to the
+    // head unit and can be started from its route picker.
+    useNavigationStore
+      .getState()
+      .setRoutePreview(
+        route,
+        [alternate],
+        { lat: 40.75, lng: -73.98, name: 'Coffee Shop' },
+        'auto',
+      );
     jest.clearAllMocks();
 
     fireEvent('carPlayRouteStart', { index: 1 });

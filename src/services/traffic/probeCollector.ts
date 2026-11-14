@@ -6,13 +6,20 @@ import { publishProbe as nostrPublish } from './nostrFallback';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useTrafficStore } from '../../stores/trafficStore';
 import type { TrafficProbe } from '../../models/traffic';
-import { MIN_PEER_THRESHOLD } from '../../models/traffic';
+import { consumePublishBudget } from './publishBudget';
 
 const PUBLISH_INTERVAL_MS = 5_000;
+/**
+ * Public Nostr relays are shared infrastructure. When the swarm has too few
+ * peers and probes fall back to relays, sample at 1/6 the local GPS rate so a
+ * launch spike does not turn into thousands of events per second per relay.
+ */
+const NOSTR_PUBLISH_MIN_INTERVAL_MS = 30_000;
 const MIN_SPEED_MPH = 3;
 const PROBE_ID_ROTATION_MS = 60 * 60 * 1000; // 1 hour
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
+let lastNostrPublishAt = 0;
 let currentProbeId: Uint8Array = randomBytes(32);
 let probeIdCreatedAt: number = Date.now();
 
@@ -37,14 +44,25 @@ function encodeTrafficProbe(probe: TrafficProbe): string {
 }
 
 /**
- * Choose the transport for an outbound probe: Hyperswarm once enough peers
- * are connected, otherwise the Nostr relay fallback.
+ * Minimum swarm peers before probes stay on the mesh.
+ *
+ * At scale the relay path must stay rare: probes are high-frequency (every few
+ * seconds), so they only leave the mesh when the swarm has **no** peers at
+ * all. A device with even one peer publishes over Hyperswarm (which reaches
+ * that peer) instead of broadcasting to donation-funded public relays. The
+ * daily publish budget (publishBudget.ts) is the hard backstop.
+ */
+export const PROBE_RELAY_MIN_PEERS = 1;
+
+/**
+ * Choose the transport for an outbound probe: Hyperswarm while any peer is
+ * connected, otherwise the Nostr relay fallback.
  */
 export function selectProbeTransport(
   swarmStarted: boolean,
   swarmPeerCount: number,
 ): 'hyperswarm' | 'nostr' {
-  return swarmStarted && swarmPeerCount >= MIN_PEER_THRESHOLD ? 'hyperswarm' : 'nostr';
+  return swarmStarted && swarmPeerCount >= PROBE_RELAY_MIN_PEERS ? 'hyperswarm' : 'nostr';
 }
 
 async function collectAndPublish(): Promise<void> {
@@ -80,7 +98,12 @@ async function collectAndPublish(): Promise<void> {
       const probeJson = encodeTrafficProbe(probe);
       hyperswarmPublish(probeJson);
     } else {
-      // Fallback: Nostr relay broadcast
+      // Fallback: Nostr relay broadcast, sampled and budgeted to protect
+      // donation-funded public relays.
+      const now = Date.now();
+      if (now - lastNostrPublishAt < NOSTR_PUBLISH_MIN_INTERVAL_MS) return;
+      if (!consumePublishBudget('probe', now)) return;
+      lastNostrPublishAt = now;
       await nostrPublish(probe, geohash4);
     }
   } catch {

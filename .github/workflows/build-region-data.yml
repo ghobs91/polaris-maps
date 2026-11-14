@@ -1,7 +1,8 @@
 name: Build Region Map Data
 
-# Builds Valhalla routing tiles, PMTiles, and geocoding databases from
-# OpenStreetMap data (via Geofabrik) and publishes them to GitHub Releases.
+# Builds Valhalla routing tiles, PMTiles, geocoding databases, and the on-device
+# POI/transit search indices (+ content-addressed shards) from OpenStreetMap data
+# (via Geofabrik) and publishes them to GitHub Releases.
 # The Polaris Maps app downloads these assets automatically via
 # GitHub Releases or Hyperdrive P2P.
 #
@@ -9,6 +10,12 @@ name: Build Region Map Data
 #   - Weekly (Sunday midnight UTC) to pick up OSM updates
 #   - On manual trigger (workflow_dispatch) with optional region filter
 #   - On push to main that modifies the catalog or CI config
+
+# Publishing to GitHub Releases needs a write-scoped token; the default token is
+# read-only, which made every release upload fail with HTTP 403.
+permissions:
+  contents: write
+  actions: write
 
 on:
   schedule:
@@ -19,6 +26,14 @@ on:
         description: 'Region ID (e.g. jp-tokyo). Leave blank to build all catalog regions.'
         required: false
         default: ''
+      region_start:
+        description: 'Catalog index to start at (chunked builds; 0-based).'
+        required: false
+        default: '0'
+      region_count:
+        description: 'How many catalog regions this run builds (max 256 — GitHub matrix cap).'
+        required: false
+        default: '200'
       geofabrik_url:
         description: 'Custom Geofabrik PBF URL — required when region_id is not in the catalog.'
         required: false
@@ -27,6 +42,10 @@ on:
         description: 'Bounding box for clip: minLon,minLat,maxLon,maxLat (e.g. 139.5,35.5,140.0,35.9)'
         required: false
         default: ''
+      skip_tiles:
+        description: 'Skip PMTiles generation (use during an upstream auxiliary-data outage, or for partial rebuilds)'
+        required: false
+        default: 'false'
   push:
     branches: [main]
     paths:
@@ -60,8 +79,16 @@ jobs:
               '{include: [.include[] | select(.id == $id) | {id, name, geofabrik, bbox}]}' \
               scripts/regions.json)
           else
-            # Full catalog build
-            matrix=$(jq -c '{include: [.include[] | {id, name, geofabrik, bbox}]}' scripts/regions.json)
+            # Full catalog build, chunked: a workflow run's matrix caps at 256
+            # jobs, and full-world parity is 363 regions. Each run builds a
+            # slice and dispatches the next one when done (see publish job).
+            # On push events these inputs are null; GitHub's null || '0' → '0'.
+            START=${{ github.event.inputs.region_start || '0' }}
+            COUNT=${{ github.event.inputs.region_count || '200' }}
+            matrix=$(jq -c \
+              --argjson start "$START" --argjson count "$COUNT" \
+              '{include: [.include[$start:($start + $count)][] | {id, name, geofabrik, bbox}]}' \
+              scripts/regions.json)
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
@@ -77,11 +104,36 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
+      # The build job runs repository scripts (osm-to-search-sqlite.py,
+      # build-search-shards.mjs), so it needs its own checkout — the setup job's
+      # checkout does not carry over between jobs.
+      - uses: actions/checkout@v4
+
+      # The runner's default JDK is too old for planetiler (class file 61 =
+      # Java 17), which is why every build failed at "Generate PMTiles".
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # scripts/build-search-shards.mjs uses node:sqlite, which needs a modern
+      # Node (the runner's default is older than 22).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y osmium-tool python3 python3-pip curl
           pip3 install osmium --quiet
+          # DuckDB CLI: extracts POIs from the PBF in one SQL pass
+          # (scripts/osm-to-search-sqlite.py) and builds Overture places.
+          DUCKDB_VERSION="2.0.0"
+          curl -fsSL -o /tmp/duckdb.tgz \
+            "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb-cli-linux-amd64.tar.gz"
+          sudo tar xzf /tmp/duckdb.tgz -C /usr/local/bin duckdb
+          duckdb --version
           # Planetiler for PMTiles generation
           PLANETILER_VERSION="0.8.3"
           curl -fsSL -o /usr/local/bin/planetiler.jar \
@@ -107,13 +159,58 @@ jobs:
           rm -f work/${{ matrix.id }}/region.osm.pbf
           echo "Clipped size: $(du -h work/${{ matrix.id }}/clipped.osm.pbf | cut -f1)"
 
-      - name: Generate PMTiles
+      - name: Generate POI + transit search indices
         run: |
-          java -Xmx6g -jar /usr/local/bin/planetiler.jar \
-            --osm-path=work/${{ matrix.id }}/clipped.osm.pbf \
-            --output=work/${{ matrix.id }}/tiles.pmtiles \
-            --force \
-            --download
+          # On-device search indices: these answer viewport POI and transit
+          # queries with no network call for downloaded regions, which is what
+          # keeps Overpass off the critical path
+          # (src/services/poi/localPoiIndex.ts, localTransitIndex.ts).
+          # POIs come from a single DuckDB pass over the PBF; transit from
+          # osmium, which can assemble ordered route geometry.
+          python3 scripts/osm-to-search-sqlite.py \
+            "work/${{ matrix.id }}/clipped.osm.pbf" \
+            "${{ matrix.id }}" \
+            "work/${{ matrix.id }}"
+          echo "Search index size:  $(du -h work/${{ matrix.id }}/search.sqlite | cut -f1)"
+          echo "Transit index size: $(du -h work/${{ matrix.id }}/transit.sqlite | cut -f1)"
+
+      - name: Build content-addressed POI shards
+        run: |
+          # Shards let a device fetch just the cells it needs and verify each
+          # one by hash (src/services/regions/shardManifest.ts). Signing the
+          # descriptor manifest is a separate publisher step with a trusted key.
+          node scripts/build-search-shards.mjs \
+            "work/${{ matrix.id }}/search.sqlite" \
+            "work/${{ matrix.id }}"
+          tar -cf "work/${{ matrix.id }}/search-shards.tar" \
+            -C "work/${{ matrix.id }}" shards.json shards
+
+      # NOTE: planetiler downloads auxiliary sources (water polygons, natural
+      # earth) from osmdata.openstreetmap.de, which is intermittently unreachable
+      # from CI. Set skip_tiles=true to publish the rest of the pack while that
+      # host is down; scheduled builds intentionally still fail loudly.
+      - name: Generate PMTiles
+        if: ${{ github.event.inputs.skip_tiles != 'true' }}
+        run: |
+          # Planetiler fetches auxiliary sources (water polygons, natural earth)
+          # on first run; that download times out intermittently on CI runners and
+          # the failure is not retried internally, so retry the whole step.
+          for attempt in 1 2 3; do
+            if java -Xmx6g -jar /usr/local/bin/planetiler.jar \
+              --osm-path=work/${{ matrix.id }}/clipped.osm.pbf \
+              --output=work/${{ matrix.id }}/tiles.pmtiles \
+              --maxzoom=12 \
+              --force \
+              --download; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              echo "::error::planetiler failed after $attempt attempts"
+              exit 1
+            fi
+            echo "planetiler attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
           echo "PMTiles size: $(du -h work/${{ matrix.id }}/tiles.pmtiles | cut -f1)"
 
       - name: Build Valhalla routing tiles
@@ -164,12 +261,26 @@ jobs:
               );
           """)
 
+          INTERP_STEP = {'all': 1, 'odd': 2, 'even': 2}
+
+          def interpolate_range(start_number, end_number, step, limit=200):
+              lo, hi = sorted((start_number, end_number))
+              out, n = [], lo + step
+              while n < hi and len(out) < limit:
+                  out.append(n)
+                  n += step
+              return out if start_number <= end_number else list(reversed(out))
+
           class Handler(osmium.SimpleHandler):
               def __init__(self, db):
                   super().__init__()
                   self.db = db
                   self.count = 0
                   self.batch = []
+                  # Address node id -> housenumber, so an addr:interpolation way
+                  # can resolve the numbers at its two endpoints. Interpolated
+                  # points are approximations; the app labels and de-ranks them.
+                  self.addr_numbers = {}
               def flush(self):
                   if not self.batch: return
                   self.db.executemany(
@@ -189,12 +300,44 @@ jobs:
                   self.count += 1
                   if len(self.batch) >= 5000: self.flush()
               def node(self, n):
+                  if n.tags.get('addr:housenumber'):
+                      self.addr_numbers[n.id] = n.tags['addr:housenumber']
                   if n.tags.get('addr:street') or (n.tags.get('name') and n.tags.get('amenity')):
                       self._add(n.tags, n.location.lat, n.location.lon)
               def way(self, w):
+                  interp = (w.tags.get('addr:interpolation') or '').lower()
+                  if interp in INTERP_STEP and len(w.nodes) >= 2:
+                      self._interpolate(w, INTERP_STEP[interp])
                   if w.tags.get('addr:street') or (w.tags.get('name') and w.tags.get('building')):
                       try: self._add(w.tags, w.nodes[0].lat, w.nodes[0].lon)
                       except: pass
+              def _interpolate(self, w, step):
+                  try:
+                      first, last = w.nodes[0], w.nodes[-1]
+                      start = self.addr_numbers.get(first.ref)
+                      end = self.addr_numbers.get(last.ref)
+                      if not start or not end:
+                          return
+                      start_number, end_number = int(start), int(end)
+                  except (AttributeError, TypeError, ValueError):
+                      return
+                  span = end_number - start_number
+                  if span == 0:
+                      return
+                  tags = w.tags
+                  for number in interpolate_range(start_number, end_number, step):
+                      t = (number - start_number) / span
+                      lat = first.lat + (last.lat - first.lat) * t
+                      lng = first.lon + (last.lon - first.lon) * t
+                      self.batch.append((
+                          'address_interpolated', str(number),
+                          tags.get('addr:street'), tags.get('addr:city') or tags.get('addr:suburb'),
+                          tags.get('addr:state'), tags.get('addr:postcode'),
+                          tags.get('addr:country'), lat, lng,
+                      ))
+                      self.count += 1
+                      if len(self.batch) >= 5000:
+                          self.flush()
 
           h = Handler(db)
           h.apply_file(pbf_path, locations=True)
@@ -206,11 +349,92 @@ jobs:
           PYEOF
           echo "Geocoding DB size: $(du -h work/${{ matrix.id }}/geocoding.db | cut -f1)"
 
+      # Scheduled connections for offline journey planning (Tier 0). Optional:
+      # a region without a mapped feed ships without a timetable and the planner
+      # falls through to a live source.
+      #
+      # This is the *only* place a whole GTFS feed is downloaded. At runtime the
+      # app refuses anything over GTFS_MAX_FEED_BYTES, because a national feed
+      # buffered on a phone is a crash and a volunteer host is not a CDN.
+      # Per-feed headers (SPTrans 403s a bare curl), presigned redirects and
+      # "200 but the body is an HTML error page" all live in the script rather
+      # than in shell, so the quoting cannot be got wrong here.
+      - name: Build transit timetable
+        run: |
+          mkdir -p "work/${{ matrix.id }}"
+          set +e
+          node scripts/fetch-gtfs-feed.mjs "${{ matrix.id }}" "work/${{ matrix.id }}/gtfs.zip"
+          fetch_status=$?
+          set -e
+
+          if [ "$fetch_status" -eq 3 ]; then
+            echo "no GTFS feed mapped for ${{ matrix.id }} — skipping timetable"
+            exit 0
+          fi
+          if [ "$fetch_status" -ne 0 ]; then
+            echo "::warning::no usable GTFS feed for ${{ matrix.id }}; shipping without a timetable"
+            exit 0
+          fi
+
+          python3 scripts/build-transit-timetable.py \
+            "work/${{ matrix.id }}/gtfs.zip" \
+            "work/${{ matrix.id }}" \
+            --region-id "${{ matrix.id }}"
+          rm -f "work/${{ matrix.id }}/gtfs.zip"
+          echo "Timetable size: $(du -h work/${{ matrix.id }}/transit-timetable.sqlite | cut -f1)"
+
+      - name: Record asset sizes for the catalog
+        run: |
+          # scripts/update-region-asset-urls.mjs reads these per-region sizes so
+          # the catalog carries accurate download sizes (every size field is
+          # optional; a missing entry just means no progress percentage).
+          node -e '
+            const fs = require("fs");
+            const dir = "work/${{ matrix.id }}";
+            const size = (name) => {
+              try { return fs.statSync(`${dir}/${name}`).size; } catch { return undefined; }
+            };
+            const out = {};
+            const search = size("search.sqlite");
+            const transit = size("transit.sqlite");
+            const tiles = size("tiles.pmtiles");
+            if (search !== undefined) out.searchIndexSizeBytes = search;
+            if (transit !== undefined) out.transitIndexSizeBytes = transit;
+            // Drives the auto-download size gate and tile download progress.
+            if (tiles !== undefined) out.tilesSizeBytes = tiles;
+            fs.writeFileSync(`${dir}/sizes.json`, JSON.stringify(out));
+          '
+
+      - name: Record asset checksums for the catalog
+        run: |
+          # Delta downloads need a checksum per published asset so the client can
+          # skip files it already has. Keys are release asset names
+          # (`<region>-<file>`), matching what scripts/update-region-asset-urls.mjs
+          # emits into each region's `assets` manifest.
+          node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const dir = "work/${{ matrix.id }}";
+            const region = "${{ matrix.id }}";
+            const out = {};
+            for (const name of ["search.sqlite", "transit.sqlite", "tiles.pmtiles"]) {
+              try {
+                const bytes = fs.readFileSync(`${dir}/${name}`);
+                out[`${region}-${name}`] = crypto.createHash("md5").update(bytes).digest("hex");
+              } catch { /* asset not built for this region */ }
+            }
+            fs.writeFileSync(`${dir}/checksums.json`, JSON.stringify(out));
+          '
+
       - name: Create or update GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="map-data-$(date +%Y-%m)"
+          # A full-world catalog is ~2,500 assets and a release holds at most
+          # 1,000, so regions are split across sibling tags by a hash both the
+          # build and publish jobs compute identically
+          # (scripts/pack-release-tag.mjs).
+          TAG=$(node scripts/pack-release-tag.mjs "${{ matrix.id }}")
           ASSET_PREFIX="${{ matrix.id }}"
 
           # Create release if it doesn't exist
@@ -221,15 +445,51 @@ jobs:
               --notes "Auto-generated map data from OpenStreetMap via Geofabrik. Built $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
               --prerelease
 
-          # Upload assets (overwrite if exists)
-          for file in tiles.pmtiles routing.tar geocoding.db; do
+          # Upload assets (overwrite if exists).
+          #
+          # The `path#label` syntax only sets a *label* — the asset name stays the
+          # basename, so every region would upload to the same name and clobber
+          # the previous one. Rename to `<region>-<file>` before uploading; the
+          # catalog's asset URLs (scripts/update-region-asset-urls.mjs) depend on
+          # exactly this naming.
+          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite transit-timetable.sqlite search-shards.tar checksums.json; do
             if [ -f "work/${{ matrix.id }}/$file" ]; then
+              cp "work/${{ matrix.id }}/$file" "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}"
               gh release upload "$TAG" \
-                "work/${{ matrix.id }}/$file#${ASSET_PREFIX}-${file}" \
+                "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}" \
                 --repo "${{ github.repository }}" \
                 --clobber
             fi
           done
+
+      # Optional: mirror this region's assets to the secondary pack origins
+      # (Cloudflare R2, Backblaze B2, Internet Archive). GitHub Releases stays
+      # the primary origin and the only required one — enable by setting the
+      # POLARIS_PACK_MIRRORS repository variable to 'true' and configuring the
+      # rclone remotes as secrets (see scripts/publish-region-mirrors.sh).
+      - name: Mirror assets to secondary origins
+        if: ${{ vars.POLARIS_PACK_MIRRORS == 'true' }}
+        env:
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+          RCLONE_CONFIG_B2_TYPE: b2
+          RCLONE_CONFIG_B2_ACCOUNT: ${{ secrets.B2_ACCOUNT_ID }}
+          RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          IA_ITEM: ${{ secrets.IA_ITEM }}
+          RCLONE_CONFIG_IA_TYPE: internetarchive
+          RCLONE_CONFIG_IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+          TAG="map-data-$(date +%Y-%m)"
+          # --dry-run keeps the step green when no origin is configured yet.
+          bash scripts/publish-region-mirrors.sh "$TAG" "work/${{ matrix.id }}" || \
+            echo "::warning::No pack mirror origin configured; GitHub Releases remains the only origin."
 
       - name: Upload build artifacts (for debugging)
         if: failure()
@@ -238,3 +498,206 @@ jobs:
           name: build-${{ matrix.id }}-logs
           path: work/${{ matrix.id }}/*.json
           retention-days: 7
+
+  # ── Job 3: publish the catalog stamped with this release's asset URLs ────────
+  # GitHub Releases is the origin for both the packs and this catalog — Polaris
+  # runs no CDN. The app reads it via EXPO_PUBLIC_REGION_CATALOG_URL, typically
+  # `.../releases/latest/download/catalog.json`.
+  publish-catalog:
+    needs: [setup, build]
+    # `always()` is load-bearing: without it GitHub skips this job whenever *any*
+    # job in `needs` fails, so a single bad region meant the catalog — and with
+    # it the `map-data-latest` pointer the app reads — was never published at all.
+    # That is exactly what happened on the first full run: two regions with dead
+    # Geofabrik URLs failed, and 37 successful packs were never advertised.
+    #
+    # A partial catalog is correct rather than a compromise: the stamping step
+    # only lists regions whose assets actually landed (`--assets
+    # release-assets.json`), so a failed region is simply absent.
+    if: ${{ always() && needs.setup.result == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Stamp and publish the catalog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Packs live on sibling tags (map-data-YYYY-MM-a … f) — see
+          # scripts/pack-release-tag.mjs. Enumerate them all: assets, sizes and
+          # checksums are per-tag; the catalog is global.
+          DATE_YM="$(date +%Y-%m)"
+          rm -rf checksums && mkdir -p checksums
+          ASSETS_JSON="[]"
+          # The unsuffixed tag is enumerated for one transition: packs uploaded
+          # before the sibling-tag split live there, and dropping them from the
+          # enumeration would unpublished every region mid-flight. The next full
+          # build re-uploads those regions to their sibling tags; after that
+          # this entry simply matches nothing.
+          for SUFFIX in "" a b c d e f; do
+            if [ -z "$SUFFIX" ]; then TAG_S="map-data-${DATE_YM}"; else TAG_S="map-data-${DATE_YM}-${SUFFIX}"; fi
+            if ! gh release view "$TAG_S" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              continue
+            fi
+            TAG_ASSETS=$(gh release view "$TAG_S" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name]')
+            ASSETS_JSON=$(node -e '
+              const a = JSON.parse(process.argv[1]), b = JSON.parse(process.argv[2]);
+              process.stdout.write(JSON.stringify([...a, ...b]));
+            ' "$ASSETS_JSON" "$TAG_ASSETS")
+            gh release download "$TAG_S" --repo "${{ github.repository }}" \
+              --pattern '*-checksums.json' --dir checksums --clobber 2>/dev/null || true
+          done
+          # The inline node scripts below read these from the environment;
+          # plain shell vars are not inherited.
+          export DATE_YM ASSETS_JSON
+
+          # Merge per-region checksums into one map (asset name -> md5).
+          CHECKSUMS_ARG=""
+          if ls checksums/* >/dev/null 2>&1; then
+            node -e '
+              const fs = require("fs");
+              const path = require("path");
+              const out = {};
+              for (const file of fs.readdirSync("checksums")) {
+                Object.assign(out, JSON.parse(fs.readFileSync(path.join("checksums", file), "utf8")));
+              }
+              fs.writeFileSync("checksums.json", JSON.stringify(out, null, 2));
+            '
+            CHECKSUMS_ARG="--checksums checksums.json"
+          fi
+
+          # Per-asset byte sizes, straight from the release. The app's disk gate
+          # needs a size for the asset it is about to fetch; without one it
+          # skips auto-download with `size-unknown` and the pack is only ever
+          # installed by hand.
+          ASSET_SIZES_ARG=""
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            node -e '
+              const { execFileSync } = require("child_process");
+              const assets = JSON.parse(process.env.ASSETS_JSON);
+              const out = {};
+              for (const suffix of ["", "a","b","c","d","e","f"]) {
+                const tag = "map-data-" + process.env.DATE_YM + (suffix ? "-" + suffix : "");
+                try {
+                  const json = JSON.parse(execFileSync("gh", [
+                    "release", "view", tag, "--repo", process.env.GH_REPO,
+                    "--json", "assets", "--jq",
+                    "[.assets[] | {key: .name, value: .size}] | from_entries",
+                  ], { encoding: "utf8" }));
+                  Object.assign(out, json);
+                } catch { /* tag not published yet */ }
+              }
+              require("fs").writeFileSync("asset-sizes.json", JSON.stringify(out));
+            '
+            ASSET_SIZES_ARG="--asset-sizes asset-sizes.json"
+          fi
+
+          # Per-region tag map, so asset URLs point at the tag each region
+          # actually landed on.
+          TAGS_ARG=""
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            node -e '
+              const { execFileSync } = require("child_process");
+              const catalog = JSON.parse(require("fs").readFileSync("scripts/regions.json", "utf8"));
+              const out = {};
+              for (const region of (catalog.regions ?? catalog.include ?? [])) {
+                out[region.id] = execFileSync("node", [
+                  "scripts/pack-release-tag.mjs", region.id,
+                  "--date", process.env.DATE_YM,
+                ], { encoding: "utf8" }).trim();
+              }
+              require("fs").writeFileSync("tags.json", JSON.stringify(out));
+            '
+            TAGS_ARG="--tags tags.json"
+          fi
+
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            printf '%s' "$ASSETS_JSON" > release-assets.json
+            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
+              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG
+          else
+            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json
+          fi
+
+          # ── Stable pointer release ──────────────────────────────────────────
+          # The app reads the catalog from a fixed tag, not `releases/latest`:
+          # `latest` resolves to the newest release of *any* kind, so an iOS
+          # release published after a data refresh would silently point every
+          # install at a release with no packs in it. `map-data-latest` is
+          # republished in place and carries only the catalog, whose asset URLs
+          # point at the immutable dated tag — so the packs themselves are never
+          # overwritten, only the pointer to them.
+          LATEST_TAG="map-data-latest"
+          gh release view "$LATEST_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create "$LATEST_TAG" \
+              --repo "${{ github.repository }}" \
+              --title "Map Data (latest)" \
+              --notes "Points at the newest map data release. Carries only catalog.json; the packs it references live on the dated tag." \
+              --prerelease
+          gh release upload "$LATEST_TAG" catalog.json \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+  # ── Job 4: prune dated releases the catalog no longer points at ──────────────
+  # Each month adds a release of roughly the same size across the whole region
+  # catalog. A device only needs the release its cached catalog points at plus
+  # the one before it, so older dated releases are deleted. `map-data-latest` is
+  # never a candidate — it is the pointer, not a data release.
+  prune-releases:
+    needs: [publish-catalog]
+    if: ${{ needs.publish-catalog.result == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Prune old map-data releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_RELEASES: ${{ vars.KEEP_RELEASES }}
+        run: |
+          # Keep the current and previous month by default; set the repository
+          # variable KEEP_RELEASES to retain more.
+          node scripts/prune-map-data-releases.mjs \
+            --repo "${{ github.repository }}" \
+            --keep "${KEEP_RELEASES:-2}"
+
+  # ── Job 5: chain to the next chunk ──────────────────────────────────────────
+  # A run's matrix caps at 256 jobs and full-world parity is 363 regions, so
+  # each run builds a slice and dispatches the next one. Runs are sequential:
+  # parallel chunks would each republish the catalog while later chunks were
+  # still building, advertising partially-updated regions. publish-catalog runs
+  # every chunk, so the catalog is valid at every step.
+  dispatch-next-chunk:
+    needs: [publish-catalog]
+    if: ${{ needs.publish-catalog.result == 'success' && github.event.inputs.region_id == '' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dispatch the next chunk when the catalog has more to build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          START=${{ github.event.inputs.region_start || '0' }}
+          COUNT=${{ github.event.inputs.region_count || '200' }}
+          TOTAL=$(jq '.include | length' scripts/regions.json)
+          NEXT=$((START + COUNT))
+          if [ "$NEXT" -lt "$TOTAL" ]; then
+            echo "Dispatching regions $NEXT..$((NEXT + COUNT - 1)) of $TOTAL"
+            gh workflow run build-region-data.yml \
+              --ref "${{ github.ref_name }}" \
+              -f region_start="$NEXT" \
+              -f region_count="$COUNT"
+          else
+            echo "Catalog complete ($TOTAL regions built)."
+          fi

@@ -17,6 +17,10 @@ interface TrafficState {
   swarmTopicCount: number;
   /** Number of aggregated traffic segments held by the worklet. */
   swarmSegmentCount: number;
+  /** True when the mesh is client-only because the link is metered. */
+  swarmMetered: boolean;
+  /** Connections refused by the mesh density cap since the worklet started. */
+  swarmPrunedConnections: number;
   /** Number of connected Nostr relays (fallback layer). */
   nostrRelayCount: number;
   /** Current traffic exchange mode (auto-selected based on swarm peer density). */
@@ -43,7 +47,13 @@ interface TrafficState {
   setCollecting: (collecting: boolean) => void;
   setSwarmPeerCount: (count: number) => void;
   /** Replace the full mesh status snapshot (peer/topic/segment counts). */
-  setSwarmStatus: (status: { peerCount: number; topicCount: number; segmentCount: number }) => void;
+  setSwarmStatus: (status: {
+    peerCount: number;
+    topicCount: number;
+    segmentCount: number;
+    metered?: boolean;
+    prunedConnections?: number;
+  }) => void;
   setNostrRelayCount: (count: number) => void;
   setTrafficMode: (mode: TrafficMode) => void;
   setNormalizedSegments: (segments: NormalizedTrafficSegment[]) => void;
@@ -64,6 +74,8 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   swarmPeerCount: 0,
   swarmTopicCount: 0,
   swarmSegmentCount: 0,
+  swarmMetered: false,
+  swarmPrunedConnections: 0,
   nostrRelayCount: 0,
   trafficMode: 'hyperswarm',
 
@@ -97,11 +109,13 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   setSubscriptionCount: (activeSubscriptionCount) => set({ activeSubscriptionCount }),
   setCollecting: (isCollectingProbes) => set({ isCollectingProbes }),
   setSwarmPeerCount: (swarmPeerCount) => set({ swarmPeerCount }),
-  setSwarmStatus: ({ peerCount, topicCount, segmentCount }) =>
+  setSwarmStatus: ({ peerCount, topicCount, segmentCount, metered, prunedConnections }) =>
     set({
       swarmPeerCount: peerCount,
       swarmTopicCount: topicCount,
       swarmSegmentCount: segmentCount,
+      swarmMetered: metered ?? false,
+      swarmPrunedConnections: prunedConnections ?? 0,
     }),
   setNostrRelayCount: (nostrRelayCount) => set({ nostrRelayCount }),
   setTrafficMode: (trafficMode) => set({ trafficMode }),
@@ -133,6 +147,8 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
       swarmPeerCount: 0,
       swarmTopicCount: 0,
       swarmSegmentCount: 0,
+      swarmMetered: false,
+      swarmPrunedConnections: 0,
       nostrRelayCount: 0,
       incidents: [],
     }),

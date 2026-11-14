@@ -9,6 +9,7 @@ import { confirmStreetViewConsent } from '../../services/imagery/streetViewConse
 import { endStreetViewSession } from '../../services/imagery/streetViewSession';
 import { connectMapillary, disconnectMapillary } from '../../services/imagery/mapillaryService';
 import { isMapillaryUploadConfigured } from '../../constants/config';
+import { nextCaptureZoom } from '../imagery/captureLayout';
 import { getPendingTotals, listPendingDrives } from '../../services/imagery/streetViewQueue';
 import { formatBytes } from '../../utils/formatBytes';
 
@@ -99,7 +100,7 @@ export function StreetViewSettings() {
     <SettingsGroup
       header="Street imagery"
       icon={<Ionicons name="camera-outline" size={15} color={colors.textSecondary} />}
-      footer="Photos are public on Mapillary, which blurs faces and plates on its servers."
+      footer="Photos are public on Mapillary, which blurs faces and plates on its servers. Capture pauses while the phone is in portrait — Mapillary requires landscape photos. Zoom in to crop the dashboard out of the frame; focus stays on the road while capturing."
     >
       <SettingsRow
         title="Capture while navigating"
@@ -114,12 +115,9 @@ export function StreetViewSettings() {
         )}
       />
       <SettingsRow
-        title="Telephoto detail frames"
-        rightAdornment={switchRow(
-          streetView.detailStream,
-          (detailStream) => setStreetView({ detailStream }),
-          !streetView.enabled,
-        )}
+        title="Camera zoom"
+        value={`${streetView.zoom}×`}
+        onPress={() => setStreetView({ zoom: nextCaptureZoom(streetView.zoom) })}
       />
       <SettingsRow
         title="Wi-Fi-only uploads"

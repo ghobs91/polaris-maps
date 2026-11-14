@@ -48,6 +48,12 @@ interface PlaceMediaCarouselProps {
   /** Reactive connectivity; a reconnect re-fetches open media. */
   online?: boolean;
   /**
+   * False while the place card is still opening. The carousel renders nothing
+   * (it is not yet populated) and starts no scrape or hidden WebView, which is
+   * what used to stall the card's sheet animation.
+   */
+  enabled?: boolean;
+  /**
    * Fired once per load with the URL the venue website finally resolved to
    * (post-redirect), or null when it wasn't reachable. Lets the place card
    * reconcile an out-of-date website tag with the site's new home.
@@ -85,6 +91,7 @@ export function PlaceMediaCarousel({
   tags,
   resetKey,
   online,
+  enabled = true,
   onWebsiteResolved,
 }: PlaceMediaCarouselProps) {
   const styles = useThemedStyles(createStyles);
@@ -157,6 +164,15 @@ export function PlaceMediaCarousel({
     setViewerIndex(null);
     setWebViewUri(null);
 
+    // Hold every scrape (and the fallback WebView) back until the card has
+    // finished opening; the fetch + HTML parsing runs on the JS thread and
+    // visibly froze the sheet's spring animation.
+    if (!enabled) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const connected = online ?? getConnectivity().isConnected;
     setOffline(!connected);
 
@@ -223,7 +239,19 @@ export function PlaceMediaCarousel({
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, lat, lng, name, tags, resetKey, online, pageUrl, webAttribution, persistMedia]);
+  }, [
+    enabled,
+    cacheKey,
+    lat,
+    lng,
+    name,
+    tags,
+    resetKey,
+    online,
+    pageUrl,
+    webAttribution,
+    persistMedia,
+  ]);
 
   const visible = useMemo(() => items.filter((item) => !failed.has(item.url)), [items, failed]);
   const current = viewerIndex !== null ? visible[viewerIndex] : undefined;
@@ -263,14 +291,15 @@ export function PlaceMediaCarousel({
     void persistMedia(itemsRef.current);
   }, [persistMedia]);
 
-  const hiddenWebView = webViewUri ? (
-    <WebsitePhotosWebView
-      key={`webview:${resetKey}:${webViewUri}`}
-      uri={webViewUri}
-      onPhotos={handleWebViewPhotos}
-      onSettled={handleWebViewSettled}
-    />
-  ) : null;
+  const hiddenWebView =
+    enabled && webViewUri ? (
+      <WebsitePhotosWebView
+        key={`webview:${resetKey}:${webViewUri}`}
+        uri={webViewUri}
+        onPhotos={handleWebViewPhotos}
+        onSettled={handleWebViewSettled}
+      />
+    ) : null;
 
   if (items.length === 0) {
     if (!offline) return hiddenWebView;

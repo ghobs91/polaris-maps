@@ -17,6 +17,7 @@ import type {
   RawExternalRating,
   RatingSearchCandidate,
 } from './types';
+import { Platform } from 'react-native';
 
 // ---------------------------------------------------------------------------
 // Anti-bot challenge detection
@@ -321,21 +322,41 @@ export function validateExternalRating(
 // ---------------------------------------------------------------------------
 
 /**
- * Fixed mobile Safari user agent for the external-ratings surface.
+ * Fixed mobile-browser user agent for the external-ratings surface.
  *
  * The collectors parse the providers' mobile pages. On iOS the platform WebView
  * already presents mobile Safari, but an iPad app running on macOS gets
  * WebKit's desktop Macintosh UA — and TripAdvisor answers that with a DataDome
- * 403 instead of results. Pinning one real mobile Safari UA keeps both
- * platforms on the same provider markup.
+ * 403 instead of results. Pinning a mobile UA keeps both platforms on the same
+ * provider markup.
  *
+ * The OS/Safari tokens track the actual runtime version instead of a frozen
+ * one: DataDome treats a UA that is years behind the WebView's real engine as a
+ * bot signature, which is the recurring "ratings stopped working" failure.
  * This is the only browser-facing override: TLS/WebGL/canvas fingerprints,
- * `navigator.webdriver`, and permission state are untouched. Bump the OS and
- * Safari tokens when the providers start rejecting this UA.
+ * `navigator.webdriver`, and permission state are untouched.
  */
-export const EXTERNAL_RATINGS_USER_AGENT =
-  'Mozilla/5.0 (iPad; CPU OS 18_6 like Mac OS X) AppleWebKit/605.1.15 ' +
-  '(KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
+function buildExternalRatingsUserAgent(): string {
+  if (Platform.OS === 'ios') {
+    const version =
+      typeof Platform.Version === 'string' && Platform.Version.length > 0
+        ? Platform.Version
+        : '26.0';
+    const osVersion = version.replace(/\./g, '_');
+    const device = Platform.isPad ? 'iPad' : 'iPhone';
+    return (
+      `Mozilla/5.0 (${device}; CPU OS ${osVersion} like Mac OS X) ` +
+      `AppleWebKit/605.1.15 (KHTML, like Gecko) Version/${version} Mobile/15E148 Safari/604.1`
+    );
+  }
+  // Android WebView is Chromium; present a current mobile Chrome, not Safari.
+  return (
+    'Mozilla/5.0 (Linux; Android 16; Pixel 8) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'
+  );
+}
+
+export const EXTERNAL_RATINGS_USER_AGENT = buildExternalRatingsUserAgent();
 
 /** Fetch HTML with an abort timeout, capped at 500 KB of parse work. */
 export async function fetchPageHtml(url: string, timeoutMs: number): Promise<string | null> {
@@ -598,6 +619,12 @@ export const COLLECTOR_MAX_ATTEMPTS = 6;
  * presenting a DataDome interstitial gets re-read once it clears (verified:
  * Yelp's interstitial auto-resolves within seconds in a warmed WebView).
  *
+ * A no-data page is only classified as a challenge when a real interstitial is
+ * present (protection iframe or interstitial copy in the visible text). A page
+ * that merely embeds a DataDome script bundle — which both providers' valid
+ * pages do — and has not hydrated yet stays verdict-free, so the controller
+ * treats the stage as retryable instead of remembering "no ratings".
+ *
  * The generated script is ES5-compatible — it runs inside third-party pages.
  *
  * @param providerId    Value posted as `provider` on every message.
@@ -634,24 +661,57 @@ export function buildCollectorScript(opts: {
   function collect() {
     var out = { type: TYPE, provider: PROVIDER };
 ${opts.collectBodyJs}
-    var MARKERS = ['datadome', 'akamai', 'perimeterx', 'just a moment', 'cf-challenge', 'challenge-platform', 'attention required', 'verify you are human', 'are you a robot', 'you have been blocked', 'behaviour of the browser'];
+    // A page that produced data needs no verdict: interstitial signals only
+    // fence off the no-data case, so the success path skips the scans below.
+    var hasData = ${opts.hasDataJs};
+    if (hasData) { out.blocked = false; out.challenge = false; post(out); return; }
+    var CHALLENGE_PHRASES = ['just a moment', 'verify you are human', 'are you a robot', 'attention required'];
     var BLOCK_MARKERS = ['you have been blocked', 'behaviour of the browser has caught our attention'];
-    var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
+    // A challenge is a *real interstitial*, not the mere presence of an
+    // anti-bot marker: every provider page embeds DataDome/Akamai bundles in
+    // its valid documents, so script-tag markers would brand every slow page
+    // a challenge. Structural signals only: a protection iframe, or
+    // interstitial copy in the visible text.
+    var challengeHit = false;
+    try {
+      var frames = document.querySelectorAll('iframe');
+      for (var fi = 0; fi < frames.length; fi++) {
+        var fsrc = ((frames[fi].getAttribute && frames[fi].getAttribute('src')) || '').toLowerCase();
+        if (fsrc.indexOf('captcha-delivery') !== -1 || fsrc.indexOf('datadome') !== -1 || fsrc.indexOf('px-captcha') !== -1 || fsrc.indexOf('challenges.cloudflare') !== -1 || fsrc.indexOf('hcaptcha') !== -1) {
+          challengeHit = true;
+          break;
+        }
+      }
+    } catch (e) { /* no iframe access — fall through to text checks */ }
     // Block copy is checked against *visible* text: page bundles and inline
     // scripts can contain the same phrases without the page being blocked.
-    var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
-    var markerHit = false;
-    for (var mi = 0; mi < MARKERS.length; mi++) {
-      if (low.indexOf(MARKERS[mi]) !== -1) { markerHit = true; break; }
-    }
+    // Reading innerText forces a layout pass on the provider's (often very
+    // heavy) page, so it is gated on a cheap DOM-string scan first — the
+    // interstitial/block copy is always part of the document itself.
     var blockHit = false;
-    for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
-      if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+    if (!challengeHit) {
+      var gateHit = false;
+      var low = document.body ? String(document.body.innerHTML).toLowerCase() : '';
+      for (var gi = 0; gi < CHALLENGE_PHRASES.length && !gateHit; gi++) {
+        if (low.indexOf(CHALLENGE_PHRASES[gi]) !== -1) { gateHit = true; break; }
+      }
+      for (var bgi = 0; bgi < BLOCK_MARKERS.length && !gateHit; bgi++) {
+        if (low.indexOf(BLOCK_MARKERS[bgi]) !== -1) { gateHit = true; break; }
+      }
+      if (gateHit) {
+        var visible = document.body ? String(document.body.innerText || '').toLowerCase() : '';
+        for (var bi = 0; bi < BLOCK_MARKERS.length; bi++) {
+          if (visible.indexOf(BLOCK_MARKERS[bi]) !== -1) { blockHit = true; break; }
+        }
+        if (!blockHit) {
+          for (var ci = 0; ci < CHALLENGE_PHRASES.length; ci++) {
+            if (visible.indexOf(CHALLENGE_PHRASES[ci]) !== -1) { challengeHit = true; break; }
+          }
+        }
+      }
     }
-    var hasData = ${opts.hasDataJs};
-    out.blocked = blockHit && !hasData;
-    out.challenge = markerHit && !hasData && !out.blocked;
-    if (hasData) { post(out); return; }
+    out.blocked = blockHit;
+    out.challenge = challengeHit;
     ATTEMPTS -= 1;
     if (ATTEMPTS > 0) {
       var delay = INTERVAL;

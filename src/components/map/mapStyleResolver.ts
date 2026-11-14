@@ -3,6 +3,7 @@ import { LIGHT_MAP_STYLE_JSON } from '../../constants/lightMapStyle';
 import { SATELLITE_STYLE_JSON } from '../../constants/satelliteStyle';
 import { TERRAIN_DARK_STYLE_JSON, TERRAIN_STYLE_JSON } from '../../constants/terrainStyle';
 import { applyLabelLanguage } from '../../services/map/labelLanguage';
+import { applyBasemapSource } from '../../services/map/basemapSource';
 
 type MapStylePreference = 'default' | 'satellite' | 'terrain';
 
@@ -17,24 +18,44 @@ interface ResolveMapStyleArgs {
   language?: string;
 }
 
+/**
+ * Global raster used when the vector style itself fails to load.
+ *
+ * This previously pointed at `tile.openstreetmap.org`, which is the OSM
+ * Foundation's own tile server. Its usage policy explicitly excludes
+ * applications of this kind, so the app's last-resort fallback was a server
+ * that does not permit it — a fallback that works only until somebody notices.
+ *
+ * NASA GIBS is a government service with a published, permissive access policy
+ * and no per-application quota. It is satellite imagery with no labels, so this
+ * is a "something is on screen, pan to find your bearings" state rather than a
+ * usable street map. That is the correct trade for a path this rare: it exists
+ * because a bundled style failed to parse, not because the network is down.
+ */
+const COMPAT_RASTER_TILES = [
+  'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best' +
+    '/Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual/default' +
+    '/GoogleMapsCompatible_Level12/{z}/{y}/{x}.jpg',
+];
+
 function buildCompatStyle(isDark: boolean): string {
   return JSON.stringify({
     version: 8,
     name: isDark ? 'Polaris iOS26 Compat Dark' : 'Polaris iOS26 Compat Light',
     sources: {
-      osm: {
+      compat: {
         type: 'raster',
-        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tiles: COMPAT_RASTER_TILES,
         tileSize: 256,
-        attribution: '© OpenStreetMap contributors',
-        maxzoom: 19,
+        attribution: 'NASA GIBS / Landsat',
+        maxzoom: 12,
       },
     },
     layers: [
       {
-        id: 'osm-raster',
+        id: 'compat-raster',
         type: 'raster',
-        source: 'osm',
+        source: 'compat',
         // Dark mode dims and desaturates the raster so it stays legible; the
         // raster compat style has no dark tile source of its own.
         paint: isDark
@@ -70,6 +91,10 @@ export function resolveMapStyle({
   } else {
     base = isDark ? DARK_MAP_STYLE_JSON : LIGHT_MAP_STYLE_JSON;
   }
+
+  // Point the vector basemap at a configured alternative when one is set.
+  // No-op (and free) when it is not, which is the normal case.
+  base = applyBasemapSource(base);
 
   // Localise vector place labels (light/dark and the satellite label overlay)
   // into the user's language. The raster styles — terrain and the iOS 26

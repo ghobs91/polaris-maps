@@ -1,22 +1,25 @@
 /**
- * Regression tests for routingService fallback behaviour.
+ * Regression tests for the routing cascade.
  *
- * Ensures that computeRoute() and reroute() gracefully fall back between
- * the native (on-device) Valhalla engine, the online HTTP API, and
- * Apple's MapKit MKDirections (iOS only) when earlier tiers fail.
+ * The cascade is strictly ordered: on-device Valhalla → OSRM → Apple MapKit →
+ * FOSSGIS public Valhalla. These tests pin that order (including which tiers
+ * must *not* be contacted when an earlier tier answers) and the tier reporting
+ * that drives the developer-mode indicator.
  */
 
-// ── Mock factories ─────────────────────────────────────────────────────────
-
 import { decodePolyline, encodePolyline } from '../../src/utils/polyline';
+
+// ── Mock factories ─────────────────────────────────────────────────────────
 
 const mockNativeComputeRoute = jest.fn();
 const mockNativeReroute = jest.fn();
 const mockInitialize = jest.fn().mockResolvedValue(undefined);
 const mockDispose = jest.fn().mockResolvedValue(undefined);
 const mockIsOnline = jest.fn().mockReturnValue(true);
-const mockGetConnectionQuality = jest.fn().mockReturnValue('good');
 const mockFetchImpl = jest.fn() as jest.MockedFunction<typeof fetch>;
+
+const mockOsrmComputeRoute = jest.fn();
+const mockOsrmSupported = jest.fn().mockReturnValue(true);
 
 const mockMapKitComputeRoute = jest.fn();
 const mockMapKitReroute = jest.fn();
@@ -42,9 +45,14 @@ jest.mock('../../src/native/mapkit', () => ({
   searchNearby: jest.fn(),
 }));
 
+jest.mock('../../src/services/routing/osrmClient', () => ({
+  computeOsrmRoute: (...args: unknown[]) => mockOsrmComputeRoute(...args),
+  isOsrmSupported: (...args: unknown[]) => mockOsrmSupported(...args),
+}));
+
 jest.mock('../../src/services/regions/connectivityService', () => ({
   isOnline: (...args: unknown[]) => mockIsOnline(...args),
-  getConnectionQuality: (...args: unknown[]) => mockGetConnectionQuality(...args),
+  getConnectionQuality: () => 'good',
 }));
 
 jest.mock('react-native', () => ({
@@ -96,10 +104,35 @@ function validValhallaResponse() {
   };
 }
 
-function validMapKitRoute() {
+/** Native-shaped route (already normalised by the native module adapter). */
+function nativeRoute(distanceMeters = 1500) {
   return {
-    summary: { distanceMeters: 1500, durationSeconds: 120, hasToll: false, hasFerry: false },
-    legs: [{ distanceMeters: 1500, durationSeconds: 120, maneuvers: [] }],
+    summary: {
+      distance_meters: distanceMeters,
+      duration_seconds: 120,
+      has_toll: false,
+      has_ferry: false,
+    },
+    legs: [{ distance_meters: distanceMeters, duration_seconds: 120, maneuvers: [] }],
+    geometry: 'abc',
+    bounding_box: [-74, 40.7, -73.9, 40.8],
+  };
+}
+
+/** App-shaped route, as `computeOsrmRoute` returns after normalisation. */
+function osrmRoute(distanceMeters = 1111) {
+  return {
+    summary: { distanceMeters, durationSeconds: 90, hasToll: false, hasFerry: false },
+    legs: [{ distanceMeters, durationSeconds: 90, maneuvers: [] }],
+    geometry: 'abc',
+    boundingBox: [-74, 40.7, -73.9, 40.8],
+  };
+}
+
+function mapKitRoute(distanceMeters = 2222) {
+  return {
+    summary: { distanceMeters, durationSeconds: 100, hasToll: false, hasFerry: false },
+    legs: [{ distanceMeters, durationSeconds: 100, maneuvers: [] }],
     geometry: 'abc',
     boundingBox: [-74, 40.7, -73.9, 40.8],
   };
@@ -116,9 +149,17 @@ function mockOnlineFailure() {
   mockFetchImpl.mockRejectedValue(new TypeError('Network request failed'));
 }
 
+function mockOsrmSuccess(distanceMeters = 1111) {
+  mockOsrmComputeRoute.mockResolvedValue([osrmRoute(distanceMeters)]);
+}
+
+function mockOsrmFailure() {
+  mockOsrmComputeRoute.mockRejectedValue(new Error('OSRM unavailable'));
+}
+
 function mockMapKitSuccess() {
-  mockMapKitComputeRoute.mockResolvedValue([validMapKitRoute()]);
-  mockMapKitReroute.mockResolvedValue(validMapKitRoute());
+  mockMapKitComputeRoute.mockResolvedValue([mapKitRoute()]);
+  mockMapKitReroute.mockResolvedValue(mapKitRoute());
 }
 
 function mockMapKitFailure() {
@@ -134,10 +175,8 @@ const waypoints = [
 const reroutePos = { lat: 40.7128, lng: -74.006, bearing: 90 };
 const destination = { lat: 40.758, lng: -73.9855 };
 
-// ── Tests ──────────────────────────────────────────────────────────────────
-
-// We use jest.isolateModules to get a fresh module instance (with reset
-// `initialized` flag) for each test group that needs it.
+// A fresh module instance per test resets the `initialized` flag and the
+// last-tier record.
 function loadRoutingService() {
   let mod: typeof import('../../src/services/routing/routingService');
   jest.isolateModules(() => {
@@ -147,122 +186,135 @@ function loadRoutingService() {
   return mod!;
 }
 
-describe('routingService fallback', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockIsOnline.mockReturnValue(true);
-    mockGetConnectionQuality.mockReturnValue('good');
-    mockInitialize.mockResolvedValue(undefined);
-    mockMapKitAvailable.mockReturnValue(true);
-    global.fetch = mockFetchImpl;
-  });
+function baseBeforeEach() {
+  jest.clearAllMocks();
+  mockIsOnline.mockReturnValue(true);
+  mockOsrmSupported.mockReturnValue(true);
+  mockInitialize.mockResolvedValue(undefined);
+  mockMapKitAvailable.mockReturnValue(true);
+  global.fetch = mockFetchImpl;
+}
 
-  // ── computeRoute ──────────────────────────────────────────────────────
+describe('routing cascade', () => {
+  beforeEach(baseBeforeEach);
 
   describe('computeRoute', () => {
-    it('uses native engine when initialized and it succeeds', async () => {
+    it('tier 1: uses the on-device engine and contacts nothing else', async () => {
       const svc = loadRoutingService();
-      const nativeRoute = {
-        summary: {
-          distance_meters: 1500,
-          duration_seconds: 120,
-          has_toll: false,
-          has_ferry: false,
-        },
-        legs: [{ distance_meters: 1500, duration_seconds: 120, maneuvers: [] }],
-        geometry: 'abc',
-        bounding_box: [-74, 40.7, -73.9, 40.8],
-      };
-      mockNativeComputeRoute.mockResolvedValue([nativeRoute]);
+      mockNativeComputeRoute.mockResolvedValue([nativeRoute()]);
 
       await svc.initRouting('/tiles/');
       const routes = await svc.computeRoute(waypoints, 'auto');
 
       expect(mockNativeComputeRoute).toHaveBeenCalledTimes(1);
+      expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
       expect(mockFetchImpl).not.toHaveBeenCalled();
       expect(mockMapKitComputeRoute).not.toHaveBeenCalled();
-      expect(routes).toHaveLength(1);
-    });
-
-    it('falls back to online when native engine throws', async () => {
-      const svc = loadRoutingService();
-      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
-      mockOnlineSuccess();
-
-      await svc.initRouting('/tiles/');
-      const routes = await svc.computeRoute(waypoints, 'auto');
-
-      expect(mockNativeComputeRoute).toHaveBeenCalledTimes(1);
-      expect(mockFetchImpl).toHaveBeenCalled();
-      expect(mockMapKitComputeRoute).not.toHaveBeenCalled();
-      expect(routes).toHaveLength(1);
-    });
-
-    it('falls back to MapKit when both native and online fail', async () => {
-      const svc = loadRoutingService();
-      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
-      mockOnlineFailure();
-      mockMapKitSuccess();
-
-      await svc.initRouting('/tiles/');
-      const routes = await svc.computeRoute(waypoints, 'auto');
-
-      expect(mockNativeComputeRoute).toHaveBeenCalledTimes(1);
-      expect(mockFetchImpl).toHaveBeenCalled();
-      expect(mockMapKitComputeRoute).toHaveBeenCalledTimes(1);
-      expect(routes).toHaveLength(1);
-    });
-
-    it('throws native error when all three tiers fail', async () => {
-      const svc = loadRoutingService();
-      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
-      mockOnlineFailure();
-      mockMapKitFailure();
-
-      await svc.initRouting('/tiles/');
-
-      await expect(svc.computeRoute(waypoints, 'auto')).rejects.toThrow(
-        'Route outside tile coverage',
+      // The mocked native module returns the raw snake_case payload, so this
+      // also proves the answer came from the on-device tier untouched.
+      expect((routes[0].summary as unknown as { distance_meters: number }).distance_meters).toBe(
+        1500,
       );
+      expect(svc.getRoutingTierState()).toMatchObject({ tier: 'on-device', degraded: false });
     });
 
-    it('uses online when native is not initialized', async () => {
+    it('tier 2: falls back to OSRM when the on-device engine fails', async () => {
       const svc = loadRoutingService();
-      mockOnlineSuccess();
+      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
+      mockOsrmSuccess();
+
+      await svc.initRouting('/tiles/');
+      const routes = await svc.computeRoute(waypoints, 'auto');
+
+      expect(mockOsrmComputeRoute).toHaveBeenCalledTimes(1);
+      // Tier 3 must not be touched once OSRM answers.
+      expect(mockFetchImpl).not.toHaveBeenCalled();
+      expect(mockMapKitComputeRoute).not.toHaveBeenCalled();
+      expect(routes[0].summary.distanceMeters).toBe(1111);
+      expect(svc.getRoutingTierState()).toMatchObject({ tier: 'osrm', degraded: true });
+    });
+
+    it('tier 2: uses OSRM when no region graph is loaded', async () => {
+      const svc = loadRoutingService();
+      mockOsrmSuccess();
 
       const routes = await svc.computeRoute(waypoints, 'auto');
 
       expect(mockNativeComputeRoute).not.toHaveBeenCalled();
-      expect(mockFetchImpl).toHaveBeenCalled();
-      expect(mockMapKitComputeRoute).not.toHaveBeenCalled();
+      expect(mockOsrmComputeRoute).toHaveBeenCalledTimes(1);
       expect(routes).toHaveLength(1);
     });
 
-    it('falls back to MapKit when online fails and native not initialized', async () => {
+    it('tier 3: falls back to MapKit when on-device and OSRM both fail', async () => {
       const svc = loadRoutingService();
-      mockOnlineFailure();
+      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
+      mockOsrmFailure();
       mockMapKitSuccess();
 
+      await svc.initRouting('/tiles/');
+      const routes = await svc.computeRoute(waypoints, 'auto');
+
+      expect(mockMapKitComputeRoute).toHaveBeenCalledTimes(1);
+      expect(mockFetchImpl).not.toHaveBeenCalled();
+      expect(routes[0].summary.distanceMeters).toBe(2222);
+      expect(svc.getRoutingTierState()).toMatchObject({ tier: 'mapkit', degraded: true });
+    });
+
+    it('tier 3: falls back to FOSSGIS Valhalla when everything above fails', async () => {
+      const svc = loadRoutingService();
+      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
+      mockOsrmFailure();
+      mockMapKitFailure();
+      mockOnlineSuccess();
+
+      await svc.initRouting('/tiles/');
       const routes = await svc.computeRoute(waypoints, 'auto');
 
       expect(mockFetchImpl).toHaveBeenCalled();
-      expect(mockMapKitComputeRoute).toHaveBeenCalledTimes(1);
+      expect(routes).toHaveLength(1);
+      expect(svc.getRoutingTierState()).toMatchObject({ tier: 'fossgis', degraded: true });
+    });
+
+    it('skips OSRM for transit, which has no OSRM profile', async () => {
+      const svc = loadRoutingService();
+      mockOsrmSupported.mockReturnValue(false);
+      mockOnlineSuccess();
+
+      const routes = await svc.computeRoute(waypoints, 'transit');
+
+      expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
+      expect(mockFetchImpl).toHaveBeenCalled();
       expect(routes).toHaveLength(1);
     });
 
-    it('falls back to MapKit when offline and native not initialized', async () => {
+    it('skips OSRM while offline', async () => {
       const svc = loadRoutingService();
       mockIsOnline.mockReturnValue(false);
       mockMapKitSuccess();
 
       const routes = await svc.computeRoute(waypoints, 'auto');
 
-      expect(mockFetchImpl).not.toHaveBeenCalled();
+      expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
       expect(mockMapKitComputeRoute).toHaveBeenCalledTimes(1);
       expect(routes).toHaveLength(1);
     });
 
-    it('throws when offline, native not initialized, and MapKit unavailable', async () => {
+    it('throws a cascade error when every tier fails', async () => {
+      const svc = loadRoutingService();
+      mockNativeComputeRoute.mockRejectedValue(new Error('Route outside tile coverage'));
+      mockOsrmFailure();
+      mockMapKitFailure();
+      mockOnlineFailure();
+
+      await svc.initRouting('/tiles/');
+
+      await expect(svc.computeRoute(waypoints, 'auto')).rejects.toThrow(
+        /Every routing tier failed/,
+      );
+      expect(svc.getRoutingTierState()).toMatchObject({ tier: 'unavailable' });
+    });
+
+    it('reports "no data and no connection" when offline without a graph', async () => {
       const svc = loadRoutingService();
       mockIsOnline.mockReturnValue(false);
       mockMapKitAvailable.mockReturnValue(false);
@@ -272,163 +324,79 @@ describe('routingService fallback', () => {
       );
     });
 
-    it('rethrows native error when offline and native fails (MapKit unavailable)', async () => {
+    it('notifies tier subscribers when the tier changes', async () => {
       const svc = loadRoutingService();
-      mockIsOnline.mockReturnValue(false);
-      mockMapKitAvailable.mockReturnValue(false);
-      mockNativeComputeRoute.mockRejectedValue(new Error('Tile corruption'));
+      const seen: string[] = [];
+      const unsubscribe = svc.subscribeRoutingTier(() =>
+        seen.push(svc.getRoutingTierState()?.tier ?? 'none'),
+      );
+      mockOsrmSuccess();
 
-      await svc.initRouting('/tiles/');
+      await svc.computeRoute(waypoints, 'auto');
+      unsubscribe();
 
-      await expect(svc.computeRoute(waypoints, 'auto')).rejects.toThrow('Tile corruption');
-      expect(mockFetchImpl).not.toHaveBeenCalled();
+      expect(seen).toEqual(['osrm']);
     });
   });
 
-  // ── reroute ───────────────────────────────────────────────────────────
-
   describe('reroute', () => {
-    it('uses native engine when initialized and it succeeds', async () => {
+    it('tier 1: uses the native reroute fast path', async () => {
       const svc = loadRoutingService();
-      const nativeRoute = {
-        summary: {
-          distance_meters: 1500,
-          duration_seconds: 120,
-          has_toll: false,
-          has_ferry: false,
-        },
-        legs: [{ distance_meters: 1500, duration_seconds: 120, maneuvers: [] }],
-        geometry: 'abc',
-        bounding_box: [-74, 40.7, -73.9, 40.8],
-      };
-      mockNativeReroute.mockResolvedValue(nativeRoute);
+      mockNativeReroute.mockResolvedValue(nativeRoute());
 
       await svc.initRouting('/tiles/');
       const route = await svc.reroute(reroutePos, destination, 'auto');
 
       expect(mockNativeReroute).toHaveBeenCalledTimes(1);
+      expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
       expect(mockFetchImpl).not.toHaveBeenCalled();
-      expect(mockMapKitReroute).not.toHaveBeenCalled();
-      expect(route).toBeDefined();
+      expect((route.summary as unknown as { distance_meters: number }).distance_meters).toBe(1500);
+      expect(svc.getRoutingTierState()).toMatchObject({ tier: 'on-device' });
     });
 
-    it('prefers the native engine on a weak connection even with a heading', async () => {
+    it('routes through via-points on the on-device engine instead of reroute', async () => {
       const svc = loadRoutingService();
-      const nativeRoute = {
-        summary: {
-          distance_meters: 1500,
-          duration_seconds: 120,
-          has_toll: false,
-          has_ferry: false,
-        },
-        legs: [{ distance_meters: 1500, duration_seconds: 120, maneuvers: [] }],
-        geometry: 'abc',
-        bounding_box: [-74, 40.7, -73.9, 40.8],
-      };
-      mockNativeReroute.mockResolvedValue(nativeRoute);
-      mockIsOnline.mockReturnValue(true);
-      mockGetConnectionQuality.mockReturnValue('poor');
+      mockNativeComputeRoute.mockResolvedValue([nativeRoute()]);
 
       await svc.initRouting('/tiles/');
-      const route = await svc.reroute(reroutePos, destination, 'auto', { heading: 90 });
+      await svc.reroute(reroutePos, destination, 'auto', { via: [{ lat: 40.73, lng: -74.0 }] });
 
-      expect(mockNativeReroute).toHaveBeenCalledTimes(1);
+      expect(mockNativeReroute).not.toHaveBeenCalled();
+      const [pts] = mockNativeComputeRoute.mock.calls[0] as [Array<{ lat: number }>];
+      expect(pts).toHaveLength(3);
+    });
+
+    it('tier 2: falls back to OSRM when the native reroute fails', async () => {
+      const svc = loadRoutingService();
+      mockNativeReroute.mockRejectedValue(new Error('No coverage'));
+      mockOsrmSuccess();
+
+      await svc.initRouting('/tiles/');
+      const route = await svc.reroute(reroutePos, destination, 'auto');
+
+      expect(mockOsrmComputeRoute).toHaveBeenCalledTimes(1);
       expect(mockFetchImpl).not.toHaveBeenCalled();
-      expect(route).toBeDefined();
+      expect(route.summary.distanceMeters).toBe(1111);
     });
 
-    it('uses the heading-aware online engine first on a good connection', async () => {
+    it('forwards the crisis heading to the network tiers', async () => {
       const svc = loadRoutingService();
-      mockOnlineSuccess();
-      mockGetConnectionQuality.mockReturnValue('good');
-
-      await svc.initRouting('/tiles/');
-      const route = await svc.reroute(reroutePos, destination, 'auto', { heading: 90 });
-
-      expect(mockFetchImpl).toHaveBeenCalled();
-      expect(route).toBeDefined();
-    });
-
-    it('falls back to online when native reroute throws', async () => {
-      const svc = loadRoutingService();
-      mockNativeReroute.mockRejectedValue(new Error('No coverage'));
-      mockOnlineSuccess();
-
-      await svc.initRouting('/tiles/');
-      const route = await svc.reroute(reroutePos, destination, 'auto');
-
-      expect(mockNativeReroute).toHaveBeenCalledTimes(1);
-      expect(mockFetchImpl).toHaveBeenCalled();
-      expect(mockMapKitReroute).not.toHaveBeenCalled();
-      expect(route).toBeDefined();
-    });
-
-    it('falls back to MapKit when both native and online reroute fail', async () => {
-      const svc = loadRoutingService();
-      mockNativeReroute.mockRejectedValue(new Error('No coverage'));
-      mockOnlineFailure();
-      mockMapKitSuccess();
-
-      await svc.initRouting('/tiles/');
-      const route = await svc.reroute(reroutePos, destination, 'auto');
-
-      expect(mockNativeReroute).toHaveBeenCalledTimes(1);
-      expect(mockFetchImpl).toHaveBeenCalled();
-      expect(mockMapKitReroute).toHaveBeenCalledTimes(1);
-      expect(route).toBeDefined();
-    });
-
-    it('throws native error when all three reroute tiers fail', async () => {
-      const svc = loadRoutingService();
-      mockNativeReroute.mockRejectedValue(new Error('No coverage'));
-      mockOnlineFailure();
+      mockOsrmFailure();
       mockMapKitFailure();
-
-      await svc.initRouting('/tiles/');
-
-      await expect(svc.reroute(reroutePos, destination, 'auto')).rejects.toThrow('No coverage');
-    });
-
-    it('falls back to MapKit when offline and native not initialized', async () => {
-      const svc = loadRoutingService();
-      mockIsOnline.mockReturnValue(false);
-      mockMapKitSuccess();
-
-      const route = await svc.reroute(reroutePos, destination, 'auto');
-
-      expect(mockFetchImpl).not.toHaveBeenCalled();
-      expect(mockMapKitReroute).toHaveBeenCalledTimes(1);
-      expect(route).toBeDefined();
-    });
-
-    it('throws when offline, native not initialized, and MapKit unavailable', async () => {
-      const svc = loadRoutingService();
-      mockIsOnline.mockReturnValue(false);
-      mockMapKitAvailable.mockReturnValue(false);
-
-      await expect(svc.reroute(reroutePos, destination, 'auto')).rejects.toThrow(
-        'No offline routing data and no internet connection.',
-      );
-    });
-
-    it('routes through via-points and sends the GPS heading on reroute', async () => {
-      const svc = loadRoutingService();
       mockOnlineSuccess();
 
-      const via = [{ lat: 40.73, lng: -74.0 }];
-      await svc.reroute(reroutePos, destination, 'auto', { via, heading: 90 });
+      await svc.reroute(reroutePos, destination, 'auto', { heading: 90 });
 
-      expect(mockFetchImpl).toHaveBeenCalled();
       const body = JSON.parse(
         (mockFetchImpl.mock.calls[0][1] as { body: string }).body as string,
       ) as { locations: Array<Record<string, unknown>> };
-      expect(body.locations).toHaveLength(3);
-      expect(body.locations[1]).toMatchObject({ lat: 40.73, lon: -74.0 });
       expect(body.locations[0]).toMatchObject({ heading: 90 });
     });
 
-    it('omits heading from the reroute request when unknown', async () => {
+    it('omits heading when unknown', async () => {
       const svc = loadRoutingService();
+      mockOsrmFailure();
+      mockMapKitFailure();
       mockOnlineSuccess();
 
       await svc.reroute(reroutePos, destination, 'auto');
@@ -437,6 +405,20 @@ describe('routingService fallback', () => {
         (mockFetchImpl.mock.calls[0][1] as { body: string }).body as string,
       ) as { locations: Array<Record<string, unknown>> };
       expect(body.locations[0]).not.toHaveProperty('heading');
+    });
+
+    it('throws when every reroute tier fails', async () => {
+      const svc = loadRoutingService();
+      mockNativeReroute.mockRejectedValue(new Error('No coverage'));
+      mockOsrmFailure();
+      mockMapKitFailure();
+      mockOnlineFailure();
+
+      await svc.initRouting('/tiles/');
+
+      await expect(svc.reroute(reroutePos, destination, 'auto')).rejects.toThrow(
+        /Every routing tier failed/,
+      );
     });
   });
 
@@ -592,35 +574,29 @@ describe('routingService fallback', () => {
 });
 
 describe('rerouteCandidates', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockIsOnline.mockReturnValue(true);
-    mockGetConnectionQuality.mockReturnValue('good');
-    mockMapKitAvailable.mockReturnValue(true);
-    global.fetch = mockFetchImpl;
-  });
+  beforeEach(baseBeforeEach);
 
-  it('requests alternates from the online engine when no via points are present', async () => {
+  it('requests alternates from the tier that answers (OSRM here)', async () => {
     const svc = loadRoutingService();
-    const trip = validValhallaResponse().trip;
-    mockFetchImpl.mockResolvedValue({
-      ok: true,
-      json: async () => ({ alternates: [{ trip }, { trip }, { trip }] }),
-    } as unknown as Response);
+    mockOsrmComputeRoute.mockResolvedValue([osrmRoute(), osrmRoute(1200), osrmRoute(1300)]);
 
     const routes = await svc.rerouteCandidates(reroutePos, destination, 'auto', {
       heading: 90,
       alternates: 2,
     });
 
-    expect(mockFetchImpl).toHaveBeenCalled();
+    expect(mockOsrmComputeRoute).toHaveBeenCalledTimes(1);
+    const [, , options] = mockOsrmComputeRoute.mock.calls[0] as [
+      unknown,
+      unknown,
+      { alternates?: number; originHeading?: number },
+    ];
+    expect(options.alternates).toBe(2);
+    expect(options.originHeading).toBe(90);
     expect(routes.length).toBeGreaterThan(1);
-    // The alternates count is forwarded to the provider request body.
-    const body = JSON.parse((mockFetchImpl.mock.calls[0][1] as RequestInit).body as string);
-    expect(body.alternates).toBe(2);
   });
 
-  it('degrades to a single route when via points are present', async () => {
+  it('degrades to a single route when no tier offers alternatives', async () => {
     const svc = loadRoutingService();
     mockIsOnline.mockReturnValue(false);
     mockMapKitSuccess();
@@ -631,6 +607,7 @@ describe('rerouteCandidates', () => {
     });
 
     expect(routes).toHaveLength(1);
+    expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
     expect(mockFetchImpl).not.toHaveBeenCalled();
   });
 });

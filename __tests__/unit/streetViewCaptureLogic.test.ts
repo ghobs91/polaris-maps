@@ -1,7 +1,9 @@
 import {
   buildCaptureExif,
   captureConfigForMode,
+  captureDistanceForSpeed,
   detailZoomForDevice,
+  isPortraitOrientation,
   resolveCaptureMode,
   formatExifDate,
   formatExifDateTime,
@@ -9,6 +11,7 @@ import {
   isDrivingCosting,
   shouldCapture,
   shouldCaptureDetail,
+  shouldLockInfinityFocus,
 } from '../../src/services/imagery/streetViewCaptureLogic';
 import type { StreetViewFix } from '../../src/models/streetViewCapture';
 
@@ -79,15 +82,80 @@ describe('shouldCapture', () => {
     };
     expect(shouldCapture(FIX, last, FIX.timestamp, config).capture).toBe(true);
   });
+});
 
-  it('uses denser spacing in 3D mode', () => {
+describe('adaptive spacing', () => {
+  const config = captureConfigForMode('standard');
+  const last = (meters: number) => ({
+    lat: FIX.lat - meters / 111_320,
+    lng: FIX.lng,
+    capturedAt: FIX.timestamp - 2000,
+  });
+
+  it('exposes 3 m urban and 20 m highway spacing', () => {
+    expect(captureDistanceForSpeed(8, config)).toBe(3);
+    expect(captureDistanceForSpeed(25, config)).toBe(20);
+  });
+
+  it('switches tiers at 50 km/h', () => {
+    expect(captureDistanceForSpeed(49 / 3.6, config)).toBe(3);
+    expect(captureDistanceForSpeed(51 / 3.6, config)).toBe(20);
+  });
+
+  it('captures every few metres below 50 km/h', () => {
+    const urban = { ...FIX, speedMps: 8 };
+    expect(shouldCapture(urban, last(4), FIX.timestamp, config).capture).toBe(true);
+  });
+
+  it('keeps capturing in stop-and-go traffic', () => {
+    const creeping = { ...FIX, speedMps: 2 };
+    expect(shouldCapture(creeping, last(4), FIX.timestamp, config).capture).toBe(true);
+  });
+
+  it('holds highway spacing until 20 m', () => {
+    const highway = { ...FIX, speedMps: 25 };
+    expect(shouldCapture(highway, last(11), FIX.timestamp, config)).toMatchObject({
+      capture: false,
+      reason: 'not-far-enough',
+    });
+    expect(shouldCapture(highway, last(22), FIX.timestamp, config).capture).toBe(true);
+  });
+
+  it('uses the same Mapillary spacing in 3D mode', () => {
     const threeD = captureConfigForMode('threeD');
-    const last = {
-      lat: FIX.lat - 0.0001, // ~11 m: too close for standard, far enough for 3D
-      lng: FIX.lng,
-      capturedAt: FIX.timestamp - 3000,
-    };
-    expect(shouldCapture(FIX, last, FIX.timestamp, threeD).capture).toBe(true);
+    expect(captureDistanceForSpeed(8, threeD)).toBe(3);
+    expect(captureDistanceForSpeed(25, threeD)).toBe(20);
+  });
+});
+
+describe('isPortraitOrientation', () => {
+  it('rejects the two portrait orientations', () => {
+    expect(isPortraitOrientation('up')).toBe(true);
+    expect(isPortraitOrientation('down')).toBe(true);
+  });
+
+  it('allows both landscape orientations', () => {
+    expect(isPortraitOrientation('left')).toBe(false);
+    expect(isPortraitOrientation('right')).toBe(false);
+  });
+
+  it('does not block before the orientation is known', () => {
+    expect(isPortraitOrientation(undefined)).toBe(false);
+  });
+});
+
+describe('shouldLockInfinityFocus', () => {
+  it('locks the lens above 10 mph', () => {
+    expect(shouldLockInfinityFocus(4.6)).toBe(true);
+  });
+
+  it('returns control to autofocus below 10 mph', () => {
+    expect(shouldLockInfinityFocus(4.4)).toBe(false);
+  });
+
+  it('does not lock without a usable speed', () => {
+    expect(shouldLockInfinityFocus(null)).toBe(false);
+    expect(shouldLockInfinityFocus(Number.NaN)).toBe(false);
   });
 });
 

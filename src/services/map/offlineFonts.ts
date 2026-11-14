@@ -14,6 +14,7 @@
  * fonts simply stay label-less until the region is re-downloaded.
  */
 import * as FileSystem from 'expo-file-system/legacy';
+import { OPENFREEMAP_USER_AGENT } from '../../constants/config';
 
 /** Fontstacks referenced by the light/dark style `text-font` lists. */
 export const OFFLINE_FONTSTACKS = [
@@ -94,7 +95,9 @@ export async function downloadOfflineFonts(): Promise<void> {
       const dest = `${stackDir}${range}.pbf`;
       try {
         if ((await FileSystem.getInfoAsync(dest)).exists) continue;
-        await FileSystem.downloadAsync(remoteGlyphUrl(stack, range), dest);
+        await FileSystem.downloadAsync(remoteGlyphUrl(stack, range), dest, {
+          headers: { 'User-Agent': OPENFREEMAP_USER_AGENT },
+        });
       } catch {
         // Skip individual range failures.
       }

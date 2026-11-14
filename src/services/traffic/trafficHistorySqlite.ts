@@ -47,6 +47,33 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
         PRIMARY KEY (geohash5, day_of_week, half_hour)
       );
     `);
+    // Migration: probe_samples was added when profile republish gating
+    // landed. Existing rows predate provenance tracking, so 0 (unknown —
+    // conservative: not publishable) is the correct default.
+    try {
+      await db.execAsync(
+        `ALTER TABLE traffic_conditions ADD COLUMN probe_samples INTEGER NOT NULL DEFAULT 0;`,
+      );
+    } catch {
+      // Column already exists
+    }
+    // Migration: observation span (days between first and last sighting),
+    // used to gate profile publishing. Existing rows default to 0 = single
+    // day observed, which is the conservative choice.
+    try {
+      await db.execAsync(
+        `ALTER TABLE traffic_conditions ADD COLUMN observed_span_days INTEGER NOT NULL DEFAULT 0;`,
+      );
+    } catch {
+      // Column already exists
+    }
+    try {
+      await db.execAsync(
+        `ALTER TABLE traffic_conditions ADD COLUMN last_observed_day INTEGER NOT NULL DEFAULT 0;`,
+      );
+    } catch {
+      // Column already exists
+    }
   }
 
   async insert(condition: TrafficAreaCondition): Promise<void> {
@@ -54,8 +81,9 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
     await db.runAsync(
       `INSERT OR REPLACE INTO traffic_conditions
         (geohash5, day_of_week, half_hour, avg_speed_mph, avg_congestion_ratio,
-         free_flow_speed_mph, sample_count, last_updated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         free_flow_speed_mph, sample_count, last_updated, probe_samples,
+         observed_span_days, last_observed_day)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       condition.geohash5,
       condition.dayOfWeek,
       condition.halfHour,
@@ -64,6 +92,9 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       condition.freeFlowSpeedMph,
       condition.sampleCount,
       condition.lastUpdated,
+      condition.probeSamples,
+      condition.observedSpanDays,
+      condition.lastObservedDay,
     );
   }
 
@@ -72,13 +103,17 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
     await db.runAsync(
       `UPDATE traffic_conditions SET
         avg_speed_mph = ?, avg_congestion_ratio = ?, free_flow_speed_mph = ?,
-        sample_count = ?, last_updated = ?
+        sample_count = ?, last_updated = ?, probe_samples = ?,
+        observed_span_days = ?, last_observed_day = ?
        WHERE geohash5 = ? AND day_of_week = ? AND half_hour = ?`,
       condition.avgSpeedMph,
       condition.avgCongestionRatio,
       condition.freeFlowSpeedMph,
       condition.sampleCount,
       condition.lastUpdated,
+      condition.probeSamples,
+      condition.observedSpanDays,
+      condition.lastObservedDay,
       condition.geohash5,
       condition.dayOfWeek,
       condition.halfHour,
@@ -98,9 +133,13 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       free_flow_speed_mph: number;
       sample_count: number;
       last_updated: number;
+      probe_samples: number;
+      observed_span_days: number;
+      last_observed_day: number;
     }>(
       `SELECT geohash5, day_of_week, half_hour, avg_speed_mph, avg_congestion_ratio,
-              free_flow_speed_mph, sample_count, last_updated
+              free_flow_speed_mph, sample_count, last_updated, probe_samples,
+              observed_span_days, last_observed_day
        FROM traffic_conditions
        WHERE geohash5 IN (${placeholders}) AND day_of_week = ? AND half_hour = ?`,
       ...cells,
@@ -116,6 +155,9 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       freeFlowSpeedMph: r.free_flow_speed_mph,
       sampleCount: r.sample_count,
       lastUpdated: r.last_updated,
+      probeSamples: r.probe_samples,
+      observedSpanDays: r.observed_span_days,
+      lastObservedDay: r.last_observed_day,
     }));
   }
 
@@ -130,9 +172,13 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       free_flow_speed_mph: number;
       sample_count: number;
       last_updated: number;
+      probe_samples: number;
+      observed_span_days: number;
+      last_observed_day: number;
     }>(
       `SELECT geohash5, day_of_week, half_hour, avg_speed_mph, avg_congestion_ratio,
-              free_flow_speed_mph, sample_count, last_updated
+              free_flow_speed_mph, sample_count, last_updated, probe_samples,
+              observed_span_days, last_observed_day
        FROM traffic_conditions`,
     );
     return rows.map((r) => ({
@@ -144,6 +190,9 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       freeFlowSpeedMph: r.free_flow_speed_mph,
       sampleCount: r.sample_count,
       lastUpdated: r.last_updated,
+      probeSamples: r.probe_samples,
+      observedSpanDays: r.observed_span_days,
+      lastObservedDay: r.last_observed_day,
     }));
   }
 

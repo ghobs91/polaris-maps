@@ -30,11 +30,16 @@ export interface StreetViewPreferences {
   consentAccepted: boolean;
   /** Start a capture session automatically on driving routes (set in Settings only). */
   autoStart: boolean;
-  /**
-   * Capture a paired telephoto frame every few wide frames. Needs a device
+  /** Capture a paired telephoto frame every few wide frames. Needs a device
    * with a tele lens; ignored otherwise.
    */
   detailStream: boolean;
+  /**
+   * Capture crop/zoom relative to the current lens. 1.5x is the default so a
+   * dash-mounted phone shows the road instead of the dashboard; 1x restores the
+   * full field of view. See CAPTURE_ZOOM_PRESETS.
+   */
+  zoom: number;
   /** Default to Wi-Fi for uploads. */
   wifiOnly: boolean;
   /** Reserved for automatic end-of-drive upload (MVP uses the confirmation sheet). */
@@ -83,6 +88,15 @@ interface PersistedSettings {
   showOnboardingOnLaunch: boolean;
   /** Show diagnostics: node dashboard, P2P stats, traffic coverage badge. */
   devMode: boolean;
+  /**
+   * Download the offline pack for the region the map is looking at, so the
+   * area around the user renders from local bytes instead of shared tile
+   * servers. Only packs under the size cap, and only on unmetered links
+   * unless `allowMeteredRegionDownloads` is set.
+   */
+  autoDownloadRegions: boolean;
+  /** Allow automatic region downloads over cellular / metered links. */
+  allowMeteredRegionDownloads: boolean;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -99,9 +113,14 @@ interface SettingsState extends PersistedSettings {
   setSavedListsSort: (mode: SavedListsSortMode) => void;
   setShowOnboardingOnLaunch: (enabled: boolean) => void;
   setDevMode: (enabled: boolean) => void;
+  setAutoDownloadRegions: (enabled: boolean) => void;
+  setAllowMeteredRegionDownloads: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = 'settings';
+
+/** The pre-parity capture cap; raised once because 3 m / 4:3 stills outgrow it. */
+const LEGACY_STREET_VIEW_MAX_STORAGE_BYTES = 2 * 1024 * 1024 * 1024;
 
 const DEFAULT_SETTINGS: PersistedSettings = {
   permissions: {
@@ -121,9 +140,10 @@ const DEFAULT_SETTINGS: PersistedSettings = {
     consentAccepted: false,
     autoStart: false,
     detailStream: false,
+    zoom: 1.5,
     wifiOnly: true,
     autoUpload: false,
-    maxStorageBytes: 2 * 1024 * 1024 * 1024,
+    maxStorageBytes: 8 * 1024 * 1024 * 1024,
     mapillaryUsername: null,
   },
   dashCam: {
@@ -142,6 +162,8 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   placeSort: 'recent',
   savedListsSort: 'recent',
   showOnboardingOnLaunch: false,
+  autoDownloadRegions: true,
+  allowMeteredRegionDownloads: false,
   devMode: false,
 };
 
@@ -150,6 +172,16 @@ function loadSettings(): PersistedSettings {
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+      const streetView = {
+        ...DEFAULT_SETTINGS.streetView,
+        ...(parsed.streetView ?? {}),
+      };
+      // The old 2 GB cap was sized for 1080p frames every 20 m. The
+      // Mapillary-parity cadence fills it in minutes, so raise that exact
+      // legacy default once; any other value is left alone.
+      if (streetView.maxStorageBytes === LEGACY_STREET_VIEW_MAX_STORAGE_BYTES) {
+        streetView.maxStorageBytes = DEFAULT_SETTINGS.streetView.maxStorageBytes;
+      }
       return {
         ...DEFAULT_SETTINGS,
         ...parsed,
@@ -158,10 +190,7 @@ function loadSettings(): PersistedSettings {
           ...DEFAULT_SETTINGS.routePreferences,
           ...(parsed.routePreferences ?? {}),
         },
-        streetView: {
-          ...DEFAULT_SETTINGS.streetView,
-          ...(parsed.streetView ?? {}),
-        },
+        streetView,
         dashCam: {
           ...DEFAULT_SETTINGS.dashCam,
           ...(parsed.dashCam ?? {}),
@@ -191,6 +220,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       savedListsSort: state.savedListsSort,
       showOnboardingOnLaunch: state.showOnboardingOnLaunch,
       devMode: state.devMode,
+      autoDownloadRegions: state.autoDownloadRegions,
+      allowMeteredRegionDownloads: state.allowMeteredRegionDownloads,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -247,6 +278,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setDevMode: (devMode) => {
       set({ devMode });
+      persist();
+    },
+    setAutoDownloadRegions: (autoDownloadRegions) => {
+      set({ autoDownloadRegions });
+      persist();
+    },
+    setAllowMeteredRegionDownloads: (allowMeteredRegionDownloads) => {
+      set({ allowMeteredRegionDownloads });
       persist();
     },
   };

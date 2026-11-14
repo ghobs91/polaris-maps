@@ -74,6 +74,7 @@ import {
   CMD_INCOMING_INCIDENT,
   CMD_SUSPEND,
   CMD_RESUME,
+  CMD_SET_NETWORK_PROFILE,
 } from './rpcCommands';
 import type { AggregatedTrafficState, TrafficProbe } from '../../models/traffic';
 import type { WireConditionEntry } from '../../models/trafficHistory';
@@ -280,20 +281,29 @@ export function publishProbe(probeJson: string): void {
 /** How long to wait for the worklet's status reply before falling back. */
 const STATUS_TIMEOUT_MS = 3_000;
 
-/** Get current Hyperswarm status (peer count, topics, segment count). */
-export async function getStatus(): Promise<{
+export interface SwarmStatus {
   peerCount: number;
   topicCount: number;
   topics: string[];
   segmentCount: number;
-}> {
-  const empty = (): {
-    peerCount: number;
-    topicCount: number;
-    topics: string[];
-    segmentCount: number;
-  } => ({ peerCount: 0, topicCount: 0, topics: [], segmentCount: 0 });
-  if (!rpc) return empty();
+  /** True when the mesh is running client-only (cellular / hotspot). */
+  metered: boolean;
+  /** Connections refused by the density cap since the worklet started. */
+  prunedConnections: number;
+}
+
+const EMPTY_SWARM_STATUS: SwarmStatus = {
+  peerCount: 0,
+  topicCount: 0,
+  topics: [],
+  segmentCount: 0,
+  metered: false,
+  prunedConnections: 0,
+};
+
+/** Get current Hyperswarm status (peer count, topics, segment count, density). */
+export async function getStatus(): Promise<SwarmStatus> {
+  if (!rpc) return { ...EMPTY_SWARM_STATUS, topics: [] };
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -311,28 +321,30 @@ export async function getStatus(): Promise<{
         timer = setTimeout(() => resolve(null), STATUS_TIMEOUT_MS);
       }),
     ]);
-    if (reply == null) return empty();
+    if (reply == null) return { ...EMPTY_SWARM_STATUS, topics: [] };
 
     const text = typeof reply === 'string' ? reply : new TextDecoder().decode(reply);
-    const parsed = JSON.parse(text) as Partial<{
-      peerCount: number;
-      topicCount: number;
-      topics: string[];
-      segmentCount: number;
-    }>;
+    const parsed = JSON.parse(text) as Partial<SwarmStatus>;
 
     return {
       peerCount: parsed.peerCount ?? 0,
       topicCount: parsed.topicCount ?? 0,
       topics: Array.isArray(parsed.topics) ? parsed.topics : [],
       segmentCount: parsed.segmentCount ?? 0,
+      metered: parsed.metered ?? false,
+      prunedConnections: parsed.prunedConnections ?? 0,
     };
   } catch (e) {
     console.warn('[HyperswarmBridge] getStatus failed', e);
-    return empty();
+    return { ...EMPTY_SWARM_STATUS, topics: [] };
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/** Apply the network profile (metered links run client-only, no uploads). */
+export function setNetworkProfile(metered: boolean): void {
+  sendCommand(CMD_SET_NETWORK_PROFILE, metered ? 'metered' : 'unmetered');
 }
 
 /** Suspend Hyperswarm connections (call on app background). */

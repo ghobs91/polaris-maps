@@ -20,6 +20,8 @@ import { fetchWmataLines } from './wmataFetcher';
 import { fetchGtfsStaticLines, type GtfsFetcherConfig } from './gtfsStaticFetcher';
 import { fetchDotGtfsLines } from './dotGtfsFetcher';
 import { overpassFetch } from '../overpassClient';
+import { localRoutesAtPoint } from './localTransitIndex';
+import { fetchLocalTransitLines } from './localTransitLines';
 import { storage } from '../storage/mmkv';
 
 const OVERPASS_TIMEOUT_MS = 75_000;
@@ -1359,6 +1361,28 @@ export async function fetchTransitLines(
   // Hydrate only the tiles this viewport can render before touching caches.
   hydratePersistentCacheForBounds(minLat, minLng, maxLat, maxLng);
 
+  // ── Pack-backed lines first ───────────────────────────────────────
+  // A downloaded region already holds the route relations and their geometry,
+  // so a covered viewport is answered with zero network calls. This is what
+  // keeps a consolidated national GTFS zip (495 MiB for Germany) from being
+  // requested at all: `fetchLocalTransitLines` returns null only when no pack
+  // covers the box, and an empty array when the pack genuinely has no routes
+  // here — both are answers the live sources cannot improve on.
+  const localLines = await fetchLocalTransitLines({
+    south: minLat,
+    west: minLng,
+    north: maxLat,
+    east: maxLng,
+  });
+  if (localLines !== null) {
+    if (localLines.length > 0) {
+      tileData.set(OTP_CACHE_KEY, localLines);
+      wrappedProgress(getAllCachedLines());
+    }
+    onSettled?.();
+    return localLines;
+  }
+
   // ── Start Overpass fetch in parallel ──────────────────────────────
   const overpassPromise = fetchOverpassForViewport(
     minLat,
@@ -1796,6 +1820,21 @@ export async function fetchRoutesAtStop(lat: number, lon: number): Promise<Overp
   const key = stopKey(lat, lon);
   const cached = stopRouteCache.get(key);
   if (cached) return cached;
+
+  // On-device transit index first: when a region pack covers this point the
+  // stop→route join is already materialised in SQLite, so the stop card opens
+  // without an Overpass round trip (and without leaking the stop location).
+  // `localRoutesAtPoint` returns null when the area is not covered, so an
+  // uncovered stop still falls through to Overpass.
+  try {
+    const local = await localRoutesAtPoint(lat, lon);
+    if (local && local.length > 0) {
+      stopRouteCache.set(key, local);
+      return local;
+    }
+  } catch {
+    // Index unavailable (no pack, schema race): fall through to Overpass.
+  }
 
   const query = `[out:json][timeout:15];
 (

@@ -44,7 +44,7 @@ const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.no
 
 // ── Types ───────────────────────────────────────────────────────────
 
-interface NostrEvent {
+export interface NostrEvent {
   id: string;
   pubkey: string;
   created_at: number;
@@ -317,7 +317,12 @@ function processIncomingEvent(event: NostrEvent): void {
 
 // ── Event signing (NIP-01) ──────────────────────────────────────────
 
-async function createSignedEvent(
+/**
+ * Sign an arbitrary NIP-01 event with the traffic identity key.
+ * Exported so sibling traffic transports (e.g. the profile exchange) reuse
+ * the same identity instead of minting a second one.
+ */
+export async function createSignedEvent(
   kind: number,
   content: string,
   tags: string[][],
@@ -367,6 +372,19 @@ export function getConnectedRelayCount(): number {
   return count;
 }
 
+/** Send a pre-signed stored event (e.g. a traffic profile) to every open relay. */
+export function publishStoredEvent(event: NostrEvent): number {
+  const msg = JSON.stringify(['EVENT', event]);
+  let sent = 0;
+  for (const ws of sockets.values()) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(msg);
+      sent++;
+    }
+  }
+  return sent;
+}
+
 export function getSubscribedGeohashes(): string[] {
   return Array.from(subscribedGeohashes);
 }
@@ -388,8 +406,9 @@ function hexToBytes(hex: string): Uint8Array {
 /**
  * Verify NIP-01 event: check that id == sha256([0,pubkey,...]) and that
  * the Schnorr signature over id is valid for event.pubkey.
+ * Exported so sibling traffic transports verify with the same rules.
  */
-function verifyEvent(event: NostrEvent): boolean {
+export function verifyEvent(event: NostrEvent): boolean {
   try {
     const serialized = JSON.stringify([
       0,

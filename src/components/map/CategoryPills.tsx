@@ -1,24 +1,12 @@
-import React from 'react';
 import { ScrollView, TouchableOpacity, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../contexts/ThemeContext';
+import {
+  SEARCH_CATEGORIES as CATEGORIES,
+  type CategoryPill,
+} from '../../constants/searchCategories';
 
-export interface CategoryPill {
-  id: string;
-  label: string;
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  searchQuery: string;
-}
-
-const CATEGORIES: CategoryPill[] = [
-  { id: 'restaurants', label: 'Restaurants', icon: 'restaurant', searchQuery: 'restaurants' },
-  { id: 'coffee', label: 'Coffee', icon: 'cafe', searchQuery: 'coffee' },
-  { id: 'ev_charging', label: 'EV Charging', icon: 'flash', searchQuery: 'ev charging' },
-  { id: 'gas_stations', label: 'Gas Stations', icon: 'car', searchQuery: 'gas stations' },
-  { id: 'fast_food', label: 'Fast Food', icon: 'fast-food', searchQuery: 'fast food' },
-  { id: 'grocery', label: 'Grocery', icon: 'cart', searchQuery: 'grocery stores' },
-  { id: 'parking', label: 'Parking', icon: 'car-outline', searchQuery: 'parking' },
-];
+export type { CategoryPill };
 
 interface CategoryPillsProps {
   onCategoryPress: (categoryId: string, query: string) => void;

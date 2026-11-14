@@ -14,6 +14,7 @@ import {
   isMapillaryUploadConfigured,
 } from '../../constants/config';
 import type { StreetViewCapture, StreetViewDriveSummary } from '../../models/streetViewCapture';
+import { haversineMeters } from '../../utils/routeSnap';
 import { useSettingsStore } from '../../stores/settingsStore';
 import {
   getOrCreateUploadBatch,
@@ -75,6 +76,8 @@ class MapillaryTransientError extends Error {
 const MAX_IMAGES_PER_CLUSTER = 1000;
 /** A long stop (parking, a break) starts a new sequence on Mapillary. */
 const MAX_CLUSTER_GAP_MS = 10 * 60 * 1000;
+/** Mapillary splits a sequence when consecutive images are more than 100 m apart. */
+const MAX_CLUSTER_GAP_METERS = 100;
 const TRANSIENT_ATTEMPTS = 4;
 const RETRY_BASE_DELAY_MS = 700;
 const MAX_RETRY_DELAY_MS = 15_000;
@@ -99,6 +102,50 @@ function retryAfterFromHeaders(headers?: Record<string, string> | null): number 
 
 function isTransientStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+/**
+ * rupload reports most errors as JSON with an optional `debug_info`. The
+ * reference implementation (`mapillary_tools`) documents that rate limiting
+ * arrives as HTTP 400 (and sometimes 429 with `retriable: false`) with a
+ * `backoff` in ms, and that a `412` with `OffsetInvalidError` is retriable by
+ * re-reading the offset and resuming — punish those as transient.
+ */
+interface RUploadDebugInfo {
+  retriable?: boolean;
+  type?: string;
+}
+
+interface RUploadErrorBody {
+  backoff?: number;
+  debug_info?: RUploadDebugInfo;
+}
+
+function retryAfterFromRuploadBody(body: RUploadErrorBody): number | null {
+  const backoff = Number(body.backoff);
+  if (Number.isFinite(backoff) && backoff > 0) return Math.min(backoff, MAX_RETRY_DELAY_MS);
+  return null;
+}
+
+function ruploadErrorIsTransient(body: RUploadErrorBody): boolean {
+  return body.debug_info?.retriable === true || body.debug_info?.type === 'RequestRateLimitedError';
+}
+
+/** How far into an error body we surface; the reason is always near the top. */
+const ERROR_BODY_PREVIEW_CHARS = 240;
+
+/**
+ * Server error text for a stored capture failure. Includes the response body
+ * so a failing upload names its reason instead of a bare HTTP code.
+ */
+function describeUploadFailure(status: number, body: string): string {
+  let normalized = body.trim().replace(/\s+/g, ' ');
+  if (normalized.length > ERROR_BODY_PREVIEW_CHARS) {
+    normalized = `${normalized.slice(0, ERROR_BODY_PREVIEW_CHARS)}…`;
+  }
+  return normalized
+    ? `Mapillary upload failed (${status}): ${normalized}`
+    : `Mapillary upload failed (${status})`;
 }
 
 /** Retries transient (429/5xx) failures with exponential backoff. */
@@ -363,39 +410,121 @@ interface UploadHandleResponse {
   h?: string;
 }
 
+interface OffsetResponse {
+  offset?: number;
+}
+
+/**
+ * How many times one upload may restart at a fresh server offset. A 412
+ * (`OffsetInvalidError`) means the upload service already holds bytes for this
+ * session key, so the request must resume instead of starting over; after
+ * several contradictions give up and let the drive retry later.
+ */
+const MAX_OFFSET_RESUMES = 3;
+
+async function readUploadOffset(auth: MapillaryAuth, sessionKey: string): Promise<number> {
+  try {
+    const response = await request(`${MAPILLARY_UPLOAD_URL}/${sessionKey}`, {
+      method: 'GET',
+      headers: { ...tokenAuthHeader(auth.accessToken), Accept: 'application/json' },
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new MapillaryAuthError();
+    }
+    if (!response.ok) return 0;
+    const payload = await readJson<OffsetResponse>(response);
+    return typeof payload.offset === 'number' && payload.offset > 0
+      ? Math.floor(payload.offset)
+      : 0;
+  } catch (error) {
+    if (error instanceof MapillaryAuthError) throw error;
+    // The offset probe is best-effort: a brand-new session key can 404, and a
+    // probe failure must not stop an upload that would start at 0 anyway.
+    return 0;
+  }
+}
+
+function parseRuploadErrorBody(body: string | null | undefined): RUploadErrorBody {
+  if (!body) return {};
+  try {
+    const parsed = JSON.parse(body) as RUploadErrorBody;
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
 async function uploadBinary(
   auth: MapillaryAuth,
   fileUri: string,
   sessionKey: string,
   contentType: string,
 ): Promise<string> {
-  const response = await withTransientRetry(async () => {
-    const result = await FileSystem.uploadAsync(`${MAPILLARY_UPLOAD_URL}/${sessionKey}`, fileUri, {
-      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      httpMethod: 'POST',
-      mimeType: contentType,
-      sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-      headers: {
-        ...tokenAuthHeader(auth.accessToken),
-        Offset: '0',
-        'X-Entity-Name': sessionKey,
+  let offset = -1;
+  let resumes = 0;
+  const result = await withTransientRetry(async () => {
+    if (offset < 0) {
+      offset = await readUploadOffset(auth, sessionKey);
+    }
+    const response = await FileSystem.uploadAsync(
+      `${MAPILLARY_UPLOAD_URL}/${sessionKey}`,
+      fileUri,
+      {
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        httpMethod: 'POST',
+        mimeType: contentType,
+        sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+        headers: {
+          ...tokenAuthHeader(auth.accessToken),
+          Offset: String(offset),
+          'X-Entity-Name': sessionKey,
+        },
       },
-    });
-    if (isTransientStatus(result.status)) {
+    );
+    const body = parseRuploadErrorBody(response.body);
+
+    // The upload service already holds parts of this file; report the real
+    // offset (and keep it for the next attempt) instead of resending from 0.
+    if (response.status === 412) {
+      if (resumes < MAX_OFFSET_RESUMES) {
+        resumes += 1;
+        offset = await readUploadOffset(auth, sessionKey);
+        throw new MapillaryTransientError(
+          `Mapillary upload stale offset (${sessionKey}); resuming at ${offset}`,
+        );
+      }
+      throw new Error(describeUploadFailure(response.status, response.body ?? ''));
+    }
+
+    if (isTransientStatus(response.status)) {
       throw new MapillaryTransientError(
-        `Mapillary upload failed (${result.status})`,
-        retryAfterFromHeaders(result.headers),
+        describeUploadFailure(response.status, response.body ?? ''),
+        retryAfterFromHeaders(response.headers) ?? retryAfterFromRuploadBody(body),
       );
     }
-    return result;
+
+    if (response.status === 401 || response.status === 403) {
+      throw new MapillaryAuthError();
+    }
+
+    // rupload reports rate limiting as a 4xx with a backoff / retriable flag
+    // in the body (mapillary_tools retries it; a bare status code here made
+    // every throttled image a permanent failure).
+    if (response.status >= 400 && response.status < 500 && ruploadErrorIsTransient(body)) {
+      throw new MapillaryTransientError(
+        describeUploadFailure(response.status, response.body ?? ''),
+        retryAfterFromRuploadBody(body),
+      );
+    }
+
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(describeUploadFailure(response.status, response.body ?? ''));
+    }
+
+    return response;
   });
-  if (response.status === 401 || response.status === 403) {
-    throw new MapillaryAuthError();
-  }
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Mapillary upload failed (${response.status})`);
-  }
-  const payload = JSON.parse(response.body || '{}') as UploadHandleResponse;
+  const payload = JSON.parse(result.body || '{}') as UploadHandleResponse;
   if (!payload.h) throw new Error('Mapillary did not return a file handle');
   return payload.h;
 }
@@ -446,8 +575,10 @@ async function finishUpload(auth: MapillaryAuth, manifestHandle: string): Promis
       60_000,
     );
     if (isTransientStatus(result.status)) {
+      // Graph errors carry the reason as XML text; surface it for debugging.
+      const text = await result.text().catch(() => '');
       throw new MapillaryTransientError(
-        `Mapillary could not finish the upload (${result.status})`,
+        describeUploadFailure(result.status, text),
         parseRetryAfter(result.headers.get('retry-after')),
       );
     }
@@ -457,7 +588,8 @@ async function finishUpload(auth: MapillaryAuth, manifestHandle: string): Promis
     throw new MapillaryAuthError();
   }
   if (!response.ok) {
-    throw new Error(`Mapillary could not finish the upload (${response.status})`);
+    const text = await (response.bodyUsed ? Promise.resolve('') : response.text().catch(() => ''));
+    throw new Error(describeUploadFailure(response.status, text));
   }
   const payload = await readJson<{ cluster_id?: string }>(response);
   if (!payload.cluster_id) throw new Error('Mapillary did not return a cluster id');
@@ -483,26 +615,34 @@ export interface MapillaryUploadResult {
 
 /**
  * Splits a drive into Mapillary "sequence"-sized segments: a new cluster after
- * a long stop (a break, parking) or once a manifest grows past
- * `MAX_IMAGES_PER_CLUSTER`. One giant manifest for a multi-hour drive is the
- * case that tends to fail server-side, so bound it here.
+ * a long stop (a break, parking), after a GPS gap wider than Mapillary's 100 m
+ * sequence cutoff, or once a manifest grows past `MAX_IMAGES_PER_CLUSTER`. One
+ * giant manifest for a multi-hour drive is the case that tends to fail
+ * server-side, so bound it here.
  */
 export function segmentCaptures(captures: StreetViewCapture[]): StreetViewCapture[][] {
   const sorted = [...captures].sort((a, b) => a.capturedAt - b.capturedAt);
   const segments: StreetViewCapture[][] = [];
   let current: StreetViewCapture[] = [];
-  let previousAt: number | null = null;
+  let previous: StreetViewCapture | null = null;
 
   for (const capture of sorted) {
-    const gap = previousAt == null ? 0 : capture.capturedAt - previousAt;
+    const gapMs = previous == null ? 0 : capture.capturedAt - previous.capturedAt;
+    const gapMeters =
+      previous == null
+        ? 0
+        : haversineMeters([previous.lng, previous.lat], [capture.lng, capture.lat]);
     const shouldSplit =
-      current.length > 0 && (gap > MAX_CLUSTER_GAP_MS || current.length >= MAX_IMAGES_PER_CLUSTER);
+      current.length > 0 &&
+      (gapMs > MAX_CLUSTER_GAP_MS ||
+        gapMeters > MAX_CLUSTER_GAP_METERS ||
+        current.length >= MAX_IMAGES_PER_CLUSTER);
     if (shouldSplit) {
       segments.push(current);
       current = [];
     }
     current.push(capture);
-    previousAt = capture.capturedAt;
+    previous = capture;
   }
   if (current.length > 0) segments.push(current);
   return segments;
