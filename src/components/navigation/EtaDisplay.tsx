@@ -62,20 +62,29 @@ export function EtaDisplay({
     scaledTrafficEta = Math.round(progress * trafficEtaSeconds);
   }
 
-  // When an intermediate stop is pending the bar counts down to it; otherwise
-  // (single-destination route, or the stop was skipped) it shows the whole trip.
+  // When an intermediate stop is pending the big number counts down to it;
+  // otherwise (single-destination route, or the stop was skipped) it shows the
+  // whole trip. Either way the whole-trip figure stays visible beside it.
   const showingNextStop = nextStop != null;
+  const tripEta = scaledTrafficEta ?? etaSeconds;
   const displayEta = showingNextStop
     ? trafficScale != null
       ? Math.round(nextStop.etaSeconds * trafficScale)
       : nextStop.etaSeconds
-    : (scaledTrafficEta ?? etaSeconds);
+    : tripEta;
   const displayDistance = showingNextStop ? nextStop.distanceMeters : remainingDistanceMeters;
 
   if (displayEta == null) return null;
 
   const arrival = new Date(Date.now() + displayEta * 1000);
   const arrivalStr = arrival.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const tripArrivalStr =
+    tripEta != null
+      ? new Date(Date.now() + tripEta * 1000).toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : null;
   const isTrafficAdjusted = showingNextStop ? trafficScale != null : scaledTrafficEta != null;
   const delaySecs =
     !showingNextStop && isTrafficAdjusted && freeFlowEtaSeconds != null
@@ -83,12 +92,16 @@ export function EtaDisplay({
       : 0;
 
   const nextStopSuffix = showingNextStop ? ` to ${nextStop.name}` : '';
+  const tripSuffix =
+    showingNextStop && tripEta != null
+      ? `, whole trip ${formatDuration(tripEta)}${tripArrivalStr ? ` arriving ${tripArrivalStr}` : ''}`
+      : '';
 
   return (
     <View
       style={styles.container}
       accessibilityRole="summary"
-      accessibilityLabel={`ETA ${formatDuration(displayEta)}${nextStopSuffix}${displayDistance != null ? `, ${formatDistance(displayDistance)}` : ''}, arriving at ${arrivalStr}`}
+      accessibilityLabel={`ETA ${formatDuration(displayEta)}${nextStopSuffix}${displayDistance != null ? `, ${formatDistance(displayDistance)}` : ''}, arriving at ${arrivalStr}${tripSuffix}`}
     >
       {showingNextStop && (
         <View style={styles.nextStopRow}>
@@ -112,13 +125,37 @@ export function EtaDisplay({
       )}
       <View style={styles.mainRow}>
         <View style={styles.info}>
-          <Text
-            style={[styles.eta, { color: etaColor }]}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            {formatDuration(displayEta)}
-          </Text>
+          <View style={styles.etaRow}>
+            <Text
+              style={[styles.eta, { color: etaColor }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              {formatDuration(displayEta)}
+            </Text>
+            {showingNextStop && tripEta != null && (
+              <View
+                style={styles.tripBlock}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                <Text style={styles.tripLabel} numberOfLines={1}>
+                  Trip
+                </Text>
+                <Text style={styles.tripValue} numberOfLines={1}>
+                  {formatDuration(tripEta)}
+                </Text>
+                {tripArrivalStr != null && (
+                  <Text style={styles.tripArrival} numberOfLines={1}>
+                    {tripArrivalStr}
+                  </Text>
+                )}
+              </View>
+            )}
+          </View>
           <Text
             style={styles.sub}
             accessibilityElementsHidden
@@ -152,7 +189,7 @@ export function EtaDisplay({
             style={styles.shareBtn}
             onPress={async () => {
               const dest = destinationName ?? 'destination';
-              const arrival = new Date(Date.now() + (displayEta ?? 0) * 1000);
+              const arrival = new Date(Date.now() + (tripEta ?? displayEta ?? 0) * 1000);
               const arrivalStr = arrival.toLocaleTimeString([], {
                 hour: 'numeric',
                 minute: '2-digit',
@@ -228,6 +265,11 @@ const styles = StyleSheet.create({
   info: {
     flex: 1,
   },
+  etaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   eta: {
     // Tabular figures keep the countdown from jittering as the digits change.
     fontVariant: ['tabular-nums'],
@@ -235,6 +277,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: ETA_COLOR_GREEN,
     lineHeight: 38,
+    flexShrink: 1,
+  },
+  /** Whole-trip ETA beside the next-stop countdown. */
+  tripBlock: {
+    paddingLeft: 10,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(255,255,255,0.18)',
+  },
+  tripLabel: {
+    color: nav.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  tripValue: {
+    color: nav.textPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 21,
+    fontVariant: ['tabular-nums'],
+  },
+  tripArrival: {
+    color: nav.textMuted,
+    fontSize: 11,
+    marginTop: 1,
+    fontVariant: ['tabular-nums'],
   },
   sub: {
     fontSize: 16,

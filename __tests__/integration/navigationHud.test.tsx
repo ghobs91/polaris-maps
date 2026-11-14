@@ -65,10 +65,19 @@ describe('NavigationHud', () => {
     expect(screen.getByText('Exit')).toBeTruthy();
   });
 
+  it('keeps the whole-trip ETA beside the next-stop ETA', () => {
+    const { screen } = renderHud();
+    expect(screen.getByText('Trip')).toBeTruthy();
+    expect(screen.getByText('20 min')).toBeTruthy();
+    expect(screen.getByLabelText(/whole trip 20 min/)).toBeTruthy();
+  });
+
   it('shows the whole-trip ETA when the next target is the destination', () => {
     const { screen } = renderHud({ nextStop: null });
     expect(screen.getByLabelText(/ETA 20 min/)).toBeTruthy();
     expect(screen.queryByText('Next · Coffee Shop')).toBeNull();
+    // No duplicate figure: the big number is the trip when nothing is pending.
+    expect(screen.queryByText('Trip')).toBeNull();
   });
 
   it('skips the next stop from the collapsed banner', () => {
