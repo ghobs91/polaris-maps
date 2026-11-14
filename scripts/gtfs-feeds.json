@@ -2,18 +2,23 @@
   "_comment": [
     "GTFS feed used to build each region's `transit-timetable.sqlite`.",
     "Consumed by .github/workflows/build-region-data.yml; a region absent from",
-    "this file simply ships without a timetable (its pack still works — the",
+    "`feeds` simply ships without a timetable (its pack still works — the",
     "planner falls through to a live source).",
     "",
-    "Every URL here was verified with an HTTP request before being added. The",
-    "app-side registry (src/services/transit/otpEndpointRegistry.ts) is the",
-    "primary source; where it has no usable URL the bundled DOT index",
-    "(src/services/transit/dot-gtfs-index.json) is used instead.",
+    "POLICY: a `feeds` url must be served by the transit authority or a",
+    "government open-data portal. No commercial mirrors, no community",
+    "re-publishers, no aggregators (transitfeeds.com, mkuran.pl, addtransit,",
+    "github re-uploads, vendor CDNs). Where only a third-party copy exists the",
+    "region is left out of `feeds` on purpose.",
     "",
-    "Deliberately not included: es-madrid (the registry URL is a literal",
-    "`items/...` placeholder), fr-paris (the IDFM URL 404s), us-az-phoenix",
-    "(the Phoenix open-data zip returns 403). Each needs a working feed before",
-    "it can ship a timetable.",
+    "`feeds` = fetched, and the bytes checked (zip magic + required GTFS",
+    "members) with `node scripts/verify-gtfs-feeds.mjs --full`. Re-run that",
+    "after touching this file; feeds do move.",
+    "",
+    "`candidates` = the official source has been identified but could not be",
+    "verified from an Actions-like network (timeout, TLS reset, Cloudflare",
+    "challenge, or an API key). Kept for the next attempt, never consumed by",
+    "the build.",
     "",
     "Note these are BUILD-TIME downloads. Fetching a national feed at runtime",
     "is what GTFS_MAX_FEED_BYTES exists to prevent."
@@ -21,43 +26,228 @@
   "feeds": {
     "us-ny-new-york": {
       "label": "MTA New York City Transit (subway)",
-      "url": "https://web.mta.info/developers/data/nyct/subway/google_transit.zip"
+      "url": "https://web.mta.info/developers/data/nyct/subway/google_transit.zip",
+      "operator": "Metropolitan Transportation Authority"
     },
     "us-ca-los-angeles": {
       "label": "LA Metro Rail",
-      "url": "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip"
+      "url": "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip",
+      "operator": "Los Angeles County Metropolitan Transportation Authority"
     },
     "us-ca-san-francisco": {
       "label": "BART",
-      "url": "https://www.bart.gov/dev/schedules/google_transit.zip"
+      "url": "https://www.bart.gov/dev/schedules/google_transit.zip",
+      "operator": "Bay Area Rapid Transit"
     },
     "us-il-chicago": {
       "label": "Chicago Transit Authority",
-      "url": "https://www.transitchicago.com/downloads/sch_data/google_transit.zip"
+      "url": "https://www.transitchicago.com/downloads/sch_data/google_transit.zip",
+      "operator": "Chicago Transit Authority"
     },
     "us-tx-houston": {
       "label": "Metropolitan Transit Authority of Harris County",
-      "url": "https://ridemetro-gtfs.azurewebsites.us/google_transit.zip"
+      "url": "https://ridemetro-gtfs.azurewebsites.us/google_transit.zip",
+      "operator": "METRO"
     },
     "us-wa-seattle": {
       "label": "King County Metro",
-      "url": "https://metro.kingcounty.gov/GTFS/google_transit.zip"
+      "url": "https://metro.kingcounty.gov/GTFS/google_transit.zip",
+      "operator": "King County Metro"
     },
     "us-fl-miami": {
       "label": "Miami-Dade Transit",
-      "url": "https://www.miamidade.gov/transit/googletransit/current/google_transit.zip"
+      "url": "https://www.miamidade.gov/transit/googletransit/current/google_transit.zip",
+      "operator": "Miami-Dade Department of Transportation and Public Works"
     },
     "us-ma-boston": {
       "label": "Massachusetts Bay Transportation Authority",
-      "url": "https://cdn.mbta.com/MBTA_GTFS.zip"
+      "url": "https://cdn.mbta.com/MBTA_GTFS.zip",
+      "operator": "MBTA"
+    },
+    "us-az-phoenix": {
+      "label": "Valley Metro (bus + light rail)",
+      "url": "https://www.phoenixopendata.com/dataset/3eae9a4a-98b9-40c8-8df7-8c00c1756235/resource/28ccc0a5-49c8-495c-b91f-193de5ce2cb7/download/googletransit.zip",
+      "operator": "City of Phoenix / Valley Metro"
+    },
+    "ca-on-toronto": {
+      "label": "TTC routes and schedules (merged GTFS)",
+      "url": "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/b811ead4-6eaf-4adb-8408-d389fb5a069c/resource/c920e221-7a1c-488b-8c5b-6d8cd4e85eaf/download/completegtfs.zip",
+      "operator": "Toronto Transit Commission"
+    },
+    "ca-bc-vancouver": {
+      "label": "TransLink static GTFS",
+      "url": "https://gtfs-static.translink.ca/gtfs/google_transit.zip",
+      "operator": "TransLink (South Coast British Columbia Transportation Authority)"
+    },
+    "br-sao-paulo": {
+      "label": "SPTrans bus network",
+      "url": "https://www.sptrans.com.br/umbraco/Surface/PerfilDesenvolvedor/BaixarGTFS?memberName=sptrans",
+      "operator": "São Paulo Transporte S/A",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Referer": "https://www.sptrans.com.br/desenvolvedores/"
+      },
+      "note": "SPTrans rejects a bare curl UA with 403; it needs a browser UA and a referer from its own developer page."
+    },
+    "ar-buenos-aires": {
+      "label": "Colectivos (city bus network)",
+      "url": "https://cdn.buenosaires.gob.ar/datosabiertos/datasets/transporte-y-obras-publicas/colectivos-gtfs/colectivos-gtfs.zip",
+      "operator": "Gobierno de la Ciudad de Buenos Aires"
     },
     "de-berlin": {
       "label": "VBB Berlin-Brandenburg",
-      "url": "https://www.vbb.de/vbbgtfs"
+      "url": "https://www.vbb.de/vbbgtfs",
+      "operator": "Verkehrsverbund Berlin-Brandenburg"
+    },
+    "fr-paris": {
+      "label": "IDFM (Métro, RER, Transilien, bus, tram)",
+      "url": "https://data.iledefrance-mobilites.fr/explore/dataset/offre-horaires-tc-gtfs-idfm/files/a925e164271e4bca93433756d6a340d1/download/",
+      "operator": "Île-de-France Mobilités",
+      "note": "The path segment is a file hash that rotates each time IDFM republishes, and their records API now requires a key. Expect to refresh this URL periodically."
+    },
+    "es-madrid": {
+      "label": "CRTM interurban bus network (Comunidad de Madrid)",
+      "url": "https://www.arcgis.com/sharing/rest/content/items/885399f83408473c8d815e40c5e702b7/data",
+      "operator": "Consorcio Regional de Transportes de Madrid",
+      "note": "CRTM publishes one feed per mode, not a consolidated regional feed. This is the 354-route interurban bus network — the only CRTM mode that spans the whole Comunidad de Madrid. Metro (crtm item 5c7f2951, 14 routes), EMT city buses (item 868df0e5, 239 routes) and Cercanías (item 1a25440b, 39 routes) are separate files; combining them needs multi-feed merging, which the timetable builder does not do yet."
+    },
+    "it-rome": {
+      "label": "Roma network (bus, tram, metro, regional rail)",
+      "url": "https://romamobilita.it/sites/default/files/rome_static_gtfs.zip",
+      "operator": "Roma Servizi per la Mobilità"
     },
     "nl-amsterdam": {
       "label": "Netherlands national GTFS",
-      "url": "https://data.public-transport.earth/gtfs/nl"
+      "url": "https://data.public-transport.earth/gtfs/nl",
+      "operator": "NDOV Loket (mirrored by public-transport.earth)",
+      "official": false,
+      "note": "The one exception to the policy above, flagged rather than hidden: the Dutch national feed is only distributed through NDOV Loket's authenticated channel, so this is a civic mirror on a non-government host. Kept because Amsterdam would otherwise have no timetable at all — replace it if an official public channel appears."
+    },
+    "th-bangkok": {
+      "label": "Bangkok (namtang national GTFS)",
+      "url": "https://namtang-api.otp.go.th/download/namtang-gtfs.zip",
+      "operator": "Office of Transport and Traffic Policy and Planning (OTP), Thailand"
+    },
+    "id-jakarta": {
+      "label": "TransJakarta",
+      "url": "https://gtfs.transjakarta.co.id/files/file_gtfs.zip",
+      "operator": "PT Transportasi Jakarta (BUMD DKI Jakarta)"
+    },
+    "ng-lagos": {
+      "label": "Lagos State ferry network",
+      "url": "https://lagosferries.com/gtfs.zip",
+      "operator": "Lagos State Waterways Authority",
+      "note": "Waterways only — no bus or rail GTFS is published. Small network, but it is the authority's own feed."
+    },
+    "au-sydney": {
+      "label": "Greater Sydney GTFS",
+      "url": "https://opendata.transport.nsw.gov.au/data/dataset/d1f68d4f-b778-44df-9823-cf2fa922e47f/resource/67974f14-01bf-47b7-bfa5-c7f2f8a950ca/download/full_greater_sydney_gtfs_static_0.zip",
+      "operator": "Transport for New South Wales"
+    },
+    "au-melbourne": {
+      "label": "Metro Trains Melbourne",
+      "url": "https://data.ptv.vic.gov.au/downloads/gtfs.zip",
+      "operator": "Public Transport Victoria",
+      "extract": "2/google_transit.zip",
+      "note": "PTV publishes a 310 MB bundle containing one `google_transit.zip` per mode (1 regional rail, 2 metro rail, 3 trams, 4 buses, 5 coach…), not a feed. Pointing the builder at the bundle failed outright; `extract` takes the metro rail member. Adding trams or buses needs multi-feed merging, which the timetable builder does not do yet."
+    },
+    "jp-tokyo": {
+      "label": "Toei subway and rail",
+      "url": "https://api-public.odpt.org/api/v4/files/Toei/data/Toei-Train-GTFS.zip",
+      "operator": "Tokyo Metropolitan Bureau of Transportation",
+      "note": "Public ODPT endpoint, no key. Covers Toei lines only — Tokyo Metro and JR East publish separately."
+    }
+  },
+  "candidates": {
+    "mx-mexico-city": {
+      "label": "CDMX (Metro, Metrobús, Trolebús, RTP, concesionados)",
+      "url": "https://datos.cdmx.gob.mx/dataset/75538d96-3ade-4bc5-ae7d-d85595e4522d/resource/32ed1b6b-41cd-49b3-b7f0-b57acb0eb819/download/gtfs.zip",
+      "operator": "Gobierno de la Ciudad de México (SEMOVI)",
+      "blocked_by": "datos.cdmx.gob.mx resets the TLS handshake from this network"
+    },
+    "gb-england-london": {
+      "label": "TfL unified GTFS",
+      "url": "https://tfl.gov.uk/tfl/syndication/feeds/gtfs.zip",
+      "operator": "Transport for London",
+      "blocked_by": "tfl.gov.uk answers 403 to datacenter IP ranges, including with browser headers"
+    },
+    "co-bogota": {
+      "label": "SIMUR Bogotá",
+      "url": "https://www.transportes.gob.co/",
+      "operator": "Secretaría Distrital de Movilidad de Bogotá (SIMUR)",
+      "blocked_by": "datosabiertos.bogota.gov.co does not resolve. A dated object exists in a generic storage.googleapis.com bucket, but it cannot be attributed to the authority from the URL, so it is not adopted."
+    },
+    "ru-moscow": {
+      "label": "Moscow transport GTFS",
+      "url": "https://data.mos.ru/",
+      "operator": "Департамент транспорта Москвы / Мосгортранс",
+      "blocked_by": "data.mos.ru and transport.mos.ru time out from CI egress"
+    },
+    "pl-warsaw": {
+      "label": "ZTM Warszawa",
+      "url": "https://www.ztm.waw.pl/pliki-do-pobrania/dane-rozkladowe/",
+      "operator": "Zarząd Transportu Miejskiego w Warszawie",
+      "blocked_by": "ztm.waw.pl serves a Cloudflare challenge (202) to every non-browser client"
+    },
+    "tr-istanbul": {
+      "label": "İETT / İBB GTFS",
+      "url": "https://data.ibb.gov.tr/en/dataset/iett-gtfs-verisi",
+      "operator": "İstanbul Büyükşehir Belediyesi",
+      "blocked_by": "data.ibb.gov.tr does not connect from CI egress"
+    },
+    "in-delhi": {
+      "label": "Delhi Transport Corporation",
+      "url": "https://opentransitdata.dimts.in/",
+      "operator": "Delhi Transport Corporation / DIMTS",
+      "blocked_by": "the official portal does not resolve from CI egress; only non-authority re-uploads exist"
+    },
+    "in-mumbai": {
+      "label": "BEST / Mumbai bus network",
+      "url": "https://www.bestundertaking.com/",
+      "operator": "Brihanmumbai Electric Supply and Transport",
+      "blocked_by": "no official GTFS download exists; the site publishes no schedule feed"
+    },
+    "kr-seoul": {
+      "label": "Seoul metropolitan network",
+      "url": "https://www.tago.go.kr/",
+      "operator": "Seoul Metropolitan Government / TAGO",
+      "blocked_by": "no anonymous export: data.seoul.go.kr and TAGO both require a key"
+    },
+    "sg-singapore": {
+      "label": "LTA DataMall GTFS",
+      "url": "https://datamall.lta.gov.sg/content/datamall/en/download.html",
+      "operator": "Land Transport Authority",
+      "blocked_by": "requires an AccountKey header; no key-free download exists"
+    },
+    "ph-manila": {
+      "label": "Metro Manila",
+      "url": "https://ltfrb.gov.ph/",
+      "operator": "Land Transportation Franchising and Regulatory Board",
+      "blocked_by": "no GTFS published; only third-party community feeds exist"
+    },
+    "ke-nairobi": {
+      "label": "Nairobi matatu network",
+      "url": "https://namata.go.ke/",
+      "operator": "Nairobi Metropolitan Area Transport Authority",
+      "blocked_by": "namata.go.ke does not resolve from CI egress; the DigitalMatatus feed is a university/World Bank project, not the authority"
+    },
+    "za-cape-town": {
+      "label": "MyCiTi",
+      "url": "https://odp.capetown.gov.za/",
+      "operator": "City of Cape Town",
+      "blocked_by": "the City's open data portal publishes MyCiTi stops and routes as GIS layers but has no GTFS dataset at all"
+    },
+    "nz-auckland": {
+      "label": "Auckland Transport GTFS",
+      "url": "https://api.at.govt.nz/",
+      "operator": "Auckland Transport",
+      "blocked_by": "requires a subscription key"
+    },
+    "eg-cairo": {
+      "label": "Cairo Metro",
+      "url": "https://www.nat.gov.eg/",
+      "operator": "National Authority for Tunnels",
+      "blocked_by": "no official GTFS is published; the only feed comes from an NGO, which is out of policy"
     }
   }
 }
