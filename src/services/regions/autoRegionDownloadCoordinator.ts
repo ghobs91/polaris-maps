@@ -97,9 +97,17 @@ async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision>
     });
     void startBackgroundDownload(region)
       .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        // Replace "started" with the failure. Leaving the line at "started"
+        // while the card reads "Failed" is what made a failed download
+        // indistinguishable from one still running: the reason existed only in
+        // a log no screen reads.
+        if (lastDecision?.outcome === `started ${decision.regionId}`) {
+          lastDecision = { ...lastDecision, outcome: `failed — ${message}` };
+        }
         logDiagnostic('regions', 'warn', 'auto-download failed', {
           regionId: decision.regionId,
-          message: error instanceof Error ? error.message : String(error),
+          message,
         });
       })
       .finally(() => {

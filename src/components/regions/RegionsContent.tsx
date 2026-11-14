@@ -14,6 +14,7 @@ import {
   packsIntersectingBounds,
 } from '../../services/regions/nearestPackRegion';
 import { planOfflineTileDownload } from '../../services/regions/tileDownloadPlan';
+import { uncoveredTree, flattenTree } from '../../services/regions/uncoveredTree';
 import { getLastAutoDownloadDecision } from '../../services/regions/autoRegionDownloadCoordinator';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
 import { upsertRegion } from '../../services/regions/regionRepository';
@@ -64,6 +65,31 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
           region.downloadStatus !== 'downloading',
       ),
     [regions],
+  );
+
+  /**
+   * Every area a pack covers, downloaded or not.
+   *
+   * Downloaded ones count too: their tree entry is just as redundant, and the
+   * pack list above only shows what is not yet downloaded.
+   */
+  const packIds = useMemo(
+    () => new Set(regions.filter((r) => (r.assets?.length ?? 0) > 0).map((r) => r.id)),
+    [regions],
+  );
+
+  /**
+   * The Geofabrik tree with pack-covered areas removed.
+   *
+   * The tree downloads raw OpenFreeMap tiles, capped at 50 MB per download.
+   * Listing an area there when a pack already covers it offers the worse of two
+   * downloads for the same place, so the tree is now only the fallback: places
+   * with no pack, for whatever reason.
+   */
+  const uncoveredNodes = useMemo(() => uncoveredTree(GEOFABRIK_TREE, packIds), [packIds]);
+  const uncoveredCount = useMemo(
+    () => flattenTree(uncoveredNodes).filter((node) => !node.children?.length).length,
+    [uncoveredNodes],
   );
   const [loading, setLoading] = useState(true);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
@@ -253,14 +279,11 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Packs</Text>
           <Text style={styles.description}>
-            Full offline packs — maps, routing, search and transit — with no per-download size
-            limit.
+            {availablePacks.length} full offline packs — maps, routing, search and transit — with no
+            per-download size limit. Prefer these: a pack covers its whole area, so the areas it
+            covers are not listed again below.
           </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.downloadedScroll}
-          >
+          <ScrollView style={styles.packScroll} nestedScrollEnabled>
             {availablePacks.map((region) => (
               <RegionCard
                 key={region.id}
@@ -297,21 +320,24 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         </View>
       )}
 
-      <View style={styles.availableSection}>
-        <Text style={styles.sectionTitle}>Available Regions</Text>
-        <Text style={styles.description}>
-          Worldwide areas, downloaded as map tiles from OpenFreeMap. Tile downloads are capped at 50
-          MB, so large areas fail — prefer a pack above when one covers you.
-        </Text>
-        <View style={styles.treeContainer}>
-          <GeofabrikTreePicker
-            nodes={GEOFABRIK_TREE}
-            completedPaths={completedPaths}
-            downloadingPath={downloadingPath}
-            onDownload={handleTreeDownload}
-          />
+      {uncoveredNodes.length > 0 && (
+        <View style={styles.availableSection}>
+          <Text style={styles.sectionTitle}>No Pack Available</Text>
+          <Text style={styles.description}>
+            {uncoveredCount} areas have no pack yet — entire large countries, and places the pack
+            build has not reached. These download as map tiles from OpenFreeMap, which is capped at
+            50 MB per download, so the largest of them will fail.
+          </Text>
+          <View style={styles.treeContainer}>
+            <GeofabrikTreePicker
+              nodes={uncoveredNodes}
+              completedPaths={completedPaths}
+              downloadingPath={downloadingPath}
+              onDownload={handleTreeDownload}
+            />
+          </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
@@ -341,6 +367,14 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     emptyText: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
     downloadedScroll: {
       maxHeight: 200,
+    },
+    /**
+     * Packs are the primary path, so they get a tall vertical list of full-width
+     * cards rather than a horizontal strip of clipped ones. Bounded so the
+     * fallback tree below keeps usable space.
+     */
+    packScroll: {
+      maxHeight: 380,
     },
     autoDownloadHint: {
       fontSize: 11,

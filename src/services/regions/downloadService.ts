@@ -304,10 +304,14 @@ export async function downloadRegion(
       return;
     }
 
-    if ((error as Error).name === 'DownloadLimitError') {
-      // Over-limit downloads are refused rather than completed non-conformantly.
-      await FileSystem.deleteAsync(destDir, { idempotent: true }).catch(() => {});
-    }
+    // Any failed download leaves its partial files behind, and a pack asset is
+    // resumed from a sidecar offset. A truncated archive therefore resumes from
+    // a bad offset, fails the checksum, and fails identically on every retry —
+    // the region is stuck on "Failed" until it is deleted by hand. The region
+    // never reached `complete`, so nothing in the directory is usable: drop it
+    // and let Retry start clean. (Over-limit downloads are refused rather than
+    // completed non-conformantly, which this also covers.)
+    await FileSystem.deleteAsync(destDir, { idempotent: true }).catch(() => {});
 
     await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
       'failed',
