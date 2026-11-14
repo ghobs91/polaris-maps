@@ -1,12 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationStepsContent } from './NavigationStepsList';
 import { formatDistance, formatDuration } from '../../utils/units';
 import { useTheme } from '../../contexts/ThemeContext';
 import { nav } from '../../constants/theme';
 import type { ValhallaRoute } from '../../models/route';
+import type { NextStop } from '../../utils/navigationStops';
 
 interface CarPlayNavigationCompanionProps {
   route: ValhallaRoute | null;
@@ -14,18 +14,25 @@ interface CarPlayNavigationCompanionProps {
   etaSeconds: number | null;
   remainingDistanceMeters: number | null;
   destinationName?: string;
-  /** Height of the live capture band at the bottom (0 when not capturing). */
-  bottomInset?: number;
+  /** Pending waypoint; the first ETA counts down to it. */
+  nextStop?: NextStop | null;
   /** Open the add-stop search (a waypoint along the route). */
   onAddStop: () => void;
   /** End the navigation session. */
   onEnd: () => void;
 }
 
+function formatClock(etaSeconds: number): string {
+  return new Date(Date.now() + etaSeconds * 1000).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 /**
- * Phone view shown while navigation is driven from CarPlay: the turn-by-turn
- * step list plus a search bar for adding a waypoint along the route, matching
- * Apple Maps (the car screen shows the map; the phone becomes the companion).
+ * Phone view shown while navigation is driven from CarPlay: the map sits above
+ * this sheet, which carries the next-stop and whole-trip ETA, the step list,
+ * and an add-stop search bar, matching Apple Maps.
  */
 export function CarPlayNavigationCompanion({
   route,
@@ -33,16 +40,20 @@ export function CarPlayNavigationCompanion({
   etaSeconds,
   remainingDistanceMeters,
   destinationName,
-  bottomInset = 0,
+  nextStop,
   onAddStop,
   onEnd,
 }: CarPlayNavigationCompanionProps) {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
 
-  const summaryParts: string[] = [];
-  if (etaSeconds != null) summaryParts.push(formatDuration(etaSeconds));
-  if (remainingDistanceMeters != null) summaryParts.push(formatDistance(remainingDistanceMeters));
+  const tripParts: string[] = [];
+  if (etaSeconds != null) tripParts.push(formatDuration(etaSeconds));
+  if (remainingDistanceMeters != null) tripParts.push(formatDistance(remainingDistanceMeters));
+  if (etaSeconds != null) tripParts.push(`arrive ${formatClock(etaSeconds)}`);
+
+  const nextStopLabel = nextStop
+    ? `Next · ${nextStop.name} · ${formatDuration(nextStop.etaSeconds)}`
+    : null;
 
   return (
     <View
@@ -50,20 +61,19 @@ export function CarPlayNavigationCompanion({
         styles.container,
         {
           backgroundColor: colors.backgroundDark,
-          paddingTop: insets.top + 12,
-          // The capture band overlays the bottom quarter of the screen; the
-          // list shrinks to sit above it instead of being covered.
-          paddingBottom: insets.bottom + 12 + bottomInset,
         },
       ]}
     >
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.destination} numberOfLines={1}>
-            {destinationName ?? 'Destination'}
+            {nextStop ? nextStopLabel : (destinationName ?? 'Destination')}
           </Text>
-          {summaryParts.length > 0 && (
-            <Text style={styles.summary}>{summaryParts.join(' · ')}</Text>
+          {tripParts.length > 0 && (
+            <Text style={styles.summary} numberOfLines={1}>
+              {nextStop ? `${destinationName ?? 'Destination'} · ` : ''}
+              {tripParts.join(' · ')}
+            </Text>
           )}
         </View>
         <Pressable
@@ -100,7 +110,7 @@ export function CarPlayNavigationCompanion({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 16 },
+  container: { flex: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

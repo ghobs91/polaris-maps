@@ -13,7 +13,7 @@ import { IncidentAheadBanner } from '@/components/navigation/IncidentAheadBanner
 import type { UnifiedSearchResult } from '@/services/search/unifiedSearch';
 import { useNavigationStore, type Waypoint } from '@/stores/navigationStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { spacing, typography } from '@/constants/theme';
+import { spacing, typography, borderRadius } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { decodePolyline } from '@/utils/polyline';
 import { buildUpcomingStops, buildNextStop, moveStop, removeStop } from '@/utils/navigationStops';
@@ -268,6 +268,8 @@ export default function NavigationScreen() {
 
   const handleCloseAddDestination = useCallback(() => {
     setShowAddDestination(false);
+    // The search overview broke camera follow; resume the guidance view.
+    setFollowCamera(true);
   }, []);
 
   // Search submitted in the add-stop panel: release camera follow so the
@@ -318,6 +320,8 @@ export default function NavigationScreen() {
 
       await rerouteFromStops(pendingWaypoints);
       setShowAddDestination(false);
+      // Resume the guidance view now that the stop is on the route.
+      setFollowCamera(true);
     },
     [waypoints, currentLegIndex, rerouteFromStops],
   );
@@ -630,27 +634,51 @@ export default function NavigationScreen() {
       ? MAPILLARY_SPEED_LIMIT_ATTRIBUTION
       : undefined;
 
-  // CarPlay companion: the car shows the map, so the phone shows the step list
-  // and an add-stop search bar instead of duplicating the map HUD.
+  // CarPlay companion: the car shows turn-by-turn guidance, so the phone keeps
+  // the same route as a live overview (so an add-stop search can zoom out to
+  // the options along it) with the step list and add-stop bar in a sheet.
   if (isNavigating && carPlayConnected) {
     return (
       <View style={styles.container}>
+        <MapView
+          ref={mapRef}
+          routeGeometry={activeRoute.geometry}
+          navigationMode={isNavigating}
+          navPosition={navPosition}
+          navBearing={navBearing}
+          followCamera={followCamera}
+          onFollowCameraChange={handleFollowCameraChange}
+          destination={destination}
+          remainingDistanceMeters={remainingDistanceMeters}
+        />
+
         <View
           style={[styles.bannerContainer, { top: insets.top + spacing.sm }]}
           pointerEvents="box-none"
         >
           <FasterRouteBanner />
         </View>
-        <CarPlayNavigationCompanion
-          route={activeRoute}
-          currentStepIndex={guidanceIdx}
-          etaSeconds={etaSeconds}
-          remainingDistanceMeters={remainingDistanceMeters}
-          destinationName={destination?.name}
-          bottomInset={bandHeight}
-          onAddStop={handleOpenAddDestination}
-          onEnd={stopNavigation}
-        />
+
+        <View
+          style={[
+            styles.companionSheet,
+            {
+              bottom: bandHeight,
+              paddingBottom: bandHeight > 0 ? 0 : insets.bottom,
+            },
+          ]}
+        >
+          <CarPlayNavigationCompanion
+            route={activeRoute}
+            currentStepIndex={guidanceIdx}
+            etaSeconds={etaSeconds}
+            remainingDistanceMeters={remainingDistanceMeters}
+            destinationName={destination?.name}
+            nextStop={nextStop}
+            onAddStop={handleOpenAddDestination}
+            onEnd={stopNavigation}
+          />
+        </View>
 
         <AddDestinationPanel
           visible={showAddDestination}
@@ -1035,6 +1063,22 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       position: 'absolute',
       left: spacing.md,
       right: spacing.md,
+    },
+    /** CarPlay companion sheet: the phone map stays visible above it. */
+    companionSheet: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      height: '52%',
+      backgroundColor: colors.backgroundDark,
+      borderTopLeftRadius: borderRadius.xxl,
+      borderTopRightRadius: borderRadius.xxl,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOpacity: 0.28,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: -4 },
+      elevation: 12,
     },
     empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
     emptyText: { ...typography.h3, color: colors.text, marginBottom: spacing.xs },
