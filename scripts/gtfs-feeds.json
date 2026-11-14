@@ -1,0 +1,63 @@
+{
+  "_comment": [
+    "GTFS feed used to build each region's `transit-timetable.sqlite`.",
+    "Consumed by .github/workflows/build-region-data.yml; a region absent from",
+    "this file simply ships without a timetable (its pack still works — the",
+    "planner falls through to a live source).",
+    "",
+    "Every URL here was verified with an HTTP request before being added. The",
+    "app-side registry (src/services/transit/otpEndpointRegistry.ts) is the",
+    "primary source; where it has no usable URL the bundled DOT index",
+    "(src/services/transit/dot-gtfs-index.json) is used instead.",
+    "",
+    "Deliberately not included: es-madrid (the registry URL is a literal",
+    "`items/...` placeholder), fr-paris (the IDFM URL 404s), us-az-phoenix",
+    "(the Phoenix open-data zip returns 403). Each needs a working feed before",
+    "it can ship a timetable.",
+    "",
+    "Note these are BUILD-TIME downloads. Fetching a national feed at runtime",
+    "is what GTFS_MAX_FEED_BYTES exists to prevent."
+  ],
+  "feeds": {
+    "us-ny-new-york": {
+      "label": "MTA New York City Transit (subway)",
+      "url": "https://web.mta.info/developers/data/nyct/subway/google_transit.zip"
+    },
+    "us-ca-los-angeles": {
+      "label": "LA Metro Rail",
+      "url": "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip"
+    },
+    "us-ca-san-francisco": {
+      "label": "BART",
+      "url": "https://www.bart.gov/dev/schedules/google_transit.zip"
+    },
+    "us-il-chicago": {
+      "label": "Chicago Transit Authority",
+      "url": "https://www.transitchicago.com/downloads/sch_data/google_transit.zip"
+    },
+    "us-tx-houston": {
+      "label": "Metropolitan Transit Authority of Harris County",
+      "url": "https://ridemetro-gtfs.azurewebsites.us/google_transit.zip"
+    },
+    "us-wa-seattle": {
+      "label": "King County Metro",
+      "url": "https://metro.kingcounty.gov/GTFS/google_transit.zip"
+    },
+    "us-fl-miami": {
+      "label": "Miami-Dade Transit",
+      "url": "https://www.miamidade.gov/transit/googletransit/current/google_transit.zip"
+    },
+    "us-ma-boston": {
+      "label": "Massachusetts Bay Transportation Authority",
+      "url": "https://cdn.mbta.com/MBTA_GTFS.zip"
+    },
+    "de-berlin": {
+      "label": "VBB Berlin-Brandenburg",
+      "url": "https://www.vbb.de/vbbgtfs"
+    },
+    "nl-amsterdam": {
+      "label": "Netherlands national GTFS",
+      "url": "https://data.public-transport.earth/gtfs/nl"
+    }
+  }
+}

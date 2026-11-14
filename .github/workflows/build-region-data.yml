@@ -331,6 +331,39 @@ jobs:
           PYEOF
           echo "Geocoding DB size: $(du -h work/${{ matrix.id }}/geocoding.db | cut -f1)"
 
+      # Scheduled connections for offline journey planning (Tier 0). Optional:
+      # a region without a mapped feed ships without a timetable and the planner
+      # falls through to a live source.
+      #
+      # This is the *only* place a whole GTFS feed is downloaded. At runtime the
+      # app refuses anything over GTFS_MAX_FEED_BYTES, because a national feed
+      # buffered on a phone is a crash and a volunteer host is not a CDN.
+      - name: Build transit timetable
+        run: |
+          FEED_URL=$(node -e '
+            const feeds = require("./scripts/gtfs-feeds.json").feeds;
+            const entry = feeds[process.argv[1]];
+            process.stdout.write(entry ? entry.url : "");
+          ' "${{ matrix.id }}")
+
+          if [ -z "$FEED_URL" ]; then
+            echo "no GTFS feed mapped for ${{ matrix.id }} — skipping timetable"
+            exit 0
+          fi
+
+          echo "Downloading $FEED_URL"
+          if ! curl -fSL --retry 3 --max-time 900 -o "work/${{ matrix.id }}/gtfs.zip" "$FEED_URL"; then
+            echo "::warning::GTFS download failed for ${{ matrix.id }}; shipping without a timetable"
+            exit 0
+          fi
+
+          python3 scripts/build-transit-timetable.py \
+            "work/${{ matrix.id }}/gtfs.zip" \
+            "work/${{ matrix.id }}" \
+            --region-id "${{ matrix.id }}"
+          rm -f "work/${{ matrix.id }}/gtfs.zip"
+          echo "Timetable size: $(du -h work/${{ matrix.id }}/transit-timetable.sqlite | cut -f1)"
+
       - name: Record asset sizes for the catalog
         run: |
           # scripts/update-region-asset-urls.mjs reads these per-region sizes so
@@ -396,7 +429,7 @@ jobs:
           # the previous one. Rename to `<region>-<file>` before uploading; the
           # catalog's asset URLs (scripts/update-region-asset-urls.mjs) depend on
           # exactly this naming.
-          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite search-shards.tar sizes.json checksums.json; do
+          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite transit-timetable.sqlite search-shards.tar sizes.json checksums.json; do
             if [ -f "work/${{ matrix.id }}/$file" ]; then
               cp "work/${{ matrix.id }}/$file" "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}"
               gh release upload "$TAG" \
