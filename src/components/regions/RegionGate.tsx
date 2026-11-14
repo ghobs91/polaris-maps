@@ -10,7 +10,14 @@ import {
   geoNodeToRegion,
   findDeepestNodeContainingPoint,
 } from '../../constants/geofabrikCatalog';
-import { upsertRegion, getDownloadedRegions } from '../../services/regions/regionRepository';
+import {
+  upsertRegion,
+  getDownloadedRegions,
+  getAllRegions,
+} from '../../services/regions/regionRepository';
+import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
+import { pickNearestPackRegion } from '../../services/regions/nearestPackRegion';
+import type { Region } from '../../models/region';
 import { downloadRegion, type DownloadProgress } from '../../services/regions/downloadService';
 import {
   seedRegion,
@@ -37,6 +44,17 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [completedPaths, setCompletedPaths] = useState<Set<string>>(new Set());
   const [seedingPaths, setSeedingPaths] = useState<Set<string>>(new Set());
+  /**
+   * The pack-backed region to offer above the Geofabrik tree.
+   *
+   * The tree is states and countries, none of which have a pack, so they
+   * download as OpenFreeMap tiles and are capped at 50 MB — a large state fails
+   * every time. The packs have no such cap, so the nearest one is offered first
+   * and the tree becomes the "somewhere else" option.
+   */
+  const [suggestedPack, setSuggestedPack] = useState<Region | null>(null);
+  const [packDownloading, setPackDownloading] = useState(false);
+  const [packDownloaded, setPackDownloaded] = useState(false);
   const [seedPeerCounts, setSeedPeerCounts] = useState<Map<string, number>>(new Map());
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -98,6 +116,61 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
       }
     },
     [downloading],
+  );
+
+  /**
+   * Offer the nearest pack. Seeding first is what makes this work on a fresh
+   * install: the region table starts empty, so there would be nothing to
+   * suggest. The cached manifest seeds instantly and offline.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await fetchAndSeedCatalog().catch(() => undefined);
+        const all = await getAllRegions();
+        if (cancelled) return;
+        const pack = pickNearestPackRegion(all, userLat, userLng);
+        setSuggestedPack(pack);
+        if (pack) {
+          const downloaded = await getDownloadedRegions().catch(() => [] as Region[]);
+          if (!cancelled) setPackDownloaded(downloaded.some((r) => r.id === pack.id));
+        }
+      } catch {
+        // No suggestion is survivable: the tree below still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userLat, userLng]);
+
+  /**
+   * Download a pack-backed region. Unlike the tree handler this keeps the
+   * region's `assets`, which is what routes the download to the pack instead of
+   * the capped per-tile path.
+   */
+  const handleDownloadPack = useCallback(
+    async (region: Region) => {
+      if (downloading || packDownloading) return;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setPackDownloading(true);
+      setProgress(null);
+      try {
+        await upsertRegion(region);
+        await downloadRegion(region, (p) => setProgress(p), controller.signal);
+        if (!controller.signal.aborted) setPackDownloaded(true);
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          Alert.alert('Download Failed', err instanceof Error ? err.message : 'Unknown error');
+        }
+      } finally {
+        abortControllerRef.current = null;
+        setPackDownloading(false);
+      }
+    },
+    [downloading, packDownloading],
   );
 
   const handleCancel = useCallback(() => {
@@ -182,7 +255,7 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
           </Text>
         )}
 
-        {progress && downloading && (
+        {progress && (downloading || packDownloading) && (
           <View style={styles.progressWrapper}>
             <DownloadProgressBar progress={progress} />
             <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} activeOpacity={0.7}>
@@ -190,6 +263,42 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
             </TouchableOpacity>
           </View>
         )}
+
+        {suggestedPack && (
+          <View style={[styles.packCard, { borderColor: c.primary }]}>
+            <Text style={[styles.packEyebrow, { color: c.primary }]}>
+              {userLat != null ? 'YOUR AREA' : 'SUGGESTED'}
+            </Text>
+            <Text style={[styles.packName, { color: c.text }]}>{suggestedPack.name}</Text>
+            <Text style={[styles.packNote, { color: c.textSecondary }]}>
+              Offline map pack — routing, local search and offline maps.
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.packBtn,
+                {
+                  backgroundColor: packDownloaded ? c.surface : c.primary,
+                  opacity: downloading || packDownloading ? 0.6 : 1,
+                },
+              ]}
+              onPress={() => void handleDownloadPack(suggestedPack)}
+              disabled={packDownloaded || !!downloading || packDownloading}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[styles.packBtnText, { color: packDownloaded ? c.textSecondary : '#fff' }]}
+              >
+                {packDownloaded ? 'Downloaded' : packDownloading ? 'Downloading…' : 'Download'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <Text style={[styles.treeHint, { color: c.textSecondary }]}>
+          {suggestedPack
+            ? 'Or pick a different area. Areas without a pack download as map tiles, and large ones exceed the 50 MB per-download limit.'
+            : 'Pick an area to download.'}
+        </Text>
 
         <GeofabrikTreePicker
           nodes={GEOFABRIK_TREE}
@@ -230,6 +339,38 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFill,
     zIndex: 999,
+  },
+  packCard: {
+    borderWidth: 1,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  packEyebrow: {
+    ...typography.caption,
+    letterSpacing: 1,
+    marginBottom: spacing.xs,
+  },
+  packName: {
+    ...typography.h3,
+    marginBottom: spacing.xs,
+  },
+  packNote: {
+    ...typography.caption,
+    marginBottom: spacing.sm,
+  },
+  packBtn: {
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  packBtnText: {
+    ...typography.body,
+    fontWeight: '600',
+  },
+  treeHint: {
+    ...typography.caption,
+    marginBottom: spacing.sm,
   },
   content: {
     flex: 1,
