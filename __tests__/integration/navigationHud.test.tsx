@@ -67,8 +67,10 @@ describe('NavigationHud', () => {
 
   it('keeps the whole-trip ETA beside the next-stop ETA', () => {
     const { screen } = renderHud();
-    expect(screen.getByText('Trip')).toBeTruthy();
-    expect(screen.getByText('20 min')).toBeTruthy();
+    // The trip block is rendered but hidden from accessibility (the card's label
+    // already announces it), so it has to be queried explicitly.
+    expect(screen.getByText('Trip', { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByText('20 min', { includeHiddenElements: true })).toBeTruthy();
     expect(screen.getByLabelText(/whole trip 20 min/)).toBeTruthy();
   });
 
@@ -77,7 +79,7 @@ describe('NavigationHud', () => {
     expect(screen.getByLabelText(/ETA 20 min/)).toBeTruthy();
     expect(screen.queryByText('Next · Coffee Shop')).toBeNull();
     // No duplicate figure: the big number is the trip when nothing is pending.
-    expect(screen.queryByText('Trip')).toBeNull();
+    expect(screen.queryByText('Trip', { includeHiddenElements: true })).toBeNull();
   });
 
   it('skips the next stop from the collapsed banner', () => {
