@@ -419,7 +419,10 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
       .then((newRoute) => {
         const navStore = useNavigationStore.getState();
         if (navStore.isNavigating) {
-          navStore.replaceRoute(newRoute);
+          // The reroute was computed from the current position through the
+          // stops still ahead, so re-baseline the waypoint list and leg index
+          // to keep next-stop ETAs and arrival detection aligned with its legs.
+          navStore.addWaypointAndReplaceRoute(newRoute, pending);
           // Haptics are skipped from the headless background task: the phone
           // is stowed, and the round-trip only eats into the background
           // execution window.

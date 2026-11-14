@@ -271,10 +271,13 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
     set({ fasterRouteSuggestion: { route, savingSeconds } }),
 
   acceptFasterRoute: () => {
-    const { fasterRouteSuggestion } = get();
+    const { fasterRouteSuggestion, waypoints, currentLegIndex } = get();
     if (!fasterRouteSuggestion) return;
-    // replaceRoute clears the suggestion (and stale alternates).
-    get().replaceRoute(fasterRouteSuggestion.route);
+    // The suggestion was computed from the current position through the stops
+    // still ahead, so the leg index must restart at 0 against that waypoint
+    // list. `replaceRoute` keeps the old index, which then pairs the next stop
+    // with the wrong leg and misreports its ETA.
+    get().addWaypointAndReplaceRoute(fasterRouteSuggestion.route, waypoints.slice(currentLegIndex));
   },
 
   dismissFasterRoute: () => set({ fasterRouteSuggestion: null }),
@@ -302,6 +305,9 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
     set({
       activeRoute: route,
+      // Every caller computes the new route from the current position through
+      // the pending stops, so the previous alternatives no longer apply.
+      alternateRoutes: [],
       currentStepIndex: 0,
       currentManeuver: firstManeuver,
       currentLegIndex: 0,

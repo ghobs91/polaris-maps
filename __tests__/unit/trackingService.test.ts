@@ -712,6 +712,32 @@ describe('trackingService — off-route detection & rerouting', () => {
     expect(mockReroute.mock.calls[0][3]).toMatchObject({ via: [stop] });
   });
 
+  it('re-baselines the leg index after a reroute so next-stop ETAs stay aligned', async () => {
+    const first = { lat: B[1], lng: B[0], name: 'First' };
+    const second = { lat: B[1] + 0.01, lng: B[0], name: 'Second' };
+    useNavigationStore
+      .getState()
+      .startNavigation(makeRoute(), [], { lat: second.lat, lng: second.lng }, 'auto', [
+        first,
+        second,
+      ]);
+    // The driver already reached the first stop.
+    useNavigationStore.setState({ currentLegIndex: 1 });
+    startTracking(makeRoute());
+    mockReroute.mockResolvedValue(makeRoute());
+
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    processFix(farOffRouteFix());
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockReroute.mock.calls[0][3]).toMatchObject({ via: [second] });
+    const nav = useNavigationStore.getState();
+    expect(nav.currentLegIndex).toBe(0);
+    expect(nav.waypoints).toEqual([second]);
+  });
+
   it('omits via-points when the trip has no intermediate stops', async () => {
     startNav(makeRoute());
     startTracking(makeRoute());

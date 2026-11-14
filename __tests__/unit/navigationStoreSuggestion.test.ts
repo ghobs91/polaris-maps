@@ -40,6 +40,23 @@ describe('faster-route suggestion', () => {
     expect(state.etaSeconds).toBe(faster.summary.durationSeconds);
   });
 
+  it('accepting re-baselines stops the driver already passed', () => {
+    const first = { lat: 40.001, lng: -74, name: 'First' };
+    const second = { lat: 40.002, lng: -74, name: 'Second' };
+    useNavigationStore
+      .getState()
+      .startNavigation(primary, [], destination, 'auto', [first, second]);
+    useNavigationStore.setState({ currentLegIndex: 1 });
+    useNavigationStore.getState().suggestFasterRoute(faster, 300);
+
+    useNavigationStore.getState().acceptFasterRoute();
+
+    const state = useNavigationStore.getState();
+    expect(state.activeRoute).toBe(faster);
+    expect(state.currentLegIndex).toBe(0);
+    expect(state.waypoints).toEqual([second]);
+  });
+
   it('dismissing keeps the active route and clears the suggestion', () => {
     useNavigationStore.getState().startNavigation(primary, [], destination, 'auto', []);
     useNavigationStore.getState().suggestFasterRoute(faster, 300);
