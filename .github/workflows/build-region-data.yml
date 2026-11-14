@@ -517,8 +517,13 @@ jobs:
           DATE_YM="$(date +%Y-%m)"
           rm -rf checksums && mkdir -p checksums
           ASSETS_JSON="[]"
-          for SUFFIX in a b c d e f; do
-            TAG_S="map-data-${DATE_YM}-${SUFFIX}"
+          # The unsuffixed tag is enumerated for one transition: packs uploaded
+          # before the sibling-tag split live there, and dropping them from the
+          # enumeration would unpublished every region mid-flight. The next full
+          # build re-uploads those regions to their sibling tags; after that
+          # this entry simply matches nothing.
+          for SUFFIX in "" a b c d e f; do
+            if [ -z "$SUFFIX" ]; then TAG_S="map-data-${DATE_YM}"; else TAG_S="map-data-${DATE_YM}-${SUFFIX}"; fi
             if ! gh release view "$TAG_S" --repo "${{ github.repository }}" >/dev/null 2>&1; then
               continue
             fi
@@ -559,8 +564,8 @@ jobs:
               const { execFileSync } = require("child_process");
               const assets = JSON.parse(process.env.ASSETS_JSON);
               const out = {};
-              for (const suffix of ["a","b","c","d","e","f"]) {
-                const tag = "map-data-" + process.env.DATE_YM + "-" + suffix;
+              for (const suffix of ["", "a","b","c","d","e","f"]) {
+                const tag = "map-data-" + process.env.DATE_YM + (suffix ? "-" + suffix : "");
                 try {
                   const json = JSON.parse(execFileSync("gh", [
                     "release", "view", tag, "--repo", process.env.GH_REPO,
