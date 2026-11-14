@@ -146,7 +146,13 @@ jobs:
         run: |
           mkdir -p work/${{ matrix.id }}
           echo "Downloading ${{ matrix.name }} extract..."
-          curl -fSL -o work/${{ matrix.id }}/region.osm.pbf "${{ matrix.geofabrik }}"
+          # Geofabrik rate-limits and occasionally 5xxs; a single failed fetch
+          # used to cost the whole region for that run (exit 22), which is how 8
+          # of 192 builds dropped out. Retry with backoff before giving up.
+          curl -fSL \
+            --retry 5 --retry-delay 10 --retry-all-errors \
+            --connect-timeout 30 --max-time 3600 \
+            -o work/${{ matrix.id }}/region.osm.pbf "${{ matrix.geofabrik }}"
           echo "Download size: $(du -h work/${{ matrix.id }}/region.osm.pbf | cut -f1)"
 
       - name: Clip extract to bounding box
@@ -678,7 +684,11 @@ jobs:
   # every chunk, so the catalog is valid at every step.
   dispatch-next-chunk:
     needs: [publish-catalog]
-    if: ${{ needs.publish-catalog.result == 'success' && github.event.inputs.region_id == '' }}
+    # `!github.event.inputs.region_id` covers both '' (dispatch) and null
+    # (push): the previous `== ''` was false on push, so a push-triggered run
+    # built only the first chunk and stopped — the catalog stalled at whatever
+    # that chunk covered.
+    if: ${{ needs.publish-catalog.result == 'success' && !github.event.inputs.region_id }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
