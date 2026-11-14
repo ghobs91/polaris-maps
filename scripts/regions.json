@@ -154,7 +154,7 @@
     {
       "id": "gb-england-london",
       "name": "London",
-      "geofabrik": "https://download.geofabrik.de/europe/great-britain/england-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf",
       "bbox": "-0.5,51.3,0.3,51.7",
       "bounds": { "minLat": 51.3, "maxLat": 51.7, "minLng": -0.5, "maxLng": 0.3 },
       "tilesSizeBytes": 220200960,
@@ -224,7 +224,7 @@
     {
       "id": "ru-moscow",
       "name": "Moscow",
-      "geofabrik": "https://download.geofabrik.de/europe/russia/central-fed-district-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/russia/central-fed-district-latest.osm.pbf",
       "bbox": "37.3,55.5,37.9,56.0",
       "bounds": { "minLat": 55.5, "maxLat": 56.0, "minLng": 37.3, "maxLng": 37.9 },
       "tilesSizeBytes": 125829120,
