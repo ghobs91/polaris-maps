@@ -23,8 +23,8 @@
  * avoids unpacking multi-hundred-megabyte feeds just to list four filenames.
  */
 
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -174,14 +174,15 @@ export async function verifyFeed(id, entry, { quick = false } = {}) {
   try {
     if (quick) {
       const file = path.join(dir, 'probe.bin');
-      const out = execFileSync(
+      // Deliberately tolerant of a non-zero exit: some hosts ignore Range and
+      // start streaming the whole archive, which `--max-time` cuts off. Only
+      // the first two bytes are needed, so a partial file is a success here.
+      spawnSync(
         'curl',
         [
           '-fSL',
-          '--retry',
-          '2',
           '--max-time',
-          '120',
+          '20',
           '-r',
           '0-3',
           ...headerList(entry.headers),
@@ -189,9 +190,10 @@ export async function verifyFeed(id, entry, { quick = false } = {}) {
           file,
           entry.url,
         ],
-        { encoding: 'buffer', stdio: ['ignore', 'pipe', 'pipe'] },
+        { stdio: ['ignore', 'ignore', 'pipe'] },
       );
-      const isZip = out.length >= 2 && out[0] === 0x50 && out[1] === 0x4b;
+      const head = existsSync(file) ? readFileSync(file) : Buffer.alloc(0);
+      const isZip = head.length >= 2 && head[0] === 0x50 && head[1] === 0x4b;
       return {
         id,
         ok: isZip,
