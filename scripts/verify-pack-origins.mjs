@@ -52,10 +52,18 @@ function flag(name, fallback) {
   return value;
 }
 
-const CATALOG_URL = flag('--catalog', process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? '') || '';
+// Same defaults as `src/constants/config.ts` / `remoteConfig.ts`: the pack
+// release tag carries the packs, the catalog and the signed config. Kept in
+// sync by hand because this script is plain ESM and cannot import the TS
+// constants; `packOriginsDefaults.test.ts` pins the three strings together.
+const DATA_REPO = process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-maps';
+const DATA_TAG = 'map-data-latest';
+const DATA_BASE = `https://github.com/${DATA_REPO}/releases/download/${DATA_TAG}`;
+
+const CATALOG_URL =
+  flag('--catalog', process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? '') || `${DATA_BASE}/catalog.json`;
 const CONFIG_URL =
-  flag('--config', process.env.EXPO_PUBLIC_REMOTE_CONFIG_URL ?? '') ||
-  'https://app.polarismaps.app/config.json';
+  flag('--config', process.env.EXPO_PUBLIC_REMOTE_CONFIG_URL ?? '') || `${DATA_BASE}/config.json`;
 const REGIONS = Number(flag('--regions', '1'));
 const TIMEOUT_MS = Number(flag('--timeout', '15000'));
 const WARN_ONLY = args.includes('--warn-only');

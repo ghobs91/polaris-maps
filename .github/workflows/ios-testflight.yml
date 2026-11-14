@@ -151,18 +151,31 @@ jobs:
           EXPO_PUBLIC_GEONAMES_DB_URL: ${{ secrets.EXPO_PUBLIC_GEONAMES_DB_URL }}
           EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL: ${{ secrets.EXPO_PUBLIC_OVERTURE_PLACES_PM_TILES_URL }}
           EXPO_PUBLIC_REGION_CATALOG_URL: ${{ secrets.EXPO_PUBLIC_REGION_CATALOG_URL }}
+          POLARIS_REGION_CATALOG_URL: ${{ secrets.EXPO_PUBLIC_REGION_CATALOG_URL }}
+          POLARIS_REMOTE_CONFIG_URL: ${{ secrets.EXPO_PUBLIC_REMOTE_CONFIG_URL }}
+          POLARIS_REQUIRE_PACK_ORIGINS: ${{ vars.POLARIS_REQUIRE_PACK_ORIGINS }}
 
       # A build that advertises a region catalog must actually be able to fetch
       # it. A 404 here means every install streams live third-party tiles
       # instead of downloading a pack, and that no kill switch is published to
-      # turn an origin off when it blocks us. Fail before the 10-minute native
-      # build rather than shipping that quietly.
+      # turn an origin off when it blocks us.
+      #
+      # Always runs, so the state of the origins is visible in every build log.
+      # It only *fails* the build when POLARIS_REQUIRE_PACK_ORIGINS is set —
+      # set it on release/TestFlight lanes, leave it unset for local and
+      # development builds where unpublished packs are expected.
       - name: Verify pack origins resolve
-        if: env.POLARIS_REGION_CATALOG_URL != ''
         run: |
-          args=(--catalog "$POLARIS_REGION_CATALOG_URL")
+          args=()
+          if [ -n "$POLARIS_REGION_CATALOG_URL" ]; then
+            args+=(--catalog "$POLARIS_REGION_CATALOG_URL")
+          fi
           if [ -n "$POLARIS_REMOTE_CONFIG_URL" ]; then
             args+=(--config "$POLARIS_REMOTE_CONFIG_URL")
+          fi
+          if [ "$POLARIS_REQUIRE_PACK_ORIGINS" != "1" ]; then
+            args+=(--warn-only)
+            echo "::warning::POLARIS_REQUIRE_PACK_ORIGINS is not set; pack-origin failures will not fail this build."
           fi
           node scripts/verify-pack-origins.mjs "${args[@]}"
 

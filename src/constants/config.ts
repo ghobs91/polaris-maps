@@ -222,23 +222,47 @@ export const TRANSIT_FETCH_DEBOUNCE_MS = 500;
 /** Cache TTL (ms) for transit feed discovery results. */
 export const TRANSIT_FEED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-// ── Offline Region Data CDN ─────────────────────────────────────────
+// ── Offline Region Data ─────────────────────────────────────────────
 
-/** URL for the master region catalog manifest (JSON). */
+/**
+ * GitHub repository publishing pre-built packs, routing graphs and the catalog
+ * via Releases.
+ *
+ * `build-region-data.yml` uploads `<regionId>-routing.tar` and the pack assets
+ * here; the app downloads and extracts them during region download so on-device
+ * Valhalla works offline. Set to an empty string to disable GitHub Releases
+ * routing downloads (P2P packs still work).
+ */
+export const REGION_DATA_REPO: string =
+  process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-maps';
+
+/**
+ * Release tag that carries the pack data, the catalog and the signed config.
+ *
+ * A fixed tag rather than `latest`: GitHub's `releases/latest` resolves to the
+ * most recent release of *any* kind, so an iOS release published after a data
+ * refresh would silently point every install at a release with no packs in it.
+ * The pack workflow re-publishes this tag instead.
+ */
+export const REGION_DATA_TAG = 'map-data-latest';
+
+/** Base URL for assets published on the pack release tag. */
+export const REGION_DATA_BASE_URL = REGION_DATA_REPO
+  ? `https://github.com/${REGION_DATA_REPO}/releases/download/${REGION_DATA_TAG}`
+  : '';
+
+/**
+ * URL for the master region catalog manifest (JSON).
+ *
+ * Polaris runs no CDN, so this is a third-party origin — the pack release.
+ * When it does not resolve, every install streams live third-party tiles
+ * instead of downloading a pack, which is the load profile packs exist to
+ * remove. `pnpm packs:verify` fails a release build in that case.
+ */
 export const REGION_CATALOG_URL =
-  process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? 'https://cdn.example.com/regions/catalog.json';
+  process.env.EXPO_PUBLIC_REGION_CATALOG_URL ??
+  (REGION_DATA_BASE_URL ? `${REGION_DATA_BASE_URL}/catalog.json` : '');
 
 /** URL for the global GeoNames SQLite database (gzipped). */
 export const GEONAMES_DB_URL =
   process.env.EXPO_PUBLIC_GEONAMES_DB_URL ?? 'https://cdn.example.com/global/geonames.sqlite.gz';
-
-/**
- * GitHub repository publishing pre-built offline routing graphs via Releases.
- *
- * `build-region-data.yml` uploads `<regionId>-routing.tar` assets to a
- * `map-data-*` release here; the app downloads and extracts them during region
- * download so on-device Valhalla works offline. Set to an empty string to
- * disable GitHub Releases routing downloads (P2P packs still work).
- */
-export const REGION_DATA_REPO: string =
-  process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-maps';

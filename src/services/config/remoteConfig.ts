@@ -18,12 +18,22 @@ import { setNominatimEnabled } from '../geocoding/nominatimPolicy';
 import { setTransitousPlanEnabled } from '../transit/transitousPlanPolicy';
 import { createSigningPayload, verify } from '../identity/signing';
 import { TRUSTED_REGION_PUBLISHERS } from '../../constants/regionPublishers';
+import { REGION_DATA_BASE_URL } from '../../constants/config';
 import type { MMKV } from 'react-native-mmkv';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 
-/** Static config location. Override to self-host the same signed JSON. */
+/**
+ * Signed kill-switch document.
+ *
+ * Polaris runs no CDN, so this lives on the pack release alongside the catalog
+ * and the packs themselves. It was previously pinned to `app.polarismaps.app`,
+ * which serves nothing — so the signature check could never pass and every flag
+ * stayed at its compiled default, with no way to turn an origin off short of an
+ * App Store release. Override to self-host the same signed JSON.
+ */
 export const REMOTE_CONFIG_URL =
-  process.env.EXPO_PUBLIC_REMOTE_CONFIG_URL ?? 'https://app.polarismaps.app/config.json';
+  process.env.EXPO_PUBLIC_REMOTE_CONFIG_URL ??
+  (REGION_DATA_BASE_URL ? `${REGION_DATA_BASE_URL}/config.json` : '');
 
 const CACHE_KEY = 'remote_config:v1';
 const FETCH_TIMEOUT_MS = 3_000;
