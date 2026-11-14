@@ -6,7 +6,12 @@
  * time for a new user. These pin which pack is offered instead.
  */
 
-import { packRegions, pickNearestPackRegion } from '../../src/services/regions/nearestPackRegion';
+import {
+  packRegionForNodeId,
+  packRegions,
+  packsIntersectingBounds,
+  pickNearestPackRegion,
+} from '../../src/services/regions/nearestPackRegion';
 import type { Region } from '../../src/models/region';
 
 const PACK = [{ name: 'tiles.pmtiles', url: 'https://packs.test/tiles.pmtiles' }];
@@ -96,5 +101,47 @@ describe('pickNearestPackRegion', () => {
   it('ignores a non-finite location rather than ranking by NaN', () => {
     const pick = pickNearestPackRegion([region('us-ny-new-york', NYC)], Number.NaN, 0);
     expect(pick!.id).toBe('us-ny-new-york');
+  });
+});
+
+describe('packRegionForNodeId', () => {
+  it('finds a pack by tree-node id', () => {
+    // ids are the tree path with / → -, generated from the same tree.
+    expect(
+      packRegionForNodeId(
+        [region('north-america-us-new-york', NY_STATE)],
+        'north-america-us-new-york',
+      )!.id,
+    ).toBe('north-america-us-new-york');
+  });
+
+  it('returns null when the node has no pack (tiles path stays honest)', () => {
+    expect(packRegionForNodeId([region('a', NYC, [])], 'a')).toBeNull();
+    expect(packRegionForNodeId([], 'a')).toBeNull();
+  });
+});
+
+describe('packsIntersectingBounds', () => {
+  it('returns intersecting packs, smallest first', () => {
+    const list = [
+      region('north-america-us-new-york', NY_STATE),
+      region('us-ny-new-york', NYC),
+      region('gb-england-london', LONDON),
+    ];
+    const hits = packsIntersectingBounds(list, {
+      minLat: 40.5,
+      maxLat: 41,
+      minLng: -74.2,
+      maxLng: -73.6,
+    });
+    expect(hits.map((r) => r.id)).toEqual(['us-ny-new-york', 'north-america-us-new-york']);
+  });
+
+  it('ignores pack-less regions', () => {
+    expect(packsIntersectingBounds([region('a', NYC, [])], NYC)).toEqual([]);
+  });
+
+  it('returns empty when nothing intersects', () => {
+    expect(packsIntersectingBounds([region('us-ny-new-york', NYC)], LONDON)).toEqual([]);
   });
 });

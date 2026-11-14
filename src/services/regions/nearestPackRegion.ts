@@ -70,3 +70,42 @@ export function pickNearestPackRegion(
     distanceToCentreSq(region, lat, lng) < distanceToCentreSq(best, lat, lng) ? region : best,
   );
 }
+
+/** Area of a bounds in degrees² — only used to rank, never displayed. */
+function boundsArea(bounds: Region['bounds']): number {
+  return Math.abs(bounds.maxLat - bounds.minLat) * Math.abs(bounds.maxLng - bounds.minLng);
+}
+
+function intersects(a: Region['bounds'], b: Region['bounds']): boolean {
+  return (
+    a.minLat <= b.maxLat && a.maxLat >= b.minLat && a.minLng <= b.maxLng && a.maxLng >= b.minLng
+  );
+}
+
+/**
+ * Pack-backed regions intersecting a bounds, smallest first.
+ *
+ * Used when an area the user tapped (a Geofabrik tree node, say) has no pack of
+ * its own: if a published pack covers part of it, that is the honest
+ * alternative to a tile download that will fail the cap.
+ */
+export function packsIntersectingBounds(
+  regions: readonly Region[],
+  bounds: Region['bounds'],
+): Region[] {
+  return regions
+    .filter((region) => (region.assets?.length ?? 0) > 0 && intersects(region.bounds, bounds))
+    .sort((a, b) => boundsArea(a.bounds) - boundsArea(b.bounds));
+}
+
+/**
+ * The pack for a tree-node id, when one exists.
+ *
+ * `geoNodeToRegion(node).id` is the node path with `/` → `-`, and the pack
+ * catalog is generated from the same tree — so ids line up by construction.
+ * This is what turns "the tree keeps using the failing tile method" into "the
+ * tree downloads the pack when there is one".
+ */
+export function packRegionForNodeId(regions: readonly Region[], nodeId: string): Region | null {
+  return regions.find((region) => region.id === nodeId && (region.assets?.length ?? 0) > 0) ?? null;
+}

@@ -16,7 +16,12 @@ import {
   getAllRegions,
 } from '../../services/regions/regionRepository';
 import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
-import { pickNearestPackRegion } from '../../services/regions/nearestPackRegion';
+import {
+  packRegionForNodeId,
+  packsIntersectingBounds,
+  pickNearestPackRegion,
+} from '../../services/regions/nearestPackRegion';
+import { planOfflineTileDownload } from '../../services/regions/tileDownloadPlan';
 import type { Region } from '../../models/region';
 import { downloadRegion, type DownloadProgress } from '../../services/regions/downloadService';
 import {
@@ -53,6 +58,7 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
    * and the tree becomes the "somewhere else" option.
    */
   const [suggestedPack, setSuggestedPack] = useState<Region | null>(null);
+  const [allRegions, setAllRegions] = useState<Region[]>([]);
   const [packDownloading, setPackDownloading] = useState(false);
   const [packDownloaded, setPackDownloaded] = useState(false);
   const [seedPeerCounts, setSeedPeerCounts] = useState<Map<string, number>>(new Map());
@@ -91,10 +97,59 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
     });
   }, [idToPathMap]);
 
+  const handleDownloadPack = useCallback(
+    async (region: Region) => {
+      if (downloading || packDownloading) return;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setPackDownloading(true);
+      setProgress(null);
+      try {
+        await upsertRegion(region);
+        await downloadRegion(region, (p) => setProgress(p), controller.signal);
+        if (!controller.signal.aborted) setPackDownloaded(true);
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          Alert.alert('Download Failed', err instanceof Error ? err.message : 'Unknown error');
+        }
+      } finally {
+        abortControllerRef.current = null;
+        setPackDownloading(false);
+      }
+    },
+    [downloading, packDownloading],
+  );
+
+  /**
+   * Download a tree node: its pack when the catalog has one (the pack catalog
+   * is generated from this tree, so ids match), else tiles — refused up front
+   * when the plan had to reduce detail, since the byte cap would abort it
+   * halfway through.
+   */
   const handleDownload = useCallback(
     async (node: GeoNode) => {
       if (downloading) return;
-      const region = geoNodeToRegion(node);
+      const nodeRegion = geoNodeToRegion(node);
+      const pack = packRegionForNodeId(allRegions, nodeRegion.id);
+      if (pack) {
+        await handleDownloadPack(pack);
+        return;
+      }
+
+      const plan = planOfflineTileDownload(nodeRegion.bounds);
+      if (plan.reduced) {
+        const covering = packsIntersectingBounds(allRegions, nodeRegion.bounds);
+        const suggestion = covering[0]
+          ? `The ${covering[0].name} pack covers part of this area — use the button above.`
+          : 'Try a smaller area.';
+        Alert.alert(
+          'Area Too Large',
+          `${node.name} needs more detail than OpenFreeMap's 50 MB offline limit allows. ${suggestion}`,
+        );
+        return;
+      }
+
+      const region = nodeRegion;
       const controller = new AbortController();
       abortControllerRef.current = controller;
       setDownloading(node.path);
@@ -130,6 +185,7 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
         await fetchAndSeedCatalog().catch(() => undefined);
         const all = await getAllRegions();
         if (cancelled) return;
+        setAllRegions(all);
         const pack = pickNearestPackRegion(all, userLat, userLng);
         setSuggestedPack(pack);
         if (pack) {
@@ -150,29 +206,6 @@ export function RegionGate({ checking, userLat, userLng, onDismiss }: RegionGate
    * region's `assets`, which is what routes the download to the pack instead of
    * the capped per-tile path.
    */
-  const handleDownloadPack = useCallback(
-    async (region: Region) => {
-      if (downloading || packDownloading) return;
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      setPackDownloading(true);
-      setProgress(null);
-      try {
-        await upsertRegion(region);
-        await downloadRegion(region, (p) => setProgress(p), controller.signal);
-        if (!controller.signal.aborted) setPackDownloaded(true);
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
-          Alert.alert('Download Failed', err instanceof Error ? err.message : 'Unknown error');
-        }
-      } finally {
-        abortControllerRef.current = null;
-        setPackDownloading(false);
-      }
-    },
-    [downloading, packDownloading],
-  );
-
   const handleCancel = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
