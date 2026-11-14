@@ -22,6 +22,7 @@ import { searchByCategory, type CategorySearchResult } from '../poi/categorySear
 import { searchAddress } from '../geocoding/geocodingService';
 import { throwIfAborted, withSourceTimeout, isAbortError } from './abortUtils';
 import { searchPhoton, type PhotonResult } from './photonGeocoder';
+import { canUsePhotonFallback, notePhotonFallback } from './photonFallbackBudget';
 import {
   parseSearchQuery,
   fuzzyMatchBrand,
@@ -639,8 +640,14 @@ export async function unifiedSearch(
   // no strong local POI match, and (for an address query) no local address at
   // all. Running it unconditionally made every keystroke in a downloaded region
   // pay for a request whose results the local index already had.
+  // Photon is a free public instance run by a commercial company with no
+  // published quota, so it is gated two ways: a signed `photonFallback` flag
+  // (off = never call it) and a per-device daily allowance. Local coverage
+  // failing is the only thing that makes it worth a request at all.
   const photonNeeded =
-    strongLocalMatches === 0 && (!addressQuery || localAddressResults.length === 0);
+    strongLocalMatches === 0 &&
+    (!addressQuery || localAddressResults.length === 0) &&
+    canUsePhotonFallback();
   const photonPromise = !photonNeeded
     ? Promise.resolve([] as PhotonResult[])
     : (() => {
@@ -663,10 +670,14 @@ export async function unifiedSearch(
             limit,
             osmTagFilter,
           ]),
-          () =>
-            searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
+          () => {
+            // Spend only on a cache miss, i.e. when a request actually leaves
+            // the device.
+            notePhotonFallback();
+            return searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
               signal,
-            }),
+            });
+          },
           { bounds: viewportBounds, signal },
         );
       })();

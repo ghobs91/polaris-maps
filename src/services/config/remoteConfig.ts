@@ -16,6 +16,7 @@ import { isTrustedPublisher } from '../regions/regionManifest';
 import { setOverpassEnabled } from '../overpassClient';
 import { setNominatimEnabled } from '../geocoding/nominatimPolicy';
 import { setTransitousPlanEnabled } from '../transit/transitousPlanPolicy';
+import { setPhotonFallbackEnabled } from '../search/photonFallbackPolicy';
 import { createSigningPayload, verify } from '../identity/signing';
 import { TRUSTED_REGION_PUBLISHERS } from '../../constants/regionPublishers';
 import { REGION_DATA_BASE_URL } from '../../constants/config';
@@ -90,6 +91,19 @@ export interface RemoteConfigFlags {
    * has a real user base. See `services/transit/transitousPlanPolicy`.
    */
   transitousPlan: boolean;
+  /**
+   * Photon (komoot) fuzzy geocoder fallback for text search.
+   *
+   * Unsigned for the same reason as {@link overpassQuery}. Defaults to
+   * **enabled**, unlike Nominatim and Transitous, because there is no published
+   * quota to violate — the risk is komoot's goodwill rather than a policy
+   * ceiling. That is addressed by rationing instead of disabling: the tier is
+   * already fallback-only (it runs when the local index found no strong match)
+   * and each device gets a hard daily allowance in
+   * `services/search/photonFallbackBudget`. Publish `photonFallback: false` to
+   * turn it off entirely.
+   */
+  photonFallback: boolean;
 }
 
 export interface RemoteConfig {
@@ -110,6 +124,7 @@ export const DEFAULT_REMOTE_FLAGS: RemoteConfigFlags = {
   overpassQuery: true,
   nominatimFallback: false,
   transitousPlan: false,
+  photonFallback: true,
 };
 
 /** Fixed flag order for the canonical signing payload. Do not reorder. */
@@ -180,6 +195,7 @@ export function parseRemoteConfig(
     flags.nominatimFallback = rawFlags.nominatimFallback;
   }
   if (typeof rawFlags.transitousPlan === 'boolean') flags.transitousPlan = rawFlags.transitousPlan;
+  if (typeof rawFlags.photonFallback === 'boolean') flags.photonFallback = rawFlags.photonFallback;
 
   const payload = remoteConfigPayload({
     version: config.version,
@@ -225,6 +241,7 @@ export function applyRemoteFlags(flags: RemoteConfigFlags): void {
   setNominatimEnabled(flags.nominatimFallback === true);
   // Transitous plan routing is off unless a signed config enables it.
   setTransitousPlanEnabled(flags.transitousPlan === true);
+  setPhotonFallbackEnabled(flags.photonFallback !== false);
   notify();
 }
 

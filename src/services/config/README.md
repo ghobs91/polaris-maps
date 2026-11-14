@@ -31,6 +31,31 @@ does not run a user-data backend.
 Missing flag keys default to `true`, so adding a new flag cannot silently
 disable it in an old document.
 
+### Flags added after signing
+
+The signature covers the original five flags only. Adding a field to the signed
+payload would invalidate every config already published, so later flags are read
+from the same `flags` object but are **not** signature-covered:
+
+| Flag                | Default | Gates                                                                       |
+| ------------------- | ------- | --------------------------------------------------------------------------- |
+| `overpassQuery`     | on      | Public Overpass fallback for areas with no pack                             |
+| `nominatimFallback` | **off** | Nominatim address lookup — OSMF caps the whole app at 1 req/s               |
+| `transitousPlan`    | **off** | Transitous `/plan` — published ceiling is 720 calls/24h for the whole app   |
+| `photonFallback`    | on      | Photon text-search fallback — no published quota, so it is rationed instead |
+| `basemapTilesUrl`   | unset   | Alternative OpenMapTiles tilejson for the vector basemap (https only)       |
+
+`photonFallback` and `basemapTilesUrl` are bounded in code rather than by the
+document: a per-device daily allowance in `search/photonFallbackBudget`, and
+https-only, vector-source-only application in `map/basemapSource`.
+
+## Where it is published
+
+`REMOTE_CONFIG_URL` derives from `REGION_DATA_REPO` and `REGION_DATA_TAG`
+(`map-data-latest`) in `constants/config`, so the kill-switch document lives on
+the same release as the packs and the catalog. See
+[`docs/pack-publishing.md`](../../../docs/pack-publishing.md).
+
 ## Signing and publishing
 
 ```bash
