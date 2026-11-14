@@ -507,3 +507,22 @@ jobs:
           gh release upload "$TAG" catalog.json \
             --repo "${{ github.repository }}" \
             --clobber
+
+          # ── Stable pointer release ──────────────────────────────────────────
+          # The app reads the catalog from a fixed tag, not `releases/latest`:
+          # `latest` resolves to the newest release of *any* kind, so an iOS
+          # release published after a data refresh would silently point every
+          # install at a release with no packs in it. `map-data-latest` is
+          # republished in place and carries only the catalog, whose asset URLs
+          # point at the immutable dated tag — so the packs themselves are never
+          # overwritten, only the pointer to them.
+          LATEST_TAG="map-data-latest"
+          gh release view "$LATEST_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create "$LATEST_TAG" \
+              --repo "${{ github.repository }}" \
+              --title "Map Data (latest)" \
+              --notes "Points at the newest map data release. Carries only catalog.json; the packs it references live on the dated tag." \
+              --prerelease
+          gh release upload "$LATEST_TAG" catalog.json \
+            --repo "${{ github.repository }}" \
+            --clobber

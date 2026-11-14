@@ -26,12 +26,25 @@ profile packs exist to remove.
 `catalog.json` and `config.json` are what the app looks for at startup; the rest
 are referenced by URL from the catalog.
 
-## Why a fixed tag, not `latest`
+## Two tags, and why
 
-GitHub's `releases/latest` resolves to the most recent release of **any** kind.
-An iOS build published after a data refresh would silently redirect every
-install to a release with no packs in it. `map-data-latest` is re-published in
-place by the data workflow instead.
+| Tag                  | Carries                                                | Mutability                                 |
+| -------------------- | ------------------------------------------------------ | ------------------------------------------ |
+| `map-data-<YYYY-MM>` | the packs, routing graphs, indices and their checksums | immutable once published                   |
+| `map-data-latest`    | `catalog.json` only                                    | republished in place on every data refresh |
+
+The app reads the catalog from `map-data-latest`. The catalog's asset URLs point
+at the dated tag, so a refresh never overwrites bytes a device may be part-way
+through downloading.
+
+The pointer is a fixed tag rather than GitHub's `releases/latest` because
+`latest` resolves to the most recent release of **any** kind — an iOS build
+published after a data refresh would silently redirect every install to a
+release with no packs in it.
+
+`config.json` is **not** published by CI: it is signed with a private key the
+workflow does not hold. Upload it to `map-data-latest` by hand after signing
+(step 3).
 
 ## Procedure
 
