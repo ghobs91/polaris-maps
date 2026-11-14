@@ -79,10 +79,13 @@ shared OpenFreeMap servers, which is a donation-funded service — at a large us
 base that is the single biggest external dependency in the app.
 
 Expansion is capped at z12 (`UNPACK_MAX_ZOOM`), matching the zoom the previous
-per-tile path fetched, which bounds both file count and disk use. Raising it
-means many more files per region; the alternative is serving the archive
-directly via HTTP range requests, which needs Range support in the native tile
-server.
+per-tile path fetched, which bounds both file count and disk use. The archive
+itself is now also _built_ at z12 (`--maxzoom=12` in CI): zooms 13–14 were
+unpacked by nothing and rendered by nothing (MapLibre overzooms past the last
+level), so they were pure dead weight — roughly a third of every pack.
+Raising it means many more files per region; the alternative is serving the
+archive directly via HTTP range requests, which needs Range support in the
+native tile server.
 
 ## Auto-download for the visible region
 

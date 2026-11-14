@@ -182,6 +182,7 @@ jobs:
             if java -Xmx6g -jar /usr/local/bin/planetiler.jar \
               --osm-path=work/${{ matrix.id }}/clipped.osm.pbf \
               --output=work/${{ matrix.id }}/tiles.pmtiles \
+              --maxzoom=12 \
               --force \
               --download; then
               break
@@ -338,22 +339,23 @@ jobs:
       # This is the *only* place a whole GTFS feed is downloaded. At runtime the
       # app refuses anything over GTFS_MAX_FEED_BYTES, because a national feed
       # buffered on a phone is a crash and a volunteer host is not a CDN.
+      # Per-feed headers (SPTrans 403s a bare curl), presigned redirects and
+      # "200 but the body is an HTML error page" all live in the script rather
+      # than in shell, so the quoting cannot be got wrong here.
       - name: Build transit timetable
         run: |
-          FEED_URL=$(node -e '
-            const feeds = require("./scripts/gtfs-feeds.json").feeds;
-            const entry = feeds[process.argv[1]];
-            process.stdout.write(entry ? entry.url : "");
-          ' "${{ matrix.id }}")
+          mkdir -p "work/${{ matrix.id }}"
+          set +e
+          node scripts/fetch-gtfs-feed.mjs "${{ matrix.id }}" "work/${{ matrix.id }}/gtfs.zip"
+          fetch_status=$?
+          set -e
 
-          if [ -z "$FEED_URL" ]; then
+          if [ "$fetch_status" -eq 3 ]; then
             echo "no GTFS feed mapped for ${{ matrix.id }} — skipping timetable"
             exit 0
           fi
-
-          echo "Downloading $FEED_URL"
-          if ! curl -fSL --retry 3 --max-time 900 -o "work/${{ matrix.id }}/gtfs.zip" "$FEED_URL"; then
-            echo "::warning::GTFS download failed for ${{ matrix.id }}; shipping without a timetable"
+          if [ "$fetch_status" -ne 0 ]; then
+            echo "::warning::no usable GTFS feed for ${{ matrix.id }}; shipping without a timetable"
             exit 0
           fi
 
@@ -411,7 +413,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="map-data-$(date +%Y-%m)"
+          # A full-world catalog is ~2,500 assets and a release holds at most
+          # 1,000, so regions are split across sibling tags by a hash both the
+          # build and publish jobs compute identically
+          # (scripts/pack-release-tag.mjs).
+          TAG=$(node scripts/pack-release-tag.mjs "${{ matrix.id }}")
           ASSET_PREFIX="${{ matrix.id }}"
 
           # Create release if it doesn't exist
@@ -429,7 +435,7 @@ jobs:
           # the previous one. Rename to `<region>-<file>` before uploading; the
           # catalog's asset URLs (scripts/update-region-asset-urls.mjs) depend on
           # exactly this naming.
-          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite transit-timetable.sqlite search-shards.tar sizes.json checksums.json; do
+          for file in tiles.pmtiles routing.tar geocoding.db search.sqlite transit.sqlite transit-timetable.sqlite search-shards.tar checksums.json; do
             if [ -f "work/${{ matrix.id }}/$file" ]; then
               cp "work/${{ matrix.id }}/$file" "work/${{ matrix.id }}/${ASSET_PREFIX}-${file}"
               gh release upload "$TAG" \
@@ -503,32 +509,44 @@ jobs:
       - name: Stamp and publish the catalog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          TAG="map-data-$(date +%Y-%m)"
-          # Only advertise regions whose pack actually landed in this release.
-          ASSETS_JSON=""
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            ASSETS_JSON=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name]')
-          fi
-
-          # Merge the per-region checksum files into one map so the catalog can
-          # carry a delta checksum per asset (asset name -> md5).
-          CHECKSUMS_ARG=""
-          if [ -n "$ASSETS_JSON" ]; then
-            rm -rf checksums && mkdir -p checksums
-            if gh release download "$TAG" --repo "${{ github.repository }}" \
-                 --pattern '*-checksums.json' --dir checksums --clobber 2>/dev/null; then
-              node -e '
-                const fs = require("fs");
-                const path = require("path");
-                const out = {};
-                for (const file of fs.readdirSync("checksums")) {
-                  Object.assign(out, JSON.parse(fs.readFileSync(path.join("checksums", file), "utf8")));
-                }
-                fs.writeFileSync("checksums.json", JSON.stringify(out, null, 2));
-              '
-              CHECKSUMS_ARG="--checksums checksums.json"
+          # Packs live on sibling tags (map-data-YYYY-MM-a … f) — see
+          # scripts/pack-release-tag.mjs. Enumerate them all: assets, sizes and
+          # checksums are per-tag; the catalog is global.
+          DATE_YM="$(date +%Y-%m)"
+          rm -rf checksums && mkdir -p checksums
+          ASSETS_JSON="[]"
+          for SUFFIX in a b c d e f; do
+            TAG_S="map-data-${DATE_YM}-${SUFFIX}"
+            if ! gh release view "$TAG_S" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              continue
             fi
+            TAG_ASSETS=$(gh release view "$TAG_S" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name]')
+            ASSETS_JSON=$(node -e '
+              const a = JSON.parse(process.argv[1]), b = JSON.parse(process.argv[2]);
+              process.stdout.write(JSON.stringify([...a, ...b]));
+            ' "$ASSETS_JSON" "$TAG_ASSETS")
+            gh release download "$TAG_S" --repo "${{ github.repository }}" \
+              --pattern '*-checksums.json' --dir checksums --clobber 2>/dev/null || true
+          done
+          # The inline node scripts below read these from the environment;
+          # plain shell vars are not inherited.
+          export DATE_YM ASSETS_JSON
+
+          # Merge per-region checksums into one map (asset name -> md5).
+          CHECKSUMS_ARG=""
+          if ls checksums/* >/dev/null 2>&1; then
+            node -e '
+              const fs = require("fs");
+              const path = require("path");
+              const out = {};
+              for (const file of fs.readdirSync("checksums")) {
+                Object.assign(out, JSON.parse(fs.readFileSync(path.join("checksums", file), "utf8")));
+              }
+              fs.writeFileSync("checksums.json", JSON.stringify(out, null, 2));
+            '
+            CHECKSUMS_ARG="--checksums checksums.json"
           fi
 
           # Per-asset byte sizes, straight from the release. The app's disk gate
@@ -536,30 +554,53 @@ jobs:
           # skips auto-download with `size-unknown` and the pack is only ever
           # installed by hand.
           ASSET_SIZES_ARG=""
-          if [ -n "$ASSETS_JSON" ]; then
-            gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
-              --jq '[.assets[] | {key: .name, value: .size}] | from_entries' > asset-sizes.json
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            node -e '
+              const { execFileSync } = require("child_process");
+              const assets = JSON.parse(process.env.ASSETS_JSON);
+              const out = {};
+              for (const suffix of ["a","b","c","d","e","f"]) {
+                const tag = "map-data-" + process.env.DATE_YM + "-" + suffix;
+                try {
+                  const json = JSON.parse(execFileSync("gh", [
+                    "release", "view", tag, "--repo", process.env.GH_REPO,
+                    "--json", "assets", "--jq",
+                    "[.assets[] | {key: .name, value: .size}] | from_entries",
+                  ], { encoding: "utf8" }));
+                  Object.assign(out, json);
+                } catch { /* tag not published yet */ }
+              }
+              require("fs").writeFileSync("asset-sizes.json", JSON.stringify(out));
+            '
             ASSET_SIZES_ARG="--asset-sizes asset-sizes.json"
           fi
 
-          if [ -n "$ASSETS_JSON" ]; then
-            printf '%s' "$ASSETS_JSON" > release-assets.json
-            node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json \
-              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG
-          else
-            node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json
+          # Per-region tag map, so asset URLs point at the tag each region
+          # actually landed on.
+          TAGS_ARG=""
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            node -e '
+              const { execFileSync } = require("child_process");
+              const catalog = JSON.parse(require("fs").readFileSync("scripts/regions.json", "utf8"));
+              const out = {};
+              for (const region of (catalog.regions ?? catalog.include ?? [])) {
+                out[region.id] = execFileSync("node", [
+                  "scripts/pack-release-tag.mjs", region.id,
+                  "--date", process.env.DATE_YM,
+                ], { encoding: "utf8" }).trim();
+              }
+              require("fs").writeFileSync("tags.json", JSON.stringify(out));
+            '
+            TAGS_ARG="--tags tags.json"
           fi
 
-          gh release view "$TAG" --repo "${{ github.repository }}" 2>/dev/null || \
-            gh release create "$TAG" \
-              --repo "${{ github.repository }}" \
-              --title "Map Data $(date +%B\ %Y)" \
-              --notes "Auto-generated map data from OpenStreetMap via Geofabrik. Built $(date -u +%Y-%m-%dT%H:%M:%SZ)." \
-              --prerelease
-
-          gh release upload "$TAG" catalog.json \
-            --repo "${{ github.repository }}" \
-            --clobber
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            printf '%s' "$ASSETS_JSON" > release-assets.json
+            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
+              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG
+          else
+            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json
+          fi
 
           # ── Stable pointer release ──────────────────────────────────────────
           # The app reads the catalog from a fixed tag, not `releases/latest`:

@@ -134,4 +134,34 @@ describe('map-data release retention', () => {
   it('reports dryRun so a caller cannot mistake a plan for a deletion', () => {
     expect(prune(['map-data-2026-11', 'map-data-2026-10', 'map-data-2026-09']).dryRun).toBe(true);
   });
+
+  it('treats sibling tags of one month as a single unit', () => {
+    // Packs are split across sibling tags because a release caps at 1,000
+    // assets; the catalog references assets across all of a month's siblings,
+    // so they must survive or die together.
+    const tags = [
+      'map-data-2026-11-a',
+      'map-data-2026-11-b',
+      'map-data-2026-10-a',
+      'map-data-2026-10-b',
+      'map-data-2026-09-a',
+    ];
+
+    expect(prune(tags).keep).toEqual([
+      'map-data-2026-11-a',
+      'map-data-2026-11-b',
+      'map-data-2026-10-a',
+      'map-data-2026-10-b',
+    ]);
+    expect(prune(tags).pruned).toEqual(['map-data-2026-09-a']);
+  });
+
+  it('keeps every sibling when the keep window shrinks to one month', () => {
+    const result = prune(
+      ['map-data-2026-11-a', 'map-data-2026-11-f', 'map-data-2026-10-a'],
+      ['--keep', '1'],
+    );
+    expect(result.keep).toEqual(['map-data-2026-11-a', 'map-data-2026-11-f']);
+    expect(result.pruned).toEqual(['map-data-2026-10-a']);
+  });
 });

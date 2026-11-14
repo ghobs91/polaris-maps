@@ -54,6 +54,7 @@ function parseArgs(argv) {
     else if (arg === '--assets') args.assets = argv[++i];
     else if (arg === '--checksums') args.checksums = argv[++i];
     else if (arg === '--asset-sizes') args.assetSizes = argv[++i];
+    else if (arg === '--tags') args.tags = argv[++i];
     else if (arg === '--mirrors') {
       // Backwards compatible: a comma-separated list of base URLs.
       for (const base of String(argv[++i]).split(',')) {
@@ -103,13 +104,27 @@ export function assetName(regionId, asset) {
  */
 export function stampCatalog(
   catalog,
-  { tag, base, sizes = {}, checksums = {}, mirrors = [], assetSizes = {}, available = null },
+  {
+    tag,
+    base,
+    sizes = {},
+    checksums = {},
+    mirrors = [],
+    assetSizes = {},
+    available = null,
+    tags = null,
+  },
 ) {
-  const prefix = `${base.replace(/\/+$/, '')}/${tag}`;
-  // Mirrors follow the same `<origin>/<tag>/<asset>` layout as the primary, so
-  // a base is an origin only — never a prefix that already carries the tag.
-  const mirrorPrefixes = mirrors.map((mirror) => `${String(mirror).replace(/\/+$/, '')}/${tag}`);
+  // Packs can be split across sibling tags (`map-data-2026-11-a`, …) because a
+  // release holds at most 1,000 assets and full-world parity is ~2,500. `tags`
+  // maps region id → its tag; `tag` alone stamps every region with the same
+  // one. Mirrors follow whatever tag each region landed on.
+  const tagFor = (regionId) => (tags ? (tags[regionId] ?? tag) : tag);
   const regions = (catalog.regions ?? catalog.include ?? []).map((region) => {
+    const prefix = `${base.replace(/\/+$/, '')}/${tagFor(region.id)}`;
+    const mirrorPrefixes = mirrors.map(
+      (mirror) => `${String(mirror).replace(/\/+$/, '')}/${tagFor(region.id)}`,
+    );
     const size = sizes[region.id] ?? {};
     const searchName = assetName(region.id, 'search.sqlite');
     const transitName = assetName(region.id, 'transit.sqlite');
@@ -237,6 +252,7 @@ function main() {
   const assetSizes = args.assetSizes
     ? JSON.parse(readFileSync(resolve(args.assetSizes), 'utf8'))
     : {};
+  const tags = args.tags ? JSON.parse(readFileSync(resolve(args.tags), 'utf8')) : null;
   const stamped = stampCatalog(catalog, {
     tag: args.tag,
     base: args.base,
@@ -245,6 +261,7 @@ function main() {
     mirrors,
     assetSizes,
     available: assets ? new Set(assets) : null,
+    tags,
   });
   const baseUrls = [args.base, ...mirrors].map((base) => String(base).replace(/\/+$/, ''));
   const updated = args.out

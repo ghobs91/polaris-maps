@@ -9,7 +9,8 @@
  *
  * A device only needs the release its cached catalog points at, plus the one
  * before it while a catalog refresh is in flight. So: keep the newest N dated
- * releases, delete the rest.
+ * months — every sibling tag of a kept month, since the catalog references
+ * assets across them — and delete the rest.
  *
  * Safety rules, because this deletes published data:
  *
@@ -25,7 +26,8 @@
  *   node scripts/prune-map-data-releases.mjs [options]
  *
  * Options:
- *   --keep <n>        Dated releases to retain (default 2, minimum 1)
+ *   --keep <n>        Dated months to retain, all sibling tags included
+ *                     (default 2, minimum 1)
  *   --repo <owner/name>  Defaults to GITHUB_REPOSITORY, else the gh default
  *   --dry-run         Print what would be deleted; delete nothing
  *   --json            Machine-readable result on stdout
@@ -40,7 +42,10 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-const DATED_TAG = /^map-data-(\d{4})-(0[1-9]|1[0-2])$/;
+// Dated tags, optionally with a sibling suffix (`map-data-2026-11-a`). Packs
+// are split across siblings because a release holds at most 1,000 assets, so
+// retention must treat a month's siblings as one unit.
+const DATED_TAG = /^map-data-(\d{4})-(0[1-9]|1[0-2])(?:-([a-z]))?$/;
 
 /**
  * Split a list of release tags into the ones to keep and the ones to prune.
@@ -70,9 +75,13 @@ export function selectReleasesToPrune(tags, keep = 2) {
   // Newest first. The key is fixed-width YYYYMM, so a string compare is exact.
   dated.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
 
+  // `keep` counts months, not tags: all of a month's sibling tags survive or
+  // die together, since the catalog references assets across them.
+  const months = [...new Set(dated.map((entry) => entry.key))].slice(0, keep);
+  const keepKeys = new Set(months);
   return {
-    keep: dated.slice(0, keep).map((entry) => entry.tag),
-    prune: dated.slice(keep).map((entry) => entry.tag),
+    keep: dated.filter((entry) => keepKeys.has(entry.key)).map((entry) => entry.tag),
+    prune: dated.filter((entry) => !keepKeys.has(entry.key)).map((entry) => entry.tag),
     ignored,
   };
 }
