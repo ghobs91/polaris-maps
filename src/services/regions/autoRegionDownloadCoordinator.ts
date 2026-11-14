@@ -82,6 +82,12 @@ async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision>
     settled: true, // evaluate() only runs after the settle timer fired
   });
 
+  lastDecision = {
+    subject: region ? `${region.name} (${region.id})` : `${lat.toFixed(2)}, ${lng.toFixed(2)}`,
+    outcome: decision.start ? `started ${decision.regionId}` : describeDecision(decision),
+    at: Date.now(),
+  };
+
   if (decision.start && region) {
     attempts.set(decision.regionId, (attempts.get(decision.regionId) ?? 0) + 1);
     started = decision.regionId;
@@ -154,8 +160,31 @@ export function disposeAutoRegionDownload(): void {
   started = null;
 }
 
+export interface AutoDownloadDiagnostics {
+  /** Human-readable region name when one was evaluated, else the coordinates. */
+  subject: string;
+  /** `started` or the skip reason from `describeDecision`. */
+  outcome: string;
+  at: number;
+}
+
+let lastDecision: AutoDownloadDiagnostics | null = null;
+
+/**
+ * The most recent auto-download evaluation, for UI display.
+ *
+ * The decision was previously only written to the diagnostics log, which no
+ * screen reads — so "why is my map not downloading" was unanswerable from the
+ * device. This is one evaluation deep, not a history; enough to see the
+ * current reason (`no-region`, `size-unknown`, `metered`, …).
+ */
+export function getLastAutoDownloadDecision(): AutoDownloadDiagnostics | null {
+  return lastDecision;
+}
+
 /** Test-only: reset session state. */
 export function __resetAutoRegionDownloadForTests(): void {
   disposeAutoRegionDownload();
   attempts.clear();
+  lastDecision = null;
 }

@@ -9,6 +9,12 @@ import {
 } from '../../services/regions/downloadManager';
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
 import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
+import {
+  packRegionForNodeId,
+  packsIntersectingBounds,
+} from '../../services/regions/nearestPackRegion';
+import { planOfflineTileDownload } from '../../services/regions/tileDownloadPlan';
+import { getLastAutoDownloadDecision } from '../../services/regions/autoRegionDownloadCoordinator';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
 import { upsertRegion } from '../../services/regions/regionRepository';
 import { RegionCard, DownloadProgressBar, GeofabrikTreePicker } from '.';
@@ -27,6 +33,38 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [regions, setRegions] = useState<Region[]>([]);
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
+  /**
+   * Catalog regions with a pack that are not yet downloaded.
+   *
+   * These were previously never rendered — "Available Regions" showed only the
+   * Geofabrik tree, whose entries have no pack and are capped at OpenFreeMap's
+   * 50 MB offline limit. The packs, which have no such cap, were unreachable
+   * from this screen.
+   */
+  /**
+   * Why the background downloader last did or did not run, or null when it has
+   * never evaluated (e.g. it is disabled). Surfaces reasons that were
+   * previously only in a log no screen reads — 'no-region', 'metered',
+   * 'size-unknown' — so a silent skip can be told apart from a broken one.
+   */
+  const autoDownloadLine = useMemo(() => {
+    const decision = getLastAutoDownloadDecision();
+    if (!decision) return null;
+    const ageMin = Math.round((Date.now() - decision.at) / 60_000);
+    const when = ageMin <= 0 ? 'just now' : `${ageMin}m ago`;
+    return `Background download — ${decision.subject}: ${decision.outcome} (${when})`;
+  }, [regions]);
+
+  const availablePacks = useMemo(
+    () =>
+      regions.filter(
+        (region) =>
+          (region.assets?.length ?? 0) > 0 &&
+          region.downloadStatus !== 'complete' &&
+          region.downloadStatus !== 'downloading',
+      ),
+    [regions],
+  );
   const [loading, setLoading] = useState(true);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   // Global progress — survives screen unmount + app backgrounding.
@@ -84,14 +122,44 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     [loadRegions],
   );
 
+  /**
+   * Download a tree node: its pack when the catalog has one, else tiles.
+   *
+   * This was previously unconditional tiles — which is why tapping an area
+   * always used the capped method even when a pack covered it. The pack catalog
+   * is generated from the same tree, so ids line up and the lookup is exact.
+   *
+   * When there is no pack and the tile plan had to reduce detail to fit the
+   * 3,000-tile budget, the download is refused *before* starting: the byte cap
+   * would abort it halfway through, after 50 MB of the user's bandwidth.
+   */
   const handleTreeDownload = useCallback(
     async (node: GeoNode) => {
       if (downloadingPath) return;
-      const region = geoNodeToRegion(node);
+      const nodeRegion = geoNodeToRegion(node);
+      const pack = packRegionForNodeId(regions, nodeRegion.id);
+      if (pack) {
+        await handleDownload(pack);
+        return;
+      }
+
+      const plan = planOfflineTileDownload(nodeRegion.bounds);
+      if (plan.reduced) {
+        const covering = packsIntersectingBounds(regions, nodeRegion.bounds);
+        const suggestion = covering[0]
+          ? `The ${covering[0].name} pack covers part of this area — download that instead.`
+          : 'Try a smaller area.';
+        Alert.alert(
+          'Area Too Large',
+          `${node.name} needs more detail than OpenFreeMap's 50 MB offline limit allows. ${suggestion}`,
+        );
+        return;
+      }
+
       setDownloadingPath(node.path);
       try {
-        await upsertRegion(region);
-        await startBackgroundDownload(region);
+        await upsertRegion(nodeRegion);
+        await startBackgroundDownload(nodeRegion);
         loadRegions();
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
@@ -101,7 +169,7 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         setDownloadingPath(null);
       }
     },
-    [downloadingPath, loadRegions],
+    [downloadingPath, loadRegions, regions, handleDownload],
   );
 
   const handleCancel = useCallback(
@@ -179,6 +247,34 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         </Text>
       )}
 
+      {autoDownloadLine && <Text style={styles.autoDownloadHint}>{autoDownloadLine}</Text>}
+
+      {availablePacks.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Available Packs</Text>
+          <Text style={styles.description}>
+            Full offline packs — maps, routing, search and transit — with no per-download size
+            limit.
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.downloadedScroll}
+          >
+            {availablePacks.map((region) => (
+              <RegionCard
+                key={region.id}
+                region={region}
+                onDownload={handleDownload}
+                onCancel={handleCancel}
+                onDelete={handleDelete}
+                updateAvailable={staleRegionIds.has(region.id)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {downloadedRegions.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Downloaded Regions</Text>
@@ -204,8 +300,8 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
       <View style={styles.availableSection}>
         <Text style={styles.sectionTitle}>Available Regions</Text>
         <Text style={styles.description}>
-          Maps are powered by OpenFreeMap and available globally online. Download regions to use
-          them offline.
+          Worldwide areas, downloaded as map tiles from OpenFreeMap. Tile downloads are capped at 50
+          MB, so large areas fail — prefer a pack above when one covers you.
         </Text>
         <View style={styles.treeContainer}>
           <GeofabrikTreePicker
@@ -245,6 +341,11 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     emptyText: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
     downloadedScroll: {
       maxHeight: 200,
+    },
+    autoDownloadHint: {
+      fontSize: 11,
+      opacity: 0.6,
+      marginTop: 8,
     },
     availableSection: { flex: 1, minHeight: 0 },
     treeContainer: { flex: 1, minHeight: 0 },
