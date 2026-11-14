@@ -449,7 +449,16 @@ jobs:
   # `.../releases/latest/download/catalog.json`.
   publish-catalog:
     needs: [setup, build]
-    if: ${{ needs.setup.result == 'success' }}
+    # `always()` is load-bearing: without it GitHub skips this job whenever *any*
+    # job in `needs` fails, so a single bad region meant the catalog — and with
+    # it the `map-data-latest` pointer the app reads — was never published at all.
+    # That is exactly what happened on the first full run: two regions with dead
+    # Geofabrik URLs failed, and 37 successful packs were never advertised.
+    #
+    # A partial catalog is correct rather than a compromise: the stamping step
+    # only lists regions whose assets actually landed (`--assets
+    # release-assets.json`), so a failed region is simply absent.
+    if: ${{ always() && needs.setup.result == 'success' }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -526,3 +535,30 @@ jobs:
           gh release upload "$LATEST_TAG" catalog.json \
             --repo "${{ github.repository }}" \
             --clobber
+
+  # ── Job 4: prune dated releases the catalog no longer points at ──────────────
+  # Each month adds a release of roughly the same size across the whole region
+  # catalog. A device only needs the release its cached catalog points at plus
+  # the one before it, so older dated releases are deleted. `map-data-latest` is
+  # never a candidate — it is the pointer, not a data release.
+  prune-releases:
+    needs: [publish-catalog]
+    if: ${{ needs.publish-catalog.result == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Prune old map-data releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_RELEASES: ${{ vars.KEEP_RELEASES }}
+        run: |
+          # Keep the current and previous month by default; set the repository
+          # variable KEEP_RELEASES to retain more.
+          node scripts/prune-map-data-releases.mjs \
+            --repo "${{ github.repository }}" \
+            --keep "${KEEP_RELEASES:-2}"
