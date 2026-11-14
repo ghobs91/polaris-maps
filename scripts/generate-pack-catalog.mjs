@@ -84,6 +84,10 @@ function entryForLeaf(leaf) {
     // The build clips the Geofabrik extract to the region's own bounds, which
     // for a leaf is (near-)identity — kept so the matrix stays uniform.
     bbox: `${round(minLng)},${round(minLat)},${round(maxLng)},${round(maxLat)}`,
+    // The app reads `bounds`, not `bbox`, and stores it in NOT NULL columns:
+    // a region without them cannot be seeded at all. `bbox` alone is only
+    // enough for the CI matrix.
+    bounds: { minLat, maxLat, minLng, maxLng },
     geofabrik: `https://download.geofabrik.de/${leaf.path}-latest.osm.pbf`,
   };
 }
@@ -112,21 +116,42 @@ function generate() {
   const leaves = collectLeaves(tree);
 
   const existing = JSON.parse(readFileSync(REGIONS_PATH, 'utf8'));
-  const curated = new Map(existing.include.map((entry) => [entry.id, entry]));
 
-  // Curated entries win; generated entries are appended in tree order so the
-  // catalog is stable and diffable.
-  //
+  // A tree-leaf id is *generated*, never curated — even though a previous run
+  // wrote it into this file. Treating every existing entry as curated freezes
+  // generated ones forever, so a field added to `entryForLeaf` later never
+  // reaches them. That is exactly how 324 regions shipped with no `bounds`:
+  // the app stores bounds in NOT NULL columns, so those regions could not be
+  // seeded at all. Only ids the tree does not produce are hand-maintained.
+  const leafIds = new Set(leaves.map((leaf) => leaf.path.replace(/\//g, '-')));
+  const curated = new Map(
+    existing.include
+      .filter((entry) => !leafIds.has(entry.id))
+      .map((entry) => [entry.id, entry]),
+  );
+
   // Cross-listed nodes (Russia is intentionally under Europe AND top-level,
   // mirroring Geofabrik's site) must yield one matrix job, not two colliding
   // on the same asset names — dedupe by id, first occurrence wins.
   const seen = new Set();
-  const generated = [];
+  const generatedById = new Map();
+  const generatedOrder = [];
   for (const leaf of leaves) {
     const entry = entryForLeaf(leaf);
     if (curated.has(entry.id) || seen.has(entry.id) || DENYLIST.has(entry.id)) continue;
     seen.add(entry.id);
-    generated.push(entry);
+    generatedById.set(entry.id, entry);
+    generatedOrder.push(entry.id);
+  }
+
+  // Keep the existing order so diffs stay small, but replace every generated
+  // entry with its freshly derived form. Anything new is appended in tree order.
+  const include = existing.include.map((entry) =>
+    generatedById.has(entry.id) ? generatedById.get(entry.id) : entry,
+  );
+  const present = new Set(include.map((entry) => entry.id));
+  for (const id of generatedOrder) {
+    if (!present.has(id)) include.push(generatedById.get(id));
   }
 
   return {
@@ -137,9 +162,9 @@ function generate() {
       'Geofabrik tree by scripts/generate-pack-catalog.mjs — re-run that after',
       'editing src/constants/geofabrikCatalog.ts.',
     ],
-    include: [...existing.include, ...generated],
-    generatedCount: generated.length,
-    curatedCount: existing.include.length,
+    include,
+    generatedCount: generatedById.size,
+    curatedCount: curated.size,
   };
 }
 
@@ -149,15 +174,14 @@ function main() {
 
   if (check) {
     const current = JSON.parse(readFileSync(REGIONS_PATH, 'utf8'));
-    const currentIds = current.include
-      .map((entry) => entry.id)
-      .sort()
-      .join(',');
-    const nextIds = next.include
-      .map((entry) => entry.id)
-      .sort()
-      .join(',');
-    if (currentIds !== nextIds) {
+    // Compare the whole entry, not just ids: a field the generator stopped (or
+    // started) emitting — `bounds`, say — leaves the ids identical while the
+    // published catalog becomes unseedable.
+    const normalise = (entries) =>
+      JSON.stringify(
+        [...entries].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+      );
+    if (normalise(current.include) !== normalise(next.include)) {
       console.error(
         `regions.json is stale: tree has ${next.include.length} regions, ` +
           `regions.json has ${current.include.length}. Re-run ` +

@@ -33,9 +33,19 @@ jest.mock('../../src/services/regions/regionRepository', () => ({
   getRegionById: async () => null,
 }));
 
+// The catalog service reports skipped/malformed entries through the diagnostics
+// log, which is MMKV-backed and flushes on a timer — unhandled in this env.
+const diagnostics: string[] = [];
+jest.mock('../../src/services/diagnostics/diagnosticsLog', () => ({
+  logDiagnostic: (_scope: string, _level: string, message: string) => {
+    diagnostics.push(message);
+  },
+}));
+
 beforeEach(() => {
   mockStorage.clear();
   upsertedRegions.length = 0;
+  diagnostics.length = 0;
 });
 
 describe('getCatalogIds', () => {
@@ -99,5 +109,66 @@ describe('fetchAndSeedCatalog', () => {
   it('does nothing when offline and no cache', async () => {
     await fetchAndSeedCatalog();
     expect(upsertedRegions).toHaveLength(0);
+  });
+
+  it('seeds a region whose entry has no version', async () => {
+    // The published catalog is generated, and it shipped without a per-region
+    // `version` for a while. `regions.version` is NOT NULL, so that insert
+    // threw and aborted the whole loop: every install ended up with zero
+    // pack-backed regions, auto-download always reported `no-region`, and the
+    // regions screen had no packs to offer. Fixtures that always include
+    // `version` cannot catch that, so this one deliberately omits it.
+    mockStorage.set(
+      'region_catalog_v1',
+      JSON.stringify({
+        version: '1',
+        updated_at: '2026-03-18',
+        regions: [
+          {
+            id: 'us-new-york',
+            name: 'New York Metro',
+            bounds: { minLat: 40.4, maxLat: 41.0, minLng: -74.3, maxLng: -73.2 },
+            assets: [
+              {
+                name: 'tiles.pmtiles',
+                url: 'https://example.com/us-ny-new-york-tiles.pmtiles',
+                sizeBytes: 1000,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await fetchAndSeedCatalog();
+
+    expect(upsertedRegions).toHaveLength(1);
+    expect(upsertedRegions[0].version).toBe('1');
+    expect(upsertedRegions[0].assets).toHaveLength(1);
+  });
+
+  it('keeps seeding after an entry that cannot be stored', async () => {
+    mockStorage.set(
+      'region_catalog_v1',
+      JSON.stringify({
+        version: '1',
+        updated_at: '2026-03-18',
+        regions: [
+          { id: 'broken', name: 'Broken' },
+          {
+            id: 'us-california',
+            name: 'California',
+            version: '1',
+            bounds: { minLat: 32.5, maxLat: 42.0, minLng: -124.4, maxLng: -114.1 },
+          },
+        ],
+      }),
+    );
+
+    await fetchAndSeedCatalog();
+
+    // The malformed entry is skipped, not fatal: the good one still seeds.
+    expect(upsertedRegions.map((r) => r.id)).toEqual(['us-california']);
+    expect(diagnostics).toContain('skipping malformed catalog region');
   });
 });

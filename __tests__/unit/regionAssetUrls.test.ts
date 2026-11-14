@@ -117,6 +117,29 @@ describe('update-region-asset-urls.mjs', () => {
     expect(ny.searchIndexSizeBytes).toBeUndefined();
   });
 
+  it('stamps a per-region version into the published catalog', () => {
+    // The app stores `regions.version` in a NOT NULL column, so a published
+    // catalog without per-region versions seeds nothing at all — silently, and
+    // it took out auto-download and the pack list with it. `regions.json`
+    // carries no version, so the stamper has to supply one.
+    const outPath = join(dir, 'catalog.json');
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--tag', 'map-data-2026-01', '--catalog', catalogPath, '--out', outPath],
+      { stdio: 'pipe' },
+    );
+
+    const catalog = JSON.parse(readFileSync(outPath, 'utf8')) as {
+      regions: Array<Record<string, unknown>>;
+    };
+
+    expect(catalog.regions.length).toBeGreaterThan(0);
+    for (const region of catalog.regions) {
+      expect(typeof region.version).toBe('string');
+      expect(region.version).toBe('map-data-2026-01');
+    }
+  });
+
   it('applies sizes when a sizes file is supplied', () => {
     const sizesPath = join(dir, 'sizes.json');
     writeFileSync(

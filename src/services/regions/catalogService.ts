@@ -214,11 +214,25 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
     const existing = await getRegionById(entry.id);
     if (existing?.downloadStatus === 'complete') continue;
 
+    // The catalog is generated, so a field the generator forgets is a data bug
+    // that must not take the whole catalog with it: one throw inside this loop
+    // aborts every remaining region, leaving the install with no pack-backed
+    // rows at all. That is silent (seeding is best-effort), and the symptoms
+    // are indistinguishable from "no packs published" — auto-download skips
+    // with `no-region` and the tree offers no covering pack. Skip the bad entry
+    // and keep the rest.
+    if (!entry.id || !entry.name || !entry.bounds) {
+      logDiagnostic('regions', 'warn', 'skipping malformed catalog region', { id: entry.id });
+      continue;
+    }
+
     const region: Region = {
       id: entry.id,
       name: entry.name,
       bounds: entry.bounds,
-      version: entry.version,
+      // NOT NULL in the regions table: a catalog that omits it would otherwise
+      // fail the insert rather than seed the region without a version.
+      version: entry.version ?? '1',
       downloadStatus: (existing?.downloadStatus as RegionDownloadStatus) ?? 'none',
       tilesSizeBytes: existing?.tilesSizeBytes ?? null,
       routingSizeBytes: existing?.routingSizeBytes ?? null,
@@ -240,6 +254,13 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       assets: entry.assets,
     };
 
-    await upsertRegion(region);
+    try {
+      await upsertRegion(region);
+    } catch (error) {
+      logDiagnostic('regions', 'warn', 'failed to seed catalog region', {
+        id: entry.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 }

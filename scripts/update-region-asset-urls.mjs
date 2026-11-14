@@ -217,6 +217,20 @@ export function stampCatalog(
  * `assets` (asset names present in the release) filters out regions whose pack
  * was not built, so a partial run cannot advertise a pack that 404s.
  */
+/**
+ * `minLng,minLat,maxLng,maxLat` (the CI matrix's form) → the app's bounds object.
+ *
+ * Returns undefined for a missing or unparseable bbox so the caller's fallback
+ * stays explicit rather than producing a region with NaN corners.
+ */
+export function boundsFromBbox(bbox) {
+  if (typeof bbox !== 'string') return undefined;
+  const parts = bbox.split(',').map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value))) return undefined;
+  const [minLng, minLat, maxLng, maxLat] = parts;
+  return { minLat, maxLat, minLng, maxLng };
+}
+
 export function toPublishedCatalog(stamped, assets = null, { tag = null, baseUrls = [] } = {}) {
   let regions = stamped.regions ?? stamped.include ?? [];
   if (assets) {
@@ -226,7 +240,21 @@ export function toPublishedCatalog(stamped, assets = null, { tag = null, baseUrl
   const catalog = {
     version: '1',
     updated_at: new Date().toISOString(),
-    regions,
+    regions: regions.map((region) => ({
+      // Every region needs its own `version`. The app's `regions.version` column
+      // is NOT NULL, so a catalog without per-region versions throws on the
+      // first row and seeds *nothing* — no pack is ever offered, auto-download
+      // reports `no-region` forever, and the failure is silent because seeding
+      // is best-effort. The publication tag is the content version: it changes
+      // with every data refresh, which is what staleness detection compares.
+      ...region,
+      version: region.version ?? tag ?? '1',
+      // `bbox` is what the CI matrix consumes; the app reads `bounds` and
+      // stores it in NOT NULL columns. Deriving it here means a hand-written or
+      // generated entry that only carries `bbox` still seeds instead of being
+      // dropped as malformed.
+      bounds: region.bounds ?? boundsFromBbox(region.bbox),
+    })),
   };
   // Multi-origin publication metadata. `assetBaseUrls` lets the client build a
   // URL for any release asset (including the routing tarballs, which are not
