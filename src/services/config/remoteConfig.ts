@@ -17,6 +17,7 @@ import { setOverpassEnabled } from '../overpassClient';
 import { setNominatimEnabled } from '../geocoding/nominatimPolicy';
 import { setTransitousPlanEnabled } from '../transit/transitousPlanPolicy';
 import { setPhotonFallbackEnabled } from '../search/photonFallbackPolicy';
+import { setBasemapTilesUrl } from '../map/basemapSource';
 import { createSigningPayload, verify } from '../identity/signing';
 import { TRUSTED_REGION_PUBLISHERS } from '../../constants/regionPublishers';
 import { REGION_DATA_BASE_URL } from '../../constants/config';
@@ -104,6 +105,20 @@ export interface RemoteConfigFlags {
    * turn it off entirely.
    */
   photonFallback: boolean;
+  /**
+   * Alternative OpenMapTiles-schema tilejson for the vector basemap.
+   *
+   * Unsigned, like the other flags added after the original five. A URL is a
+   * bigger surface than a boolean, so it is constrained in `map/basemapSource`:
+   * https only, applied to the `openmaptiles` source only, and ignored rather
+   * than thrown when unusable.
+   *
+   * Exists because the default basemap is a single free service from a company
+   * with no SLA, and there is no public-interest drop-in replacement for the
+   * OpenMapTiles schema. This is the only way to move off it during an outage
+   * without an App Store release.
+   */
+  basemapTilesUrl?: string;
 }
 
 export interface RemoteConfig {
@@ -196,6 +211,8 @@ export function parseRemoteConfig(
   }
   if (typeof rawFlags.transitousPlan === 'boolean') flags.transitousPlan = rawFlags.transitousPlan;
   if (typeof rawFlags.photonFallback === 'boolean') flags.photonFallback = rawFlags.photonFallback;
+  if (typeof rawFlags.basemapTilesUrl === 'string')
+    flags.basemapTilesUrl = rawFlags.basemapTilesUrl;
 
   const payload = remoteConfigPayload({
     version: config.version,
@@ -242,6 +259,7 @@ export function applyRemoteFlags(flags: RemoteConfigFlags): void {
   // Transitous plan routing is off unless a signed config enables it.
   setTransitousPlanEnabled(flags.transitousPlan === true);
   setPhotonFallbackEnabled(flags.photonFallback !== false);
+  setBasemapTilesUrl(flags.basemapTilesUrl ?? null);
   notify();
 }
 

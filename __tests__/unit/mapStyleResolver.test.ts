@@ -43,7 +43,11 @@ describe('resolveMapStyle', () => {
 
     const parsedStyle = JSON.parse(resolvedStyle);
     expect(parsedStyle.name).toBe('Polaris iOS26 Compat Light');
-    expect(parsedStyle.sources.osm.tiles[0]).toContain('tile.openstreetmap.org');
+    // NASA GIBS, not OSM's own tile server: OSMF's usage policy excludes
+    // applications of this kind, so the last-resort fallback must not be a
+    // server that does not permit it.
+    expect(parsedStyle.sources.compat.tiles[0]).toContain('gibs.earthdata.nasa.gov');
+    expect(parsedStyle.sources.compat.tiles[0]).not.toContain('tile.openstreetmap.org');
   });
 
   it('returns the dark raster compatibility style after a style load failure in dark mode', () => {
@@ -55,7 +59,7 @@ describe('resolveMapStyle', () => {
 
     const parsedStyle = JSON.parse(resolvedStyle);
     expect(parsedStyle.name).toBe('Polaris iOS26 Compat Dark');
-    expect(parsedStyle.sources.osm.tiles[0]).toContain('tile.openstreetmap.org');
+    expect(parsedStyle.sources.compat.tiles[0]).toContain('gibs.earthdata.nasa.gov');
     expect(parsedStyle.layers[0].paint['raster-brightness-max']).toBeLessThan(1);
   });
 
