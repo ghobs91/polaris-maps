@@ -87,7 +87,7 @@ jobs:
             COUNT=${{ github.event.inputs.region_count || '200' }}
             matrix=$(jq -c \
               --argjson start "$START" --argjson count "$COUNT" \
-              '{include: [.include[$start:($start + $count)] | {id, name, geofabrik, bbox}]}' \
+              '{include: [.include[$start:($start + $count)][] | {id, name, geofabrik, bbox}]}' \
               scripts/regions.json)
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
