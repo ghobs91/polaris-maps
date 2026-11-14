@@ -15,6 +15,7 @@ name: Build Region Map Data
 # read-only, which made every release upload fail with HTTP 403.
 permissions:
   contents: write
+  actions: write
 
 on:
   schedule:
@@ -25,6 +26,14 @@ on:
         description: 'Region ID (e.g. jp-tokyo). Leave blank to build all catalog regions.'
         required: false
         default: ''
+      region_start:
+        description: 'Catalog index to start at (chunked builds; 0-based).'
+        required: false
+        default: '0'
+      region_count:
+        description: 'How many catalog regions this run builds (max 256 — GitHub matrix cap).'
+        required: false
+        default: '200'
       geofabrik_url:
         description: 'Custom Geofabrik PBF URL — required when region_id is not in the catalog.'
         required: false
@@ -70,8 +79,16 @@ jobs:
               '{include: [.include[] | select(.id == $id) | {id, name, geofabrik, bbox}]}' \
               scripts/regions.json)
           else
-            # Full catalog build
-            matrix=$(jq -c '{include: [.include[] | {id, name, geofabrik, bbox}]}' scripts/regions.json)
+            # Full catalog build, chunked: a workflow run's matrix caps at 256
+            # jobs, and full-world parity is 363 regions. Each run builds a
+            # slice and dispatches the next one when done (see publish job).
+            # On push events these inputs are null; GitHub's null || '0' → '0'.
+            START=${{ github.event.inputs.region_start || '0' }}
+            COUNT=${{ github.event.inputs.region_count || '200' }}
+            matrix=$(jq -c \
+              --argjson start "$START" --argjson count "$COUNT" \
+              '{include: [.include[$start:($start + $count)] | {id, name, geofabrik, bbox}]}' \
+              scripts/regions.json)
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
@@ -652,3 +669,35 @@ jobs:
           node scripts/prune-map-data-releases.mjs \
             --repo "${{ github.repository }}" \
             --keep "${KEEP_RELEASES:-2}"
+
+  # ── Job 5: chain to the next chunk ──────────────────────────────────────────
+  # A run's matrix caps at 256 jobs and full-world parity is 363 regions, so
+  # each run builds a slice and dispatches the next one. Runs are sequential:
+  # parallel chunks would each republish the catalog while later chunks were
+  # still building, advertising partially-updated regions. publish-catalog runs
+  # every chunk, so the catalog is valid at every step.
+  dispatch-next-chunk:
+    needs: [publish-catalog]
+    if: ${{ needs.publish-catalog.result == 'success' && github.event.inputs.region_id == '' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dispatch the next chunk when the catalog has more to build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          START=${{ github.event.inputs.region_start || '0' }}
+          COUNT=${{ github.event.inputs.region_count || '200' }}
+          TOTAL=$(jq '.include | length' scripts/regions.json)
+          NEXT=$((START + COUNT))
+          if [ "$NEXT" -lt "$TOTAL" ]; then
+            echo "Dispatching regions $NEXT..$((NEXT + COUNT - 1)) of $TOTAL"
+            gh workflow run build-region-data.yml \
+              --ref "${{ github.ref_name }}" \
+              -f region_start="$NEXT" \
+              -f region_count="$COUNT"
+          else
+            echo "Catalog complete ($TOTAL regions built)."
+          fi
