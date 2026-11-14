@@ -2,7 +2,8 @@ import NetInfo from '@react-native-community/netinfo';
 import { getFreeDiskStorageAsync } from 'expo-file-system/legacy';
 import { useMapStore } from '../../stores/mapStore';
 import { useSettingsStore } from '../../stores/settingsStore';
-import { getRegionContainingPoint } from './regionRepository';
+import { getPackRegionContainingPoint } from './regionRepository';
+import { fetchAndSeedCatalog } from './catalogService';
 import { isDownloading, startBackgroundDownload } from './downloadManager';
 import { isMeteredConnection } from '../traffic/densityPolicy';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
@@ -61,7 +62,10 @@ async function freeDiskBytes(): Promise<number | null> {
 
 async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision> {
   const settings = useSettingsStore.getState();
-  const region = await getRegionContainingPoint(lat, lng);
+  // The candidate, not the already-downloaded region: asking for a `complete`
+  // region here can only ever return null for the area the user is looking at,
+  // which is precisely the area worth downloading.
+  const region = await getPackRegionContainingPoint(lat, lng);
   const [netState, freeBytes] = await Promise.all([NetInfo.fetch(), freeDiskBytes()]);
   const netDetails = netState.details as { isConnectionExpensive?: boolean } | null;
 
@@ -85,12 +89,19 @@ async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision>
       regionId: decision.regionId,
       sizeBytes: packSizeOf(region),
     });
-    void startBackgroundDownload(region).catch((error) => {
-      logDiagnostic('regions', 'warn', 'auto-download failed', {
-        regionId: decision.regionId,
-        message: error instanceof Error ? error.message : String(error),
+    void startBackgroundDownload(region)
+      .catch((error) => {
+        logDiagnostic('regions', 'warn', 'auto-download failed', {
+          regionId: decision.regionId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        // Release the latch so panning into a *different* uncovered area later
+        // can start the next download. `attempts` still prevents a retry loop
+        // on a region that failed this session.
+        if (started === decision.regionId) started = null;
       });
-    });
   }
 
   return decision;
@@ -112,13 +123,22 @@ function scheduleEvaluation(lat: number, lng: number): void {
 export function initAutoRegionDownload(): void {
   if (unsubscribe) return;
 
-  const { lat, lng } = useMapStore.getState().viewport;
-  scheduleEvaluation(lat, lng);
+  // Seed the catalog before the first evaluation. On a fresh install the region
+  // table is empty, so without this there is no candidate to find and nothing
+  // is ever downloaded — the user keeps rendering from third-party tiles.
+  // Cached manifests seed instantly and offline; a network refresh follows.
+  void fetchAndSeedCatalog()
+    .catch(() => undefined)
+    .finally(() => {
+      const { lat, lng } = useMapStore.getState().viewport;
+      scheduleEvaluation(lat, lng);
+    });
 
   unsubscribe = useMapStore.subscribe((state) => {
     const { lat: nextLat, lng: nextLng } = state.viewport;
-    // Only reschedule when the view actually moved somewhere new.
-    if (started) return;
+    // Deliberately not gated on `started`: the decision already skips a region
+    // that is downloaded, downloading, or already attempted, so the only thing
+    // a gate here achieves is never downloading the second area a user pans to.
     scheduleEvaluation(nextLat, nextLng);
   });
 }

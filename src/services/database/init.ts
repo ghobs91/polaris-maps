@@ -57,7 +57,12 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
       geocoding_size_bytes INTEGER,
       downloaded_at INTEGER,
       last_updated INTEGER,
-      drive_key TEXT
+      drive_key TEXT,
+      -- The pack manifest, as JSON. Persisted because downloadRegion decides
+      -- between the pack path and the legacy per-tile path from assets: a
+      -- region that loses them silently falls back to OpenFreeMap tiles, which
+      -- are hard-capped at 50 MB per download.
+      assets_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS map_tiles (
@@ -416,6 +421,11 @@ async function initializeSchema(database: SQLite.SQLiteDatabase): Promise<void> 
 
   // Add tile_version to regions for version-aware P2P downloads
   await database.execAsync(`ALTER TABLE regions ADD COLUMN tile_version TEXT;`).catch(() => {});
+
+  // Add assets_json to regions. Without it every region read back from the
+  // database looked pack-less, so every download took the capped per-tile path
+  // and the published packs were unreachable from the app.
+  await database.execAsync(`ALTER TABLE regions ADD COLUMN assets_json TEXT;`).catch(() => {});
 
   // Add places_url / places_size_bytes to regions for the Overture places
   // bundle (offline viewport POIs).

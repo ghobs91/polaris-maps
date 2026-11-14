@@ -287,8 +287,12 @@ export default function RootLayout() {
  * consent exists. Re-consent after a version change re-enters this gate.
  */
 function ConsentGate() {
+  // `showOnboardingOnLaunch` was gated on `__DEV__`, so the setting did nothing
+  // in a TestFlight or App Store build — flipping it appeared to have no effect
+  // on a cold start because it genuinely had none. It is a user-facing preview
+  // switch, so it has to work in release builds too.
   const [consentComplete, setConsentComplete] = useState(
-    () => hasCompletedConsent() && !(__DEV__ && useSettingsStore.getState().showOnboardingOnLaunch),
+    () => hasCompletedConsent() && !useSettingsStore.getState().showOnboardingOnLaunch,
   );
 
   if (!consentComplete) {
