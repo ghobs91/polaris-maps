@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,8 +23,12 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { useMapStore } from '../../stores/mapStore';
 import { decodePolyline } from '../../utils/polyline';
+import { selectStopsAlongRoute } from '../../utils/routeCorridor';
 import { formatDistance } from '../../utils/units';
 import { spacing, nav } from '../../constants/theme';
+
+/** Options listed before the user expands the submitted overview. */
+const COLLAPSED_RESULT_LIMIT = 3;
 
 function detourKey(r: { lat: number; lng: number }): string {
   return `${r.lat.toFixed(5)},${r.lng.toFixed(5)}`;
@@ -58,6 +62,10 @@ export function AddDestinationPanel({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   /** True after the user hits search — results stay visible with detour times + map pins. */
   const [submitted, setSubmitted] = useState(false);
+  /** True when the submitted overview shows every option rather than the top few. */
+  const [showAll, setShowAll] = useState(false);
+  /** Origin snapshotted at submit, used to cut the corridor to the road ahead. */
+  const [corridorOrigin, setCorridorOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [detours, setDetours] = useState<Record<string, number | null>>({});
   const slideAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<TextInput>(null);
@@ -95,11 +103,49 @@ export function AddDestinationPanel({
   const costing = useNavigationStore((s) => s.costing);
   const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
 
+  /** Decoded active route, used to keep suggestions beside the drive. */
+  const routeCoords = useMemo<Array<[number, number]>>(
+    () => (activeRoute?.geometry ? decodePolyline(activeRoute.geometry) : []),
+    [activeRoute?.geometry],
+  );
+
+  // Only options near the road ahead are worth showing: a place across town is
+  // not "along the route" however close it is to the car. Falls back to the
+  // nearest few when the corridor has nothing.
+  const alongRoute = useMemo(
+    () => selectStopsAlongRoute(results, routeCoords, corridorOrigin),
+    [results, routeCoords, corridorOrigin],
+  );
+
+  // Best options first: shortest added drive time, still-calculating last.
+  const orderedResults = useMemo(() => {
+    if (!submitted) return alongRoute;
+    const rank = (result: UnifiedSearchResult) =>
+      detours[detourKey(result)] ?? Number.POSITIVE_INFINITY;
+    return [...alongRoute].sort((a, b) => {
+      const left = rank(a);
+      const right = rank(b);
+      if (left === right) return 0;
+      return left < right ? -1 : 1;
+    });
+  }, [submitted, alongRoute, detours]);
+
+  const listedResults = showAll ? orderedResults : orderedResults.slice(0, COLLAPSED_RESULT_LIMIT);
+
+  // Drop pins for the submitted options so the zoomed-out route shows them.
+  useEffect(() => {
+    if (!submitted || alongRoute.length === 0) return;
+    useMapStore
+      .getState()
+      .setStopSearchMarkers(alongRoute.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })));
+  }, [submitted, alongRoute]);
+
   // Animate panel in/out
   useEffect(() => {
     if (visible) {
       clearSearch();
       setSubmitted(false);
+      setShowAll(false);
       setDetours({});
       Animated.timing(slideAnim, {
         toValue: 1,
@@ -207,31 +253,34 @@ export function AddDestinationPanel({
       // New keystrokes invalidate the submitted overview — clear pins/detours
       // until the user hits search again.
       setSubmitted(false);
+      setShowAll(false);
       setDetours({});
       useMapStore.getState().setStopSearchMarkers([]);
     },
     [setQuery],
   );
 
-  // User hit search/submit: keep the list visible, drop pins for every result
-  // on the map, and zoom out to the full route so they can pick a stop.
+  // User hit search/submit: keep the list visible, drop pins for the options
+  // along the route, and zoom out to the full route so they can pick a stop.
   const handleSearchSubmit = useCallback(async () => {
     const searchResults = await submitSearch(query);
     if (searchResults.length === 0) return;
     Keyboard.dismiss();
+    // Freeze the origin for the corridor + detour math — see submittedOriginRef.
+    const origin = { lat: searchCenter.lat, lng: searchCenter.lng };
+    submittedOriginRef.current = origin;
+    setCorridorOrigin(origin);
     setSubmitted(true);
-    // Freeze the origin for detour math — see submittedOriginRef.
-    submittedOriginRef.current = { lat: searchCenter.lat, lng: searchCenter.lng };
-    useMapStore
-      .getState()
-      .setStopSearchMarkers(searchResults.map((r) => ({ lat: r.lat, lng: r.lng, name: r.name })));
-    // Fit the camera to the route + all results (MapView applies bottom
-    // padding for the "search" mode so the sheet doesn't cover the pins).
+    setShowAll(false);
+    // Fit the camera to the route + the options along it (MapView applies
+    // bottom padding for the "search" mode so the sheet doesn't cover pins).
     const coords: Array<[number, number]> = [];
     if (activeRoute?.geometry) {
       coords.push(...decodePolyline(activeRoute.geometry));
     }
-    for (const r of searchResults) coords.push([r.lng, r.lat]);
+    for (const r of selectStopsAlongRoute(searchResults, coords, origin)) {
+      coords.push([r.lng, r.lat]);
+    }
     if (coords.length > 0) {
       let minLng = Infinity;
       let minLat = Infinity;
@@ -243,7 +292,7 @@ export function AddDestinationPanel({
         if (lng > maxLng) maxLng = lng;
         if (lat > maxLat) maxLat = lat;
       }
-      useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat]);
+      useMapStore.getState().setFitBounds([minLng, minLat, maxLng, maxLat], 'search');
     }
     onShowOnMap?.();
   }, [query, submitSearch, activeRoute, onShowOnMap, searchCenter]);
@@ -254,7 +303,7 @@ export function AddDestinationPanel({
   // on the live searchCenter would restart this effect on every GPS tick and
   // the detours would never resolve ("calculating" forever).
   useEffect(() => {
-    if (!submitted || results.length === 0 || !destination) return;
+    if (!submitted || alongRoute.length === 0 || !destination) return;
     const origin = submittedOriginRef.current;
     if (!origin) return;
     const baseSeconds = activeRoute?.summary.durationSeconds;
@@ -266,7 +315,7 @@ export function AddDestinationPanel({
     const prefs = useSettingsStore.getState().routePreferences;
     void (async () => {
       const settled = await Promise.allSettled(
-        results.map(async (r) => {
+        alongRoute.map(async (r) => {
           const withNew = [...pending];
           const stop = { lat: r.lat, lng: r.lng, name: r.name };
           if (withNew.length > 0) withNew.splice(1, 0, stop);
@@ -288,19 +337,20 @@ export function AddDestinationPanel({
       if (cancelled || detourGenRef.current !== gen) return;
       const next: Record<string, number | null> = {};
       settled.forEach((entry, i) => {
-        next[detourKey(results[i])] = entry.status === 'fulfilled' ? entry.value : null;
+        next[detourKey(alongRoute[i])] = entry.status === 'fulfilled' ? entry.value : null;
       });
       setDetours(next);
     })();
     return () => {
       cancelled = true;
     };
-  }, [submitted, results, activeRoute, waypoints, currentLegIndex, destination, costing]);
+  }, [submitted, alongRoute, activeRoute, waypoints, currentLegIndex, destination, costing]);
 
   // "Edit Search" from the submitted overview: drop the map pins/overview and
   // return to the editable list without losing the query or results.
   const handleEditSearch = useCallback(() => {
     setSubmitted(false);
+    setShowAll(false);
     setDetours({});
     useMapStore.getState().setStopSearchMarkers([]);
     inputRef.current?.focus();
@@ -315,6 +365,7 @@ export function AddDestinationPanel({
     useMapStore.getState().setStopSearchMarkers([]);
     useMapStore.getState().setPendingStopSelection(null);
     setSubmitted(false);
+    setShowAll(false);
     setDetours({});
     onClose();
   }, [onClose, isListening]);
@@ -329,6 +380,7 @@ export function AddDestinationPanel({
       useMapStore.getState().setStopSearchMarkers([]);
       useMapStore.getState().setPendingStopSelection(null);
       setSubmitted(false);
+      setShowAll(false);
       setDetours({});
       onSelect(result);
       clearSearch();
@@ -352,11 +404,18 @@ export function AddDestinationPanel({
 
   const renderItem = useCallback(
     ({ item }: { item: UnifiedSearchResult }) => {
-      const label = submitted ? detourLabel(detours[detourKey(item)]) : null;
+      const detour = detours[detourKey(item)];
+      const label = submitted ? detourLabel(detour) : null;
+      // A long diversion reads as a warning, a short one as an easy add.
+      const detourStyle =
+        typeof detour === 'number' && detour > 300 ? styles.resultDetourLong : styles.resultDetour;
       return (
         <Pressable
           style={({ pressed }) => [styles.resultItem, pressed && styles.resultItemPressed]}
           onPress={() => handleSelect(item)}
+          accessibilityRole="button"
+          accessibilityLabel={label != null ? `${item.name}, ${label.toLowerCase()}` : item.name}
+          accessibilityHint="Adds this place as a stop on your route"
         >
           <View style={styles.resultIcon}>
             <Ionicons name="location-outline" size={20} color={nav.accent} />
@@ -369,7 +428,7 @@ export function AddDestinationPanel({
               {formatDistance(item.distanceKm * 1000)} · {item.subtitle}
             </Text>
             {label != null && (
-              <Text style={styles.resultDetour} numberOfLines={1}>
+              <Text style={detourStyle} numberOfLines={1}>
                 {label}
               </Text>
             )}
@@ -388,13 +447,35 @@ export function AddDestinationPanel({
     outputRange: [600, 0],
   });
 
+  // Editing searches every match; the submitted overview lists the options
+  // along the route, top three by default.
+  const listData = submitted ? listedResults : results;
+
   if (!visible) return null;
 
   return (
-    <View style={styles.overlay} pointerEvents={visible ? 'auto' : 'none'}>
-      <TouchableOpacity style={styles.backdrop} onPress={handleClose} activeOpacity={1} />
-      <View style={[styles.keyboardAvoid, keyboardHeight > 0 && { paddingBottom: keyboardHeight }]}>
-        <Animated.View style={[styles.panel, { transform: [{ translateY }] }]}>
+    <View
+      style={styles.overlay}
+      pointerEvents={submitted ? 'box-none' : 'auto'}
+      testID="add-destination-panel"
+    >
+      {/* While the search is being edited the backdrop keeps focus on the
+          input; once results are submitted it clears so the zoomed-out route
+          and the option pins underneath stay visible and interactive. */}
+      {!submitted && (
+        <TouchableOpacity style={styles.backdrop} onPress={handleClose} activeOpacity={1} />
+      )}
+      <View
+        style={[styles.keyboardAvoid, keyboardHeight > 0 && { paddingBottom: keyboardHeight }]}
+        pointerEvents="box-none"
+      >
+        <Animated.View
+          style={[
+            styles.panel,
+            submitted && styles.panelSubmitted,
+            { transform: [{ translateY }] },
+          ]}
+        >
           <GlassView material="regular" colorScheme="dark" style={styles.panelGlass} />
           {/* Drag handle */}
           <View style={styles.dragHandle} />
@@ -414,7 +495,7 @@ export function AddDestinationPanel({
                 value={query}
                 onChangeText={handleChangeText}
                 onSubmitEditing={handleSearchSubmit}
-                placeholder="Where to?"
+                placeholder="Add a stop"
                 placeholderTextColor="rgba(255,255,255,0.4)"
                 autoCorrect={false}
                 returnKeyType="search"
@@ -444,17 +525,21 @@ export function AddDestinationPanel({
             </TouchableOpacity>
           </View>
 
-          {submitted && results.length > 0 && (
-            <TouchableOpacity
-              style={styles.foundRow}
-              onPress={handleEditSearch}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`${results.length} results found, edit search`}
-            >
-              <Text style={styles.foundText}>{results.length} found</Text>
-              <Text style={styles.editSearchText}>Edit Search</Text>
-            </TouchableOpacity>
+          {submitted && alongRoute.length > 0 && (
+            <View style={styles.foundRow}>
+              <Text style={styles.foundText}>
+                {alongRoute.length} {alongRoute.length === 1 ? 'stop' : 'stops'} along your route
+              </Text>
+              <TouchableOpacity
+                onPress={handleEditSearch}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Edit search"
+                accessibilityHint="Return to the search field and result list"
+              >
+                <Text style={styles.editSearchText}>Edit Search</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {isListening && (
@@ -478,13 +563,33 @@ export function AddDestinationPanel({
 
           {results.length > 0 && (
             <FlatList
-              data={results}
+              data={listData}
               keyExtractor={(item, index) => `${item.lat}-${item.lng}-${index}`}
               keyboardShouldPersistTaps="handled"
               renderItem={renderItem}
               ItemSeparatorComponent={renderSeparator}
-              style={styles.resultsList}
+              style={[styles.resultsList, submitted && styles.resultsListSubmitted]}
+              scrollEnabled={!submitted || showAll}
             />
+          )}
+
+          {submitted && orderedResults.length > COLLAPSED_RESULT_LIMIT && (
+            <TouchableOpacity
+              style={styles.showAllRow}
+              onPress={() => setShowAll((value) => !value)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={showAll ? 'Show fewer options' : 'Show all options'}
+            >
+              <Text style={styles.showAllText}>
+                {showAll ? 'Show fewer' : `Show all ${orderedResults.length}`}
+              </Text>
+              <Ionicons
+                name={showAll ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={nav.accent}
+              />
+            </TouchableOpacity>
           )}
         </Animated.View>
       </View>
@@ -514,6 +619,10 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : spacing.lg,
     maxHeight: '75%',
+  },
+  /** Submitted overview: a compact card so the zoomed-out route stays visible. */
+  panelSubmitted: {
+    maxHeight: '60%',
   },
   panelGlass: {
     position: 'absolute',
@@ -599,11 +708,13 @@ const styles = StyleSheet.create({
   foundRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
     marginBottom: 6,
     paddingHorizontal: 4,
   },
   foundText: {
+    flex: 1,
     color: 'rgba(255,255,255,0.6)',
     fontSize: 14,
   },
@@ -614,6 +725,22 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     maxHeight: 380,
+  },
+  resultsListSubmitted: {
+    maxHeight: 260,
+    flexShrink: 1,
+  },
+  showAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 10,
+  },
+  showAllText: {
+    color: nav.accent,
+    fontSize: 14,
+    fontWeight: '600',
   },
   resultItem: {
     flexDirection: 'row',
@@ -650,6 +777,12 @@ const styles = StyleSheet.create({
   },
   resultDetour: {
     color: nav.success,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  resultDetourLong: {
+    color: nav.warning,
     fontSize: 13,
     fontWeight: '600',
     marginTop: 2,
