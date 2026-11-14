@@ -283,3 +283,95 @@ describe('update-region-asset-urls.mjs', () => {
     expect(readFileSync(catalogPath, 'utf8')).toBe(before);
   });
 });
+
+/**
+ * Per-asset sizes and existence filtering.
+ *
+ * Both were missing from the published catalog, and both break auto-download:
+ * `decideAutoDownload` refuses to start without a size (`size-unknown`), and an
+ * asset entry the release does not carry is a guaranteed 404 mid-download.
+ */
+describe('per-asset sizes and availability', () => {
+  let dir: string;
+  let catalogPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'polaris-asset-sizes-'));
+    catalogPath = join(dir, 'regions.json');
+    writeFileSync(
+      catalogPath,
+      JSON.stringify({ include: [{ id: 'us-ny-new-york', name: 'New York Metro' }] }),
+    );
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function stamp(extraArgs: string[]): Record<string, unknown> {
+    const out = join(dir, 'catalog.json');
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--tag', 'map-data-2026-11', '--catalog', catalogPath, '--out', out, ...extraArgs],
+      { stdio: 'pipe' },
+    );
+    return JSON.parse(readFileSync(out, 'utf8')) as Record<string, unknown>;
+  }
+
+  function assetsOf(catalog: Record<string, unknown>): Array<{ name: string; sizeBytes?: number }> {
+    const regions = catalog.regions as Array<{ id: string; assets: Array<{ name: string }> }>;
+    return regions.find((r) => r.id === 'us-ny-new-york')!.assets as Array<{
+      name: string;
+      sizeBytes?: number;
+    }>;
+  }
+
+  it('fills sizeBytes from the release asset list', () => {
+    const sizesPath = join(dir, 'asset-sizes.json');
+    writeFileSync(
+      sizesPath,
+      JSON.stringify({
+        'us-ny-new-york-tiles.pmtiles': 77_822_320,
+        'us-ny-new-york-search.sqlite': 50_429_952,
+      }),
+    );
+    const assetsPath = join(dir, 'assets.json');
+    writeFileSync(
+      assetsPath,
+      JSON.stringify([
+        'us-ny-new-york-routing.tar',
+        'us-ny-new-york-tiles.pmtiles',
+        'us-ny-new-york-search.sqlite',
+      ]),
+    );
+
+    const catalog = stamp(['--asset-sizes', sizesPath, '--assets', assetsPath]);
+
+    const assets = assetsOf(catalog);
+    expect(assets.find((a) => a.name === 'tiles.pmtiles')!.sizeBytes).toBe(77_822_320);
+    expect(assets.find((a) => a.name === 'search.sqlite')!.sizeBytes).toBe(50_429_952);
+  });
+
+  it('drops assets the release does not carry', () => {
+    // The published catalog advertised a transit-timetable URL that was never
+    // uploaded, so that fetch could only 404.
+    const assetsPath = join(dir, 'assets.json');
+    writeFileSync(
+      assetsPath,
+      JSON.stringify([
+        'us-ny-new-york-routing.tar',
+        'us-ny-new-york-tiles.pmtiles',
+        'us-ny-new-york-search.sqlite',
+      ]),
+    );
+
+    const catalog = stamp(['--assets', assetsPath]);
+
+    expect(assetsOf(catalog).map((a) => a.name)).toEqual(['tiles.pmtiles', 'search.sqlite']);
+  });
+
+  it('leaves the manifest alone when no asset list is given', () => {
+    // Without `--assets` there is nothing to filter against, so every declared
+    // asset stays (and simply has no size).
+    const catalog = stamp([]);
+    expect(assetsOf(catalog).length).toBeGreaterThan(0);
+  });
+});

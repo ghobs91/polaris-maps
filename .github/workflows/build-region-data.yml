@@ -498,10 +498,21 @@ jobs:
             fi
           fi
 
+          # Per-asset byte sizes, straight from the release. The app's disk gate
+          # needs a size for the asset it is about to fetch; without one it
+          # skips auto-download with `size-unknown` and the pack is only ever
+          # installed by hand.
+          ASSET_SIZES_ARG=""
+          if [ -n "$ASSETS_JSON" ]; then
+            gh release view "$TAG" --repo "${{ github.repository }}" --json assets \
+              --jq '[.assets[] | {key: .name, value: .size}] | from_entries' > asset-sizes.json
+            ASSET_SIZES_ARG="--asset-sizes asset-sizes.json"
+          fi
+
           if [ -n "$ASSETS_JSON" ]; then
             printf '%s' "$ASSETS_JSON" > release-assets.json
             node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json \
-              --assets release-assets.json $CHECKSUMS_ARG
+              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG
           else
             node scripts/update-region-asset-urls.mjs --tag "$TAG" --out catalog.json
           fi

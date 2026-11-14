@@ -12,7 +12,7 @@ import { setRemoteRegionManifests } from './regionManifestResolver';
 import { REGION_CATALOG_URL } from '../../constants/config';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import type { RegionManifest } from './regionManifest';
-import type { Region, RegionDownloadStatus } from '../../models/region';
+import type { Region, RegionAsset, RegionDownloadStatus } from '../../models/region';
 
 const MMKV_CATALOG_KEY = 'region_catalog_v1';
 
@@ -48,6 +48,14 @@ interface CatalogEntry {
   /** Optional on-device transit index asset (see Region.transitIndexUrl). */
   transitIndexUrl?: string;
   transitIndexSizeBytes?: number;
+  /**
+   * Per-asset pack manifest stamped by `scripts/update-region-asset-urls.mjs`.
+   *
+   * Load-bearing: `downloadRegion` picks the pack path over the capped
+   * per-tile path from these, and auto-download needs their sizes. Dropping
+   * them here silently sends every download to OpenFreeMap tiles.
+   */
+  assets?: RegionAsset[];
   /** Optional per-entry signed manifest with the region's canonical drive key. */
   manifest?: RegionManifest;
 }
@@ -226,6 +234,10 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       transitIndexUrl: entry.transitIndexUrl ?? null,
       transitIndexSizeBytes: entry.transitIndexSizeBytes ?? null,
       tileVersion: existing?.tileVersion ?? null,
+      // Without this the row is persisted with no manifest, `downloadRegion`
+      // falls back to the 50 MB-capped per-tile path, and auto-download skips
+      // with `size-unknown` because there is nothing to size.
+      assets: entry.assets,
     };
 
     await upsertRegion(region);

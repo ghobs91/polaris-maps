@@ -53,6 +53,7 @@ function parseArgs(argv) {
     else if (arg === '--out') args.out = argv[++i];
     else if (arg === '--assets') args.assets = argv[++i];
     else if (arg === '--checksums') args.checksums = argv[++i];
+    else if (arg === '--asset-sizes') args.assetSizes = argv[++i];
     else if (arg === '--mirrors') {
       // Backwards compatible: a comma-separated list of base URLs.
       for (const base of String(argv[++i]).split(',')) {
@@ -100,7 +101,10 @@ export function assetName(regionId, asset) {
  * Pure transform: given a catalog and the release coordinates, return a new
  * catalog with asset URLs (and sizes, when known) stamped in.
  */
-export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, mirrors = [] }) {
+export function stampCatalog(
+  catalog,
+  { tag, base, sizes = {}, checksums = {}, mirrors = [], assetSizes = {}, available = null },
+) {
   const prefix = `${base.replace(/\/+$/, '')}/${tag}`;
   // Mirrors follow the same `<origin>/<tag>/<asset>` layout as the primary, so
   // a base is an origin only — never a prefix that already carries the tag.
@@ -163,6 +167,25 @@ export function stampCatalog(catalog, { tag, base, sizes = {}, checksums = {}, m
         mirrorPrefixes,
       ),
     ];
+
+    // Prefer the release's own byte size for each asset: `sizes.json` only
+    // covers three of the four, and the app's disk gate needs a size for
+    // whichever asset it is about to fetch. Without sizes auto-download skips
+    // with `size-unknown` and never starts.
+    for (const entry of stamped.assets) {
+      if (typeof entry.sizeBytes === 'number') continue;
+      const fromRelease = assetSizes[assetName(region.id, entry.name)];
+      if (typeof fromRelease === 'number') entry.sizeBytes = fromRelease;
+    }
+
+    // Drop entries the release does not actually carry, so the catalog never
+    // advertises a URL that 404s (a region without a timetable, say).
+    if (available) {
+      stamped.assets = stamped.assets.filter((entry) =>
+        available.has(assetName(region.id, entry.name)),
+      );
+    }
+
     return stamped;
   });
 
@@ -208,12 +231,20 @@ function main() {
   const mirrors = args.mirrorBases;
 
   const assets = args.assets ? JSON.parse(readFileSync(resolve(args.assets), 'utf8')) : null;
+  // `--asset-sizes` maps release asset name -> bytes, straight from
+  // `gh release view --json assets`. It is what gives the app a size for the
+  // asset it is about to fetch; without it auto-download skips `size-unknown`.
+  const assetSizes = args.assetSizes
+    ? JSON.parse(readFileSync(resolve(args.assetSizes), 'utf8'))
+    : {};
   const stamped = stampCatalog(catalog, {
     tag: args.tag,
     base: args.base,
     sizes,
     checksums,
     mirrors,
+    assetSizes,
+    available: assets ? new Set(assets) : null,
   });
   const baseUrls = [args.base, ...mirrors].map((base) => String(base).replace(/\/+$/, ''));
   const updated = args.out
