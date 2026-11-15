@@ -20,19 +20,29 @@ import {
   recordMirrorFailure,
   recordMirrorSuccess,
 } from '../regions/mirrorHealth';
-import {
-  REGION_CATALOG,
-  boundsIntersect,
-  catalogEntriesIntersectingBounds,
-  type CatalogEntry,
-} from '../../constants/regionCatalog';
-import { getDownloadedRegions } from '../regions/regionRepository';
+import { REGION_CATALOG, boundsIntersect, type CatalogEntry } from '../../constants/regionCatalog';
+import { getDownloadedRegions, getRegionById } from '../regions/regionRepository';
 import type { DownloadProgress } from '../regions/downloadService';
 import type { Region } from '../../models/region';
-import { boundsArea, type RoutingGraphCandidate } from '../../utils/routingGraphSelect';
+import {
+  isGlobishBounds,
+  selectRoutingGraphTargets,
+  unionBounds,
+  type LatLngBounds,
+  type RoutingGraphCandidate,
+} from '../../utils/routingGraphSelect';
+import {
+  recordRoutingGraphInstallStatus,
+  type RoutingGraphInstallStatus,
+} from './routingGraphStatus';
 
 /** Cap on how many routing graphs a single region download pulls. */
 const MAX_ROUTING_GRAPHS_PER_REGION = 4;
+
+/** Sidecar written into a graph directory recording the bounds it was published
+ *  under. Selection prefers it over the compiled-in catalog bounds, which drift
+ *  as the published catalog is re-cut. */
+const GRAPH_META_FILE = 'polaris-graph.json';
 
 const RELEASE_TAG_PREFIX = 'map-data-';
 
@@ -78,6 +88,72 @@ async function exists(uri: string): Promise<boolean> {
   }
 }
 
+/** Metadata stored beside a graph's Valhalla tiles. */
+interface RoutingGraphMeta {
+  version: 1;
+  id: string;
+  /** Bounds the graph was published under (catalog ∪ database at install). */
+  bounds: LatLngBounds;
+  installedAt: number;
+}
+
+/** Best-effort: a missing or unreadable sidecar just means selection falls back
+ *  to the compiled-in catalog bounds. */
+async function writeGraphMeta(dirUri: string, meta: RoutingGraphMeta): Promise<void> {
+  try {
+    await FileSystem.writeAsStringAsync(`${dirUri}${GRAPH_META_FILE}`, JSON.stringify(meta));
+  } catch {
+    // Ignored — see the doc comment above.
+  }
+}
+
+async function readGraphMeta(dirUri: string): Promise<RoutingGraphMeta | null> {
+  try {
+    const raw = await FileSystem.readAsStringAsync(`${dirUri}${GRAPH_META_FILE}`);
+    const parsed = JSON.parse(raw) as Partial<RoutingGraphMeta>;
+    const bounds = parsed.bounds;
+    if (
+      !bounds ||
+      typeof bounds.minLat !== 'number' ||
+      typeof bounds.maxLat !== 'number' ||
+      typeof bounds.minLng !== 'number' ||
+      typeof bounds.maxLng !== 'number'
+    ) {
+      return null;
+    }
+    return {
+      version: 1,
+      id: typeof parsed.id === 'string' ? parsed.id : '',
+      bounds,
+      installedAt: typeof parsed.installedAt === 'number' ? parsed.installedAt : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bounds to record for a freshly installed graph: the compiled-in catalog box
+ * widened by the database's (remote-catalog) box for the same id.
+ *
+ * The two disagree in practice — the published catalog for New York Metro ends
+ * at -73.2° while the compiled-in box ends at -73.7° — and the narrower one
+ * silently excludes routes it should have covered. Union is the conservative
+ * choice: over-selection degrades to "no route in coverage" (a clean failure
+ * that falls through the cascade), under-selection hides the graph entirely.
+ */
+async function resolveGraphBounds(catalogId: string): Promise<LatLngBounds | null> {
+  const entry = REGION_CATALOG.find((e) => e.id === catalogId);
+  let bounds: LatLngBounds | null = entry ? { ...entry.bounds } : null;
+  try {
+    const row = await getRegionById(catalogId);
+    if (row) bounds = bounds ? unionBounds(bounds, row.bounds) : { ...row.bounds };
+  } catch {
+    // DB unavailable — the compiled-in box still works.
+  }
+  return bounds;
+}
+
 /** Latest `map-data-*` release tag, or null when unreachable/disabled.
  *
  * The catalog stamps the tag its asset URLs were published under, so the
@@ -120,8 +196,11 @@ async function getLatestRoutingReleaseTag(): Promise<string | null> {
  * every mirror: GitHub Releases (primary) plus whatever `assetBaseUrls` the
  * catalog advertises (R2 / B2 / Internet Archive). Rotation and failure
  * cooldowns are shared with the pack downloader.
+ *
+ * Each tag is expanded across every base in turn, so the caller's tag order is
+ * preserved: the pack's own release is tried before the catalog-wide one.
  */
-function routingTarballSources(catalogId: string, tag: string): string[] {
+function routingTarballSources(catalogId: string, tags: readonly string[]): string[] {
   const asset = `${catalogId}-routing.tar`;
   const githubBase = REGION_DATA_REPO
     ? `https://github.com/${REGION_DATA_REPO}/releases/download`
@@ -129,44 +208,91 @@ function routingTarballSources(catalogId: string, tag: string): string[] {
   const bases = [githubBase, ...catalogAssetOrigins().baseUrls].filter(
     (base): base is string => !!base,
   );
-  const urls = bases.map((base) => `${base.replace(/\/+$/, '')}/${tag}/${asset}`);
-  return orderMirrorSources(buildSourceList(null, urls));
-}
-
-/** Catalog entries intersecting a region download, most specific (smallest) first. */
-function routingCatalogTargets(region: Region): CatalogEntry[] {
-  return catalogEntriesIntersectingBounds(region.bounds)
-    .slice()
-    .sort((a, b) => boundsArea(a.bounds) - boundsArea(b.bounds))
-    .slice(0, MAX_ROUTING_GRAPHS_PER_REGION);
+  const urls: string[] = [];
+  for (const tag of tags) {
+    for (const base of bases) {
+      urls.push(`${base.replace(/\/+$/, '')}/${tag}/${asset}`);
+    }
+  }
+  return orderMirrorSources(buildSourceList(null, [...new Set(urls)]));
 }
 
 /**
- * Download and extract one catalog region's Valhalla graph. Returns true when
- * the graph is present afterwards. Best-effort: any failure returns false.
+ * Release tag a pack's own assets were stamped under (e.g. `map-data-2026-11-a`).
+ *
+ * Routing tarballs are published per release and the newest tag does not carry
+ * every metro id — `us-ny-new-york-routing.tar` exists in `-a` and in the base
+ * release, but not in `-c`…`-f`, where the same metro ships under its Geofabrik
+ * id instead. Looking the graph up under the catalog-wide tag therefore 404s
+ * for packs that are otherwise perfectly downloadable, which is why the pack's
+ * own tag leads the candidate list.
+ */
+function packReleaseTag(region: Region): string | null {
+  const urls = (region.assets ?? []).map((asset) => asset.url);
+  if (region.geocodingUrl) urls.push(region.geocodingUrl);
+  for (const url of urls) {
+    const match = /\/releases\/download\/([^/]+)\//.exec(url ?? '');
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Catalog entries worth downloading a graph for, best-covered first.
+ *
+ * Targets are ranked by how completely the pack covers each metro rather than
+ * by raw bbox intersection: a pack whose bounds span most of the globe (island
+ * nations across the date line) intersects dozens of metros it holds no data
+ * for, and the old "smallest intersecting box" cap spent a 240 MB budget on
+ * Jakarta, Nairobi and Singapore for a Kiribati download.
+ */
+function routingCatalogTargets(region: Region): CatalogEntry[] {
+  return selectRoutingGraphTargets(REGION_CATALOG, region.bounds, {
+    maxTargets: MAX_ROUTING_GRAPHS_PER_REGION,
+    packId: region.id,
+  });
+}
+
+/** Outcome of installing one graph: on disk after the attempt, or why not. */
+export interface RoutingGraphInstallResult {
+  ok: boolean;
+  /** Present when `ok` is false. */
+  reason?: string;
+}
+
+/**
+ * Download and extract one catalog region's Valhalla graph. Returns whether the
+ * graph is present afterwards. Best-effort: any failure is reported, never
+ * thrown, so a routing fetch cannot fail the tile download that owns it.
  */
 export async function downloadRoutingGraph(
   catalogId: string,
   onProgress?: (written: number, total: number, percent: number) => void,
   signal?: AbortSignal,
-): Promise<boolean> {
+  /** Release tag the owning pack was published under; tried before the
+   *  catalog-wide tag. */
+  tagHint?: string | null,
+): Promise<RoutingGraphInstallResult> {
   const dirUri = graphDirUri(catalogId);
-  if (await exists(dirUri)) return true;
+  if (await exists(dirUri)) return { ok: true };
 
-  const tag = await getLatestRoutingReleaseTag();
-  if (!tag) return false;
+  const tags: string[] = [];
+  if (tagHint) tags.push(tagHint);
+  const catalogTag = await getLatestRoutingReleaseTag();
+  if (catalogTag && !tags.includes(catalogTag)) tags.push(catalogTag);
+  if (tags.length === 0) return { ok: false, reason: 'no release tag' };
 
   const tarUri = `${FileSystem.cacheDirectory}routing-${catalogId}.tar`;
   const tmpUri = `${sharedRootUri()}.tmp-${catalogId}/`;
 
   try {
-    if (signal?.aborted) return false;
+    if (signal?.aborted) return { ok: false, reason: 'cancelled' };
     await FileSystem.deleteAsync(tarUri, { idempotent: true }).catch(() => {});
     await FileSystem.deleteAsync(tmpUri, { idempotent: true }).catch(() => {});
 
     await downloadResumable({
       destPath: tarUri,
-      sources: routingTarballSources(catalogId, tag),
+      sources: routingTarballSources(catalogId, tags),
       signal,
       onSourceSettled: (source, outcome) => {
         if (outcome === 'success') recordMirrorSuccess(source);
@@ -181,7 +307,7 @@ export async function downloadRoutingGraph(
         );
       },
     });
-    if (signal?.aborted) return false;
+    if (signal?.aborted) return { ok: false, reason: 'cancelled' };
 
     // Extract to a temp dir and move into place, so an interrupted extraction
     // never leaves a half-populated graph that later reads as installed.
@@ -189,30 +315,66 @@ export async function downloadRoutingGraph(
     await extractTar(toNativePath(tarUri), toNativePath(tmpUri));
     await FileSystem.deleteAsync(dirUri, { idempotent: true }).catch(() => {});
     await FileSystem.moveAsync({ from: tmpUri, to: dirUri });
-    return true;
-  } catch {
-    return false;
+
+    // Record the bounds this graph was published under, so selection does not
+    // depend on compiled-in catalog boxes that drift between releases.
+    const bounds = await resolveGraphBounds(catalogId);
+    if (bounds) {
+      await writeGraphMeta(dirUri, {
+        version: 1,
+        id: catalogId,
+        bounds,
+        installedAt: Date.now(),
+      });
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: describeError(err) };
   } finally {
     await FileSystem.deleteAsync(tarUri, { idempotent: true }).catch(() => {});
     await FileSystem.deleteAsync(tmpUri, { idempotent: true }).catch(() => {});
   }
 }
 
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name;
+  return String(err);
+}
+
 /**
- * Download the routing graphs covering a freshly downloaded region. Targets
- * are catalog regions intersecting the pack's bounds (catalog regions are the
- * only ones with pre-built graphs).
+ * Download the routing graphs covering a freshly downloaded region.
+ *
+ * Returns (and records) what was attempted and what landed, so the caller can
+ * surface a failure instead of the routing tier degrading with no explanation.
  */
 export async function downloadRoutingGraphsForRegion(
   region: Region,
   onProgress?: (progress: DownloadProgress) => void,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<RoutingGraphInstallStatus> {
   const targets = routingCatalogTargets(region);
-  if (targets.length === 0 || signal?.aborted) return;
+  const status: Omit<RoutingGraphInstallStatus, 'at'> = {
+    regionId: region.id,
+    requested: targets.map((entry) => entry.id),
+    installed: [],
+    failed: [],
+    ...(targets.length > 0
+      ? {}
+      : {
+          skipped: (isGlobishBounds(region.bounds)
+            ? 'untrusted-pack-bounds'
+            : 'no-metro-coverage') as 'untrusted-pack-bounds' | 'no-metro-coverage',
+        }),
+  };
+
+  if (targets.length === 0 || signal?.aborted) {
+    return recordRoutingGraphInstallStatus(status);
+  }
 
   const totalBytes = targets.reduce((sum, entry) => sum + (entry.routingSizeBytes ?? 0), 0);
   let baseBytes = 0;
+  // The pack's own tag is the one its routing tarballs were published under.
+  const tagHint = packReleaseTag(region);
 
   onProgress?.({
     regionId: region.id,
@@ -223,9 +385,9 @@ export async function downloadRoutingGraphsForRegion(
   });
 
   for (const entry of targets) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) break;
     const base = baseBytes;
-    await downloadRoutingGraph(
+    const result = await downloadRoutingGraph(
       entry.id,
       (written) => {
         const downloadedBytes = base + written;
@@ -239,7 +401,10 @@ export async function downloadRoutingGraphsForRegion(
         });
       },
       signal,
+      tagHint,
     );
+    if (result.ok) status.installed.push(entry.id);
+    else status.failed.push({ id: entry.id, reason: result.reason ?? 'unknown' });
     baseBytes = base + (entry.routingSizeBytes ?? 0);
   }
 
@@ -250,6 +415,8 @@ export async function downloadRoutingGraphsForRegion(
     percent: 100,
     stage: 'routing',
   });
+
+  return recordRoutingGraphInstallStatus(status);
 }
 
 /** Every routing graph currently on disk: shared store plus region packs. */
@@ -258,13 +425,15 @@ export async function listInstalledRoutingGraphs(): Promise<RoutingGraphCandidat
 
   for (const entry of REGION_CATALOG) {
     const uri = graphDirUri(entry.id);
-    if (await exists(uri)) {
-      candidates.push({
-        id: `catalog:${entry.id}`,
-        dir: toNativePath(uri),
-        bounds: entry.bounds,
-      });
-    }
+    if (!(await exists(uri))) continue;
+    // Prefer the bounds recorded at install time, widened by the compiled-in
+    // box so a graph installed by an older build still covers what it used to.
+    const meta = await readGraphMeta(uri);
+    candidates.push({
+      id: `catalog:${entry.id}`,
+      dir: toNativePath(uri),
+      bounds: meta ? unionBounds(entry.bounds, meta.bounds) : entry.bounds,
+    });
   }
 
   try {
@@ -302,7 +471,9 @@ export async function pruneUnusedRoutingGraphs(): Promise<void> {
   for (const entry of REGION_CATALOG) {
     const uri = graphDirUri(entry.id);
     if (!(await exists(uri))) continue;
-    const stillNeeded = regions.some((region) => boundsIntersect(region.bounds, entry.bounds));
+    const meta = await readGraphMeta(uri);
+    const bounds = meta ? unionBounds(entry.bounds, meta.bounds) : entry.bounds;
+    const stillNeeded = regions.some((region) => boundsIntersect(region.bounds, bounds));
     if (!stillNeeded) {
       await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
     }
