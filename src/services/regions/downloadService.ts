@@ -39,6 +39,8 @@ import { orderMirrorSources, recordMirrorFailure, recordMirrorSuccess } from './
 import type { RegionAsset } from '../../models/region';
 import { isFeatureEnabled } from '../config/remoteConfig';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
+import { usePeerStore } from '../../stores/peerStore';
+import { shouldTryPeerDownload } from './peerDownloadPolicy';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -174,6 +176,16 @@ function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T 
 /** Per-step budget for the post-transfer imports. */
 const POST_TRANSFER_STEP_TIMEOUT_MS = 120_000;
 
+/**
+ * Routing graphs get their own, much larger budget.
+ *
+ * A single metro tarball is large — `us-ny-new-york-routing.tar` is 247 MB — and
+ * it is extracted on top of the transfer. The 2-minute post-transfer budget
+ * abandoned that step mid-download, which looked exactly like "the region
+ * downloaded fine but routing never works".
+ */
+const ROUTING_GRAPH_STEP_TIMEOUT_MS = 15 * 60_000;
+
 /** Throws an AbortError if the signal has been aborted. Works across all RN/Hermes versions. */
 function checkAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
@@ -215,7 +227,18 @@ export async function downloadRegion(
     // from peers before hitting any origin). Also require the version to match
     // latest, unless we're offline and treating peers as best effort.
     const canonicalKey = region.driveKey ?? getRegionManifest(region.id)?.driveKey ?? null;
-    if (canonicalKey) {
+    // …and only when there is actually a peer to ask — see peerDownloadPolicy.
+    const hasHttpFallback = (region.assets?.length ?? 0) > 0 || (region.tilesSizeBytes ?? 0) > 0;
+    const peersConnected = usePeerStore.getState().activePeers > 0;
+    const peerWorthTrying = shouldTryPeerDownload({
+      canonicalKey,
+      peersConnected,
+      hasHttpFallback,
+    });
+    if (canonicalKey && !peerWorthTrying) {
+      logDiagnostic('regions', 'info', `skipping P2P for ${region.id}: no peers connected`);
+    }
+    if (peerWorthTrying) {
       const versionOk =
         !latestVersion || // offline — trust P2P as best effort
         region.tileVersion === latestVersion; // version matches latest
@@ -329,13 +352,35 @@ export async function downloadRegion(
 
     checkAborted(signal);
 
-    // Offline routing graphs (Valhalla) for catalog regions intersecting this
-    // pack. Best-effort: a failed routing fetch must not fail the tile download.
-    await withTimeout(
+    // Offline routing graphs (Valhalla) for the metro catalog entries this pack
+    // actually covers. Best-effort: a failed routing fetch must not fail the
+    // tile download — but it must be visible, so the outcome is logged and
+    // recorded for the routing badge instead of discarded.
+    const routingStatus = await withTimeout(
       downloadRoutingGraphsForRegion(region, onProgress, signal),
-      POST_TRANSFER_STEP_TIMEOUT_MS,
+      ROUTING_GRAPH_STEP_TIMEOUT_MS,
       'routing graphs',
-    ).catch(() => {});
+    ).catch((err: unknown) => {
+      logDiagnostic('regions', 'warn', `routing graphs failed for ${region.id}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
+    });
+
+    if (routingStatus?.skipped) {
+      logDiagnostic('regions', 'warn', `routing graphs skipped for ${region.id}`, {
+        skipped: routingStatus.skipped,
+        reason:
+          routingStatus.skipped === 'untrusted-pack-bounds'
+            ? 'pack bounds span too much longitude for metro targeting'
+            : 'pack covers no metro catalog entry',
+      });
+    } else if (routingStatus && routingStatus.failed.length > 0) {
+      logDiagnostic('regions', 'warn', `routing graphs incomplete for ${region.id}`, {
+        installed: routingStatus.installed,
+        failed: routingStatus.failed,
+      });
+    }
 
     checkAborted(signal);
 
