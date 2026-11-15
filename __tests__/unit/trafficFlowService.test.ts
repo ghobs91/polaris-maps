@@ -84,6 +84,7 @@ describe('publishResolvedSegments', () => {
       p2p: 3,
       openFeed: 0,
       coldStart: 5,
+      aged: 0,
       unresolved: 0,
     };
 
@@ -100,6 +101,7 @@ describe('publishResolvedSegments', () => {
       p2p: 4,
       openFeed: 0,
       coldStart: 0,
+      aged: 0,
       unresolved: 0,
     });
 

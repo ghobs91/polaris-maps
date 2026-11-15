@@ -31,6 +31,7 @@ import type { TrafficSourceBreakdown } from '../../models/trafficHistory';
 import { publishProfileConditions } from './nostrProfileExchange';
 import { currentTimeBucket } from './trafficTimeBuckets';
 import { seedThroughCache } from './trafficSeedCache';
+import { getAgedTraffic, readAgedSegments, recordAgedSegments } from './trafficAgedIndex';
 import {
   resolveTrafficConditions,
   observationsFromSegments,
@@ -117,9 +118,25 @@ function logResolution(label: string, source: string, breakdown: TrafficSourceBr
     `[TrafficFlowService] ${label} resolved via ${source} ` +
       `(${breakdown.requestedCells} cells: device ${breakdown.localProbe}` +
       `${breakdown.localSeeded > 0 ? `+${breakdown.localSeeded} seeded` : ''}, ` +
-      `tomtom ${breakdown.coldStart}, peers ${breakdown.p2p}, open ${breakdown.openFeed}, ` +
+      `tomtom ${breakdown.coldStart}, peers ${breakdown.p2p}, open ${breakdown.openFeed}` +
+      `${breakdown.aged > 0 ? `, aged ${breakdown.aged}` : ''}, ` +
       `unresolved ${breakdown.unresolved})`,
   );
+}
+
+/**
+ * Wrap an upstream tier so whatever it fetches is also kept on device for the
+ * aged fallback tier. Recording is fire-and-forget and preserves each segment's
+ * own observation time, so re-serving a cached seed cannot make it look fresh.
+ */
+function rememberForFallback(
+  fetch: (missing: string[]) => Promise<NormalizedTrafficSegment[]>,
+): (missing: string[]) => Promise<NormalizedTrafficSegment[]> {
+  return async (missing) => {
+    const segments = await fetch(missing);
+    recordAgedSegments(segments);
+    return segments;
+  };
 }
 
 /** Fetch traffic from all sources, merge, and update the store. */
@@ -162,18 +179,22 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       // Free feeds are cached for the same freshness window as cold-start
       // seeds: upstream answers answer requests, they never enter the probe
       // index.
-      openFeed: (missing) =>
+      openFeed: rememberForFallback((missing) =>
         seedThroughCache(missing, () => fetchOpenTrafficSegments(viewport), {
           // Free feeds are retried next refresh if they came back empty: a
           // transient outage must not hand the cell to the cold-start bridge
           // for the whole negative window.
           negativeTtlMs: 0,
         }),
+      ),
       // TomTom is the optional cold-start bridge: only the cells the earlier
       // tiers could not resolve are queried, and only when no fresh cached
       // seed already covers them.
-      seedFromTomTom: (missing) =>
+      seedFromTomTom: rememberForFallback((missing) =>
         seedThroughCache(missing, (stillMissing) => fetchTomTomTraffic(viewport, stillMissing)),
+      ),
+      // Nothing live answered: fall back to what this device already fetched.
+      agedFallback: (missing) => readAgedSegments(missing),
     });
 
     logResolution('viewport', result.source, result.breakdown);
@@ -308,19 +329,24 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       bucket,
       points,
       history: getTrafficHistory(),
-      openFeed: (missing) =>
+      openFeed: rememberForFallback((missing) =>
         seedThroughCache(missing, () => fetchOpenTrafficSegments(boundsFromCoords(routeCoords)), {
           negativeTtlMs: 0,
         }),
+      ),
       // TomTom cold-start: query only route cells the earlier tiers missed and
       // no fresh cached seed covers. Tile decoding is cached per z/x/y too, so
       // a route refreshed inside the window costs no provider request.
-      seedFromTomTom: (missing) =>
-        isTomTomConfigured()
-          ? seedThroughCache(missing, (stillMissing) =>
+      seedFromTomTom: isTomTomConfigured()
+        ? rememberForFallback((missing) =>
+            seedThroughCache(missing, (stillMissing) =>
               sampleRouteTileColors(routeCoords, stillMissing),
-            )
-          : Promise.resolve([]),
+            ),
+          )
+        : async () => [],
+      // Last resort: a route re-checked later in an area whose live tiers are
+      // empty still gets last-known traffic colours and a stale-labelled ETA.
+      agedFallback: (missing) => readAgedSegments(missing),
     });
 
     logResolution('route', result.source, result.breakdown);
@@ -452,6 +478,12 @@ export async function initTrafficP2P(): Promise<void> {
     .prune()
     .then(() => getTrafficHistory().count())
     .then((rows) => useTrafficStore.getState().setHistoryEntryCount(rows))
+    .catch(() => {});
+
+  // Same for the aged fallback table: short-lived by design, but it still has
+  // to be trimmed between sessions.
+  void getAgedTraffic()
+    .prune()
     .catch(() => {});
 
   // Listen for peer count changes from the worklet

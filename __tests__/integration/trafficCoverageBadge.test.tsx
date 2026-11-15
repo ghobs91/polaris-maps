@@ -29,6 +29,7 @@ function makeBreakdown(overrides: Partial<TrafficSourceBreakdown> = {}): Traffic
     p2p: 0,
     openFeed: 0,
     coldStart: 0,
+    aged: 0,
     unresolved: 0,
     ...overrides,
   };
@@ -87,5 +88,14 @@ describe('TrafficCoverageBadge', () => {
 
     expect(screen.getByText('On-device history (seeded)')).toBeTruthy();
     expect(screen.getByText('device 0 · seeded 4 · tomtom 0 · peers 0 · open 0')).toBeTruthy();
+  });
+
+  it('shows an aged fallback as stale traffic, not current', () => {
+    setCoverage('aged', NOW, makeBreakdown({ aged: 6 }));
+
+    const screen = render(<TrafficCoverageBadge />);
+
+    expect(screen.getByText('Stale traffic data')).toBeTruthy();
+    expect(screen.getByText('device 0 · tomtom 0 · peers 0 · open 0 · aged 6')).toBeTruthy();
   });
 });

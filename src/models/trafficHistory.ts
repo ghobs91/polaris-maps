@@ -82,6 +82,7 @@ export type TrafficResolveSource =
   | 'p2p'
   | 'open_feed'
   | 'tomtom'
+  | 'aged'
   | 'none';
 
 /**
@@ -106,6 +107,8 @@ export interface TrafficSourceBreakdown {
   openFeed: number;
   /** Cells answered by the optional TomTom cold-start bridge. */
   coldStart: number;
+  /** Cells answered by aged on-device data (last-known, nothing live). */
+  aged: number;
   /** Cells no tier could answer. */
   unresolved: number;
 }
@@ -147,5 +150,8 @@ export const SOURCE_CONFIDENCE: Record<TrafficResolveSource, number> = {
   p2p: 0.7,
   open_feed: 0.75,
   tomtom: 0.9,
+  // Last resort: the data is real, but it can be up to `AGED_MAX_AGE_SEC` old
+  // and must lose a confidence-weighted merge against any live source.
+  aged: 0.3,
   none: 0,
 };

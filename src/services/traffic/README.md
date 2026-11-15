@@ -8,6 +8,8 @@ The traffic system prefers crowd-sourced speed probes from Polaris Maps peers (H
 
 Provenance is kept strict: the weekly condition index is the **on-device flow history** and only ever receives probe-derived observations (own probes, P2P aggregates, peer condition answers). Upstream batches (open feeds, TomTom) answer requests from a bounded, 15-minute in-memory seed cache instead — they are never blended into the weekly profiles, and a cached answer is still labelled `cold-start`/`open-feed`, never `on-device`.
 
+When every live tier comes back empty for a cell, the cascade falls back to **aged** data: upstream segments the device already fetched earlier (up to 2 hours old, see `trafficAgedStore`). It is strictly a last resort — ranked below the TomTom bridge, never overriding a live label — and a resolution that used it reports `stale` coverage so the UI never presents last-known traffic as current. Aged segments are never republished or served to peers.
+
 During active navigation, the ETA is continuously adjusted using geohash6-indexed traffic segments matched to route geometry. When a traffic-aware candidate route is at least two minutes faster than the active route's remaining time, the system surfaces a dismissible in-navigation suggestion instead of rerouting silently; the user accepts or dismisses it, and a two-minute anti-thrash cooldown limits repeat prompts.
 
 Crowd-reported incidents (accident, road closure, hazard, construction, police, other) are Schnorr-signed and shared over the same P2P transports, then rendered on the map and announced ahead during navigation.
@@ -25,10 +27,11 @@ nostrRelayDirectory.ts (health-probes and ranks the relay pool)
     ↓
 trafficAggregator.ts (5min rolling window)
     ↓
-trafficCascade.ts (5 tiers: local fresh → local history → P2P swarm + Nostr profiles → open feeds → TomTom)
-    ↓ (tiers 1–3 write into the index; upstream tiers 4–5 are cached by trafficSeedCache instead)
+trafficCascade.ts (6 tiers: local fresh → local history → P2P swarm + Nostr profiles → open feeds → TomTom → aged on-device fallback)
+    ↓ (tiers 1–3 write into the index; upstream tiers 4–5 are cached by trafficSeedCache; tier 6 serves last-known data with stale coverage)
 trafficHistorySqlite.ts (weekly EMA profiles, probe-sample provenance per row)
 trafficSeedCache.ts (bounded 15-min in-memory cache for open-feed / TomTom answers)
+trafficAgedStore.ts (SQLite, ≤2 h served / 6 h retained, last-known upstream segments)
     ↓
 trafficMerger.ts (+ TomTom + peer probes)
     ↓
@@ -52,6 +55,9 @@ trafficStore.incidents → IncidentLayer / IncidentAheadBanner
 | `openTrafficFeed.ts`            | Free open-feed adapters (511 / DATEX II / NDW): fetches a bbox, normalizes to `NormalizedTrafficSegment[]`, and fails closed to no data. Configured via `EXPO_PUBLIC_OPEN_TRAFFIC_FEEDS`.                                                                                                                                                                                                                                                                                                           |
 | `trafficCoverage.ts`            | Pure mapping from a cascade resolve source to an explicit coverage status (P2P, open-feed, cold-start, on-device, stale, no-data), plus the one-line per-source breakdown used by the developer-mode badge and settings.                                                                                                                                                                                                                                                                            |
 | `trafficSeedCache.ts`           | Bounded in-memory cache (geohash5 cell → segments, 15-minute TTL, 5-minute negative TTL) for upstream bootstrap data. Makes repeated refreshes reuse an open-feed/TomTom answer without writing licensed content into the weekly probe index, and stops no-data cells from being re-queried on every refresh.                                                                                                                                                                                       |
+| `trafficAgedStore.ts`           | Service + in-memory backend for the aged fallback: upstream segments persisted with their own observation time, served only for cells nothing live resolved, ≤2 h old, retained 6 h, capped at 20k rows. Pure `agedRowsFromSegments`/`agedSegmentsFromRows` helpers keep the round-trip testable.                                                                                                                                                                                                   |
+| `trafficAgedSqlite.ts`          | SQLite backend (`traffic-aged.db`) for the aged store: upsert keeps whichever copy was observed most recently, corrupt coordinate blobs are dropped instead of failing the cascade, and retention/cap are enforced with row counts returned for diagnostics.                                                                                                                                                                                                                                        |
+| `trafficAgedIndex.ts`           | Singleton + wiring for the aged store: `readAgedSegments` (never throws into the cascade) and fire-and-forget `recordAgedSegments` (provider batches only — probe data belongs to the weekly index).                                                                                                                                                                                                                                                                                                |
 | `trafficMerger.ts`              | Merges P2P `AggregatedTrafficState` and external `NormalizedTrafficSegment[]` using haversine proximity matching (~30m). P2P data takes priority when both sources cover the same road.                                                                                                                                                                                                                                                                                                             |
 | `trafficAggregator.ts`          | Ingests individual `TrafficProbe` messages into a 5-minute rolling window per road segment. Computes rolling average speed, congestion level, and sample count with validation guards.                                                                                                                                                                                                                                                                                                              |
 | `probeCollectionCoordinator.ts` | Starts/stops probe collection based on consent (`trafficTelemetryEnabled` + completed privacy consent) and `AppState`; mirrors state into `trafficStore.isCollectingProbes`.                                                                                                                                                                                                                                                                                                                        |
@@ -125,6 +131,28 @@ normal spend but cannot make it confidential. Guard rails:
 - HTTP 403/429 opens a 30-minute breaker; repeated 5xx/network failures open a
   10-minute breaker (both logged to diagnostics);
 - the signed `tomtomBridge` remote flag disables the bridge without a release.
+
+## Aged fallback (better than nothing)
+
+Every upstream answer the device fetches (TomTom flow segments, open-feed road
+segments) is also written to a short-lived local table, keyed by geohash5 cell
+and stamped with the provider's own observation time. When a resolution reaches
+the end of the cascade with cells still unresolved — no key, breaker open, no
+peers, no feed coverage — those cells are answered from that table instead of
+rendering empty.
+
+- **Ranked last.** It runs only for cells every live tier missed and never
+  overrides a live label: coverage reports `stale` only when nothing live
+  resolved anything.
+- **Hard age limit.** Segments older than 2 hours are not served; rows are
+  deleted after 6 hours and the table is capped at 20,000 rows (pruned at
+  traffic init).
+- **Honest age.** The row's timestamp is the provider observation time, never
+  the write time, so re-caching a 15-minute-old seed cannot make it look fresh.
+- **Local only.** Aged rows are never published through Nostr/Hyperdrive and
+  never counted as probe samples — licensed upstream content stays on device.
+- **ETA guard.** When the visible traffic is only aged fallback, `useTrafficEta`
+  prefers the fresh route-ETA API over the stale local estimate (`prefersRouteApiEta`).
 
 ## Related Files
 

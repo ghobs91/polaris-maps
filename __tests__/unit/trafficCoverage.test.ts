@@ -13,6 +13,7 @@ function breakdown(overrides: Partial<TrafficSourceBreakdown> = {}): TrafficSour
     p2p: 0,
     openFeed: 0,
     coldStart: 0,
+    aged: 0,
     unresolved: 0,
     ...overrides,
   };
@@ -25,6 +26,11 @@ describe('coverageFromResolveSource', () => {
     expect(coverageFromResolveSource('tomtom')).toBe('cold-start');
     expect(coverageFromResolveSource('local-fresh')).toBe('local');
     expect(coverageFromResolveSource('local-history')).toBe('local');
+  });
+
+  it('reports aged (last-known) data as stale, never as current', () => {
+    expect(coverageFromResolveSource('aged')).toBe('stale');
+    expect(resolveTrafficCoverage('aged', 10_000, 10_000)).toBe('stale');
   });
 
   it('treats unknown/empty sources as no-data', () => {
@@ -63,6 +69,12 @@ describe('summarizeTrafficBreakdown', () => {
         breakdown({ localProbe: 8, localSeeded: 4, coldStart: 5, unresolved: 3 }),
       ),
     ).toBe('device 8 · seeded 4 · tomtom 5 · peers 0 · open 0 · none 3');
+  });
+
+  it('shows an aged-fallback count when nothing live resolved', () => {
+    expect(summarizeTrafficBreakdown(breakdown({ aged: 4 }))).toBe(
+      'device 0 · tomtom 0 · peers 0 · open 0 · aged 4',
+    );
   });
 
   it('returns an empty summary when no cells were requested', () => {

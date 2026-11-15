@@ -24,12 +24,19 @@ import { wireToEntry } from './p2pConditionWire';
  *   3. p2p               — fresh data from connected Hyperswarm peers
  *   4. open feed         — free open traffic feed (511 / DATEX II / NDW)
  *   5. tomtom            — optional cold-start seed (cached outside this module)
+ *   6. aged              — last-known upstream segments still on the device
  *
  * Only tiers 1–3 write into the weekly condition index. Upstream tiers (open
  * feed, TomTom) answer the request but are cached by `trafficSeedCache`
  * instead: they are not probe-derived, so they cannot be republished, and
  * blending them into the weekly profile made the index both misattributed and
  * needlessly granular.
+ *
+ * The last tier is a "better than nothing" fallback: when every live tier came
+ * back empty for a cell (no key, breaker open, no peers, no feed coverage), a
+ * segment the device fetched earlier today still beats an empty overlay. It is
+ * served only for cells nothing live resolved, and a resolution that had to use
+ * it is labelled `stale` — never presented as current traffic.
  */
 
 export interface CascadePoint {
@@ -57,6 +64,12 @@ export interface CascadeRequest {
    * cells that still need data (may return segments for other cells too).
    */
   seedFromTomTom: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
+  /**
+   * Optional last-resort tier: segments the device already fetched for these
+   * cells earlier (see `trafficAgedStore`). Only asked for the cells every
+   * live tier missed.
+   */
+  agedFallback?: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
   /** Request P2P data; injectable for tests. Defaults to the real bridge. */
   p2pQuery?: (cells: string[], bucket: TimeBucket) => Promise<WireConditionEntry[]>;
 }
@@ -178,6 +191,7 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     p2p: 0,
     openFeed: 0,
     coldStart: 0,
+    aged: 0,
     unresolved: 0,
   };
 
@@ -295,6 +309,38 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
         }
       }
       breakdown.coldStart += resolvedAny;
+      missing = missing.filter((c) => !conditions.has(c));
+    }
+  }
+
+  // Tier 6: aged on-device fallback (last-known upstream segments).
+  if (missing.length > 0 && typeof req.agedFallback === 'function') {
+    const segments = await req.agedFallback(missing).catch(() => [] as NormalizedTrafficSegment[]);
+    if (segments.length > 0) {
+      const observations = observationsFromSegments(segments, geohash5ForCoord);
+      let resolvedAny = 0;
+      for (const [cell, obs] of observations) {
+        if (!conditions.has(cell)) {
+          conditions.set(cell, {
+            geohash5: cell,
+            dayOfWeek: req.bucket.dayOfWeek,
+            halfHour: req.bucket.halfHour,
+            avgSpeedMph: Math.round(obs.avgSpeedMph * 10) / 10,
+            avgCongestionRatio: obs.avgCongestionRatio,
+            freeFlowSpeedMph: obs.freeFlowSpeedMph,
+            sampleCount: 1,
+            probeSamples: 0,
+            observedSpanDays: 0,
+            lastObservedDay: Math.floor(Date.now() / 86_400_000),
+            lastUpdated: Math.floor(Date.now() / 1000),
+          });
+          resolvedAny += 1;
+        }
+      }
+      breakdown.aged += resolvedAny;
+      // Aged data never overrides a live label: coverage is only reported as
+      // stale when nothing live resolved anything at all.
+      if (resolvedAny > 0 && source === 'none') source = 'aged';
       missing = missing.filter((c) => !conditions.has(c));
     }
   }

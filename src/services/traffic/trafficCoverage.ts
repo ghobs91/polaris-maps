@@ -14,6 +14,9 @@ export function coverageFromResolveSource(source: string | null | undefined): Tr
       return 'open-feed';
     case 'tomtom':
       return 'cold-start';
+    case 'aged':
+      // Last-known data from earlier in the session/day: real, but not current.
+      return 'stale';
     case 'local-fresh':
     case 'local-history':
       return 'local';
@@ -63,6 +66,7 @@ export function summarizeTrafficBreakdown(breakdown: TrafficSourceBreakdown): st
   parts.push(`tomtom ${breakdown.coldStart}`);
   parts.push(`peers ${breakdown.p2p}`);
   parts.push(`open ${breakdown.openFeed}`);
+  if (breakdown.aged > 0) parts.push(`aged ${breakdown.aged}`);
   if (breakdown.unresolved > 0) parts.push(`none ${breakdown.unresolved}`);
   return parts.join(' · ');
 }

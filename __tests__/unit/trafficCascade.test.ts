@@ -89,6 +89,7 @@ describe('resolveTrafficConditions cascade order', () => {
       p2p: 0,
       openFeed: 0,
       coldStart: 0,
+      aged: 0,
       unresolved: 0,
     });
     expect(p2p).not.toHaveBeenCalled();
@@ -300,6 +301,92 @@ describe('resolveTrafficConditions cascade order', () => {
 
     expect(result.source).toBe('tomtom');
     expect(result.unresolvedCells).toHaveLength(0);
+  });
+
+  it('falls back to aged on-device data when nothing live resolves', async () => {
+    const history = makeHistory();
+    const aged = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.4)));
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      seedFromTomTom: async () => [],
+      agedFallback: aged,
+      p2pQuery: async () => [],
+    });
+
+    expect(aged).toHaveBeenCalledWith(CELLS);
+    expect(result.source).toBe('aged');
+    expect(result.breakdown.aged).toBe(3);
+    expect(result.unresolvedCells).toHaveLength(0);
+    expect(result.segments).toHaveLength(3);
+    // Aged segments are synthesized with the lowest tier confidence so a
+    // confidence-weighted merge against live data always loses.
+    expect(result.segments.every((s) => s.confidence < 0.5)).toBe(true);
+  });
+
+  it('never labels a live resolution as aged, and only asks for the missing cells', async () => {
+    const history = makeHistory([makeCondition(CELLS[0], { lastUpdated: 1_800_000_000 })]);
+    const seed = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.5)));
+    const aged = jest.fn(async () => [] as NormalizedTrafficSegment[]);
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      seedFromTomTom: seed,
+      agedFallback: aged,
+      p2pQuery: async () => [],
+    });
+
+    // TomTom answered the fresh cell's siblings, so the aged tier is never
+    // consulted — let alone allowed to override the label.
+    expect(seed).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
+    expect(aged).not.toHaveBeenCalled();
+    expect(result.source).toBe('tomtom');
+    expect(result.breakdown.aged).toBe(0);
+  });
+
+  it('keeps the live source when only some cells needed aged data', async () => {
+    const history = makeHistory([makeCondition(CELLS[0], { lastUpdated: 1_800_000_000 })]);
+    const aged = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.4)));
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      seedFromTomTom: async () => [],
+      agedFallback: aged,
+      p2pQuery: async () => [],
+    });
+
+    expect(aged).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
+    // Coverage is only reported as stale when *nothing* live resolved.
+    expect(result.source).toBe('local-fresh');
+    expect(result.breakdown).toMatchObject({ localProbe: 1, aged: 2, unresolved: 0 });
+  });
+
+  it('treats a failing aged store as no data', async () => {
+    const history = makeHistory();
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      seedFromTomTom: async () => [],
+      agedFallback: async () => {
+        throw new Error('sqlite closed');
+      },
+      p2pQuery: async () => [],
+    });
+
+    expect(result.source).toBe('none');
+    expect(result.breakdown.aged).toBe(0);
+    expect(result.unresolvedCells).toHaveLength(3);
   });
 });
 
