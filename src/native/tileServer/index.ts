@@ -20,6 +20,12 @@ export async function addTileSource(source: TileSource): Promise<void> {
   return NativePolarisTileServer!.addSource(source);
 }
 
+/** Serve a pack's PMTiles archive directly (no per-tile expansion on disk). */
+export async function addPmtilesTileSource(source: TileSource): Promise<void> {
+  if (!isAvailable || !NativePolarisTileServer!.addPmtilesSource) return;
+  return NativePolarisTileServer!.addPmtilesSource(source);
+}
+
 export async function removeTileSource(sourceId: string): Promise<void> {
   if (!isAvailable) return;
   return NativePolarisTileServer!.removeSource(sourceId);

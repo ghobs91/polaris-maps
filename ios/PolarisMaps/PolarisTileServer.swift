@@ -14,9 +14,24 @@ import Network
 /// 127.0.0.1 only.
 @objc(PolarisTileServer)
 class PolarisTileServer: NSObject {
+  /// A registered tile source: an unpacked `{z}/{x}/{y}.pbf` tree (packs
+  /// downloaded before archives were served directly) or a PMTiles archive.
+  private enum Source {
+    case directory(String)
+    case pmtiles(PolarisPmtilesArchive)
+
+    var path: String {
+      switch self {
+      case .directory(let path): return path
+      case .pmtiles(let archive): return archive.path
+      }
+    }
+  }
+
   private let queue = DispatchQueue(label: "polaris.tile-server", qos: .utility)
+  private let sourcesLock = NSLock()
   private var listener: NWListener?
-  private var sources: [String: String] = [:] // id → directory path
+  private var sources: [String: Source] = [:]
   private var port: UInt16 = 0
   private var isStarting = false
   private var pendingStartHandlers: [(RCTPromiseResolveBlock, RCTPromiseRejectBlock)] = []
@@ -121,8 +136,35 @@ class PolarisTileServer: NSObject {
       reject("tile_server_invalid_source", "Source requires id and filePath", nil)
       return
     }
-    sources[id] = filePath
+    sourcesLock.lock()
+    sources[id] = .directory(filePath)
+    sourcesLock.unlock()
     resolve(nil)
+  }
+
+  /// Register a PMTiles archive as a source.
+  ///
+  /// The archive is served tile-by-tile through range reads, so a pack costs
+  /// its download size on disk instead of one file per tile.
+  @objc
+  func addPmtilesSource(
+    _ source: NSDictionary,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard let id = source["id"] as? String, let filePath = source["filePath"] as? String else {
+      reject("tile_server_invalid_source", "Source requires id and filePath", nil)
+      return
+    }
+    do {
+      let archive = try PolarisPmtilesArchive(path: filePath)
+      sourcesLock.lock()
+      sources[id] = .pmtiles(archive)
+      sourcesLock.unlock()
+      resolve(nil)
+    } catch {
+      reject("tile_server_bad_pmtiles", error.localizedDescription, error)
+    }
   }
 
   @objc
@@ -131,7 +173,9 @@ class PolarisTileServer: NSObject {
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
+    sourcesLock.lock()
     sources.removeValue(forKey: sourceId)
+    sourcesLock.unlock()
     resolve(nil)
   }
 
@@ -140,7 +184,10 @@ class PolarisTileServer: NSObject {
     _ resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    resolve(sources.map { ["id": $0.key, "filePath": $0.value] })
+    sourcesLock.lock()
+    let snapshot = sources.map { ["id": $0.key, "filePath": $0.value.path] }
+    sourcesLock.unlock()
+    resolve(snapshot)
   }
 
   @objc
@@ -221,21 +268,66 @@ class PolarisTileServer: NSObject {
       return
     }
 
-    guard let root = sources[sourceId] else {
+    sourcesLock.lock()
+    let source = sources[sourceId]
+    sourcesLock.unlock()
+
+    guard let source = source else {
       respond(connection, status: "404 Not Found", contentType: "text/plain", body: Data("unknown source".utf8))
       return
     }
 
     let relativePath = segments.dropFirst().joined(separator: "/")
-    let fileUrl = URL(fileURLWithPath: root).appendingPathComponent(relativePath)
 
-    guard let data = try? Data(contentsOf: fileUrl) else {
-      respond(connection, status: "404 Not Found", contentType: "text/plain", body: Data("tile not found".utf8))
-      return
+    switch source {
+    case .directory(let root):
+      let fileUrl = URL(fileURLWithPath: root).appendingPathComponent(relativePath)
+
+      guard let data = try? Data(contentsOf: fileUrl) else {
+        respond(connection, status: "404 Not Found", contentType: "text/plain", body: Data("tile not found".utf8))
+        return
+      }
+
+      let contentType = Self.contentType(for: fileUrl.pathExtension)
+      respond(connection, status: "200 OK", contentType: contentType, body: data, cacheMaxAge: 900)
+
+    case .pmtiles(let archive):
+      // Path shape is the same as the unpacked tree: {z}/{x}/{y}.pbf, so the
+      // style rewrite and offline detection need no changes.
+      let tileSegments = Array(segments.dropFirst())
+      guard tileSegments.count == 3,
+        let z = Int(tileSegments[0]),
+        let x = Int(tileSegments[1]),
+        let y = Int((tileSegments[2] as NSString).deletingPathExtension),
+        tileSegments[2].hasSuffix(".pbf")
+      else {
+        respond(connection, status: "404 Not Found", contentType: "text/plain", body: Data("bad tile path".utf8))
+        return
+      }
+
+      let tile: Data?
+      do {
+        tile = try archive.tile(z: z, x: x, y: y)
+      } catch {
+        respond(connection, status: "500 Internal Server Error", contentType: "text/plain", body: Data("pmtiles: \(error.localizedDescription)".utf8))
+        return
+      }
+
+      guard let tile = tile, !tile.isEmpty else {
+        // 204 is what MapLibre expects for "this tile has no data" — it renders
+        // the parent instead of treating it as a failed request.
+        respond(connection, status: "204 No Content", contentType: "application/vnd.mapbox-vector-tile", body: Data())
+        return
+      }
+
+      respond(
+        connection,
+        status: "200 OK",
+        contentType: "application/vnd.mapbox-vector-tile",
+        body: tile,
+        cacheMaxAge: 900
+      )
     }
-
-    let contentType = Self.contentType(for: fileUrl.pathExtension)
-    respond(connection, status: "200 OK", contentType: contentType, body: data, cacheMaxAge: 900)
   }
 
   private func respond(

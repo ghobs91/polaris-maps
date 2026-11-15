@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import {
   startTileServer,
   addTileSource,
+  addPmtilesTileSource,
   listTileSources,
   getTileServerBaseUrl,
 } from '../../native/tileServer';
@@ -23,6 +24,8 @@ import { offlineFontsDir, offlineGlyphsUrl, OFFLINE_FONTS_SOURCE_ID } from './of
  */
 
 const SOURCE_PREFIX = 'offline-';
+/** Base-map archive inside a pack directory. */
+const TILES_ARCHIVE = 'tiles.pmtiles';
 
 let serverBaseUrl: string | null = null;
 let startAttempted = false;
@@ -94,6 +97,17 @@ export async function syncOfflineSources(): Promise<void> {
       continue;
     }
     try {
+      // Prefer the archive: it is the pack's own storage, served by range
+      // reads. Only packs downloaded before that existed have an unpacked
+      // tree, and a 15.8 MB archive used to become 737k files / 2.8 GB there.
+      const archivePath = toNativePath(
+        `${FileSystem.documentDirectory}regions/${region.id}/${TILES_ARCHIVE}`,
+      );
+      if ((await FileSystem.getInfoAsync(`file://${archivePath}`)).exists) {
+        await addPmtilesTileSource({ id: sourceId, filePath: archivePath });
+        registeredSources.add(sourceId);
+        continue;
+      }
       const info = await FileSystem.getInfoAsync(
         `${FileSystem.documentDirectory}regions/${region.id}/tiles/`,
       );
@@ -158,12 +172,20 @@ export async function getOfflinePackForPoint(
   const sourceId = offlineSourceId(region.id);
   if (!registeredSources.has(sourceId)) {
     try {
-      const info = await FileSystem.getInfoAsync(
-        `${FileSystem.documentDirectory}regions/${region.id}/tiles/`,
+      const archivePath = toNativePath(
+        `${FileSystem.documentDirectory}regions/${region.id}/${TILES_ARCHIVE}`,
       );
-      if (!info.exists) return null;
-      await addTileSource({ id: sourceId, filePath: tilesDirForRegion(region.id) });
-      registeredSources.add(sourceId);
+      if ((await FileSystem.getInfoAsync(`file://${archivePath}`)).exists) {
+        await addPmtilesTileSource({ id: sourceId, filePath: archivePath });
+        registeredSources.add(sourceId);
+      } else {
+        const info = await FileSystem.getInfoAsync(
+          `${FileSystem.documentDirectory}regions/${region.id}/tiles/`,
+        );
+        if (!info.exists) return null;
+        await addTileSource({ id: sourceId, filePath: tilesDirForRegion(region.id) });
+        registeredSources.add(sourceId);
+      }
     } catch {
       return null;
     }

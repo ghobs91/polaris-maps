@@ -14,6 +14,8 @@ export interface TileSource {
 export interface Spec extends TurboModule {
   start(config: TileServerConfig): Promise<number>;
   addSource(source: TileSource): Promise<void>;
+  /** Serve a pack's `tiles.pmtiles` directly instead of an unpacked tree. */
+  addPmtilesSource(source: TileSource): Promise<void>;
   removeSource(sourceId: string): Promise<void>;
   listSources(): Promise<TileSource[]>;
   stop(): Promise<void>;

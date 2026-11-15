@@ -1,13 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDatabase } from '../database/init';
 import { updatePeerMetrics } from '../sync/peerService';
-import {
-  downloadFromPeers,
-  gunzipFile,
-  seedRegion,
-  unseedRegion,
-  unpackPmtiles,
-} from '../sync/hyperdriveBridge';
+import { downloadFromPeers, gunzipFile, seedRegion, unseedRegion } from '../sync/hyperdriveBridge';
 import { joinRegionFeed, leaveRegionFeed } from '../sync/feedSyncService';
 import {
   OPENFREEMAP_TILEJSON_URL,
@@ -238,7 +232,7 @@ export async function downloadRegion(
         // The pack carries a base-map PMTiles archive: expand it into the
         // per-tile tree the local tile server serves, so a downloaded region
         // renders from local bytes with no third-party tile requests.
-        await downloadAndUnpackTilesArchive(region, destDir, shippedTiles, onProgress, signal);
+        await downloadTilesArchive(region, destDir, shippedTiles, onProgress, signal);
       } else {
         await downloadViaHttp(region, destDir, onProgress, signal);
       }
@@ -695,23 +689,13 @@ function reportSourceOutcome(source: string, outcome: 'success' | 'failure'): vo
 }
 
 /**
- * Highest zoom expanded out of the pack archive.
- *
- * The render path serves one file per tile, so this bounds both the file count
- * and the on-disk size. It matches the zoom the previous per-tile download
- * path fetched from OpenFreeMap, so a downloaded region looks the same while
- * needing no third-party tile requests.
- */
-const UNPACK_MAX_ZOOM = 12;
-
 /**
- * Download a pack's base-map archive and expand it into `{z}/{x}/{y}.pbf`.
+ * Download a pack's base-map archive and keep it as the archive.
  *
- * The archive is removed after a successful expansion: the tile tree is what
- * peers seed and what the tile server serves, so keeping both would double
- * every pack's footprint.
+ * The native tile server reads individual tiles out of the PMTiles file, so a
+ * pack costs exactly its download size on disk.
  */
-async function downloadAndUnpackTilesArchive(
+async function downloadTilesArchive(
   region: Region,
   destDir: string,
   asset: RegionAsset,
@@ -749,29 +733,19 @@ async function downloadAndUnpackTilesArchive(
 
   checkAborted(signal);
 
-  // Expanding thousands of tiles takes minutes with no bytes transferred: say
-  // so, or the bar sits at 100% and the download looks hung.
-  onProgress?.({
+  // The archive stays as-is. The native tile server serves {z}/{x}/{y} out of
+  // it by range reads, so there is nothing to expand: expanding a 15.8 MB
+  // archive wrote 737,058 files and cost 2.8 GB of filesystem blocks, and the
+  // unpack itself took minutes during which the bar could only say "expanding".
+  //
+  // The archive is kept at `regions/{id}/tiles.pmtiles`; `offlineMapService`
+  // registers it as a PMTiles source and falls back to an unpacked `tiles/`
+  // tree only for packs downloaded before this existed.
+  logDiagnostic('regions', 'info', 'base-map archive downloaded (served directly)', {
     regionId: region.id,
-    totalBytes: asset.sizeBytes ?? 0,
-    downloadedBytes: asset.sizeBytes ?? 0,
-    percent: 100,
-    stage: 'unpack',
-  });
-
-  const tilesDir = `${destDir}tiles/`;
-  await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
-
-  const result = await unpackPmtiles(archivePath, tilesDir, { maxZoom: UNPACK_MAX_ZOOM });
-  logDiagnostic('regions', 'info', 'expanded base-map archive', {
-    regionId: region.id,
-    tiles: result.tiles,
-    skipped: result.skipped,
+    bytes: asset.sizeBytes ?? 0,
     ms: Date.now() - startedAt,
   });
-
-  // Tile tree is now the offline source of truth; drop the archive.
-  await FileSystem.deleteAsync(archivePath, { idempotent: true }).catch(() => {});
 }
 
 /** Seed a downloaded region in the background and persist the canonical key. */
