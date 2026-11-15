@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, TextInput, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { getAllRegions, getRegionById } from '../../services/regions/regionRepository';
 import { deleteRegionData } from '../../services/regions/downloadService';
 import {
@@ -15,13 +16,16 @@ import {
 } from '../../services/regions/nearestPackRegion';
 import { planOfflineTileDownload } from '../../services/regions/tileDownloadPlan';
 import { uncoveredTree, flattenTree } from '../../services/regions/uncoveredTree';
-import { getLastAutoDownloadDecision } from '../../services/regions/autoRegionDownloadCoordinator';
+import {
+  getLastAutoDownloadDecision,
+  describeAutoDownloadForUser,
+} from '../../services/regions/autoRegionDownloadCoordinator';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
 import { upsertRegion } from '../../services/regions/regionRepository';
 import { RegionCard, DownloadProgressBar, GeofabrikTreePicker } from '.';
 import { LoadingSpinner } from '../common';
 import { GEOFABRIK_TREE, type GeoNode, geoNodeToRegion } from '../../constants/geofabrikCatalog';
-import { spacing, typography } from '../../constants/theme';
+import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -34,6 +38,8 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [regions, setRegions] = useState<Region[]>([]);
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
+  /** Filter for the pack list: 193 packs are unusable as a plain scroll. */
+  const [packQuery, setPackQuery] = useState('');
   /**
    * Catalog regions with a pack that are not yet downloaded.
    *
@@ -53,7 +59,9 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     if (!decision) return null;
     const ageMin = Math.round((Date.now() - decision.at) / 60_000);
     const when = ageMin <= 0 ? 'just now' : `${ageMin}m ago`;
-    return `Background download — ${decision.subject}: ${decision.outcome} (${when})`;
+    // Rendered the raw enum and the region id before (`skip auto-download:
+    // metered (us-ny-new-york)`), which told the user nothing they could act on.
+    return `Automatic download — ${describeAutoDownloadForUser(decision)} (${when})`;
   }, [regions]);
 
   const availablePacks = useMemo(
@@ -77,6 +85,15 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     () => new Set(regions.filter((r) => (r.assets?.length ?? 0) > 0).map((r) => r.id)),
     [regions],
   );
+
+  const visiblePacks = useMemo(() => {
+    const needle = packQuery.trim().toLowerCase();
+    if (!needle) return availablePacks;
+    return availablePacks.filter(
+      (region) =>
+        region.name.toLowerCase().includes(needle) || region.id.toLowerCase().includes(needle),
+    );
+  }, [availablePacks, packQuery]);
 
   /**
    * The Geofabrik tree with pack-covered areas removed.
@@ -279,12 +296,50 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Packs</Text>
           <Text style={styles.description}>
-            {availablePacks.length} full offline packs — maps, routing, search and transit — with no
-            per-download size limit. Prefer these: a pack covers its whole area, so the areas it
-            covers are not listed again below.
+            {packQuery.trim()
+              ? `${visiblePacks.length} of ${availablePacks.length} packs match “${packQuery.trim()}”.`
+              : `${availablePacks.length} full offline packs — maps, routing, search and transit — with no per-download size limit. Prefer these: a pack covers its whole area, so the areas it covers are not listed again below.`}
           </Text>
-          <ScrollView style={styles.packScroll} nestedScrollEnabled>
-            {availablePacks.map((region) => (
+          <View
+            style={[
+              styles.searchContainer,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={18}
+              color={colors.textSecondary}
+              style={styles.searchIcon}
+            />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              value={packQuery}
+              onChangeText={setPackQuery}
+              placeholder="Search packs..."
+              placeholderTextColor={colors.textSecondary}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              accessibilityLabel="Search packs"
+            />
+            {packQuery.length > 0 && (
+              <Pressable
+                onPress={() => setPackQuery('')}
+                accessibilityRole="button"
+                accessibilityLabel="Clear pack search"
+                hitSlop={8}
+              >
+                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+              </Pressable>
+            )}
+          </View>
+          <ScrollView
+            style={styles.packScroll}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
+            {visiblePacks.map((region) => (
               <RegionCard
                 key={region.id}
                 region={region}
@@ -294,6 +349,9 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
                 updateAvailable={staleRegionIds.has(region.id)}
               />
             ))}
+            {visiblePacks.length === 0 && (
+              <Text style={styles.emptyText}>No pack matches “{packQuery.trim()}”.</Text>
+            )}
           </ScrollView>
         </View>
       )}
@@ -375,6 +433,23 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
      */
     packScroll: {
       maxHeight: 380,
+    },
+    searchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+    },
+    searchIcon: {
+      marginLeft: spacing.xs,
+    },
+    searchInput: {
+      ...typography.body,
+      flex: 1,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm + 2,
     },
     autoDownloadHint: {
       fontSize: 11,

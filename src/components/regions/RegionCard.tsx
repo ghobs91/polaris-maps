@@ -26,20 +26,38 @@ export const RegionCard = memo(function RegionCard({
   const styles = useThemedStyles(createStyles);
   const toMb = (b?: number | null) =>
     ((b ?? 0) / (1024 * 1024)).toFixed(b && b >= 10 * 1024 * 1024 ? 0 : 1);
-  const sizeMb = region.tilesSizeBytes
-    ? Math.round(
-        ((region.tilesSizeBytes ?? 0) +
-          (region.routingSizeBytes ?? 0) +
-          (region.geocodingSizeBytes ?? 0) +
-          (region.placesSizeBytes ?? 0)) /
-          (1024 * 1024),
-      )
-    : null;
+
+  // Catalog regions carry their size in `assets`, not the legacy per-part
+  // columns, so reading only those columns left every pack card blank: no way
+  // to tell a 3 MB pack from a 400 MB one before starting the download.
+  const assetBytes = (region.assets ?? []).reduce((sum, asset) => sum + (asset.sizeBytes ?? 0), 0);
+  const legacyBytes =
+    (region.tilesSizeBytes ?? 0) +
+    (region.routingSizeBytes ?? 0) +
+    (region.geocodingSizeBytes ?? 0) +
+    (region.placesSizeBytes ?? 0);
+  const totalBytes = legacyBytes > 0 ? legacyBytes : assetBytes;
+  const sizeMb = totalBytes > 0 ? Math.round(totalBytes / (1024 * 1024)) : null;
+
+  /** What the pack actually contains, from the assets it ships. */
+  const ASSET_LABELS: Record<string, string> = {
+    'tiles.pmtiles': 'Maps',
+    'search.sqlite': 'Search',
+    'transit.sqlite': 'Transit',
+    'transit-timetable.sqlite': 'Timetable',
+    'geocoding-data.sqlite': 'Geocoding',
+  };
+  const assetLabels = (region.assets ?? [])
+    .map((asset) => ASSET_LABELS[asset.name])
+    .filter((label): label is string => label != null);
+
   const contents =
-    region.tilesSizeBytes != null
-      ? `Tiles ${toMb(region.tilesSizeBytes)} MB · Routing ${toMb(region.routingSizeBytes)} MB · Geocoding ${toMb(region.geocodingSizeBytes)} MB` +
-        (region.placesSizeBytes != null ? ` · Places ${toMb(region.placesSizeBytes)} MB` : '')
-      : null;
+    assetLabels.length > 0
+      ? [...new Set(assetLabels)].join(' · ')
+      : region.tilesSizeBytes != null
+        ? `Tiles ${toMb(region.tilesSizeBytes)} MB · Routing ${toMb(region.routingSizeBytes)} MB · Geocoding ${toMb(region.geocodingSizeBytes)} MB` +
+          (region.placesSizeBytes != null ? ` · Places ${toMb(region.placesSizeBytes)} MB` : '')
+        : null;
 
   return (
     <View style={styles.card}>

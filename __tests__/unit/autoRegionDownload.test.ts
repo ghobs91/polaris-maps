@@ -12,7 +12,9 @@ import {
   AUTO_DOWNLOAD_MAX_ATTEMPTS,
   decideAutoDownload,
   describeDecision,
+  explainSkipReason,
   type AutoDownloadContext,
+  type AutoDownloadSkipReason,
 } from '../../src/services/regions/autoRegionDownload';
 
 const BASE: AutoDownloadContext = {
@@ -124,5 +126,38 @@ describe('describeDecision', () => {
 
   it('reports the skip reason otherwise', () => {
     expect(describeDecision(decideAutoDownload(ctx({ metered: true })))).toContain('metered');
+  });
+});
+
+describe('explainSkipReason', () => {
+  const REASONS: AutoDownloadSkipReason[] = [
+    'disabled',
+    'no-region',
+    'already-downloaded',
+    'already-downloading',
+    'not-settled',
+    'size-unknown',
+    'disk-unknown',
+    'insufficient-disk',
+    'metered',
+    'attempted',
+  ];
+
+  it('explains every reason without leaking the enum', () => {
+    // The screen used to render `skip auto-download: metered` verbatim.
+    for (const reason of REASONS) {
+      const text = explainSkipReason(reason);
+      expect(text.length).toBeGreaterThan(0);
+      expect(text).not.toContain(reason);
+      expect(text).not.toContain('-');
+    }
+  });
+
+  it('tells the user what to do when cellular is the blocker', () => {
+    // `metered` is the reason that actually fires on a phone with 5G, so it has
+    // to name the way forward rather than just stating the fact.
+    const text = explainSkipReason('metered');
+    expect(text).toMatch(/cellular/i);
+    expect(text).toMatch(/settings/i);
   });
 });

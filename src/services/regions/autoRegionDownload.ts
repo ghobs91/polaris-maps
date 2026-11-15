@@ -110,6 +110,38 @@ export function decideAutoDownload(ctx: AutoDownloadContext): AutoDownloadDecisi
   return { start: true, regionId: ctx.regionId, reason: 'initial' };
 }
 
+/**
+ * Why the automatic download did not start, in words a user can act on.
+ *
+ * `describeDecision` is log text (`skip auto-download: metered`); showing it
+ * verbatim in the UI exposed an internal enum and an internal region id, and
+ * never said what to do about it. Each reason below answers "so what?".
+ */
+export function explainSkipReason(reason: AutoDownloadSkipReason): string {
+  switch (reason) {
+    case 'disabled':
+      return 'automatic downloads are turned off.';
+    case 'no-region':
+      return 'no pack covers this area yet.';
+    case 'already-downloaded':
+      return 'it is already downloaded.';
+    case 'already-downloading':
+      return 'a download is already running.';
+    case 'not-settled':
+      return 'waiting for the map to stop moving.';
+    case 'size-unknown':
+      return 'the pack has no published size.';
+    case 'disk-unknown':
+      return 'free space could not be read.';
+    case 'insufficient-disk':
+      return 'there is not enough free space.';
+    case 'metered':
+      return 'you are on cellular, and automatic downloads are off for cellular. Download it from the list below, or allow cellular downloads in Settings.';
+    case 'attempted':
+      return 'it was already tried this session.';
+  }
+}
+
 /** Human-readable reason, for the diagnostics log. */
 export function describeDecision(decision: AutoDownloadDecision): string {
   return decision.start

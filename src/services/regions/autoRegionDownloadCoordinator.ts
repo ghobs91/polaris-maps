@@ -11,7 +11,9 @@ import {
   AUTO_DOWNLOAD_SETTLE_MS,
   decideAutoDownload,
   describeDecision,
+  explainSkipReason,
   type AutoDownloadDecision,
+  type AutoDownloadSkipReason,
 } from './autoRegionDownload';
 import type { Region } from '../../models/region';
 
@@ -83,8 +85,12 @@ async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision>
   });
 
   lastDecision = {
-    subject: region ? `${region.name} (${region.id})` : `${lat.toFixed(2)}, ${lng.toFixed(2)}`,
+    // The name alone: the id is developer detail and was being rendered in the
+    // UI next to it.
+    subject: region ? region.name : `${lat.toFixed(2)}, ${lng.toFixed(2)}`,
+    regionId: region?.id,
     outcome: decision.start ? `started ${decision.regionId}` : describeDecision(decision),
+    reason: decision.start ? 'started' : decision.reason,
     at: Date.now(),
   };
 
@@ -103,7 +109,12 @@ async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision>
         // indistinguishable from one still running: the reason existed only in
         // a log no screen reads.
         if (lastDecision?.outcome === `started ${decision.regionId}`) {
-          lastDecision = { ...lastDecision, outcome: `failed — ${message}` };
+          lastDecision = {
+            ...lastDecision,
+            outcome: `failed — ${message}`,
+            reason: 'failed',
+            detail: message,
+          };
         }
         logDiagnostic('regions', 'warn', 'auto-download failed', {
           regionId: decision.regionId,
@@ -171,9 +182,29 @@ export function disposeAutoRegionDownload(): void {
 export interface AutoDownloadDiagnostics {
   /** Human-readable region name when one was evaluated, else the coordinates. */
   subject: string;
-  /** `started` or the skip reason from `describeDecision`. */
+  /** Machine id of that region, for logs — not for display. */
+  regionId?: string;
+  /** `started`, the skip reason from `describeDecision`, or `failed — <msg>`. */
   outcome: string;
+  /** Structured form of `outcome`, so the UI can explain it in its own words. */
+  reason?: AutoDownloadSkipReason | 'started' | 'failed';
+  /** Error message when `reason` is `failed`. */
+  detail?: string;
   at: number;
+}
+
+/** One sentence describing the last automatic-download decision. */
+export function describeAutoDownloadForUser(decision: AutoDownloadDiagnostics): string {
+  if (decision.reason === 'started') {
+    return `downloading ${decision.subject} in the background.`;
+  }
+  if (decision.reason === 'failed') {
+    return `${decision.subject} failed to download — ${decision.detail ?? 'unknown error'}.`;
+  }
+  if (decision.reason) {
+    return `${decision.subject} was skipped — ${explainSkipReason(decision.reason)}`;
+  }
+  return decision.outcome;
 }
 
 let lastDecision: AutoDownloadDiagnostics | null = null;
