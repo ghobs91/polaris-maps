@@ -10,9 +10,10 @@ import {
 } from '../../services/regions/downloadManager';
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
 import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
-import { orderPacks, filterPacks } from '../../services/regions/packOrder';
+import { orderPacks, filterPacks, downloadedRegions } from '../../services/regions/packOrder';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
 import { RegionCard } from './RegionCard';
+import { DownloadedRegionRow } from './DownloadedRegionRow';
 import { DownloadProgressBar } from './DownloadProgressBar';
 import { LoadingSpinner } from '../common';
 import { spacing, typography, borderRadius } from '../../constants/theme';
@@ -20,9 +21,10 @@ import type { Region } from '../../models/region';
 import { useTheme } from '../../contexts/ThemeContext';
 
 /**
- * Region catalogue: a search field over every pack-backed area.
+ * Region catalogue: a shelf of what is already on disk, then a search field over
+ * every pack-backed area.
  *
- * Deliberately text-free above the list — the screen is reached from Settings →
+ * Deliberately text-free otherwise — the screen is reached from Settings →
  * Download More Maps, so the user already knows what it is and the old heading,
  * auto-download status line and pack description only pushed the list down.
  */
@@ -33,14 +35,6 @@ export function RegionsContent() {
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   /** Filter for the pack list: 193 packs are unusable as a plain scroll. */
   const [packQuery, setPackQuery] = useState('');
-  /**
-   * Catalog regions with a pack that are not yet downloaded.
-   *
-   * These were previously never rendered — "Available Regions" showed only the
-   * Geofabrik tree, whose entries have no pack and are capped at OpenFreeMap's
-   * 50 MB offline limit. The packs, which have no such cap, were unreachable
-   * from this screen.
-   */
   /**
    * Every pack-backed area, whatever its state.
    *
@@ -56,11 +50,12 @@ export function RegionsContent() {
 
   const visiblePacks = useMemo(() => filterPacks(packRegions, packQuery), [packRegions, packQuery]);
 
-  /** Tile-only areas that finished downloading (no pack exists for them). */
-  const downloadedTileRegions = useMemo(
-    () => regions.filter((r) => (r.assets?.length ?? 0) === 0 && r.downloadStatus === 'complete'),
-    [regions],
-  );
+  /**
+   * Everything already on disk, packs and tile-only areas alike, shown on its
+   * own shelf above the search so "what have I downloaded" (and deleting it)
+   * does not require knowing the name to search for.
+   */
+  const downloaded = useMemo(() => downloadedRegions(regions), [regions]);
 
   const [loading, setLoading] = useState(true);
   // Global progress — survives screen unmount + app backgrounding.
@@ -174,6 +169,21 @@ export function RegionsContent() {
         </Text>
       )}
 
+      {downloaded.length > 0 && (
+        <View style={styles.downloadedSection}>
+          <Text style={styles.sectionTitle}>Downloaded</Text>
+          <ScrollView
+            style={styles.downloadedScroll}
+            contentContainerStyle={styles.downloadedList}
+            nestedScrollEnabled
+          >
+            {downloaded.map((region) => (
+              <DownloadedRegionRow key={region.id} region={region} onDelete={handleDelete} />
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       <View
         style={[
           styles.searchContainer,
@@ -229,28 +239,6 @@ export function RegionsContent() {
           </Text>
         )}
       </ScrollView>
-
-      {downloadedTileRegions.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Downloaded Tile Areas</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.downloadedScroll}
-          >
-            {downloadedTileRegions.map((region) => (
-              <RegionCard
-                key={region.id}
-                region={region}
-                onDownload={handleDownload}
-                onCancel={handleCancel}
-                onDelete={handleDelete}
-                updateAvailable={staleRegionIds.has(region.id)}
-              />
-            ))}
-          </ScrollView>
-        </View>
-      )}
     </View>
   );
 }
@@ -268,6 +256,10 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       marginBottom: spacing.sm,
       marginTop: spacing.md,
     },
+    /** Shelf of everything already on disk, above the search. */
+    downloadedSection: {
+      marginBottom: spacing.xs,
+    },
     backgroundHint: {
       ...typography.body,
       color: colors.textSecondary,
@@ -277,11 +269,15 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
     list: { paddingBottom: spacing.xl },
     emptyText: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
     downloadedScroll: {
-      maxHeight: 200,
+      maxHeight: 176,
+      flexGrow: 0,
+    },
+    downloadedList: {
+      paddingRight: spacing.xs,
     },
     /**
      * Packs are the primary path and now the whole screen, so the list fills
-     * whatever space the tile-area strip does not use.
+     * whatever space the shelf does not use.
      */
     packScroll: {
       flex: 1,

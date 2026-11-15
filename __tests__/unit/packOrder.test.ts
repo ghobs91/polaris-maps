@@ -8,7 +8,7 @@
  * packs, so the one the user cared about most was the one they could not find.
  */
 
-import { orderPacks, filterPacks } from '../../src/services/regions/packOrder';
+import { orderPacks, filterPacks, downloadedRegions } from '../../src/services/regions/packOrder';
 import type { Region } from '../../src/models/region';
 
 const pack = (id: string, name: string, downloadStatus: Region['downloadStatus']): Region =>
@@ -72,5 +72,25 @@ describe('filterPacks', () => {
   it('returns everything for blank or whitespace queries', () => {
     expect(filterPacks(packs, '')).toHaveLength(2);
     expect(filterPacks(packs, '   ')).toHaveLength(2);
+  });
+});
+
+describe('downloadedRegions', () => {
+  it('collects every completed region, packs and tile areas alike', () => {
+    // Completed packs used to sort to the bottom of a 355-entry catalogue, so
+    // the only way to see — or delete — what was on disk was to search for it.
+    const tileOnly = pack('legacy-area', 'Legacy Area', 'complete');
+    const results = downloadedRegions([
+      pack('us-ny-new-york', 'New York Metro', 'complete'),
+      pack('jp-tokyo', 'Tokyo', 'none'),
+      pack('de-berlin', 'Berlin', 'downloading'),
+      tileOnly,
+    ]);
+
+    expect(results.map((r) => r.name)).toEqual(['New York Metro', 'Legacy Area']);
+  });
+
+  it('is empty when nothing is stored offline', () => {
+    expect(downloadedRegions([pack('jp-tokyo', 'Tokyo', 'none')])).toEqual([]);
   });
 });

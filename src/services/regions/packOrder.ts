@@ -33,3 +33,15 @@ export function filterPacks(regions: Region[], query: string): Region[] {
       region.name.toLowerCase().includes(needle) || region.id.toLowerCase().includes(needle),
   );
 }
+
+/**
+ * Everything already stored offline, for the "Downloaded" shelf.
+ *
+ * Completed packs used to sort to the *bottom* of a 355-entry catalogue, so the
+ * only way to see (or delete) what was on disk was to search for it by name.
+ * Tile-only areas — completed regions with no pack manifest — belong on the
+ * same shelf: from the user's side "what did I download" is one question.
+ */
+export function downloadedRegions(regions: Region[]): Region[] {
+  return regions.filter((region) => region.downloadStatus === 'complete');
+}
