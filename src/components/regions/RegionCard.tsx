@@ -3,6 +3,12 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useThemedStyles, type Theme } from '../../hooks/useThemedStyles';
+import {
+  packFeatureLabels,
+  packSizeBytes,
+  packScopeLabel,
+  packScopeDescription,
+} from '../../services/regions/packSummary';
 import type { Region } from '../../models/region';
 
 interface RegionCardProps {
@@ -27,33 +33,18 @@ export const RegionCard = memo(function RegionCard({
   const toMb = (b?: number | null) =>
     ((b ?? 0) / (1024 * 1024)).toFixed(b && b >= 10 * 1024 * 1024 ? 0 : 1);
 
-  // Catalog regions carry their size in `assets`, not the legacy per-part
-  // columns, so reading only those columns left every pack card blank: no way
-  // to tell a 3 MB pack from a 400 MB one before starting the download.
-  const assetBytes = (region.assets ?? []).reduce((sum, asset) => sum + (asset.sizeBytes ?? 0), 0);
-  const legacyBytes =
-    (region.tilesSizeBytes ?? 0) +
-    (region.routingSizeBytes ?? 0) +
-    (region.geocodingSizeBytes ?? 0) +
-    (region.placesSizeBytes ?? 0);
-  const totalBytes = legacyBytes > 0 ? legacyBytes : assetBytes;
-  const sizeMb = totalBytes > 0 ? Math.round(totalBytes / (1024 * 1024)) : null;
-
-  /** What the pack actually contains, from the assets it ships. */
-  const ASSET_LABELS: Record<string, string> = {
-    'tiles.pmtiles': 'Maps',
-    'search.sqlite': 'Search',
-    'transit.sqlite': 'Transit',
-    'transit-timetable.sqlite': 'Timetable',
-    'geocoding-data.sqlite': 'Geocoding',
-  };
-  const assetLabels = (region.assets ?? [])
-    .map((asset) => ASSET_LABELS[asset.name])
-    .filter((label): label is string => label != null);
+  // Shared with the "Downloaded" shelf so the two never disagree about a pack:
+  // the manifest size is what actually downloads, and the legacy per-part
+  // columns are coarse catalog estimates of which a row may carry only one
+  // (New York Metro's row has just its geocoding estimate, which advertised a
+  // 93 MB pack as 185 MB).
+  const sizeMb = Math.round(packSizeBytes(region) / (1024 * 1024)) || null;
+  const assetLabels = packFeatureLabels(region);
+  const scopeLabel = packScopeLabel(region);
 
   const contents =
     assetLabels.length > 0
-      ? [...new Set(assetLabels)].join(' · ')
+      ? assetLabels.join(' · ')
       : region.tilesSizeBytes != null
         ? `Tiles ${toMb(region.tilesSizeBytes)} MB · Routing ${toMb(region.routingSizeBytes)} MB · Geocoding ${toMb(region.geocodingSizeBytes)} MB` +
           (region.placesSizeBytes != null ? ` · Places ${toMb(region.placesSizeBytes)} MB` : '')
@@ -65,11 +56,16 @@ export const RegionCard = memo(function RegionCard({
         style={({ pressed }) => [styles.cardBody, pressed && onPress && styles.pressed]}
         onPress={() => onPress?.(region)}
         accessibilityRole={onPress ? 'button' : 'none'}
-        accessibilityLabel={region.name}
+        accessibilityLabel={`${region.name}, ${packScopeDescription(region)}`}
       >
         <View style={styles.header}>
           <Text style={styles.name}>{region.name}</Text>
           <View style={styles.badges}>
+            {/* Tells "New York" (state) from "New York Metro" (city) when the
+                search lists both. */}
+            <View style={styles.scopeBadge}>
+              <Text style={styles.scopeText}>{scopeLabel}</Text>
+            </View>
             {updateAvailable && region.downloadStatus === 'complete' && (
               <View style={[styles.badge, styles.updateBadge]}>
                 <Text style={[styles.badgeText, styles.updateText]}>Update</Text>
@@ -210,6 +206,14 @@ const createStyles = ({ colors }: Theme) =>
     },
     badge: { borderRadius: borderRadius.sm, paddingHorizontal: spacing.sm, paddingVertical: 2 },
     badgeText: { ...typography.caption, fontWeight: '600' },
+    scopeBadge: {
+      borderRadius: borderRadius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 1,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    scopeText: { ...typography.caption, color: colors.textSecondary, fontWeight: '600' },
     updateBadge: { backgroundColor: colors.warning + '20' },
     updateText: { color: colors.warning },
     actions: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, paddingTop: spacing.sm },
