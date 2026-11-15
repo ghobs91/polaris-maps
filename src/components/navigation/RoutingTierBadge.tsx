@@ -34,31 +34,48 @@ export function RoutingTierBadge() {
 
   const label = TIER_LABELS[state.tier];
   const suffix = state.degraded && state.tier !== 'unavailable' ? ' (fallback)' : '';
+  const reason = state.reason ?? null;
 
   return (
     <View
       style={styles.badge}
       accessibilityRole="text"
-      accessibilityLabel={`Routing engine: ${label}${suffix}`}
+      accessibilityLabel={
+        reason
+          ? `Routing engine: ${label}${suffix}. ${reason}`
+          : `Routing engine: ${label}${suffix}`
+      }
     >
-      <View style={[styles.dot, { backgroundColor: TIER_COLORS[state.tier] }]} />
-      <Text style={styles.text} maxFontSizeMultiplier={MAX_FONT_SCALE_CHROME}>
-        {`Route: ${label}${suffix}`}
-      </Text>
+      <View style={styles.row}>
+        <View style={[styles.dot, { backgroundColor: TIER_COLORS[state.tier] }]} />
+        <Text style={styles.text} maxFontSizeMultiplier={MAX_FONT_SCALE_CHROME}>
+          {`Route: ${label}${suffix}`}
+        </Text>
+      </View>
+      {reason ? (
+        <Text style={styles.reason} maxFontSizeMultiplier={MAX_FONT_SCALE_CHROME} numberOfLines={3}>
+          {reason}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    alignItems: 'flex-start',
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(28,28,30,0.82)',
     borderRadius: 12,
     paddingVertical: 4,
     paddingHorizontal: 10,
+    gap: 2,
+    maxWidth: 260,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   dot: {
     width: 8,
@@ -69,5 +86,10 @@ const styles = StyleSheet.create({
     color: '#EBEBF0',
     fontSize: 11,
     fontWeight: '600',
+  },
+  reason: {
+    color: '#A1A1AA',
+    fontSize: 10,
+    lineHeight: 13,
   },
 });

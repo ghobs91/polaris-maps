@@ -28,7 +28,36 @@ navigation session.
 
 The tier that produced the route on screen is exposed through
 `getRoutingTierState()` / `useRoutingTier()` and surfaced by
-`RoutingTierBadge` in developer mode (`settingsStore.devMode`).
+`RoutingTierBadge` in developer mode (`settingsStore.devMode`). The state also
+carries a `reason` — the per-tier failure clauses explaining why the tiers above
+the winner were skipped — so a degraded route says _why_ instead of just
+degrading.
+
+## Offline graph install and selection
+
+Tier 1 can only answer when a Valhalla graph is on disk, so the two halves that
+decide that are worth knowing about:
+
+- **Install** (`routingGraphs.ts`, called from the region downloader). Targets
+  are metro catalog entries whose box the pack covers by ≥50%, ranked by
+  coverage and capped at 4 — not every entry whose box merely intersects it. A
+  pack whose bounds span ≥180° of longitude (island nations across the date
+  line) is skipped entirely, because its bbox intersects dozens of metros it
+  holds no data for; and a pack much larger than a metro must also _name_ it,
+  because a rectangle can enclose a foreign metro (the New York state pack's
+  rectangle contains Toronto). Each graph is fetched from the release tag the
+  _pack's own_ assets were stamped under, falling back to the catalog-wide tag,
+  and records a `polaris-graph.json` sidecar with the bounds it was published
+  under.
+- **Selection** (`offlineRouting.ts`) picks the installed graph covering the most
+  route points, ties to the smaller box, and prefers the sidecar bounds unioned
+  with the compiled-in catalog box — the published catalog and the bundled one
+  disagree (New York Metro ends at -73.2° vs -73.7°), and the narrower box
+  silently excludes routes.
+- **Diagnosis** (`routingGraphStatus.ts`) records why an install or selection
+  produced nothing. The cascade appends that to the tier failure, so the badge
+  reads e.g. `on-device Valhalla: no region graph loaded — no routing graph
+installed — download a region pack to route offline`.
 
 ## Files
 
@@ -36,6 +65,9 @@ The tier that produced the route on screen is exposed through
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `routingService.ts`     | Valhalla API client and the routing cascade — on-device → OSRM → MapKit / FOSSGIS. Computes routes with maneuver-level turn instructions, encoded polyline geometry, and time/distance summaries. Error responses are truncated and API keys redacted. |
 | `osrmClient.ts`         | Tier-2 OSRM client. Normalises OSRM steps into the app's `ValhallaRoute` shape (synthesized instructions, step-accurate shape indices, toll/ferry flags) so downstream consumers stay engine-agnostic.                                                 |
+| `offlineRouting.ts`     | Tier-1 graph selection and load. Chooses the installed graph covering the most route points and initialises the native engine; records why nothing could be selected.                                                                                  |
+| `routingGraphs.ts`      | Tier-1 graph store. Downloads metro graphs for a region pack (coverage-ranked, tag-aware, size-capped), writes a bounds sidecar per graph, lists installed graphs, prunes unused ones.                                                                 |
+| `routingGraphStatus.ts` | Leaf module recording install and selection outcomes, and summarising them onto the routing tier badge as a one-line reason.                                                                                                                           |
 | `hassleTurns.ts`        | Prefers route candidates whose turns are managed by a stop sign or traffic light, using Mapillary detections only where imagery coverage exists. Never trades more than 5 min / 25% for a calmer route.                                                |
 | `parkAndRideService.ts` | Determines if user is >20 min walk from a rail/subway station. Computes combined drive-to-station + transit trip as a park-and-ride suggestion.                                                                                                        |
 

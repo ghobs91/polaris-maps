@@ -216,6 +216,8 @@ describe('routing cascade', () => {
         1500,
       );
       expect(svc.getRoutingTierState()).toMatchObject({ tier: 'on-device', degraded: false });
+      // A clean on-device route has nothing to explain.
+      expect(svc.getRoutingTierState()?.reason).toBeUndefined();
     });
 
     it('tier 2: falls back to OSRM when the on-device engine fails', async () => {
@@ -232,6 +234,9 @@ describe('routing cascade', () => {
       expect(mockMapKitComputeRoute).not.toHaveBeenCalled();
       expect(routes[0].summary.distanceMeters).toBe(1111);
       expect(svc.getRoutingTierState()).toMatchObject({ tier: 'osrm', degraded: true });
+      expect(svc.getRoutingTierState()?.reason).toBe(
+        'on-device Valhalla: Route outside tile coverage',
+      );
     });
 
     it('tier 2: uses OSRM when no region graph is loaded', async () => {
@@ -243,6 +248,32 @@ describe('routing cascade', () => {
       expect(mockNativeComputeRoute).not.toHaveBeenCalled();
       expect(mockOsrmComputeRoute).toHaveBeenCalledTimes(1);
       expect(routes).toHaveLength(1);
+      // No graph was ever loaded — the reason must say so rather than being
+      // left blank when the network tier answers.
+      expect(svc.getRoutingTierState()?.reason).toBe('on-device Valhalla: no region graph loaded');
+    });
+
+    it('appends why there was no graph to load when a reason was recorded', async () => {
+      // Both modules come out of one isolated registry, so the cascade sees the
+      // status the selection step wrote.
+      let svc!: typeof import('../../src/services/routing/routingService');
+      let status!: typeof import('../../src/services/routing/routingGraphStatus');
+      jest.isolateModules(() => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        status = require('../../src/services/routing/routingGraphStatus');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        svc = require('../../src/services/routing/routingService');
+      });
+      status.recordRoutingGraphSelectionFailure(
+        'no routing graph installed — download a region pack to route offline',
+      );
+      mockOsrmSuccess();
+
+      await svc.computeRoute(waypoints, 'auto');
+
+      expect(svc.getRoutingTierState()?.reason).toBe(
+        'on-device Valhalla: no region graph loaded — no routing graph installed — download a region pack to route offline',
+      );
     });
 
     it('tier 3: falls back to MapKit when on-device and OSRM both fail', async () => {
@@ -258,6 +289,10 @@ describe('routing cascade', () => {
       expect(mockFetchImpl).not.toHaveBeenCalled();
       expect(routes[0].summary.distanceMeters).toBe(2222);
       expect(svc.getRoutingTierState()).toMatchObject({ tier: 'mapkit', degraded: true });
+      // Every skipped tier contributes a clause, for both reasons above.
+      expect(svc.getRoutingTierState()?.reason).toBe(
+        'on-device Valhalla: Route outside tile coverage · OSRM: OSRM unavailable',
+      );
     });
 
     it('tier 3: falls back to FOSSGIS Valhalla when everything above fails', async () => {
@@ -312,6 +347,7 @@ describe('routing cascade', () => {
         /Every routing tier failed/,
       );
       expect(svc.getRoutingTierState()).toMatchObject({ tier: 'unavailable' });
+      expect(svc.getRoutingTierState()?.reason).toContain('OSRM: OSRM unavailable');
     });
 
     it('reports "no data and no connection" when offline without a graph', async () => {

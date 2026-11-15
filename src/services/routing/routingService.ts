@@ -1,6 +1,7 @@
 import * as Valhalla from '../../native/valhalla';
 import * as MapKitRouting from '../../native/mapkit';
 import { computeOsrmRoute, isOsrmSupported } from './osrmClient';
+import { summarizeRoutingGraphProblem } from './routingGraphStatus';
 import { isOnline } from '../regions/connectivityService';
 import { Platform } from 'react-native';
 import { decodePolyline, encodePolyline } from '../../utils/polyline';
@@ -38,6 +39,12 @@ export interface RoutingTierState {
   at: number;
   /** True whenever the answer did not come from the on-device engine. */
   degraded: boolean;
+  /**
+   * Why the tiers *above* the winning one were skipped or failed, one clause
+   * per tier (e.g. `on-device Valhalla: no region graph loaded`). Absent on a
+   * clean on-device route, where there is nothing to explain.
+   */
+  reason?: string;
 }
 
 /**
@@ -61,8 +68,16 @@ export function subscribeRoutingTier(listener: () => void): () => void {
   };
 }
 
-function recordRoutingTier(tier: RoutingTierStatus): void {
-  tierState = { tier, at: Date.now(), degraded: tier !== 'on-device' };
+/** Separator between per-tier failure clauses in `RoutingTierState.reason`. */
+const REASON_SEPARATOR = ' · ';
+
+function recordRoutingTier(tier: RoutingTierStatus, failures: readonly string[] = []): void {
+  tierState = {
+    tier,
+    at: Date.now(),
+    degraded: tier !== 'on-device',
+    reason: failures.length > 0 ? failures.join(REASON_SEPARATOR) : undefined,
+  };
   for (const listener of tierListeners) listener();
 }
 
@@ -681,7 +696,11 @@ async function runRouteCascade(
       failures.push(`on-device Valhalla: ${describeFailure(err)}`);
     }
   } else {
-    failures.push('on-device Valhalla: no region graph loaded');
+    // Say *why* there is nothing to load: a pack may be downloaded with no
+    // graph installed for it, or the route may fall outside every installed
+    // graph. Both used to read as a bare "no region graph loaded".
+    const problem = summarizeRoutingGraphProblem();
+    failures.push(`on-device Valhalla: no region graph loaded${problem ? ` — ${problem}` : ''}`);
   }
 
   // ── Tier 2 — OSRM ────────────────────────────────────────────────────────
@@ -696,7 +715,7 @@ async function runRouteCascade(
         originHeading: options?.originHeading,
       });
       if (routes.length > 0) {
-        recordRoutingTier('osrm');
+        recordRoutingTier('osrm', failures);
         return routes;
       }
       failures.push('OSRM: no route');
@@ -719,7 +738,7 @@ async function runRouteCascade(
           ]
         : await MapKitRouting.computeRoute(waypoints, costing);
       if (routes.length > 0) {
-        recordRoutingTier('mapkit');
+        recordRoutingTier('mapkit', failures);
         return routes;
       }
       failures.push('MapKit: no route');
@@ -734,7 +753,7 @@ async function runRouteCascade(
     try {
       const routes = await computeRouteOnline(waypoints, costing, options);
       if (routes.length > 0) {
-        recordRoutingTier('fossgis');
+        recordRoutingTier('fossgis', failures);
         return routes;
       }
       failures.push('FOSSGIS Valhalla: no route');
@@ -745,7 +764,7 @@ async function runRouteCascade(
     failures.push('FOSSGIS Valhalla: offline');
   }
 
-  recordRoutingTier('unavailable');
+  recordRoutingTier('unavailable', failures);
   if (!initialized && !isOnline()) {
     throw new Error('No offline routing data and no internet connection.');
   }
