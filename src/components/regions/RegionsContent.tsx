@@ -11,10 +11,6 @@ import {
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
 import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
 import { orderPacks, filterPacks } from '../../services/regions/packOrder';
-import {
-  getLastAutoDownloadDecision,
-  describeAutoDownloadForUser,
-} from '../../services/regions/autoRegionDownloadCoordinator';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
 import { RegionCard } from './RegionCard';
 import { DownloadProgressBar } from './DownloadProgressBar';
@@ -23,11 +19,14 @@ import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 import { useTheme } from '../../contexts/ThemeContext';
 
-interface RegionsContentProps {
-  showHeading?: boolean;
-}
-
-export function RegionsContent({ showHeading = true }: RegionsContentProps) {
+/**
+ * Region catalogue: a search field over every pack-backed area.
+ *
+ * Deliberately text-free above the list — the screen is reached from Settings →
+ * Download More Maps, so the user already knows what it is and the old heading,
+ * auto-download status line and pack description only pushed the list down.
+ */
+export function RegionsContent() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [regions, setRegions] = useState<Region[]>([]);
@@ -42,22 +41,6 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
    * 50 MB offline limit. The packs, which have no such cap, were unreachable
    * from this screen.
    */
-  /**
-   * Why the background downloader last did or did not run, or null when it has
-   * never evaluated (e.g. it is disabled). Surfaces reasons that were
-   * previously only in a log no screen reads — 'no-region', 'metered',
-   * 'size-unknown' — so a silent skip can be told apart from a broken one.
-   */
-  const autoDownloadLine = useMemo(() => {
-    const decision = getLastAutoDownloadDecision();
-    if (!decision) return null;
-    const ageMin = Math.round((Date.now() - decision.at) / 60_000);
-    const when = ageMin <= 0 ? 'just now' : `${ageMin}m ago`;
-    // Rendered the raw enum and the region id before (`skip auto-download:
-    // metered (us-ny-new-york)`), which told the user nothing they could act on.
-    return `Auto-download: ${describeAutoDownloadForUser(decision)} (${when})`;
-  }, [regions]);
-
   /**
    * Every pack-backed area, whatever its state.
    *
@@ -180,8 +163,6 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
 
   return (
     <View style={styles.container}>
-      {showHeading && <Text style={styles.heading}>Offline Regions</Text>}
-
       {activeIds.map((id) =>
         progressByRegion[id] ? (
           <DownloadProgressBar key={id} progress={progressByRegion[id]} />
@@ -193,71 +174,61 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         </Text>
       )}
 
-      {autoDownloadLine && <Text style={styles.autoDownloadHint}>{autoDownloadLine}</Text>}
+      <View
+        style={[
+          styles.searchContainer,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}
+      >
+        <Ionicons name="search" size={18} color={colors.textSecondary} style={styles.searchIcon} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.text }]}
+          value={packQuery}
+          onChangeText={setPackQuery}
+          placeholder="Search packs..."
+          placeholderTextColor={colors.textSecondary}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          accessibilityLabel="Search packs"
+        />
+        {packQuery.length > 0 && (
+          <Pressable
+            onPress={() => setPackQuery('')}
+            accessibilityRole="button"
+            accessibilityLabel="Clear pack search"
+            hitSlop={8}
+          >
+            <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+          </Pressable>
+        )}
+      </View>
 
-      {packRegions.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Offline Packs</Text>
-          <Text style={styles.description}>
+      <ScrollView
+        style={styles.packScroll}
+        contentContainerStyle={styles.packList}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        {visiblePacks.map((region) => (
+          <RegionCard
+            key={region.id}
+            region={region}
+            onDownload={handleDownload}
+            onCancel={handleCancel}
+            onDelete={handleDelete}
+            updateAvailable={staleRegionIds.has(region.id)}
+          />
+        ))}
+        {visiblePacks.length === 0 && (
+          <Text style={styles.emptyText}>
             {packQuery.trim()
-              ? `${visiblePacks.length} of ${packRegions.length} match “${packQuery.trim()}”.`
-              : `${packRegions.length} areas, each with offline maps, routing and search. Downloaded packs are marked and stay in this list.`}
+              ? `No pack matches “${packQuery.trim()}”.`
+              : 'No offline packs available yet.'}
           </Text>
-          <View
-            style={[
-              styles.searchContainer,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Ionicons
-              name="search"
-              size={18}
-              color={colors.textSecondary}
-              style={styles.searchIcon}
-            />
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              value={packQuery}
-              onChangeText={setPackQuery}
-              placeholder="Search packs..."
-              placeholderTextColor={colors.textSecondary}
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-              accessibilityLabel="Search packs"
-            />
-            {packQuery.length > 0 && (
-              <Pressable
-                onPress={() => setPackQuery('')}
-                accessibilityRole="button"
-                accessibilityLabel="Clear pack search"
-                hitSlop={8}
-              >
-                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-              </Pressable>
-            )}
-          </View>
-          <ScrollView
-            style={styles.packScroll}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
-          >
-            {visiblePacks.map((region) => (
-              <RegionCard
-                key={region.id}
-                region={region}
-                onDownload={handleDownload}
-                onCancel={handleCancel}
-                onDelete={handleDelete}
-                updateAvailable={staleRegionIds.has(region.id)}
-              />
-            ))}
-            {visiblePacks.length === 0 && (
-              <Text style={styles.emptyText}>No pack matches “{packQuery.trim()}”.</Text>
-            )}
-          </ScrollView>
-        </View>
-      )}
+        )}
+      </ScrollView>
 
       {downloadedTileRegions.length > 0 && (
         <View style={styles.section}>
@@ -288,7 +259,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background, padding: spacing.lg },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    heading: { ...typography.h2, color: colors.text, marginBottom: spacing.xs },
     section: {
       marginBottom: spacing.md,
     },
@@ -298,7 +268,6 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       marginBottom: spacing.sm,
       marginTop: spacing.md,
     },
-    description: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
     backgroundHint: {
       ...typography.body,
       color: colors.textSecondary,
@@ -311,13 +280,14 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       maxHeight: 200,
     },
     /**
-     * Packs are the primary path, so they get a tall vertical list of full-width
-     * cards rather than a horizontal strip of clipped ones. Bounded so the
-     * fallback tree below keeps usable space.
+     * Packs are the primary path and now the whole screen, so the list fills
+     * whatever space the tile-area strip does not use.
      */
     packScroll: {
-      maxHeight: 380,
+      flex: 1,
+      minHeight: 0,
     },
+    packList: { paddingBottom: spacing.md },
     searchContainer: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -335,13 +305,4 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       paddingHorizontal: spacing.sm,
       paddingVertical: spacing.sm + 2,
     },
-    autoDownloadHint: {
-      ...typography.caption,
-      fontSize: 11,
-      color: colors.textSecondary,
-      opacity: 0.8,
-      marginTop: 8,
-    },
-    availableSection: { flex: 1, minHeight: 0 },
-    treeContainer: { flex: 1, minHeight: 0 },
   });

@@ -221,7 +221,7 @@ export function FloatingMenuPanel({
             </>
           ) : null}
 
-          {layer === 'regions' ? <RegionsContent showHeading={false} /> : null}
+          {layer === 'regions' ? <RegionsContent /> : null}
         </GlassView>
       </Animated.View>
     </View>
