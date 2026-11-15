@@ -11,6 +11,19 @@ const ETA_REFRESH_INTERVAL_MS = 60_000;
 const MIN_MATCH_RATIO_FOR_LOCAL = 0.1;
 
 /**
+ * Whether the fresh route-ETA API should be consulted instead of trusting the
+ * local traffic set.
+ *
+ * Two cases: too little of the route matched local traffic at all, or the only
+ * traffic on screen is the aged on-device fallback (last-known segments the
+ * algorithm still matches, so the coverage threshold alone would never ask the
+ * live API). A stale ETA must not win over a fresh one.
+ */
+export function prefersRouteApiEta(matchRatio: number, resolveSource: string | null): boolean {
+  return resolveSource === 'aged' || matchRatio < MIN_MATCH_RATIO_FOR_LOCAL;
+}
+
+/**
  * Periodically computes a traffic-adjusted ETA for the active route using
  * a segment-by-segment approach:
  *
@@ -72,16 +85,19 @@ export function useTrafficEta(): void {
 
       updateTrafficEta(result.totalSeconds, result.freeFlowTotalSeconds, matchRatio);
 
-      // If local traffic coverage is too sparse, supplement with TomTom API
-      if (matchRatio < MIN_MATCH_RATIO_FOR_LOCAL) {
+      // If local traffic coverage is too sparse — or the only traffic available
+      // is aged fallback data — supplement with the TomTom route API.
+      const resolveSource = useTrafficStore.getState().lastResolveSource;
+      if (prefersRouteApiEta(matchRatio, resolveSource)) {
         fetchRouteTrafficEta(route.geometry).then((tomtomResult) => {
           if (tomtomResult) {
             const freeFlow = Math.max(
               tomtomResult.travelTimeSeconds - tomtomResult.trafficDelaySeconds,
               0,
             );
-            // Prefer TomTom when local coverage is negligible; otherwise keep local
-            if (matchRatio < 0.01) {
+            // Prefer TomTom when local coverage is negligible or stale;
+            // otherwise keep local (it has per-segment detail).
+            if (matchRatio < 0.01 || resolveSource === 'aged') {
               updateTrafficEta(tomtomResult.travelTimeSeconds, freeFlow, 1);
             }
           }
