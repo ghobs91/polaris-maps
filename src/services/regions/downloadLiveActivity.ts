@@ -53,6 +53,7 @@ export interface DownloadLiveActivityController {
 const STAGE_LABELS: Record<DownloadProgress['stage'], string> = {
   tiles: 'Downloading map tiles',
   unpack: 'Expanding map files',
+  finalizing: 'Finishing up',
   places: 'Importing places',
   routing: 'Downloading routing data',
   geocoding: 'Downloading search index',

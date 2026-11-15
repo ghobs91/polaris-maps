@@ -157,18 +157,13 @@ export const GEOFABRIK_TREE: GeoNode[] = [
         bounds: { minLat: 7.5, maxLat: 23.5, minLng: 13.5, maxLng: 24.1 },
       },
       {
-        name: 'Comoros',
-        path: 'africa/comoros',
-        bounds: { minLat: -12.4, maxLat: -11.3, minLng: 43.2, maxLng: 44.5 },
-      },
-      {
         name: 'Congo (Republic of)',
         path: 'africa/congo-brazzaville',
         bounds: { minLat: -5.1, maxLat: 3.8, minLng: 11.2, maxLng: 18.7 },
       },
       {
         name: 'Congo (Democratic Republic)',
-        path: 'africa/congo-kinshasa',
+        path: 'africa/congo-democratic-republic',
         bounds: { minLat: -13.5, maxLat: 5.4, minLng: 12.2, maxLng: 31.3 },
       },
       {
@@ -200,11 +195,6 @@ export const GEOFABRIK_TREE: GeoNode[] = [
         name: 'Gabon',
         path: 'africa/gabon',
         bounds: { minLat: -3.9, maxLat: 2.3, minLng: 8.7, maxLng: 14.6 },
-      },
-      {
-        name: 'Gambia',
-        path: 'africa/gambia',
-        bounds: { minLat: 13.1, maxLat: 13.8, minLng: -16.8, maxLng: -13.8 },
       },
       {
         name: 'Ghana',
@@ -350,11 +340,6 @@ export const GEOFABRIK_TREE: GeoNode[] = [
         name: 'Uganda',
         path: 'africa/uganda',
         bounds: { minLat: -1.5, maxLat: 4.3, minLng: 29.5, maxLng: 35.1 },
-      },
-      {
-        name: 'Western Sahara',
-        path: 'africa/western-sahara',
-        bounds: { minLat: 20.8, maxLat: 27.7, minLng: -17.1, maxLng: -8.7 },
       },
       {
         name: 'Zambia',
@@ -511,11 +496,6 @@ export const GEOFABRIK_TREE: GeoNode[] = [
         bounds: { minLat: 37.7, maxLat: 43.0, minLng: 124.2, maxLng: 130.7 },
       },
       {
-        name: 'Oman',
-        path: 'asia/oman',
-        bounds: { minLat: 16.6, maxLat: 26.4, minLng: 52.0, maxLng: 59.9 },
-      },
-      {
         name: 'Pakistan',
         path: 'asia/pakistan',
         bounds: { minLat: 23.7, maxLat: 37.1, minLng: 60.9, maxLng: 77.1 },
@@ -647,7 +627,7 @@ export const GEOFABRIK_TREE: GeoNode[] = [
       },
       {
         name: 'Norfolk Island',
-        path: 'australia-oceania/norfolk-island',
+        path: 'australia-oceania/australia/norfolk-island',
         bounds: { minLat: -29.1, maxLat: -28.9, minLng: 167.9, maxLng: 168.0 },
       },
       {
@@ -1269,11 +1249,6 @@ export const GEOFABRIK_TREE: GeoNode[] = [
         ],
       },
       {
-        name: 'San Marino',
-        path: 'europe/san-marino',
-        bounds: { minLat: 43.9, maxLat: 44.0, minLng: 12.4, maxLng: 12.5 },
-      },
-      {
         name: 'Serbia',
         path: 'europe/serbia',
         bounds: { minLat: 42.2, maxLat: 46.2, minLng: 18.8, maxLng: 23.0 },
@@ -1422,7 +1397,7 @@ export const GEOFABRIK_TREE: GeoNode[] = [
           },
           {
             name: 'Falkland Islands',
-            path: 'europe/united-kingdom/falkland-islands',
+            path: 'europe/united-kingdom/falklands',
             bounds: { minLat: -53.2, maxLat: -51.0, minLng: -61.4, maxLng: -57.7 },
           },
           {

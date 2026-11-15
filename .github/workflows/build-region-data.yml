@@ -61,6 +61,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fail here, in seconds, rather than spawning ~200 jobs where a handful
+      # die on a 404 minutes later and the run just says "failed". The catalog
+      # is generated from the Geofabrik tree, so a path Geofabrik does not
+      # publish is a data bug that would otherwise be found by burning runners.
+      - name: Verify every region exists on Geofabrik
+        run: node scripts/verify-geofabrik-paths.mjs
+
       - name: Build matrix from catalog or dispatch inputs
         id: matrix
         run: |
@@ -366,6 +373,10 @@ jobs:
       # "200 but the body is an HTML error page" all live in the script rather
       # than in shell, so the quoting cannot be got wrong here.
       - name: Build transit timetable
+        # A timetable is optional; losing the whole region because its GTFS
+        # import failed (or the runner ran out of memory doing it) is not a
+        # trade worth making. ar-buenos-aires lost its pack that way.
+        continue-on-error: true
         run: |
           mkdir -p "work/${{ matrix.id }}"
           set +e

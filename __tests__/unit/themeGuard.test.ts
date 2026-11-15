@@ -22,7 +22,6 @@ const ALLOWLIST = [
   'src/components/poi/POIList.tsx',
   'src/components/poi/RatingWidget.tsx',
   'src/components/poi/ReviewCard.tsx',
-  'src/components/regions/GeofabrikTreePicker.tsx',
   'src/components/regions/RegionGate.tsx',
   'src/contexts/ThemeContext.tsx',
 ];

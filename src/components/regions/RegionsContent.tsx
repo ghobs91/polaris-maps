@@ -10,22 +10,14 @@ import {
 } from '../../services/regions/downloadManager';
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
 import { fetchAndSeedCatalog } from '../../services/regions/catalogService';
-import {
-  packRegionForNodeId,
-  packsIntersectingBounds,
-} from '../../services/regions/nearestPackRegion';
-import { planOfflineTileDownload } from '../../services/regions/tileDownloadPlan';
-import { uncoveredTree, flattenTree } from '../../services/regions/uncoveredTree';
 import { orderPacks, filterPacks } from '../../services/regions/packOrder';
 import {
   getLastAutoDownloadDecision,
   describeAutoDownloadForUser,
 } from '../../services/regions/autoRegionDownloadCoordinator';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
-import { upsertRegion } from '../../services/regions/regionRepository';
-import { RegionCard, DownloadProgressBar, GeofabrikTreePicker } from '.';
+import { RegionCard, DownloadProgressBar } from '.';
 import { LoadingSpinner } from '../common';
-import { GEOFABRIK_TREE, type GeoNode, geoNodeToRegion } from '../../constants/geofabrikCatalog';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -78,16 +70,6 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     [regions],
   );
 
-  /**
-   * Every area a pack covers, downloaded or not.
-   *
-   * Downloaded ones count too: their tree entry is just as redundant.
-   */
-  const packIds = useMemo(
-    () => new Set(regions.filter((r) => (r.assets?.length ?? 0) > 0).map((r) => r.id)),
-    [regions],
-  );
-
   const visiblePacks = useMemo(() => filterPacks(packRegions, packQuery), [packRegions, packQuery]);
 
   /** Tile-only areas that finished downloading (no pack exists for them). */
@@ -96,21 +78,7 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     [regions],
   );
 
-  /**
-   * The Geofabrik tree with pack-covered areas removed.
-   *
-   * The tree downloads raw OpenFreeMap tiles, capped at 50 MB per download.
-   * Listing an area there when a pack already covers it offers the worse of two
-   * downloads for the same place, so the tree is now only the fallback: places
-   * with no pack, for whatever reason.
-   */
-  const uncoveredNodes = useMemo(() => uncoveredTree(GEOFABRIK_TREE, packIds), [packIds]);
-  const uncoveredCount = useMemo(
-    () => flattenTree(uncoveredNodes).filter((node) => !node.children?.length).length,
-    [uncoveredNodes],
-  );
   const [loading, setLoading] = useState(true);
-  const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   // Global progress — survives screen unmount + app backgrounding.
   const progressByRegion = useRegionDownloadStore((s) => s.progressByRegion);
   const activeIds = useRegionDownloadStore((s) => s.activeIds);
@@ -166,60 +134,9 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     [loadRegions],
   );
 
-  /**
-   * Download a tree node: its pack when the catalog has one, else tiles.
-   *
-   * This was previously unconditional tiles — which is why tapping an area
-   * always used the capped method even when a pack covered it. The pack catalog
-   * is generated from the same tree, so ids line up and the lookup is exact.
-   *
-   * When there is no pack and the tile plan had to reduce detail to fit the
-   * 3,000-tile budget, the download is refused *before* starting: the byte cap
-   * would abort it halfway through, after 50 MB of the user's bandwidth.
-   */
-  const handleTreeDownload = useCallback(
-    async (node: GeoNode) => {
-      if (downloadingPath) return;
-      const nodeRegion = geoNodeToRegion(node);
-      const pack = packRegionForNodeId(regions, nodeRegion.id);
-      if (pack) {
-        await handleDownload(pack);
-        return;
-      }
-
-      const plan = planOfflineTileDownload(nodeRegion.bounds);
-      if (plan.reduced) {
-        const covering = packsIntersectingBounds(regions, nodeRegion.bounds);
-        const suggestion = covering[0]
-          ? `The ${covering[0].name} pack covers part of this area — download that instead.`
-          : 'Try a smaller area.';
-        Alert.alert(
-          'Area Too Large',
-          `${node.name} needs more detail than OpenFreeMap's 50 MB offline limit allows. ${suggestion}`,
-        );
-        return;
-      }
-
-      setDownloadingPath(node.path);
-      try {
-        await upsertRegion(nodeRegion);
-        await startBackgroundDownload(nodeRegion);
-        loadRegions();
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
-          Alert.alert('Download Failed', err instanceof Error ? err.message : 'Unknown error');
-        }
-      } finally {
-        setDownloadingPath(null);
-      }
-    },
-    [downloadingPath, loadRegions, regions, handleDownload],
-  );
-
   const handleCancel = useCallback(
     (region: Region) => {
       cancelBackgroundDownload(region.id);
-      setDownloadingPath(null);
       loadRegions();
     },
     [loadRegions],
@@ -251,17 +168,6 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     },
     [loadRegions],
   );
-
-  const completedPaths = useMemo(() => {
-    const paths = new Set<string>();
-    for (const region of regions) {
-      if (region.downloadStatus === 'complete') {
-        // Region IDs use - as separator but tree paths use /
-        paths.add(region.id.replace(/-/g, '/'));
-      }
-    }
-    return paths;
-  }, [regions]);
 
   if (loading) {
     return (
@@ -371,24 +277,6 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
               />
             ))}
           </ScrollView>
-        </View>
-      )}
-
-      {uncoveredNodes.length > 0 && (
-        <View style={styles.availableSection}>
-          <Text style={styles.sectionTitle}>Other Areas</Text>
-          <Text style={styles.description}>
-            {uncoveredCount} areas have no pack yet. These download map tiles only, capped at 50 MB
-            — the largest areas will not fit.
-          </Text>
-          <View style={styles.treeContainer}>
-            <GeofabrikTreePicker
-              nodes={uncoveredNodes}
-              completedPaths={completedPaths}
-              downloadingPath={downloadingPath}
-              onDownload={handleTreeDownload}
-            />
-          </View>
         </View>
       )}
     </View>

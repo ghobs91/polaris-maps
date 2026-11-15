@@ -138,11 +138,46 @@ export interface DownloadProgress {
   totalBytes: number;
   downloadedBytes: number;
   percent: number;
-  stage: 'tiles' | 'unpack' | 'places' | 'routing' | 'geocoding' | 'indices' | 'complete' | 'error';
+  stage:
+    | 'tiles'
+    | 'unpack'
+    | 'finalizing'
+    | 'places'
+    | 'routing'
+    | 'geocoding'
+    | 'indices'
+    | 'complete'
+    | 'error';
   error?: string;
 }
 
 type ProgressCallback = (progress: DownloadProgress) => void;
+
+/**
+ * Bound a best-effort step.
+ *
+ * The post-transfer steps (label fonts, places, geocoding, search indices,
+ * routing graphs) are all `.catch(() => {})` so they cannot *fail* the
+ * download — but a catch does not help a request that never settles. Each of
+ * these made un-timed-out network calls, so one stalled connection left the
+ * whole download hanging forever with the progress bar frozen on the previous
+ * stage. A timeout turns "hang forever" into "skip this part", which is what
+ * best-effort already meant.
+ */
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T | undefined> {
+  return Promise.race([
+    work,
+    new Promise<undefined>((resolve) => {
+      setTimeout(() => {
+        logDiagnostic('regions', 'warn', `timed out: ${label}`, { ms });
+        resolve(undefined);
+      }, ms);
+    }),
+  ]);
+}
+
+/** Per-step budget for the post-transfer imports. */
+const POST_TRANSFER_STEP_TIMEOUT_MS = 120_000;
 
 /** Throws an AbortError if the signal has been aborted. Works across all RN/Hermes versions. */
 function checkAborted(signal?: AbortSignal): void {
@@ -210,52 +245,102 @@ export async function downloadRegion(
 
     checkAborted(signal);
 
+    // Everything below finishes the install (label fonts, places, geocoding,
+    // search indices, routing graphs). None of it reports progress, and it runs
+    // after the last byte has arrived — without its own stage the bar froze on
+    // "Expanding map files…" while these ran.
+    onProgress?.({
+      regionId: region.id,
+      totalBytes: 0,
+      downloadedBytes: 0,
+      percent: 100,
+      stage: 'finalizing',
+    });
+
     // Bundle label fonts (shared across all regions) so the offline vector
     // style can render place labels with no connection. Best-effort.
-    await downloadOfflineFonts().catch(() => {});
+    await withTimeout(downloadOfflineFonts(), POST_TRANSFER_STEP_TIMEOUT_MS, 'offline fonts').catch(
+      () => {},
+    );
 
     // Offline Overture places should come from bundled region assets. Live
     // viewport POIs now use Overture-hosted PMTiles directly.
-    await prefetchOverturePlaces(region, onProgress, signal).catch(() => {});
+    await withTimeout(
+      prefetchOverturePlaces(region, onProgress, signal),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'places prefetch',
+    ).catch(() => {});
 
     checkAborted(signal);
 
     // Download and import geocoding bundle if the region has a geocoding URL.
-    await downloadAndImportGeocodingBundle(region, destDir, onProgress, signal).catch(() => {});
+    await withTimeout(
+      downloadAndImportGeocodingBundle(region, destDir, onProgress, signal),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'geocoding bundle',
+    ).catch(() => {});
 
     checkAborted(signal);
 
     // Seed the place-detail cache from an optional region-pack payload. Region
     // seeds use sourceVersion 0 so they never clobber fresher live snapshots.
-    await importRegionPlaceDetails(destDir).catch(() => {});
+    await withTimeout(
+      importRegionPlaceDetails(destDir),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'place details',
+    ).catch(() => {});
 
     checkAborted(signal);
 
     // Fetch and import the pack's on-device search indices (POIs + transit).
     // These are what let a covered viewport answer without Overpass; a pack
     // that omits them still works, it just keeps the network fallback.
-    await downloadPackSearchIndices(region, destDir, onProgress, signal).catch(() => {});
-    await importPackSearchIndices(region.id, destDir, region.bounds).catch(() => {});
+    await withTimeout(
+      downloadPackSearchIndices(region, destDir, onProgress, signal),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'search indices',
+    ).catch(() => {});
+    await withTimeout(
+      importPackSearchIndices(region.id, destDir, region.bounds),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'search index import',
+    ).catch(() => {});
     // The timetable is registered where it lies rather than imported — see
     // `registerPackTimetable`. Absent in most packs today, so this is a no-op
     // until a region publishes one.
-    await registerPackTimetable(region.id, destDir, region.bounds).catch(() => {});
+    await withTimeout(
+      registerPackTimetable(region.id, destDir, region.bounds),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'timetable registration',
+    ).catch(() => {});
 
     // Shards let a viewport just outside the pack's coverage be answered from
     // the pack's own verified bytes instead of a network query service. They are
     // part of the pack, so peers seeding it already serve them.
-    await registerPackShards(region.id, destDir).catch(() => {});
+    await withTimeout(
+      registerPackShards(region.id, destDir),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'shard registration',
+    ).catch(() => {});
 
     checkAborted(signal);
 
     // DOT GTFS pre-caching — download transit feed data for offline transit lines.
-    await cacheDotGtfsForRegion(region.id, region.bounds).catch(() => {});
+    await withTimeout(
+      cacheDotGtfsForRegion(region.id, region.bounds),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'GTFS pre-cache',
+    ).catch(() => {});
 
     checkAborted(signal);
 
     // Offline routing graphs (Valhalla) for catalog regions intersecting this
     // pack. Best-effort: a failed routing fetch must not fail the tile download.
-    await downloadRoutingGraphsForRegion(region, onProgress, signal).catch(() => {});
+    await withTimeout(
+      downloadRoutingGraphsForRegion(region, onProgress, signal),
+      POST_TRANSFER_STEP_TIMEOUT_MS,
+      'routing graphs',
+    ).catch(() => {});
 
     checkAborted(signal);
 

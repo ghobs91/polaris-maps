@@ -32,6 +32,8 @@ import { resolve } from 'node:path';
 
 const TREE_PATH = resolve('src/constants/geofabrikCatalog.ts');
 const REGIONS_PATH = resolve('scripts/regions.json');
+/** Hand-maintained metro entries — the only entries the tree does not produce. */
+const CURATED_PATH = resolve('scripts/regions.curated.json');
 
 /**
  * Evaluate the tree literal from its TypeScript source.
@@ -109,50 +111,37 @@ const DENYLIST = new Set([
   'australia-oceania-australia',
   'asia-india',
   'asia-indonesia',
+  // Japan's extract is 2.57 GB, past GitHub's 2 GiB per-asset release cap, so
+  // the release upload fails and takes the whole job with it.
+  'asia-japan',
 ]);
 
 function generate() {
   const tree = loadTree();
   const leaves = collectLeaves(tree);
 
-  const existing = JSON.parse(readFileSync(REGIONS_PATH, 'utf8'));
-
-  // A tree-leaf id is *generated*, never curated — even though a previous run
-  // wrote it into this file. Treating every existing entry as curated freezes
-  // generated ones forever, so a field added to `entryForLeaf` later never
-  // reaches them. That is exactly how 324 regions shipped with no `bounds`:
-  // the app stores bounds in NOT NULL columns, so those regions could not be
-  // seeded at all. Only ids the tree does not produce are hand-maintained.
-  const leafIds = new Set(leaves.map((leaf) => leaf.path.replace(/\//g, '-')));
-  const curated = new Map(
-    existing.include
-      .filter((entry) => !leafIds.has(entry.id))
-      .map((entry) => [entry.id, entry]),
-  );
+  // Curated entries have their own file. Reading them out of the generated
+  // file made "is this hand-written?" a guess, and the guess (everything
+  // already present) froze generated entries and kept regions the tree no
+  // longer produces.
+  const curatedFile = JSON.parse(readFileSync(CURATED_PATH, 'utf8'));
+  const curated = new Map(curatedFile.include.map((entry) => [entry.id, entry]));
 
   // Cross-listed nodes (Russia is intentionally under Europe AND top-level,
   // mirroring Geofabrik's site) must yield one matrix job, not two colliding
   // on the same asset names — dedupe by id, first occurrence wins.
   const seen = new Set();
-  const generatedById = new Map();
-  const generatedOrder = [];
+  const generated = [];
   for (const leaf of leaves) {
     const entry = entryForLeaf(leaf);
     if (curated.has(entry.id) || seen.has(entry.id) || DENYLIST.has(entry.id)) continue;
     seen.add(entry.id);
-    generatedById.set(entry.id, entry);
-    generatedOrder.push(entry.id);
+    generated.push(entry);
   }
 
-  // Keep the existing order so diffs stay small, but replace every generated
-  // entry with its freshly derived form. Anything new is appended in tree order.
-  const include = existing.include.map((entry) =>
-    generatedById.has(entry.id) ? generatedById.get(entry.id) : entry,
-  );
-  const present = new Set(include.map((entry) => entry.id));
-  for (const id of generatedOrder) {
-    if (!present.has(id)) include.push(generatedById.get(id));
-  }
+  // Curated first (the gtfs-coverage test relies on that ordering), then the
+  // tree in its own order, so the file stays stable and diffable.
+  const include = [...curated.values(), ...generated];
 
   return {
     comment: [
@@ -163,7 +152,7 @@ function generate() {
       'editing src/constants/geofabrikCatalog.ts.',
     ],
     include,
-    generatedCount: generatedById.size,
+    generatedCount: generated.length,
     curatedCount: curated.size,
   };
 }

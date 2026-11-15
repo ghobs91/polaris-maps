@@ -725,18 +725,6 @@
       "geofabrik": "https://download.geofabrik.de/africa/chad-latest.osm.pbf"
     },
     {
-      "id": "africa-comoros",
-      "name": "Comoros",
-      "bbox": "43.2,-12.4,44.5,-11.3",
-      "bounds": {
-        "minLat": -12.4,
-        "maxLat": -11.3,
-        "minLng": 43.2,
-        "maxLng": 44.5
-      },
-      "geofabrik": "https://download.geofabrik.de/africa/comoros-latest.osm.pbf"
-    },
-    {
       "id": "africa-congo-brazzaville",
       "name": "Congo (Republic of)",
       "bbox": "11.2,-5.1,18.7,3.8",
@@ -749,7 +737,7 @@
       "geofabrik": "https://download.geofabrik.de/africa/congo-brazzaville-latest.osm.pbf"
     },
     {
-      "id": "africa-congo-kinshasa",
+      "id": "africa-congo-democratic-republic",
       "name": "Congo (Democratic Republic)",
       "bbox": "12.2,-13.5,31.3,5.4",
       "bounds": {
@@ -758,7 +746,7 @@
         "minLng": 12.2,
         "maxLng": 31.3
       },
-      "geofabrik": "https://download.geofabrik.de/africa/congo-kinshasa-latest.osm.pbf"
+      "geofabrik": "https://download.geofabrik.de/africa/congo-democratic-republic-latest.osm.pbf"
     },
     {
       "id": "africa-djibouti",
@@ -831,18 +819,6 @@
         "maxLng": 14.6
       },
       "geofabrik": "https://download.geofabrik.de/africa/gabon-latest.osm.pbf"
-    },
-    {
-      "id": "africa-gambia",
-      "name": "Gambia",
-      "bbox": "-16.8,13.1,-13.8,13.8",
-      "bounds": {
-        "minLat": 13.1,
-        "maxLat": 13.8,
-        "minLng": -16.8,
-        "maxLng": -13.8
-      },
-      "geofabrik": "https://download.geofabrik.de/africa/gambia-latest.osm.pbf"
     },
     {
       "id": "africa-ghana",
@@ -1193,18 +1169,6 @@
       "geofabrik": "https://download.geofabrik.de/africa/uganda-latest.osm.pbf"
     },
     {
-      "id": "africa-western-sahara",
-      "name": "Western Sahara",
-      "bbox": "-17.1,20.8,-8.7,27.7",
-      "bounds": {
-        "minLat": 20.8,
-        "maxLat": 27.7,
-        "minLng": -17.1,
-        "maxLng": -8.7
-      },
-      "geofabrik": "https://download.geofabrik.de/africa/western-sahara-latest.osm.pbf"
-    },
-    {
       "id": "africa-zambia",
       "name": "Zambia",
       "bbox": "21.9,-18.1,33.7,-8.2",
@@ -1349,18 +1313,6 @@
       "geofabrik": "https://download.geofabrik.de/asia/israel-and-palestine-latest.osm.pbf"
     },
     {
-      "id": "asia-japan",
-      "name": "Japan",
-      "bbox": "122.9,24.2,153.1,45.6",
-      "bounds": {
-        "minLat": 24.2,
-        "maxLat": 45.6,
-        "minLng": 122.9,
-        "maxLng": 153.1
-      },
-      "geofabrik": "https://download.geofabrik.de/asia/japan-latest.osm.pbf"
-    },
-    {
       "id": "asia-jordan",
       "name": "Jordan",
       "bbox": "35,29.2,39.3,33.4",
@@ -1491,18 +1443,6 @@
         "maxLng": 130.7
       },
       "geofabrik": "https://download.geofabrik.de/asia/north-korea-latest.osm.pbf"
-    },
-    {
-      "id": "asia-oman",
-      "name": "Oman",
-      "bbox": "52,16.6,59.9,26.4",
-      "bounds": {
-        "minLat": 16.6,
-        "maxLat": 26.4,
-        "minLng": 52,
-        "maxLng": 59.9
-      },
-      "geofabrik": "https://download.geofabrik.de/asia/oman-latest.osm.pbf"
     },
     {
       "id": "asia-pakistan",
@@ -1781,7 +1721,7 @@
       "geofabrik": "https://download.geofabrik.de/australia-oceania/niue-latest.osm.pbf"
     },
     {
-      "id": "australia-oceania-norfolk-island",
+      "id": "australia-oceania-australia-norfolk-island",
       "name": "Norfolk Island",
       "bbox": "167.9,-29.1,168,-28.9",
       "bounds": {
@@ -1790,7 +1730,7 @@
         "minLng": 167.9,
         "maxLng": 168
       },
-      "geofabrik": "https://download.geofabrik.de/australia-oceania/norfolk-island-latest.osm.pbf"
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/australia/norfolk-island-latest.osm.pbf"
     },
     {
       "id": "australia-oceania-palau",
@@ -3161,18 +3101,6 @@
       "geofabrik": "https://download.geofabrik.de/russia/kaliningrad-latest.osm.pbf"
     },
     {
-      "id": "europe-san-marino",
-      "name": "San Marino",
-      "bbox": "12.4,43.9,12.5,44",
-      "bounds": {
-        "minLat": 43.9,
-        "maxLat": 44,
-        "minLng": 12.4,
-        "maxLng": 12.5
-      },
-      "geofabrik": "https://download.geofabrik.de/europe/san-marino-latest.osm.pbf"
-    },
-    {
       "id": "europe-serbia",
       "name": "Serbia",
       "bbox": "18.8,42.2,23,46.2",
@@ -3497,7 +3425,7 @@
       "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf"
     },
     {
-      "id": "europe-united-kingdom-falkland-islands",
+      "id": "europe-united-kingdom-falklands",
       "name": "Falkland Islands",
       "bbox": "-61.4,-53.2,-57.7,-51",
       "bounds": {
@@ -3506,7 +3434,7 @@
         "minLng": -61.4,
         "maxLng": -57.7
       },
-      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/falkland-islands-latest.osm.pbf"
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/falklands-latest.osm.pbf"
     },
     {
       "id": "europe-united-kingdom-scotland",
@@ -4481,6 +4409,6 @@
       "geofabrik": "https://download.geofabrik.de/south-america/venezuela-latest.osm.pbf"
     }
   ],
-  "generatedCount": 324,
+  "generatedCount": 318,
   "curatedCount": 39
 }

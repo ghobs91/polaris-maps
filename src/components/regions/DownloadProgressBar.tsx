@@ -21,6 +21,8 @@ export function downloadStageLabel(progress: DownloadProgress): string {
       return 'Downloading map tiles…';
     case 'unpack':
       return 'Expanding map files…';
+    case 'finalizing':
+      return 'Finishing up…';
     case 'places':
       return 'Importing places…';
     case 'routing':
@@ -45,7 +47,7 @@ export function isFinishing(progress: DownloadProgress): boolean {
   return (
     progress.stage !== 'complete' &&
     progress.stage !== 'error' &&
-    (progress.stage === 'unpack' || progress.percent >= 100)
+    (progress.stage === 'unpack' || progress.stage === 'finalizing' || progress.percent >= 100)
   );
 }
 
