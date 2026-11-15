@@ -1,7 +1,22 @@
 import {
   coverageFromResolveSource,
   resolveTrafficCoverage,
+  summarizeTrafficBreakdown,
 } from '../../src/services/traffic/trafficCoverage';
+import type { TrafficSourceBreakdown } from '../../src/models/trafficHistory';
+
+function breakdown(overrides: Partial<TrafficSourceBreakdown> = {}): TrafficSourceBreakdown {
+  return {
+    requestedCells: 20,
+    localProbe: 0,
+    localSeeded: 0,
+    p2p: 0,
+    openFeed: 0,
+    coldStart: 0,
+    unresolved: 0,
+    ...overrides,
+  };
+}
 
 describe('coverageFromResolveSource', () => {
   it('maps each resolve source to a coverage status', () => {
@@ -32,5 +47,25 @@ describe('resolveTrafficCoverage', () => {
 
   it('never reports stale for no-data', () => {
     expect(resolveTrafficCoverage('none', 0, 10_000)).toBe('no-data');
+  });
+});
+
+describe('summarizeTrafficBreakdown', () => {
+  it('always shows on-device, cold-start, peer, and open counts', () => {
+    expect(summarizeTrafficBreakdown(breakdown({ localProbe: 12, coldStart: 5, p2p: 3 }))).toBe(
+      'device 12 · tomtom 5 · peers 3 · open 0',
+    );
+  });
+
+  it('calls out seeded local rows and unresolved cells when present', () => {
+    expect(
+      summarizeTrafficBreakdown(
+        breakdown({ localProbe: 8, localSeeded: 4, coldStart: 5, unresolved: 3 }),
+      ),
+    ).toBe('device 8 · seeded 4 · tomtom 5 · peers 0 · open 0 · none 3');
+  });
+
+  it('returns an empty summary when no cells were requested', () => {
+    expect(summarizeTrafficBreakdown(breakdown({ requestedCells: 0 }))).toBe('');
   });
 });

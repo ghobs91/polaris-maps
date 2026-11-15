@@ -2,7 +2,7 @@ import type {
   TimeBucket,
   TrafficAreaCondition,
   TrafficResolveSource,
-  ConditionObservationSource,
+  TrafficSourceBreakdown,
   WireConditionEntry,
 } from '../../models/trafficHistory';
 import { SOURCE_CONFIDENCE } from '../../models/trafficHistory';
@@ -23,7 +23,13 @@ import { wireToEntry } from './p2pConditionWire';
  *   2. local historical  — enough samples, within retention window
  *   3. p2p               — fresh data from connected Hyperswarm peers
  *   4. open feed         — free open traffic feed (511 / DATEX II / NDW)
- *   5. tomtom            — optional cold-start seed (also written back into the index)
+ *   5. tomtom            — optional cold-start seed (cached outside this module)
+ *
+ * Only tiers 1–3 write into the weekly condition index. Upstream tiers (open
+ * feed, TomTom) answer the request but are cached by `trafficSeedCache`
+ * instead: they are not probe-derived, so they cannot be republished, and
+ * blending them into the weekly profile made the index both misattributed and
+ * needlessly granular.
  */
 
 export interface CascadePoint {
@@ -51,17 +57,6 @@ export interface CascadeRequest {
    * cells that still need data (may return segments for other cells too).
    */
   seedFromTomTom: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
-  /**
-   * Indexes observed segments into the history index for the current
-   * bucket. Provided by the caller so the aggregation policy stays in one
-   * place. The source labels provenance, which feeds the profile
-   * republish gate (upstream-seeded rows are never republished).
-   */
-  indexObservations: (
-    bucket: TimeBucket,
-    observations: ConditionObservation[],
-    source: ConditionObservationSource,
-  ) => Promise<void>;
   /** Request P2P data; injectable for tests. Defaults to the real bridge. */
   p2pQuery?: (cells: string[], bucket: TimeBucket) => Promise<WireConditionEntry[]>;
 }
@@ -74,6 +69,8 @@ export interface CascadeResult {
   segments: NormalizedTrafficSegment[];
   /** Cells that no tier could satisfy. */
   unresolvedCells: string[];
+  /** How many cells each tier actually answered (provenance for dev UI). */
+  breakdown: TrafficSourceBreakdown;
 }
 
 /** Aggregate a set of observed segments into per-cell condition observations. */
@@ -171,14 +168,25 @@ export function segmentsFromConditions(
  */
 export async function resolveTrafficConditions(req: CascadeRequest): Promise<CascadeResult> {
   const conditions = new Map<string, TrafficAreaCondition>();
-  let missing = [...new Set(req.cells)];
+  const requested = [...new Set(req.cells)];
+  let missing = requested;
   let source: TrafficResolveSource = 'none';
+  const breakdown: TrafficSourceBreakdown = {
+    requestedCells: requested.length,
+    localProbe: 0,
+    localSeeded: 0,
+    p2p: 0,
+    openFeed: 0,
+    coldStart: 0,
+    unresolved: 0,
+  };
 
   // Tier 1: local fresh
   if (missing.length > 0) {
     const fresh = await req.history.getFresh(missing, req.bucket);
     const found = new Set(fresh.map((c) => c.geohash5));
     for (const cond of fresh) conditions.set(cond.geohash5, cond);
+    countLocalCells(fresh, breakdown);
     missing = missing.filter((c) => !found.has(c));
     if (fresh.length > 0) source = 'local-fresh';
   }
@@ -188,6 +196,7 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     const hist = await req.history.getHistorical(missing, req.bucket);
     const found = new Set(hist.map((c) => c.geohash5));
     for (const cond of hist) conditions.set(cond.geohash5, cond);
+    countLocalCells(hist, breakdown);
     missing = missing.filter((c) => !found.has(c));
     if (hist.length > 0 && source === 'none') source = 'local-history';
   }
@@ -203,6 +212,7 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       (require('./trafficP2pQuery') as typeof import('./trafficP2pQuery')).queryConditionsHybrid;
     const entries = await query(missing, req.bucket);
+    const pending = new Set(missing);
     for (const w of entries) {
       const entry = wireToEntry(w);
       // Peer answers originate from other devices' probe histories — count
@@ -215,20 +225,21 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
         observedSpanDays: 0,
         lastObservedDay: Math.floor(Date.now() / 86_400_000),
       });
+      if (pending.has(entry.geohash5)) breakdown.p2p += 1;
     }
     missing = missing.filter((c) => !conditions.has(c));
     // P2P is a lower tier than the open feed and TomTom cold-start bridge.
     if (entries.length > 0) source = 'p2p';
   }
 
-  // Tier 4: free open traffic feeds (511 / DATEX II / NDW)
+  // Tier 4: free open traffic feeds (511 / DATEX II / NDW). Upstream data is
+  // answered from here but never written into the weekly probe index.
   if (missing.length > 0 && typeof req.openFeed === 'function') {
     const segments = await req.openFeed(missing).catch(() => [] as NormalizedTrafficSegment[]);
     if (segments.length > 0) {
       const observations = observationsFromSegments(segments, geohash5ForCoord);
-      await req.indexObservations(req.bucket, Array.from(observations.values()), 'open_feed');
 
-      let resolvedAny = false;
+      let resolvedAny = 0;
       for (const [cell, obs] of observations) {
         if (!conditions.has(cell)) {
           conditions.set(cell, {
@@ -244,26 +255,27 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
             lastObservedDay: Math.floor(Date.now() / 86_400_000),
             lastUpdated: Math.floor(Date.now() / 1000),
           });
-          resolvedAny = true;
+          resolvedAny += 1;
         }
       }
-      if (resolvedAny) source = 'open_feed';
+      breakdown.openFeed += resolvedAny;
+      if (resolvedAny > 0) source = 'open_feed';
       missing = missing.filter((c) => !conditions.has(c));
     }
   }
 
-  // Tier 5: TomTom cold-start seed (optional)
+  // Tier 5: TomTom cold-start seed (optional). Like the open feed, the answer
+  // is cached by the caller (`trafficSeedCache`) and is never blended into the
+  // weekly probe index.
   if (missing.length > 0) {
     const segments = await req.seedFromTomTom(missing);
     if (segments.length > 0) {
-      // Index what we observed so future requests hit tiers 1–3. Sourced as
-      // 'tomtom' so the row's probe share stays 0 and it is never republished.
-      const observations = observationsFromSegments(segments, geohash5ForCoord);
-      await req.indexObservations(req.bucket, Array.from(observations.values()), 'tomtom');
       // TomTom is the highest tier — whenever it ran and found data,
       // that is the authoritative source label for this resolution.
       source = 'tomtom';
+      const observations = observationsFromSegments(segments, geohash5ForCoord);
 
+      let resolvedAny = 0;
       for (const [cell, obs] of observations) {
         if (!conditions.has(cell)) {
           conditions.set(cell, {
@@ -279,18 +291,35 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
             lastObservedDay: Math.floor(Date.now() / 86_400_000),
             lastUpdated: Math.floor(Date.now() / 1000),
           });
+          resolvedAny += 1;
         }
       }
+      breakdown.coldStart += resolvedAny;
       missing = missing.filter((c) => !conditions.has(c));
     }
   }
+
+  breakdown.unresolved = missing.length;
 
   return {
     source,
     conditions,
     segments: segmentsFromConditions(req.points, conditions, req.bucket, source),
     unresolvedCells: missing,
+    breakdown,
   };
+}
+
+/**
+ * Split local-tier rows by provenance: rows with probe samples are the real
+ * on-device flow history; rows without them were seeded by an upstream
+ * provider before the index stopped accepting upstream observations.
+ */
+function countLocalCells(rows: TrafficAreaCondition[], breakdown: TrafficSourceBreakdown): void {
+  for (const row of rows) {
+    if ((row.probeSamples ?? 0) > 0) breakdown.localProbe += 1;
+    else breakdown.localSeeded += 1;
+  }
 }
 
 /** Map a coordinate to its geohash5 cell (independent of the sample points). */

@@ -1,6 +1,7 @@
 import { publishResolvedSegments } from '../../src/services/traffic/trafficFlowService';
 import { useTrafficStore } from '../../src/stores/trafficStore';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
+import type { TrafficSourceBreakdown } from '../../src/models/trafficHistory';
 
 function makeSegment(
   id: string,
@@ -73,5 +74,37 @@ describe('publishResolvedSegments', () => {
     ]);
 
     expect(publishedIds().sort()).toEqual(['peer', 'resolved']);
+  });
+
+  it('publishes the per-source breakdown for developer mode', () => {
+    const breakdown: TrafficSourceBreakdown = {
+      requestedCells: 16,
+      localProbe: 8,
+      localSeeded: 0,
+      p2p: 3,
+      openFeed: 0,
+      coldStart: 5,
+      unresolved: 0,
+    };
+
+    publishResolvedSegments([makeSegment('resolved', [-73.9, 40.7])], 'tomtom', [], breakdown);
+
+    expect(useTrafficStore.getState().lastResolveBreakdown).toEqual(breakdown);
+  });
+
+  it('clears a previous breakdown when none is supplied', () => {
+    publishResolvedSegments([makeSegment('resolved', [-73.9, 40.7])], 'p2p', [], {
+      requestedCells: 4,
+      localProbe: 0,
+      localSeeded: 0,
+      p2p: 4,
+      openFeed: 0,
+      coldStart: 0,
+      unresolved: 0,
+    });
+
+    publishResolvedSegments([], 'none', []);
+
+    expect(useTrafficStore.getState().lastResolveBreakdown).toBeNull();
   });
 });

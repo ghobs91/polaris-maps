@@ -26,10 +26,11 @@ import { initTopicManager, disposeTopicManager } from './topicManager';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import { TRAFFIC_FETCH_DEBOUNCE_MS, TRAFFIC_REFRESH_INTERVAL_MS } from '../../constants/config';
 import { isTomTomConfigured } from './tomtomAccess';
-import { getTrafficHistory, geohash5For, geohash5CellsForBounds } from './trafficHistoryIndex';
-import type { ConditionObservationSource } from '../../models/trafficHistory';
+import { getTrafficHistory, geohash5For } from './trafficHistoryIndex';
+import type { TrafficSourceBreakdown } from '../../models/trafficHistory';
 import { publishProfileConditions } from './nostrProfileExchange';
-import { currentTimeBucket, bucketLabel } from './trafficTimeBuckets';
+import { currentTimeBucket } from './trafficTimeBuckets';
+import { seedThroughCache } from './trafficSeedCache';
 import {
   resolveTrafficConditions,
   observationsFromSegments,
@@ -57,14 +58,13 @@ let routeFetchInProgress = false;
 let lastRouteRefreshAt = 0;
 
 /**
- * Index observed segments into the historical condition index under the
- * current time bucket. Every source (TomTom seeds, P2P responses, probe
- * aggregates) funnels through here so the index accumulates over time.
+ * Index probe-derived segments into the on-device condition index under the
+ * current time bucket. This is the only write path into the weekly profile
+ * store: upstream seeds (open feeds, TomTom) are answered from
+ * `trafficSeedCache` instead, so an upstream observation can never be replayed
+ * later as if the device had observed it.
  */
-async function indexSegmentsIntoHistory(
-  segments: NormalizedTrafficSegment[],
-  source: ConditionObservationSource = 'probe',
-): Promise<void> {
+async function indexSegmentsIntoHistory(segments: NormalizedTrafficSegment[]): Promise<void> {
   if (segments.length === 0) return;
   const bucket = currentTimeBucket();
   // Shares the cascade's aggregation so a zero "no speed" sentinel never
@@ -78,7 +78,7 @@ async function indexSegmentsIntoHistory(
 
   // Probe-derived rows are shareable: offer the affected cells' profiles to
   // the Nostr relay store (throttled + probe-share gated inside).
-  if (source === 'probe' && observations.length > 0) {
+  if (observations.length > 0) {
     const cells = Array.from(new Set(observations.map((o) => o.geohash5)));
     const shareable = await getTrafficHistory().getHistorical(cells, bucket);
     if (shareable.length > 0) {
@@ -102,10 +102,24 @@ export function publishResolvedSegments(
   segments: NormalizedTrafficSegment[],
   source: string,
   p2pSegments: NormalizedTrafficSegment[],
+  breakdown?: TrafficSourceBreakdown,
 ): void {
   const merged = mergeTrafficSources([...segments, ...p2pSegments]);
   useTrafficStore.getState().setNormalizedSegments(merged);
   useTrafficStore.getState().setLastResolveSource(source);
+  useTrafficStore.getState().setLastResolveBreakdown(breakdown ?? null);
+}
+
+/** Dev-mode provenance line: which tier answered how many cells. */
+function logResolution(label: string, source: string, breakdown: TrafficSourceBreakdown): void {
+  if (!__DEV__) return;
+  console.log(
+    `[TrafficFlowService] ${label} resolved via ${source} ` +
+      `(${breakdown.requestedCells} cells: device ${breakdown.localProbe}` +
+      `${breakdown.localSeeded > 0 ? `+${breakdown.localSeeded} seeded` : ''}, ` +
+      `tomtom ${breakdown.coldStart}, peers ${breakdown.p2p}, open ${breakdown.openFeed}, ` +
+      `unresolved ${breakdown.unresolved})`,
+  );
 }
 
 /** Fetch traffic from all sources, merge, and update the store. */
@@ -122,15 +136,11 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
   useTrafficStore.getState().setExternalFetchLoading(true);
   try {
     const bucket = currentTimeBucket();
-    const cells = geohash5CellsForBounds(
-      viewport.south,
-      viewport.west,
-      viewport.north,
-      viewport.east,
-    );
 
-    // Sample points mirroring the old TomTom grid so synthesized segments
-    // have spatial coverage across the viewport.
+    // Sample points first, then derive the cells from them. The old path
+    // asked for up to 36 viewport cells while the cold-start tier could only
+    // query 25, so the tail was permanently unresolved and re-queried on
+    // every refresh — the bridge looked like it was consulted for everything.
     const gridSize = gridSizeForZoom(viewport.zoom);
     const points: CascadePoint[] = [];
     const latStep = (viewport.north - viewport.south) / (gridSize + 1);
@@ -142,24 +152,37 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
         points.push({ lat, lng, cell: geohash5For(lat, lng) });
       }
     }
+    const cells = [...new Set(points.map((p) => p.cell))];
 
     const result = await resolveTrafficConditions({
       cells,
       bucket,
       points,
       history: getTrafficHistory(),
-      openFeed: () => fetchOpenTrafficSegments(viewport),
+      // Free feeds are cached for the same freshness window as cold-start
+      // seeds: upstream answers answer requests, they never enter the probe
+      // index.
+      openFeed: (missing) =>
+        seedThroughCache(missing, () => fetchOpenTrafficSegments(viewport), {
+          // Free feeds are retried next refresh if they came back empty: a
+          // transient outage must not hand the cell to the cold-start bridge
+          // for the whole negative window.
+          negativeTtlMs: 0,
+        }),
       // TomTom is the optional cold-start bridge: only the cells the earlier
-      // tiers could not resolve are queried.
-      seedFromTomTom: (missing) => fetchTomTomTraffic(viewport, missing),
-      indexObservations: (b, obs, source) => getTrafficHistory().recordObservations(b, obs, source),
+      // tiers could not resolve are queried, and only when no fresh cached
+      // seed already covers them.
+      seedFromTomTom: (missing) =>
+        seedThroughCache(missing, (stillMissing) => fetchTomTomTraffic(viewport, stillMissing)),
     });
+
+    logResolution('viewport', result.source, result.breakdown);
 
     const p2pSegments: NormalizedTrafficSegment[] = Object.values(
       useTrafficStore.getState().segmentTraffic,
     ).map(convertP2PToNormalized);
 
-    publishResolvedSegments(result.segments, result.source, p2pSegments);
+    publishResolvedSegments(result.segments, result.source, p2pSegments, result.breakdown);
   } catch (error) {
     // Silent failure: keep previous normalizedSegments in store,
     // continue with stale data until next successful refresh.
@@ -285,25 +308,28 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       bucket,
       points,
       history: getTrafficHistory(),
-      openFeed: () => fetchOpenTrafficSegments(boundsFromCoords(routeCoords)),
-      // TomTom cold-start: query only route cells the earlier tiers missed.
+      openFeed: (missing) =>
+        seedThroughCache(missing, () => fetchOpenTrafficSegments(boundsFromCoords(routeCoords)), {
+          negativeTtlMs: 0,
+        }),
+      // TomTom cold-start: query only route cells the earlier tiers missed and
+      // no fresh cached seed covers. Tile decoding is cached per z/x/y too, so
+      // a route refreshed inside the window costs no provider request.
       seedFromTomTom: (missing) =>
-        isTomTomConfigured() ? sampleRouteTileColors(routeCoords, missing) : Promise.resolve([]),
-      indexObservations: (b, obs, source) => getTrafficHistory().recordObservations(b, obs, source),
+        isTomTomConfigured()
+          ? seedThroughCache(missing, (stillMissing) =>
+              sampleRouteTileColors(routeCoords, stillMissing),
+            )
+          : Promise.resolve([]),
     });
 
-    if (__DEV__) {
-      console.log(
-        `[TrafficFlowService] route resolved via ${result.source} for bucket ${bucketLabel(bucket)} ` +
-          `(${result.segments.length} segments, ${result.unresolvedCells.length} unresolved cells)`,
-      );
-    }
+    logResolution('route', result.source, result.breakdown);
 
     const p2pSegments: NormalizedTrafficSegment[] = Object.values(
       useTrafficStore.getState().segmentTraffic,
     ).map(convertP2PToNormalized);
 
-    publishResolvedSegments(result.segments, result.source, p2pSegments);
+    publishResolvedSegments(result.segments, result.source, p2pSegments, result.breakdown);
   } catch (error) {
     const msg =
       error instanceof Error ? error.message.replace(/key=[^&]*/g, 'key=REDACTED') : String(error);
@@ -418,6 +444,15 @@ export async function initTrafficP2P(): Promise<void> {
   initTrafficTileService();
   void ensureTrafficTileServer();
   void pruneTileCache();
+
+  // Keep the on-device profile table bounded. Reads already ignore rows past
+  // the retention window, but without this they stay on disk forever and the
+  // table grows with every cell the device has ever observed.
+  void getTrafficHistory()
+    .prune()
+    .then(() => getTrafficHistory().count())
+    .then((rows) => useTrafficStore.getState().setHistoryEntryCount(rows))
+    .catch(() => {});
 
   // Listen for peer count changes from the worklet
   peerCountUnsub = onPeerCount((count) => {

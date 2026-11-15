@@ -1,3 +1,5 @@
+import type { TrafficSourceBreakdown } from '../../models/trafficHistory';
+
 /** Explicit traffic coverage status derived from the resolve source. */
 export type TrafficCoverage = 'p2p' | 'open-feed' | 'cold-start' | 'local' | 'stale' | 'no-data';
 
@@ -44,3 +46,23 @@ export const TRAFFIC_COVERAGE_LABELS: Record<TrafficCoverage, string> = {
   stale: 'Stale traffic data',
   'no-data': 'No traffic data',
 };
+
+/**
+ * One-line provenance summary of a resolution, e.g.
+ * `device 12 · tomtom 5 · peers 3 · open 0 · none 2`.
+ *
+ * The single resolve source answers "which was the highest tier used?", which
+ * reads as "everything is TomTom" as soon as one cell needed a cold-start
+ * seed. This keeps the split visible instead.
+ */
+export function summarizeTrafficBreakdown(breakdown: TrafficSourceBreakdown): string {
+  if (breakdown.requestedCells <= 0) return '';
+
+  const parts = [`device ${breakdown.localProbe}`];
+  if (breakdown.localSeeded > 0) parts.push(`seeded ${breakdown.localSeeded}`);
+  parts.push(`tomtom ${breakdown.coldStart}`);
+  parts.push(`peers ${breakdown.p2p}`);
+  parts.push(`open ${breakdown.openFeed}`);
+  if (breakdown.unresolved > 0) parts.push(`none ${breakdown.unresolved}`);
+  return parts.join(' · ');
+}

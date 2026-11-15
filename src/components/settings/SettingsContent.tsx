@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
 import { useTrafficStore } from '../../stores/trafficStore';
+import { summarizeTrafficBreakdown } from '../../services/traffic/trafficCoverage';
 import {
   clearPlaceDetailCache,
   countPlaceDetailCache,
@@ -164,6 +165,11 @@ export function SettingsContent({
   const nostrRelayCount = useTrafficStore((s) => s.nostrRelayCount);
   const trafficMode = useTrafficStore((s) => s.trafficMode);
   const isCollectingProbes = useTrafficStore((s) => s.isCollectingProbes);
+  const lastResolveBreakdown = useTrafficStore((s) => s.lastResolveBreakdown);
+  const historyEntryCount = useTrafficStore((s) => s.historyEntryCount);
+  const trafficSourceSummary = lastResolveBreakdown
+    ? summarizeTrafficBreakdown(lastResolveBreakdown)
+    : '';
 
   const trackColor = {
     false: isDark ? '#39393D' : '#E5E5EA',
@@ -472,6 +478,11 @@ export function SettingsContent({
                 <SettingsRow title="Peers" value={String(swarmPeerCount)} />
                 <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
                 <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
+                <SettingsRow
+                  title="Traffic Sources"
+                  value={trafficSourceSummary || 'No resolution yet'}
+                />
+                <SettingsRow title="On-device History Rows" value={String(historyEntryCount)} />
                 <SettingsRow
                   title="Link Profile"
                   value={swarmMetered ? 'Metered (client-only)' : 'Unmetered'}

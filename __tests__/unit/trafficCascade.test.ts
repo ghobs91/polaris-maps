@@ -31,6 +31,9 @@ function makeCondition(
     freeFlowSpeedMph: 50,
     sampleCount: 5,
     lastUpdated: 1_800_000_000,
+    probeSamples: 5,
+    observedSpanDays: 2,
+    lastObservedDay: 20_833,
     ...overrides,
   };
 }
@@ -73,13 +76,21 @@ describe('resolveTrafficConditions cascade order', () => {
       points: POINTS,
       history,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: p2p,
     });
 
     expect(result.source).toBe('local-fresh');
     expect(result.unresolvedCells).toHaveLength(0);
     expect(result.segments).toHaveLength(3);
+    expect(result.breakdown).toEqual({
+      requestedCells: 3,
+      localProbe: 3,
+      localSeeded: 0,
+      p2p: 0,
+      openFeed: 0,
+      coldStart: 0,
+      unresolved: 0,
+    });
     expect(p2p).not.toHaveBeenCalled();
     expect(seed).not.toHaveBeenCalled();
   });
@@ -96,13 +107,31 @@ describe('resolveTrafficConditions cascade order', () => {
       points: POINTS,
       history,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: async () => [],
     });
 
     expect(result.source).toBe('local-history');
     expect(result.segments).toHaveLength(3);
     expect(seed).not.toHaveBeenCalled();
+  });
+
+  it('flags local rows with no probe samples as seeded, not on-device', async () => {
+    const history = makeHistory(
+      CELLS.map((c) => makeCondition(c, { probeSamples: 0, sampleCount: 1 })),
+    );
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      seedFromTomTom: async () => [],
+      p2pQuery: async () => [],
+    });
+
+    // Rows written before the index stopped accepting upstream observations
+    // must not be reported as on-device history.
+    expect(result.breakdown.localProbe).toBe(0);
+    expect(result.breakdown.localSeeded).toBe(3);
   });
 
   it('uses P2P responses for cells missing locally and indexes them', async () => {
@@ -118,12 +147,12 @@ describe('resolveTrafficConditions cascade order', () => {
       points: POINTS,
       history,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: async () => wireEntries,
     });
 
     expect(result.source).toBe('p2p');
     expect(result.unresolvedCells).toHaveLength(0);
+    expect(result.breakdown.p2p).toBe(3);
     expect(seed).not.toHaveBeenCalled();
 
     // P2P entries must have been written into the local index
@@ -150,19 +179,24 @@ describe('resolveTrafficConditions cascade order', () => {
       points: POINTS,
       history,
       seedFromTomTom: seed,
-      indexObservations,
       p2pQuery: async () => [],
     });
 
     expect(seed).toHaveBeenCalledTimes(1);
     expect(seededCells[0].sort()).toEqual([CELLS[1], CELLS[2]].sort());
-    expect(indexObservations).toHaveBeenCalledTimes(1);
-    expect(indexedCells[0].sort()).toEqual([CELLS[1], CELLS[2]].sort());
+    expect(indexObservations).not.toHaveBeenCalled();
+    expect(indexedCells).toHaveLength(0);
     expect(result.source).toBe('tomtom');
     expect(result.unresolvedCells).toHaveLength(0);
     expect(result.segments).toHaveLength(3);
+    expect(result.breakdown).toMatchObject({ localProbe: 1, coldStart: 2, unresolved: 0 });
     // TomTom-seeded segments carry the history source with tomtom confidence
     expect(result.segments.every((s) => s.source === 'history')).toBe(true);
+    // The seed is cached by the caller, not blended into the weekly probe
+    // index — otherwise a cold-start answer would later be reported as
+    // on-device history.
+    expect(await history.getFresh([CELLS[1], CELLS[2]], BUCKET)).toHaveLength(0);
+    expect(await history.count()).toBe(1);
   });
 
   it('reports unresolved cells when no tier has data', async () => {
@@ -173,12 +207,12 @@ describe('resolveTrafficConditions cascade order', () => {
       points: POINTS,
       history,
       seedFromTomTom: async () => [],
-      indexObservations: async () => {},
       p2pQuery: async () => [],
     });
     expect(result.source).toBe('none');
     expect(result.unresolvedCells.sort()).toEqual([...CELLS].sort());
     expect(result.segments).toHaveLength(0);
+    expect(result.breakdown).toMatchObject({ requestedCells: 3, unresolved: 3 });
   });
 
   it('mixes tiers per cell: fresh local + p2p + tomtom', async () => {
@@ -190,7 +224,6 @@ describe('resolveTrafficConditions cascade order', () => {
       points: POINTS,
       history,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: async (cells) =>
         cells.includes(CELLS[1])
           ? [conditionToWire(makeCondition(CELLS[1], { lastUpdated: 1_800_000_000 }), true)]
@@ -217,7 +250,6 @@ describe('resolveTrafficConditions cascade order', () => {
       history,
       openFeed,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: async () => [],
     });
 
@@ -241,7 +273,6 @@ describe('resolveTrafficConditions cascade order', () => {
       history,
       openFeed,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: async () => [],
     });
 
@@ -264,7 +295,6 @@ describe('resolveTrafficConditions cascade order', () => {
       history,
       openFeed,
       seedFromTomTom: seed,
-      indexObservations: async () => {},
       p2pQuery: async () => [],
     });
 

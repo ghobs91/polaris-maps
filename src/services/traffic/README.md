@@ -4,7 +4,9 @@ Real-time traffic flow overlay with multi-source fusion, P2P probe collection, c
 
 ## Overview
 
-The traffic system prefers crowd-sourced speed probes from Polaris Maps peers (Hyperswarm) and free open traffic feeds, falling back to an optional TomTom cold-start bridge only when neither resolves a cell and a TomTom key is configured. Probes are aggregated in a 5-minute rolling window, merged with external data using haversine proximity matching (~30m threshold), and visualized as color-coded congestion overlays on the map. Probe contribution is consent-gated (traffic telemetry permission) and foreground-only. The coverage source (P2P, open feed, cold-start, on-device, stale, or no-data) is surfaced in the UI.
+The traffic system prefers crowd-sourced speed probes from Polaris Maps peers (Hyperswarm) and free open traffic feeds, falling back to an optional TomTom cold-start bridge only when neither resolves a cell and a TomTom key is configured. Probes are aggregated in a 5-minute rolling window, merged with external data using haversine proximity matching (~30m threshold), and visualized as color-coded congestion overlays on the map. Probe contribution is consent-gated (traffic telemetry permission) and foreground-only. The coverage source (P2P, open feed, cold-start, on-device, stale, or no-data) is surfaced in the UI, together with a per-source cell breakdown in developer mode.
+
+Provenance is kept strict: the weekly condition index is the **on-device flow history** and only ever receives probe-derived observations (own probes, P2P aggregates, peer condition answers). Upstream batches (open feeds, TomTom) answer requests from a bounded, 15-minute in-memory seed cache instead — they are never blended into the weekly profiles, and a cached answer is still labelled `cold-start`/`open-feed`, never `on-device`.
 
 During active navigation, the ETA is continuously adjusted using geohash6-indexed traffic segments matched to route geometry. When a traffic-aware candidate route is at least two minutes faster than the active route's remaining time, the system surfaces a dismissible in-navigation suggestion instead of rerouting silently; the user accepts or dismisses it, and a two-minute anti-thrash cooldown limits repeat prompts.
 
@@ -24,8 +26,9 @@ nostrRelayDirectory.ts (health-probes and ranks the relay pool)
 trafficAggregator.ts (5min rolling window)
     ↓
 trafficCascade.ts (5 tiers: local fresh → local history → P2P swarm + Nostr profiles → open feeds → TomTom)
-    ↓ (every tier writes back into the index; only probe-derived rows are ever republished)
+    ↓ (tiers 1–3 write into the index; upstream tiers 4–5 are cached by trafficSeedCache instead)
 trafficHistorySqlite.ts (weekly EMA profiles, probe-sample provenance per row)
+trafficSeedCache.ts (bounded 15-min in-memory cache for open-feed / TomTom answers)
     ↓
 trafficMerger.ts (+ TomTom + peer probes)
     ↓
@@ -44,10 +47,11 @@ trafficStore.incidents → IncidentLayer / IncidentAheadBanner
 
 | File                            | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trafficFlowService.ts`         | Top-level orchestrator — fetches TomTom data, merges with P2P probes, pushes to Zustand store on debounced refresh interval. Exports `initTrafficP2P`/`disposeTrafficP2P`/`suspendTrafficP2P`/`resumeTrafficP2P`.                                                                                                                                                                                                                                                                                   |
+| `trafficFlowService.ts`         | Top-level orchestrator — resolves traffic through the cascade, merges with P2P probes, pushes to Zustand store on debounced refresh interval. Exports `initTrafficP2P`/`disposeTrafficP2P`/`suspendTrafficP2P`/`resumeTrafficP2P`.                                                                                                                                                                                                                                                                  |
 | `tomtomFetcher.ts`              | TomTom Traffic Flow API v4 client — fetches speed/freeflow data for a bounding box, normalizes to `NormalizedTrafficSegment`.                                                                                                                                                                                                                                                                                                                                                                       |
 | `openTrafficFeed.ts`            | Free open-feed adapters (511 / DATEX II / NDW): fetches a bbox, normalizes to `NormalizedTrafficSegment[]`, and fails closed to no data. Configured via `EXPO_PUBLIC_OPEN_TRAFFIC_FEEDS`.                                                                                                                                                                                                                                                                                                           |
-| `trafficCoverage.ts`            | Pure mapping from a cascade resolve source to an explicit coverage status (P2P, open-feed, cold-start, on-device, stale, no-data).                                                                                                                                                                                                                                                                                                                                                                  |
+| `trafficCoverage.ts`            | Pure mapping from a cascade resolve source to an explicit coverage status (P2P, open-feed, cold-start, on-device, stale, no-data), plus the one-line per-source breakdown used by the developer-mode badge and settings.                                                                                                                                                                                                                                                                            |
+| `trafficSeedCache.ts`           | Bounded in-memory cache (geohash5 cell → segments, 15-minute TTL, 5-minute negative TTL) for upstream bootstrap data. Makes repeated refreshes reuse an open-feed/TomTom answer without writing licensed content into the weekly probe index, and stops no-data cells from being re-queried on every refresh.                                                                                                                                                                                       |
 | `trafficMerger.ts`              | Merges P2P `AggregatedTrafficState` and external `NormalizedTrafficSegment[]` using haversine proximity matching (~30m). P2P data takes priority when both sources cover the same road.                                                                                                                                                                                                                                                                                                             |
 | `trafficAggregator.ts`          | Ingests individual `TrafficProbe` messages into a 5-minute rolling window per road segment. Computes rolling average speed, congestion level, and sample count with validation guards.                                                                                                                                                                                                                                                                                                              |
 | `probeCollectionCoordinator.ts` | Starts/stops probe collection based on consent (`trafficTelemetryEnabled` + completed privacy consent) and `AppState`; mirrors state into `trafficStore.isCollectingProbes`.                                                                                                                                                                                                                                                                                                                        |
@@ -107,7 +111,14 @@ TomTom is optional and last in the cascade. The key is inlined at build time
 normal spend but cannot make it confidential. Guard rails:
 
 - only the geohash5 cells the earlier tiers missed are queried (one point per
-  cell, capped at 25), not the whole viewport grid;
+  cell, capped at 25), not the whole viewport grid. The viewport request now
+  derives its cells from the sample points it will actually draw, so no cell
+  is permanently left out of the capped query and re-asked on every refresh;
+- answers (`cold-start` or `open-feed`) are held by `trafficSeedCache` for 15
+  minutes per cell, and cells TomTom had no data for are negative-cached for 5
+  minutes — repeated refreshes inside either window make no request. Free open
+  feeds opt out of negative caching so a transient feed outage does not hand
+  their cells to the paid bridge;
 - flow raster tiles resolve disk → P2P → TomTom, with a 15-minute TTL and a
   2,000-tile cap; route ETA answers are cached for 5 minutes;
 - a per-session budget of 400 requests stops runaway loops;

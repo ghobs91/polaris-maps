@@ -5,6 +5,7 @@ import type {
   TrafficIncident,
   TrafficMode,
 } from '../models/traffic';
+import type { TrafficSourceBreakdown } from '../models/trafficHistory';
 
 interface TrafficState {
   segmentTraffic: Record<string, AggregatedTrafficState>;
@@ -34,6 +35,8 @@ interface TrafficState {
   // Historical condition index state
   historyEntryCount: number;
   lastResolveSource: string | null;
+  /** Per-source cell counts of the last resolution (dev-mode provenance). */
+  lastResolveBreakdown: TrafficSourceBreakdown | null;
   /** Bumped when new traffic tiles are seeded — cache-busts the raster source. */
   trafficTileSeedVersion: number;
 
@@ -60,6 +63,7 @@ interface TrafficState {
   setExternalFetchLoading: (loading: boolean) => void;
   setHistoryEntryCount: (count: number) => void;
   setLastResolveSource: (source: string | null) => void;
+  setLastResolveBreakdown: (breakdown: TrafficSourceBreakdown | null) => void;
   bumpTrafficTileSeedVersion: () => void;
   setIncidents: (incidents: TrafficIncident[]) => void;
   upsertIncident: (incident: TrafficIncident) => void;
@@ -85,6 +89,7 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
 
   historyEntryCount: 0,
   lastResolveSource: null,
+  lastResolveBreakdown: null,
   trafficTileSeedVersion: 0,
   incidents: [],
 
@@ -124,6 +129,7 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
   setExternalFetchLoading: (isExternalFetchLoading) => set({ isExternalFetchLoading }),
   setHistoryEntryCount: (historyEntryCount) => set({ historyEntryCount }),
   setLastResolveSource: (lastResolveSource) => set({ lastResolveSource }),
+  setLastResolveBreakdown: (lastResolveBreakdown) => set({ lastResolveBreakdown }),
   bumpTrafficTileSeedVersion: () =>
     set((s) => ({ trafficTileSeedVersion: s.trafficTileSeedVersion + 1 })),
   setIncidents: (incidents) => set({ incidents }),
@@ -144,6 +150,8 @@ export const useTrafficStore = create<TrafficState>()((set) => ({
       normalizedSegments: [],
       isExternalFetchLoading: false,
       lastExternalFetchAt: null,
+      lastResolveSource: null,
+      lastResolveBreakdown: null,
       swarmPeerCount: 0,
       swarmTopicCount: 0,
       swarmSegmentCount: 0,

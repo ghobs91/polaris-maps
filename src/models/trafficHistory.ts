@@ -84,6 +84,32 @@ export type TrafficResolveSource =
   | 'tomtom'
   | 'none';
 
+/**
+ * Per-source cell counts for one resolution.
+ *
+ * `source` alone cannot answer "was this TomTom or my own flow history?":
+ * the cold-start tier only has to satisfy a single cell to become the
+ * highest tier used, and the local index can hold rows that were originally
+ * seeded from an upstream provider. This breakdown keeps the provenance of
+ * each resolved cell so developer-mode UI can show the real mix.
+ */
+export interface TrafficSourceBreakdown {
+  /** Cells the resolution was asked about. */
+  requestedCells: number;
+  /** Cells answered from local rows that contain probe-derived samples. */
+  localProbe: number;
+  /** Cells answered from local rows with no probe samples (upstream-seeded). */
+  localSeeded: number;
+  /** Cells answered by connected peers. */
+  p2p: number;
+  /** Cells answered by a free open traffic feed. */
+  openFeed: number;
+  /** Cells answered by the optional TomTom cold-start bridge. */
+  coldStart: number;
+  /** Cells no tier could answer. */
+  unresolved: number;
+}
+
 // ── Tunables ─────────────────────────────────────────────────────────
 
 /** Observations this recent count as "current conditions" (15 minutes). */

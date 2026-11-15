@@ -9,6 +9,7 @@ import { MapView, NAVIGATION_PUCK_SCREEN_FRACTION } from '@/components/map/MapVi
 import type { MapViewHandle } from '@/components/map/MapView';
 import { NextTurnBanner, NavigationHud, FasterRouteBanner } from '@/components/navigation';
 import { RoutingTierBadge } from '@/components/navigation/RoutingTierBadge';
+import { TrafficCoverageBadge } from '@/components/map/TrafficCoverageBadge';
 import { AddDestinationPanel } from '@/components/navigation/AddDestinationPanel';
 import { IncidentReportPanel } from '@/components/navigation/IncidentReportPanel';
 import { IncidentAheadBanner } from '@/components/navigation/IncidentAheadBanner';
@@ -875,7 +876,13 @@ export default function NavigationScreen() {
         )}
         <FasterRouteBanner />
         <IncidentAheadBanner />
-        {devMode ? <RoutingTierBadge /> : null}
+        {devMode ? (
+          <>
+            <TrafficCoverageBadge />
+            <View style={styles.devBadgeSpacer} />
+            <RoutingTierBadge />
+          </>
+        ) : null}
 
         {alternateRoutes.length > 0 && (
           <View style={styles.alternateRow}>
@@ -1140,6 +1147,8 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       gap: spacing.xs,
       marginBottom: 8,
     },
+    /** Gap between stacked developer-mode badges. */
+    devBadgeSpacer: { height: 6 },
     alternateChip: {
       flexDirection: 'row',
       alignItems: 'center',
