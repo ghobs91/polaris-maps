@@ -1,5 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, Linking, Alert } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  Linking,
+  Alert,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettingsStore, type ThemeMode } from '../../stores/settingsStore';
@@ -13,6 +24,8 @@ import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { Button, SettingsChoiceRow, SettingsGroup, SettingsRow, SFSymbol } from '../common';
 import { StreetViewSettings } from './StreetViewSettings';
 import { DashCamSettings } from './DashCamSettings';
+import { OfflineMapsSection } from './OfflineMapsSection';
+import { SettingsSectionNav, type SettingsSection } from './SettingsSectionNav';
 import { spacing, typography, iosListGroup } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -25,6 +38,19 @@ const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
 const UNIT_OPTIONS: { label: string; metric: boolean }[] = [
   { label: 'Miles', metric: false },
   { label: 'Kilometres', metric: true },
+];
+
+/** Sections reachable from the "jump to" strip, in render order. */
+const NAV_SECTIONS: SettingsSection[] = [
+  { id: 'display', label: 'Display' },
+  { id: 'offline-maps', label: 'Offline maps' },
+  { id: 'navigation', label: 'Navigation' },
+  { id: 'street-imagery', label: 'Street imagery' },
+  { id: 'dash-cam', label: 'Dash cam' },
+  { id: 'accounts', label: 'Accounts' },
+  { id: 'privacy', label: 'Privacy' },
+  { id: 'developer', label: 'Developer' },
+  { id: 'about', label: 'About' },
 ];
 
 interface SettingsContentProps {
@@ -59,6 +85,42 @@ export function SettingsContent({
   const styles = useMemo(() => createStyles(isDark), [isDark]);
   const [cachedPlaceCount, setCachedPlaceCount] = useState<number | null>(null);
   const [identityPubkey, setIdentityPubkey] = useState<string | null>(null);
+  /** Content offsets of each settings group, for the "jump to" strip. */
+  const [sectionOffsets, setSectionOffsets] = useState<Record<string, number>>({});
+  const [activeSection, setActiveSection] = useState<string>(NAV_SECTIONS[0].id);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const handleSectionLayout = useCallback(
+    (id: string) => (event: LayoutChangeEvent) => {
+      const { y } = event.nativeEvent.layout;
+      setSectionOffsets((prev) => (prev[id] === y ? prev : { ...prev, [id]: y }));
+    },
+    [],
+  );
+
+  const jumpToSection = useCallback(
+    (id: string) => {
+      setActiveSection(id);
+      const offset = sectionOffsets[id];
+      if (offset == null) return;
+      scrollRef.current?.scrollTo({ y: Math.max(offset - spacing.sm, 0), animated: true });
+    },
+    [sectionOffsets],
+  );
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Treat a group as active once its header is near the top of the viewport.
+      const y = event.nativeEvent.contentOffset.y + 24;
+      let current = NAV_SECTIONS[0].id;
+      for (const section of NAV_SECTIONS) {
+        const offset = sectionOffsets[section.id];
+        if (offset != null && offset <= y) current = section.id;
+      }
+      setActiveSection((prev) => (prev === current ? prev : current));
+    },
+    [sectionOffsets],
+  );
 
   const diagnosticsVisible = devMode || __DEV__;
 
@@ -112,410 +174,451 @@ export function SettingsContent({
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {showHeading && <Text style={styles.heading}>Settings</Text>}
-
-      <SettingsGroup header="Display" icon={rowIcon('color-palette-outline')}>
-        <SettingsChoiceRow
-          title="Theme"
-          options={THEME_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
-          value={themeMode}
-          onChange={setThemeMode}
-        />
-        <SettingsChoiceRow
-          title="Units"
-          options={UNIT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.metric }))}
-          value={useMetric}
-          onChange={setUseMetric}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup header="Navigation" icon={rowIcon('navigate-outline')}>
-        <SettingsRow
-          title="Voice guidance"
-          rightAdornment={
-            <Switch
-              value={voiceGuidanceEnabled}
-              onValueChange={setVoiceGuidanceEnabled}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Avoid tolls"
-          rightAdornment={
-            <Switch
-              value={routePreferences.avoidTolls}
-              onValueChange={(v) => setRoutePreferences({ avoidTolls: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Avoid highways"
-          rightAdornment={
-            <Switch
-              value={routePreferences.avoidHighways}
-              onValueChange={(v) => setRoutePreferences({ avoidHighways: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Avoid ferries"
-          rightAdornment={
-            <Switch
-              value={routePreferences.avoidFerries}
-              onValueChange={(v) => setRoutePreferences({ avoidFerries: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow title="CarPlay" value="Automatic when connected" />
-      </SettingsGroup>
-
-      <StreetViewSettings />
-
-      <DashCamSettings />
-
-      <SettingsGroup
-        header="Accounts"
-        icon={rowIcon('person-circle-outline')}
-        footer="Sign in to edit map data or leave reviews."
+    <View style={styles.root}>
+      {showHeading && (
+        <View style={styles.headerArea}>
+          <Text style={styles.heading}>Settings</Text>
+        </View>
+      )}
+      <SettingsSectionNav
+        sections={NAV_SECTIONS}
+        activeId={activeSection}
+        onSelect={jumpToSection}
+      />
+      <ScrollView
+        ref={scrollRef}
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={32}
+        onScroll={handleScroll}
       >
-        <View style={styles.accountCard}>
-          {osmAccessToken && osmUser ? (
-            <>
-              <View style={styles.accountRow}>
-                <View style={[styles.accountIcon, { backgroundColor: '#7EBC6F' }]}>
-                  <MaterialCommunityIcons name="map" size={16} color="#FFFFFF" />
-                </View>
-                <View style={styles.accountTextCol}>
-                  <Text style={styles.accountName} numberOfLines={1}>
-                    {osmUser.displayName}
-                  </Text>
-                  <Text style={styles.accountCaption} numberOfLines={1}>
-                    Signed in to edit map data
-                  </Text>
-                </View>
-              </View>
-              <SettingsRow
-                title="View Latest Contributions"
-                onPress={() => {
-                  Linking.openURL(
-                    `https://www.openstreetmap.org/user/${encodeURIComponent(osmUser.displayName)}/history`,
-                  );
-                }}
-              />
-              <SettingsRow title="Sign Out" onPress={osmLogout} />
-            </>
-          ) : (
-            <View style={styles.signinBlock}>
-              <View style={styles.accountRow}>
-                <View style={[styles.accountIcon, { backgroundColor: '#7EBC6F' }]}>
-                  <MaterialCommunityIcons name="map" size={16} color="#FFFFFF" />
-                </View>
-                <View style={styles.accountTextCol}>
-                  <Text style={styles.accountName}>OpenStreetMap</Text>
-                  <Text style={styles.accountCaption}>Edit map data</Text>
-                </View>
-              </View>
-              <Button
-                title={osmIsLoggingIn ? 'Signing in…' : 'Sign in with OpenStreetMap'}
-                variant="primary"
-                onPress={() => osmLogin().catch(() => {})}
-                disabled={osmIsLoggingIn}
-                style={styles.signinBtn}
-              />
-            </View>
-          )}
+        <View onLayout={handleSectionLayout('display')}>
+          <SettingsGroup header="Display" icon={rowIcon('color-palette-outline')}>
+            <SettingsChoiceRow
+              title="Theme"
+              options={THEME_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+              value={themeMode}
+              onChange={setThemeMode}
+            />
+            <SettingsChoiceRow
+              title="Units"
+              options={UNIT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.metric }))}
+              value={useMetric}
+              onChange={setUseMetric}
+            />
+          </SettingsGroup>
         </View>
 
-        <View style={styles.accountCard}>
-          {bskySession ? (
-            <>
-              <View style={styles.accountRow}>
-                <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
-                  <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
-                </View>
-                <View style={styles.accountTextCol}>
-                  <Text style={styles.accountName} numberOfLines={1}>
-                    @{bskySession.handle}
-                  </Text>
-                  <Text style={styles.accountCaption} numberOfLines={1}>
-                    Signed in to leave reviews
-                  </Text>
-                </View>
-              </View>
-              <SettingsRow title="Disconnect" onPress={bskyLogout} destructive />
-            </>
-          ) : (
-            <View style={styles.signinBlock}>
-              <View style={styles.accountRow}>
-                <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
-                  <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
-                </View>
-                <View style={styles.accountTextCol}>
-                  <Text style={styles.accountName}>Bluesky</Text>
-                  <Text style={styles.accountCaption}>Leave place reviews</Text>
-                </View>
-              </View>
-              {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
-              <Button
-                title={bskyIsLoading ? 'Signing in…' : 'Sign in with Bluesky'}
-                variant="primary"
-                onPress={() => bskyLogin().catch(() => {})}
-                disabled={bskyIsLoading}
-                style={styles.signinBtn}
-              />
-            </View>
-          )}
+        <View onLayout={handleSectionLayout('offline-maps')}>
+          <OfflineMapsSection
+            onOpenRegions={onOpenRegions}
+            icon={rowIcon('cloud-download-outline')}
+          />
         </View>
-      </SettingsGroup>
 
-      <SettingsGroup
-        header="Privacy"
-        icon={rowIcon('shield-checkmark-outline')}
-        footer="What this device shares with the network."
-      >
-        <SettingsRow
-          title="Location Access"
-          rightAdornment={
-            <Switch
-              value={permissions.locationEnabled}
-              onValueChange={(v) => setPermissions({ locationEnabled: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Traffic Telemetry"
-          rightAdornment={
-            <Switch
-              value={permissions.trafficTelemetryEnabled}
-              onValueChange={(v) => setPermissions({ trafficTelemetryEnabled: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="POI Contributions"
-          rightAdornment={
-            <Switch
-              value={permissions.poiContributionsEnabled}
-              onValueChange={(v) => setPermissions({ poiContributionsEnabled: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Imagery Sharing"
-          rightAdornment={
-            <Switch
-              value={permissions.imagerySharingEnabled}
-              onValueChange={(v) => setPermissions({ imagerySharingEnabled: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Review Photo Sharing"
-          rightAdornment={
-            <Switch
-              value={permissions.reviewPhotoSharingEnabled}
-              onValueChange={(v) => setPermissions({ reviewPhotoSharingEnabled: v })}
-              trackColor={trackColor}
-            />
-          }
-        />
-        <SettingsRow
-          title="Review Privacy Choices"
-          rightAdornment={
-            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-          }
-          onPress={() => router.push('/onboarding?step=1')}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup header="Offline maps" icon={rowIcon('cloud-download-outline')}>
-        <SettingsRow
-          title="Manage Regions"
-          value="Download offline maps"
-          onPress={onOpenRegions ?? (() => router.push('/regions'))}
-        />
-        <SettingsRow
-          title="Clear Cached Place Details"
-          value={cachedPlaceCount != null ? `${cachedPlaceCount} cached` : undefined}
-          onPress={() => {
-            clearPlaceDetailCache()
-              .then(() => {
-                setCachedPlaceCount(0);
-                Alert.alert('Cleared', 'Cached place details were removed.');
-              })
-              .catch(() => {});
-          }}
-        />
-      </SettingsGroup>
-
-      <SettingsGroup
-        header="Developer"
-        icon={rowIcon('construct-outline')}
-        footer="Diagnostics and test toggles."
-      >
-        <SettingsRow
-          title="Dev mode"
-          rightAdornment={
-            <Switch value={devMode} onValueChange={setDevMode} trackColor={trackColor} />
-          }
-        />
-        {diagnosticsVisible ? (
-          <>
+        <View onLayout={handleSectionLayout('navigation')}>
+          <SettingsGroup header="Navigation" icon={rowIcon('navigate-outline')}>
             <SettingsRow
-              title="Node Dashboard"
-              value="Peers, feeds, network"
-              onPress={onOpenNodeDashboard ?? (() => router.push('/(tabs)/profile'))}
-            />
-            <SettingsRow
-              title="Transport"
-              value={trafficMode === 'hyperswarm' ? 'Hyperswarm' : 'Nostr fallback'}
-            />
-            <SettingsRow title="Peers" value={String(swarmPeerCount)} />
-            <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
-            <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
-            <SettingsRow
-              title="Link Profile"
-              value={swarmMetered ? 'Metered (client-only)' : 'Unmetered'}
-            />
-            {swarmPrunedConnections > 0 ? (
-              <SettingsRow title="Density-cap Rejections" value={String(swarmPrunedConnections)} />
-            ) : null}
-            <SettingsRow title="Nostr Relays" value={String(nostrRelayCount)} />
-            <SettingsRow
-              title="Contributing Probes"
-              value={
-                isCollectingProbes ? 'Yes' : permissions.trafficTelemetryEnabled ? 'Paused' : 'Off'
-              }
-            />
-            <SettingsRow
-              title="Identity Public Key"
-              value={identityPubkey ? `${identityPubkey.slice(0, 12)}…` : 'Unavailable'}
-              onPress={() =>
-                identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
-              }
-            />
-            <SettingsRow
-              title="Export Diagnostics"
-              value="Redacted network + mesh log"
-              onPress={() => {
-                void (async () => {
-                  try {
-                    const { exportDiagnostics } =
-                      await import('../../services/diagnostics/diagnosticsExport');
-                    await exportDiagnostics();
-                  } catch (error) {
-                    Alert.alert(
-                      'Export failed',
-                      error instanceof Error ? error.message : 'Unknown error',
-                    );
-                  }
-                })();
-              }}
-            />
-            <SettingsRow
-              title="Show Onboarding on Launch"
+              title="Voice guidance"
               rightAdornment={
                 <Switch
-                  value={showOnboardingOnLaunch}
-                  onValueChange={(enabled) => {
-                    setShowOnboardingOnLaunch(enabled);
-                    if (enabled) {
-                      Alert.alert(
-                        'Onboarding will replay',
-                        'It will appear the next time the app is cold started.',
-                      );
-                    }
-                  }}
+                  value={voiceGuidanceEnabled}
+                  onValueChange={setVoiceGuidanceEnabled}
                   trackColor={trackColor}
                 />
               }
             />
             <SettingsRow
-              title="Publish Region Manifest"
-              value="latest downloaded region"
-              onPress={() => {
-                void (async () => {
-                  try {
-                    const [fs, { publishRegionPack }, { getDownloadedRegions }] = await Promise.all(
-                      [
-                        import('expo-file-system/legacy'),
-                        import('../../services/regions/regionManifestPublisher'),
-                        import('../../services/regions/regionRepository'),
-                      ],
-                    );
+              title="Avoid tolls"
+              rightAdornment={
+                <Switch
+                  value={routePreferences.avoidTolls}
+                  onValueChange={(v) => setRoutePreferences({ avoidTolls: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Avoid highways"
+              rightAdornment={
+                <Switch
+                  value={routePreferences.avoidHighways}
+                  onValueChange={(v) => setRoutePreferences({ avoidHighways: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Avoid ferries"
+              rightAdornment={
+                <Switch
+                  value={routePreferences.avoidFerries}
+                  onValueChange={(v) => setRoutePreferences({ avoidFerries: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow title="CarPlay" value="Automatic when connected" />
+          </SettingsGroup>
+        </View>
 
-                    const regions = await getDownloadedRegions();
-                    if (regions.length === 0) {
-                      Alert.alert(
-                        'No downloaded region',
-                        'Download a region first, then publish its manifest.',
+        <View onLayout={handleSectionLayout('street-imagery')}>
+          <StreetViewSettings />
+        </View>
+
+        <View onLayout={handleSectionLayout('dash-cam')}>
+          <DashCamSettings />
+        </View>
+
+        <View onLayout={handleSectionLayout('accounts')}>
+          <SettingsGroup
+            header="Accounts"
+            icon={rowIcon('person-circle-outline')}
+            footer="Sign in to edit map data or leave reviews."
+          >
+            <View style={styles.accountCard}>
+              {osmAccessToken && osmUser ? (
+                <>
+                  <View style={styles.accountRow}>
+                    <View style={[styles.accountIcon, { backgroundColor: '#7EBC6F' }]}>
+                      <MaterialCommunityIcons name="map" size={16} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.accountTextCol}>
+                      <Text style={styles.accountName} numberOfLines={1}>
+                        {osmUser.displayName}
+                      </Text>
+                      <Text style={styles.accountCaption} numberOfLines={1}>
+                        Signed in to edit map data
+                      </Text>
+                    </View>
+                  </View>
+                  <SettingsRow
+                    title="View Latest Contributions"
+                    onPress={() => {
+                      Linking.openURL(
+                        `https://www.openstreetmap.org/user/${encodeURIComponent(osmUser.displayName)}/history`,
                       );
-                      return;
-                    }
+                    }}
+                  />
+                  <SettingsRow title="Sign Out" onPress={osmLogout} />
+                </>
+              ) : (
+                <View style={styles.signinBlock}>
+                  <View style={styles.accountRow}>
+                    <View style={[styles.accountIcon, { backgroundColor: '#7EBC6F' }]}>
+                      <MaterialCommunityIcons name="map" size={16} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.accountTextCol}>
+                      <Text style={styles.accountName}>OpenStreetMap</Text>
+                      <Text style={styles.accountCaption}>Edit map data</Text>
+                    </View>
+                  </View>
+                  <Button
+                    title={osmIsLoggingIn ? 'Signing in…' : 'Sign in with OpenStreetMap'}
+                    variant="primary"
+                    onPress={() => osmLogin().catch(() => {})}
+                    disabled={osmIsLoggingIn}
+                    style={styles.signinBtn}
+                  />
+                </View>
+              )}
+            </View>
 
-                    const region = regions[0];
-                    const manifest = await publishRegionPack({
-                      regionId: region.id,
-                      filesDir: `${fs.documentDirectory}regions/${region.id}/`,
-                      version: region.version ?? '1.0',
-                      overtureRelease: null,
-                    });
-                    console.log(`[region-manifest] ${JSON.stringify(manifest)}`);
-                    Alert.alert(
-                      `Region manifest (${region.id})`,
-                      JSON.stringify(manifest, null, 2),
-                    );
-                  } catch (err) {
-                    Alert.alert('Publish failed', err instanceof Error ? err.message : String(err));
-                  }
-                })();
+            <View style={styles.accountCard}>
+              {bskySession ? (
+                <>
+                  <View style={styles.accountRow}>
+                    <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
+                      <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.accountTextCol}>
+                      <Text style={styles.accountName} numberOfLines={1}>
+                        @{bskySession.handle}
+                      </Text>
+                      <Text style={styles.accountCaption} numberOfLines={1}>
+                        Signed in to leave reviews
+                      </Text>
+                    </View>
+                  </View>
+                  <SettingsRow title="Disconnect" onPress={bskyLogout} destructive />
+                </>
+              ) : (
+                <View style={styles.signinBlock}>
+                  <View style={styles.accountRow}>
+                    <View style={[styles.accountIcon, { backgroundColor: '#0085FF' }]}>
+                      <MaterialCommunityIcons name="butterfly" size={16} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.accountTextCol}>
+                      <Text style={styles.accountName}>Bluesky</Text>
+                      <Text style={styles.accountCaption}>Leave place reviews</Text>
+                    </View>
+                  </View>
+                  {bskyError ? <Text style={styles.errorText}>{bskyError}</Text> : null}
+                  <Button
+                    title={bskyIsLoading ? 'Signing in…' : 'Sign in with Bluesky'}
+                    variant="primary"
+                    onPress={() => bskyLogin().catch(() => {})}
+                    disabled={bskyIsLoading}
+                    style={styles.signinBtn}
+                  />
+                </View>
+              )}
+            </View>
+          </SettingsGroup>
+        </View>
+
+        <View onLayout={handleSectionLayout('privacy')}>
+          <SettingsGroup
+            header="Privacy"
+            icon={rowIcon('shield-checkmark-outline')}
+            footer="What this device shares with the network."
+          >
+            <SettingsRow
+              title="Location Access"
+              rightAdornment={
+                <Switch
+                  value={permissions.locationEnabled}
+                  onValueChange={(v) => setPermissions({ locationEnabled: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Traffic Telemetry"
+              rightAdornment={
+                <Switch
+                  value={permissions.trafficTelemetryEnabled}
+                  onValueChange={(v) => setPermissions({ trafficTelemetryEnabled: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="POI Contributions"
+              rightAdornment={
+                <Switch
+                  value={permissions.poiContributionsEnabled}
+                  onValueChange={(v) => setPermissions({ poiContributionsEnabled: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Imagery Sharing"
+              rightAdornment={
+                <Switch
+                  value={permissions.imagerySharingEnabled}
+                  onValueChange={(v) => setPermissions({ imagerySharingEnabled: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Review Photo Sharing"
+              rightAdornment={
+                <Switch
+                  value={permissions.reviewPhotoSharingEnabled}
+                  onValueChange={(v) => setPermissions({ reviewPhotoSharingEnabled: v })}
+                  trackColor={trackColor}
+                />
+              }
+            />
+            <SettingsRow
+              title="Review Privacy Choices"
+              rightAdornment={
+                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+              }
+              onPress={() => router.push('/onboarding?step=1')}
+            />
+          </SettingsGroup>
+        </View>
+
+        <View onLayout={handleSectionLayout('developer')}>
+          <SettingsGroup
+            header="Developer"
+            icon={rowIcon('construct-outline')}
+            footer="Diagnostics and test toggles."
+          >
+            <SettingsRow
+              title="Dev mode"
+              rightAdornment={
+                <Switch value={devMode} onValueChange={setDevMode} trackColor={trackColor} />
+              }
+            />
+            <SettingsRow
+              title="Clear Cached Place Details"
+              value={cachedPlaceCount != null ? `${cachedPlaceCount} cached` : undefined}
+              onPress={() => {
+                clearPlaceDetailCache()
+                  .then(() => {
+                    setCachedPlaceCount(0);
+                    Alert.alert('Cleared', 'Cached place details were removed.');
+                  })
+                  .catch(() => {});
               }}
             />
-          </>
-        ) : null}
-      </SettingsGroup>
+            {diagnosticsVisible ? (
+              <>
+                <SettingsRow
+                  title="Node Dashboard"
+                  value="Peers, feeds, network"
+                  onPress={onOpenNodeDashboard ?? (() => router.push('/(tabs)/profile'))}
+                />
+                <SettingsRow
+                  title="Transport"
+                  value={trafficMode === 'hyperswarm' ? 'Hyperswarm' : 'Nostr fallback'}
+                />
+                <SettingsRow title="Peers" value={String(swarmPeerCount)} />
+                <SettingsRow title="Topics Joined" value={String(swarmTopicCount)} />
+                <SettingsRow title="Traffic Segments" value={String(swarmSegmentCount)} />
+                <SettingsRow
+                  title="Link Profile"
+                  value={swarmMetered ? 'Metered (client-only)' : 'Unmetered'}
+                />
+                {swarmPrunedConnections > 0 ? (
+                  <SettingsRow
+                    title="Density-cap Rejections"
+                    value={String(swarmPrunedConnections)}
+                  />
+                ) : null}
+                <SettingsRow title="Nostr Relays" value={String(nostrRelayCount)} />
+                <SettingsRow
+                  title="Contributing Probes"
+                  value={
+                    isCollectingProbes
+                      ? 'Yes'
+                      : permissions.trafficTelemetryEnabled
+                        ? 'Paused'
+                        : 'Off'
+                  }
+                />
+                <SettingsRow
+                  title="Identity Public Key"
+                  value={identityPubkey ? `${identityPubkey.slice(0, 12)}…` : 'Unavailable'}
+                  onPress={() =>
+                    identityPubkey ? Alert.alert('Identity public key', identityPubkey) : undefined
+                  }
+                />
+                <SettingsRow
+                  title="Export Diagnostics"
+                  value="Redacted network + mesh log"
+                  onPress={() => {
+                    void (async () => {
+                      try {
+                        const { exportDiagnostics } =
+                          await import('../../services/diagnostics/diagnosticsExport');
+                        await exportDiagnostics();
+                      } catch (error) {
+                        Alert.alert(
+                          'Export failed',
+                          error instanceof Error ? error.message : 'Unknown error',
+                        );
+                      }
+                    })();
+                  }}
+                />
+                <SettingsRow
+                  title="Show Onboarding on Launch"
+                  rightAdornment={
+                    <Switch
+                      value={showOnboardingOnLaunch}
+                      onValueChange={(enabled) => {
+                        setShowOnboardingOnLaunch(enabled);
+                        if (enabled) {
+                          Alert.alert(
+                            'Onboarding will replay',
+                            'It will appear the next time the app is cold started.',
+                          );
+                        }
+                      }}
+                      trackColor={trackColor}
+                    />
+                  }
+                />
+                <SettingsRow
+                  title="Publish Region Manifest"
+                  value="latest downloaded region"
+                  onPress={() => {
+                    void (async () => {
+                      try {
+                        const [fs, { publishRegionPack }, { getDownloadedRegions }] =
+                          await Promise.all([
+                            import('expo-file-system/legacy'),
+                            import('../../services/regions/regionManifestPublisher'),
+                            import('../../services/regions/regionRepository'),
+                          ]);
 
-      <SettingsGroup header="About" icon={rowIcon('information-circle-outline')}>
-        <SettingsRow
-          title="Map Data & Attributions"
-          rightAdornment={
-            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-          }
-          onPress={() =>
-            Alert.alert(
-              'Map Data & Attributions',
-              'Map data © OpenStreetMap contributors (ODbL).\n\n' +
-                'Satellite imagery: USGS The National Map (NAIP, public domain) and Sentinel-2 cloudless by EOX (CC BY-SA).\n\n' +
-                'Places: Overture Maps Foundation (CDLA-Permissive-2.0).\n\n' +
-                'Transit data: respective agencies via GTFS/GTFS-RT.',
-            )
-          }
-        />
-        <SettingsRow
-          title="Privacy Policy"
-          rightAdornment={
-            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-          }
-          onPress={() => Linking.openURL('https://app.polarismaps.app/privacy')}
-        />
-        <SettingsRow
-          title="Terms of Service"
-          rightAdornment={
-            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-          }
-          onPress={() => Linking.openURL('https://app.polarismaps.app/terms')}
-        />
-      </SettingsGroup>
-    </ScrollView>
+                        const regions = await getDownloadedRegions();
+                        if (regions.length === 0) {
+                          Alert.alert(
+                            'No downloaded region',
+                            'Download a region first, then publish its manifest.',
+                          );
+                          return;
+                        }
+
+                        const region = regions[0];
+                        const manifest = await publishRegionPack({
+                          regionId: region.id,
+                          filesDir: `${fs.documentDirectory}regions/${region.id}/`,
+                          version: region.version ?? '1.0',
+                          overtureRelease: null,
+                        });
+                        console.log(`[region-manifest] ${JSON.stringify(manifest)}`);
+                        Alert.alert(
+                          `Region manifest (${region.id})`,
+                          JSON.stringify(manifest, null, 2),
+                        );
+                      } catch (err) {
+                        Alert.alert(
+                          'Publish failed',
+                          err instanceof Error ? err.message : String(err),
+                        );
+                      }
+                    })();
+                  }}
+                />
+              </>
+            ) : null}
+          </SettingsGroup>
+        </View>
+
+        <View onLayout={handleSectionLayout('about')}>
+          <SettingsGroup header="About" icon={rowIcon('information-circle-outline')}>
+            <SettingsRow
+              title="Map Data & Attributions"
+              rightAdornment={
+                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+              }
+              onPress={() =>
+                Alert.alert(
+                  'Map Data & Attributions',
+                  'Map data © OpenStreetMap contributors (ODbL).\n\n' +
+                    'Satellite imagery: USGS The National Map (NAIP, public domain) and Sentinel-2 cloudless by EOX (CC BY-SA).\n\n' +
+                    'Places: Overture Maps Foundation (CDLA-Permissive-2.0).\n\n' +
+                    'Transit data: respective agencies via GTFS/GTFS-RT.',
+                )
+              }
+            />
+            <SettingsRow
+              title="Privacy Policy"
+              rightAdornment={
+                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+              }
+              onPress={() => Linking.openURL('https://app.polarismaps.app/privacy')}
+            />
+            <SettingsRow
+              title="Terms of Service"
+              rightAdornment={
+                <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+              }
+              onPress={() => Linking.openURL('https://app.polarismaps.app/terms')}
+            />
+          </SettingsGroup>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -525,12 +628,19 @@ const createStyles = (isDark: boolean) => {
   const captionColor = isDark ? '#8E8E93' : '#6C6C70';
   const primaryTextColor = isDark ? '#FFFFFF' : '#000000';
   return StyleSheet.create({
-    container: { flex: 1, backgroundColor: pageBg },
-    content: { paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.xxl },
+    root: { flex: 1, backgroundColor: pageBg },
+    container: { flex: 1 },
+    content: {
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.xxl,
+    },
+    headerArea: { paddingHorizontal: spacing.md },
     heading: {
       ...typography.largeTitle,
       color: headingColor,
-      marginBottom: spacing.lg,
+      marginTop: spacing.md,
+      marginBottom: spacing.xs,
       marginLeft: spacing.sm,
     },
     accountCard: {

@@ -1,7 +1,18 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn(), back: jest.fn() }) }));
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
+  // Settings sections refresh on focus; in a bare render there is no navigator.
+  useFocusEffect: (callback: () => void) => {
+    const { useEffect } = jest.requireActual('react') as typeof React;
+    useEffect(callback, [callback]);
+  },
+}));
+
+jest.mock('../../src/services/regions/regionRepository', () => ({
+  getDownloadedRegions: jest.fn().mockResolvedValue([]),
+}));
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: () => null,
