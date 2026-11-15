@@ -16,6 +16,7 @@ import {
 } from '../../services/regions/nearestPackRegion';
 import { planOfflineTileDownload } from '../../services/regions/tileDownloadPlan';
 import { uncoveredTree, flattenTree } from '../../services/regions/uncoveredTree';
+import { orderPacks, filterPacks } from '../../services/regions/packOrder';
 import {
   getLastAutoDownloadDecision,
   describeAutoDownloadForUser,
@@ -61,39 +62,39 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     const when = ageMin <= 0 ? 'just now' : `${ageMin}m ago`;
     // Rendered the raw enum and the region id before (`skip auto-download:
     // metered (us-ny-new-york)`), which told the user nothing they could act on.
-    return `Automatic download — ${describeAutoDownloadForUser(decision)} (${when})`;
+    return `Auto-download: ${describeAutoDownloadForUser(decision)} (${when})`;
   }, [regions]);
 
-  const availablePacks = useMemo(
-    () =>
-      regions.filter(
-        (region) =>
-          (region.assets?.length ?? 0) > 0 &&
-          region.downloadStatus !== 'complete' &&
-          region.downloadStatus !== 'downloading',
-      ),
+  /**
+   * Every pack-backed area, whatever its state.
+   *
+   * The list used to exclude downloading and downloaded packs, which made the
+   * search lie: typing "new york" while the New York pack was mid-download
+   * returned zero results — the pack the user cares about most. The badge on
+   * each card carries the state instead.
+   */
+  const packRegions = useMemo(
+    () => orderPacks(regions.filter((r) => (r.assets?.length ?? 0) > 0)),
     [regions],
   );
 
   /**
    * Every area a pack covers, downloaded or not.
    *
-   * Downloaded ones count too: their tree entry is just as redundant, and the
-   * pack list above only shows what is not yet downloaded.
+   * Downloaded ones count too: their tree entry is just as redundant.
    */
   const packIds = useMemo(
     () => new Set(regions.filter((r) => (r.assets?.length ?? 0) > 0).map((r) => r.id)),
     [regions],
   );
 
-  const visiblePacks = useMemo(() => {
-    const needle = packQuery.trim().toLowerCase();
-    if (!needle) return availablePacks;
-    return availablePacks.filter(
-      (region) =>
-        region.name.toLowerCase().includes(needle) || region.id.toLowerCase().includes(needle),
-    );
-  }, [availablePacks, packQuery]);
+  const visiblePacks = useMemo(() => filterPacks(packRegions, packQuery), [packRegions, packQuery]);
+
+  /** Tile-only areas that finished downloading (no pack exists for them). */
+  const downloadedTileRegions = useMemo(
+    () => regions.filter((r) => (r.assets?.length ?? 0) === 0 && r.downloadStatus === 'complete'),
+    [regions],
+  );
 
   /**
    * The Geofabrik tree with pack-covered areas removed.
@@ -251,11 +252,6 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
     [loadRegions],
   );
 
-  const downloadedRegions = useMemo(
-    () => regions.filter((r) => r.downloadStatus === 'complete'),
-    [regions],
-  );
-
   const completedPaths = useMemo(() => {
     const paths = new Set<string>();
     for (const region of regions) {
@@ -292,13 +288,13 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
 
       {autoDownloadLine && <Text style={styles.autoDownloadHint}>{autoDownloadLine}</Text>}
 
-      {availablePacks.length > 0 && (
+      {packRegions.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Packs</Text>
+          <Text style={styles.sectionTitle}>Offline Packs</Text>
           <Text style={styles.description}>
             {packQuery.trim()
-              ? `${visiblePacks.length} of ${availablePacks.length} packs match “${packQuery.trim()}”.`
-              : `${availablePacks.length} full offline packs — maps, routing, search and transit — with no per-download size limit. Prefer these: a pack covers its whole area, so the areas it covers are not listed again below.`}
+              ? `${visiblePacks.length} of ${packRegions.length} match “${packQuery.trim()}”.`
+              : `${packRegions.length} areas, each with offline maps, routing and search. Downloaded packs are marked and stay in this list.`}
           </Text>
           <View
             style={[
@@ -356,15 +352,15 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
         </View>
       )}
 
-      {downloadedRegions.length > 0 && (
+      {downloadedTileRegions.length > 0 && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Downloaded Regions</Text>
+          <Text style={styles.sectionTitle}>Downloaded Tile Areas</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.downloadedScroll}
           >
-            {downloadedRegions.map((region) => (
+            {downloadedTileRegions.map((region) => (
               <RegionCard
                 key={region.id}
                 region={region}
@@ -380,11 +376,10 @@ export function RegionsContent({ showHeading = true }: RegionsContentProps) {
 
       {uncoveredNodes.length > 0 && (
         <View style={styles.availableSection}>
-          <Text style={styles.sectionTitle}>No Pack Available</Text>
+          <Text style={styles.sectionTitle}>Other Areas</Text>
           <Text style={styles.description}>
-            {uncoveredCount} areas have no pack yet — entire large countries, and places the pack
-            build has not reached. These download as map tiles from OpenFreeMap, which is capped at
-            50 MB per download, so the largest of them will fail.
+            {uncoveredCount} areas have no pack yet. These download map tiles only, capped at 50 MB
+            — the largest areas will not fit.
           </Text>
           <View style={styles.treeContainer}>
             <GeofabrikTreePicker

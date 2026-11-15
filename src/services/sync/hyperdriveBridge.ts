@@ -146,6 +146,18 @@ export function initHyperdriveBridge(): void {
 
 /** How long to wait for a seed/download reply (peer discovery can be slow). */
 const TRANSFER_TIMEOUT_MS = 120_000;
+/**
+ * How long unpacking a PMTiles archive may take.
+ *
+ * Unpack expands thousands of tiles one RPC-free file write at a time inside
+ * the worklet — a metro pack takes well past the transfer timeout, so the 2
+ * minute cap aborted the work right after the download bar reached 100% and
+ * marked the region Failed. Retrying re-downloaded, re-verified, and timed out
+ * identically, which is why a pack could look permanently broken at exactly
+ * 100%. No progress is streamed across the RPC yet, so the budget has to cover
+ * the worst metro; when the unpack reports progress this can shrink again.
+ */
+const UNPACK_TIMEOUT_MS = 30 * 60_000;
 /** How long to wait for a status reply. */
 const STATUS_TIMEOUT_MS = 3_000;
 
@@ -282,7 +294,7 @@ export async function unpackPmtiles(
       destDir: toFsPath(destDir),
       maxZoom: options.maxZoom,
     },
-    TRANSFER_TIMEOUT_MS,
+    UNPACK_TIMEOUT_MS,
   );
   return {
     tiles: Number(result.tiles ?? 0),

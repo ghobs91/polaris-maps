@@ -138,7 +138,7 @@ export interface DownloadProgress {
   totalBytes: number;
   downloadedBytes: number;
   percent: number;
-  stage: 'tiles' | 'places' | 'routing' | 'geocoding' | 'indices' | 'complete' | 'error';
+  stage: 'tiles' | 'unpack' | 'places' | 'routing' | 'geocoding' | 'indices' | 'complete' | 'error';
   error?: string;
 }
 
@@ -652,6 +652,16 @@ async function downloadAndUnpackTilesArchive(
   });
 
   checkAborted(signal);
+
+  // Expanding thousands of tiles takes minutes with no bytes transferred: say
+  // so, or the bar sits at 100% and the download looks hung.
+  onProgress?.({
+    regionId: region.id,
+    totalBytes: asset.sizeBytes ?? 0,
+    downloadedBytes: asset.sizeBytes ?? 0,
+    percent: 100,
+    stage: 'unpack',
+  });
 
   const tilesDir = `${destDir}tiles/`;
   await FileSystem.makeDirectoryAsync(tilesDir, { intermediates: true });
