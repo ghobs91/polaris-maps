@@ -12,6 +12,7 @@ import {
   decideAutoDownload,
   describeDecision,
   explainSkipReason,
+  isPlaceholderViewport,
   type AutoDownloadDecision,
   type AutoDownloadSkipReason,
 } from './autoRegionDownload';
@@ -135,6 +136,18 @@ async function evaluate(lat: number, lng: number): Promise<AutoDownloadDecision>
 /** Schedule an evaluation once the viewport stops moving. */
 function scheduleEvaluation(lat: number, lng: number): void {
   if (settleTimer) clearTimeout(settleTimer);
+  // A cold start evaluates before the camera has moved off the store's initial
+  // (0, 0), which resolves to whichever wide-bbox pack happens to contain Null
+  // Island. Wait for a real centre instead.
+  if (isPlaceholderViewport(lat, lng)) {
+    lastDecision = {
+      subject: 'waiting for a location fix',
+      outcome: 'skip auto-download: unpositioned-viewport',
+      reason: 'unpositioned-viewport',
+      at: Date.now(),
+    };
+    return;
+  }
   settleTimer = setTimeout(() => {
     settleTimer = null;
     void evaluate(lat, lng).catch(() => {});

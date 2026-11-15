@@ -13,6 +13,7 @@ import {
   decideAutoDownload,
   describeDecision,
   explainSkipReason,
+  isPlaceholderViewport,
   type AutoDownloadContext,
   type AutoDownloadSkipReason,
 } from '../../src/services/regions/autoRegionDownload';
@@ -116,6 +117,20 @@ describe('decideAutoDownload', () => {
       start: false,
       reason: 'attempted',
     });
+  });
+});
+
+describe('isPlaceholderViewport', () => {
+  it('flags the store’s uninitialised centre', () => {
+    expect(isPlaceholderViewport(0, 0)).toBe(true);
+  });
+
+  it('does not flag a real camera centre', () => {
+    // New York, and the Gulf of Guinea point that a literal (0, 0) would be —
+    // only the exact placeholder is rejected.
+    expect(isPlaceholderViewport(40.7128, -74.006)).toBe(false);
+    expect(isPlaceholderViewport(0.0001, 0)).toBe(false);
+    expect(isPlaceholderViewport(0, -0.0001)).toBe(false);
   });
 });
 

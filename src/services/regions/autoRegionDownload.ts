@@ -83,6 +83,7 @@ export type AutoDownloadSkipReason =
   | 'already-downloaded'
   | 'already-downloading'
   | 'not-settled'
+  | 'unpositioned-viewport'
   | 'size-unknown'
   | 'disk-unknown'
   | 'insufficient-disk'
@@ -90,6 +91,24 @@ export type AutoDownloadSkipReason =
   | 'attempted';
 
 // ── Policy (pure) ────────────────────────────────────────────────────
+
+/**
+ * True while the viewport still holds `mapStore`'s uninitialised value.
+ *
+ * The store starts at exactly `lat: 0, lng: 0` and is only moved once a
+ * location fix or a camera mount lands. Evaluating at that placeholder is not
+ * harmless: Null Island falls inside the bounding box of any pack whose box
+ * spans the tropics, and the smallest such pack wins the "smallest containing
+ * region" lookup. On a cold start that downloaded Kiribati (16 MB of tiles and
+ * 241 MB of Jakarta/Nairobi/Singapore routing graphs) for a user in New York,
+ * before the map had moved anywhere near them.
+ *
+ * Exact equality on purpose: a real camera centre is never `0.000000, 0.000000`,
+ * so this identifies the placeholder and not an actual Gulf of Guinea viewport.
+ */
+export function isPlaceholderViewport(lat: number, lng: number): boolean {
+  return lat === 0 && lng === 0;
+}
 
 /** Decide whether the region under the viewport should start downloading. */
 export function decideAutoDownload(ctx: AutoDownloadContext): AutoDownloadDecision {
@@ -129,6 +148,8 @@ export function explainSkipReason(reason: AutoDownloadSkipReason): string {
       return 'a download is already running.';
     case 'not-settled':
       return 'waiting for the map to stop moving.';
+    case 'unpositioned-viewport':
+      return 'waiting for your location before downloading anything.';
     case 'size-unknown':
       return 'the pack has no published size.';
     case 'disk-unknown':
