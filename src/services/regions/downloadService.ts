@@ -20,6 +20,7 @@ import {
   planOfflineTileDownload,
 } from './tileDownloadPlan';
 import { downloadOfflineFonts } from '../map/offlineFonts';
+import { syncOfflineSources } from '../map/offlineMapService';
 import type { Region } from '../../models/region';
 import { cacheDotGtfsForRegion } from '../transit/dotGtfsOffline';
 import { removeOfflineDotGtfsData } from '../transit/dotGtfsOffline';
@@ -365,6 +366,11 @@ export async function downloadRegion(
 
     await updatePeerMetrics({ cacheSizeBytes: totalSize });
 
+    // Register the freshly expanded tiles with the loopback tile server now,
+    // not on the next MapView mount. Otherwise a pack that just finished reads
+    // as complete in the DB while the map still has no source for it.
+    await syncOfflineSources().catch(() => {});
+
     onProgress?.({
       regionId: region.id,
       totalBytes: totalSize,
@@ -379,10 +385,15 @@ export async function downloadRegion(
     });
   } catch (error) {
     if ((error as Error).name === 'AbortError') {
-      // Clean up the partial download directory and reset status
+      // Clean up the partial download directory and reset status.
+      //
+      // `none` is the only valid "nothing downloaded" status; this used to
+      // write `not_downloaded`, which is not in RegionDownloadStatus at all. A
+      // cancelled region then matched no branch in RegionCard, so its Download
+      // button disappeared permanently and the region could never be retried.
       await FileSystem.deleteAsync(destDir, { idempotent: true }).catch(() => {});
       await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
-        'not_downloaded',
+        'none',
         Math.floor(Date.now() / 1000),
         region.id,
       ]);
@@ -875,19 +886,57 @@ async function downloadPackSearchIndices(
     'transit.sqlite',
     TRANSIT_TIMETABLE_ASSET,
   ]);
+  if (assets.length === 0) return;
+
+  // Report one continuous 0→100% across the whole index set. Emitting each
+  // asset's own 0→100% made the bar reset three times, and a `percent` of 100
+  // on the first file left it pulsing "finishing" while 75 MB was still in
+  // flight.
+  const totalBytes = assets.reduce((sum, asset) => sum + (asset.sizeBytes ?? 0), 0);
+  let completedBytes = 0;
+
   for (const asset of assets) {
     checkAborted(signal);
 
+    const assetBytes = asset.sizeBytes ?? 0;
+    const base = completedBytes;
     onProgress?.({
       regionId: region.id,
-      totalBytes: 0,
-      downloadedBytes: 0,
-      percent: 0,
+      totalBytes,
+      downloadedBytes: base,
+      percent: totalBytes > 0 ? Math.round((base / totalBytes) * 100) : 0,
       stage: 'indices',
     });
 
-    await fetchPackAsset(region, destDir, asset, onProgress, signal);
+    await fetchPackAsset(
+      region,
+      destDir,
+      asset,
+      (p) => {
+        if (!onProgress) return;
+        const written = Math.min(assetBytes, p.downloadedBytes);
+        const overall = totalBytes > 0 ? Math.round(((base + written) / totalBytes) * 100) : 0;
+        onProgress({
+          ...p,
+          totalBytes,
+          downloadedBytes: base + written,
+          percent: Math.min(99, overall),
+          stage: 'indices',
+        });
+      },
+      signal,
+    );
+
+    completedBytes += assetBytes;
   }
+
+  onProgress?.({
+    regionId: region.id,
+    totalBytes,
+    downloadedBytes: totalBytes,
+    percent: 100,
+    stage: 'indices',
+  });
 }
 
 /**

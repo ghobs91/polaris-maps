@@ -16,7 +16,8 @@ import {
   describeAutoDownloadForUser,
 } from '../../services/regions/autoRegionDownloadCoordinator';
 import { checkForRegionUpdates } from '../../services/regions/updateService';
-import { RegionCard, DownloadProgressBar } from '.';
+import { RegionCard } from './RegionCard';
+import { DownloadProgressBar } from './DownloadProgressBar';
 import { LoadingSpinner } from '../common';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
@@ -335,8 +336,10 @@ const createStyles = (colors: ReturnType<typeof useTheme>['colors']) =>
       paddingVertical: spacing.sm + 2,
     },
     autoDownloadHint: {
+      ...typography.caption,
       fontSize: 11,
-      opacity: 0.6,
+      color: colors.textSecondary,
+      opacity: 0.8,
       marginTop: 8,
     },
     availableSection: { flex: 1, minHeight: 0 },

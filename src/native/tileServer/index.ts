@@ -11,7 +11,7 @@ let baseUrl: string | null = null;
 export async function startTileServer(config: TileServerConfig): Promise<number> {
   if (!isAvailable) return 0;
   const port = await NativePolarisTileServer!.start(config);
-  baseUrl = `http://localhost:${port}`;
+  baseUrl = `http://127.0.0.1:${port}`;
   return port;
 }
 

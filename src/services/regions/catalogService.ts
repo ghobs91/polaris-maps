@@ -198,6 +198,17 @@ export function getCatalogAssetOrigins(): CatalogAssetOrigins {
   }
 }
 
+/**
+ * A `downloading` row with no live download is debris from a killed session.
+ *
+ * `downloadManager` owns the only AbortControllers, and they do not survive a
+ * JS reload. So any row still marked `downloading` when the catalog seeds is
+ * orphaned by definition at that point — the download it described is gone.
+ */
+function orphanedDownloading(existing: Region | null): boolean {
+  return existing?.downloadStatus === 'downloading';
+}
+
 async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
   // Feed any signed manifests into the resolver (verified lazily on merge; the
   // bundled manifest always wins). Root-level entries plus per-region ones.
@@ -233,7 +244,13 @@ async function seedFromManifest(manifest: CatalogManifest): Promise<void> {
       // NOT NULL in the regions table: a catalog that omits it would otherwise
       // fail the insert rather than seed the region without a version.
       version: entry.version ?? '1',
-      downloadStatus: (existing?.downloadStatus as RegionDownloadStatus) ?? 'none',
+      // A row still marked `downloading` with no live download is a leftover
+      // from a killed session (crash, force-quit, reload). Keeping it makes the
+      // card show "Downloading…" forever with a Cancel button that has nothing
+      // to abort. Reset it so the region reads as downloadable again.
+      downloadStatus: orphanedDownloading(existing)
+        ? 'none'
+        : ((existing?.downloadStatus as RegionDownloadStatus) ?? 'none'),
       tilesSizeBytes: existing?.tilesSizeBytes ?? null,
       routingSizeBytes: existing?.routingSizeBytes ?? null,
       geocodingSizeBytes: entry.geocodingSizeBytes ?? null,

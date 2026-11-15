@@ -36,7 +36,7 @@
     "bare:link": "bare-link --preset ios --out node_modules/react-native-bare-kit/ios/addons backend",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "prebuild": "expo prebuild --clean",
-    "postinstall": "node scripts/patch-atproto-oauth.mjs",
+    "postinstall": "node scripts/patch-atproto-oauth.mjs && pnpm bare:link && node scripts/fix-bare-addon-min-os.mjs",
     "prepare": "husky"
   },
   "dependencies": {

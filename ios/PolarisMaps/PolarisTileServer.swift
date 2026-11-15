@@ -14,9 +14,12 @@ import Network
 /// 127.0.0.1 only.
 @objc(PolarisTileServer)
 class PolarisTileServer: NSObject {
+  private let queue = DispatchQueue(label: "polaris.tile-server", qos: .utility)
   private var listener: NWListener?
   private var sources: [String: String] = [:] // id → directory path
   private var port: UInt16 = 0
+  private var isStarting = false
+  private var pendingStartHandlers: [(RCTPromiseResolveBlock, RCTPromiseRejectBlock)] = []
 
   @objc
   func start(
@@ -24,44 +27,87 @@ class PolarisTileServer: NSObject {
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
-    if listener != nil {
-      resolve(Int(port))
-      return
-    }
+    queue.async { [weak self] in
+      guard let self = self else { return }
 
-    let requestedPort = (config["port"] as? NSNumber)?.uint16Value ?? 0
-
-    let params = NWParameters.tcp
-    params.allowLocalEndpointReuse = true
-    if requestedPort > 0 {
-      // NWEndpoint.Port wraps UInt16 — use the raw-value initializer.
-      let port = NWEndpoint.Port(rawValue: requestedPort)
-      params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: port ?? .any)
-    } else {
-      // Ephemeral port, loopback only
-      params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
-    }
-
-    do {
-      let listener = try NWListener(using: params)
-      listener.newConnectionHandler = { [weak self] connection in
-        self?.handleConnection(connection)
-      }
-      listener.start(queue: DispatchQueue(label: "polaris.tile-server", qos: .utility))
-      self.listener = listener
-      self.port = listener.port?.rawValue ?? requestedPort
-
-      if self.port == 0 {
-        // The listener failed to bind; report the error.
-        self.listener?.cancel()
-        self.listener = nil
-        reject("tile_server_bind_failed", "Unable to bind the tile server to 127.0.0.1", nil)
+      if self.listener != nil && self.port > 0 {
+        resolve(Int(self.port))
         return
       }
 
-      resolve(Int(self.port))
-    } catch {
-      reject("tile_server_start_failed", error.localizedDescription, error)
+      self.pendingStartHandlers.append((resolve, reject))
+      if self.isStarting {
+        return
+      }
+      self.isStarting = true
+
+      let requestedPort = (config["port"] as? NSNumber)?.uint16Value ?? 0
+
+      let params = NWParameters.tcp
+      params.allowLocalEndpointReuse = true
+      if requestedPort > 0, let endpointPort = NWEndpoint.Port(rawValue: requestedPort) {
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: endpointPort)
+      } else {
+        // Ephemeral port, loopback only
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
+      }
+
+      do {
+        let listener = try NWListener(using: params)
+        listener.newConnectionHandler = { [weak self] connection in
+          self?.handleConnection(connection)
+        }
+        listener.stateUpdateHandler = { [weak self] state in
+          guard let self = self else { return }
+          switch state {
+          case .ready:
+            let boundPort = listener.port?.rawValue ?? requestedPort
+            self.port = boundPort
+            self.isStarting = false
+            let handlers = self.pendingStartHandlers
+            self.pendingStartHandlers.removeAll()
+            if boundPort == 0 {
+              self.listener?.cancel()
+              self.listener = nil
+              for (_, rej) in handlers {
+                rej("tile_server_bind_failed", "Unable to bind the tile server to 127.0.0.1", nil)
+              }
+            } else {
+              for (res, _) in handlers {
+                res(Int(boundPort))
+              }
+            }
+          case .failed(let error):
+            self.listener?.cancel()
+            self.listener = nil
+            self.port = 0
+            self.isStarting = false
+            let handlers = self.pendingStartHandlers
+            self.pendingStartHandlers.removeAll()
+            for (_, rej) in handlers {
+              rej("tile_server_bind_failed", error.localizedDescription, error)
+            }
+          case .cancelled:
+            self.isStarting = false
+            let handlers = self.pendingStartHandlers
+            self.pendingStartHandlers.removeAll()
+            for (_, rej) in handlers {
+              rej("tile_server_cancelled", "Tile server listener was cancelled", nil)
+            }
+          default:
+            break
+          }
+        }
+        self.listener = listener
+        listener.start(queue: self.queue)
+      } catch {
+        self.isStarting = false
+        let handlers = self.pendingStartHandlers
+        self.pendingStartHandlers.removeAll()
+        for (_, rej) in handlers {
+          rej("tile_server_start_failed", error.localizedDescription, error)
+        }
+      }
     }
   }
 

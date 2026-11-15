@@ -26,6 +26,20 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '16.4'
 
 prepare_react_native_project!
 
+# @generated begin polaris-link-bare-addons - expo prebuild (DO NOT MODIFY)
+# Populate node_modules/react-native-bare-kit/ios/addons/*.xcframework BEFORE
+# CocoaPods evaluates react-native-bare-kit.podspec's vendored_frameworks glob.
+# Without this, a raw `pod install` (or `expo run:ios`) after `pnpm install`
+# links only BareKit.framework and omits udx-native, bare-fs, rocksdb-native,
+# and sodium-native, causing the Bare worklets to crash with ADDON_NOT_FOUND.
+polaris_root = File.expand_path('..', __dir__)
+bare_addons_out = File.join(polaris_root, 'node_modules', 'react-native-bare-kit', 'ios', 'addons')
+bare_link_bin = File.join(polaris_root, 'node_modules', '.bin', 'bare-link')
+if File.exist?(bare_link_bin) && Dir.glob(File.join(bare_addons_out, '*.xcframework')).empty?
+  system(bare_link_bin, '--preset', 'ios', '--out', bare_addons_out, File.join(polaris_root, 'backend'))
+end
+# @generated end polaris-link-bare-addons
+
 target 'PolarisMaps' do
   use_expo_modules!
 

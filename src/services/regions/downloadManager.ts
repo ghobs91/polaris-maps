@@ -20,6 +20,7 @@
  */
 
 import { AppState, type AppStateStatus } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import { downloadRegion, type DownloadProgress } from './downloadService';
 import { getDatabase } from '../database/init';
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
@@ -72,8 +73,41 @@ export async function startBackgroundDownload(region: Region): Promise<void> {
 }
 
 /** Cancel an in-flight download (real abort — wired to downloadService signal). */
+/**
+ * Cancel a running download, or clear a stale `downloading` row.
+ *
+ * The stale case is not hypothetical: a region left at `download_status =
+ * 'downloading'` by a killed session has no AbortController in this JS runtime,
+ * so the old implementation (`controllers.get(id)?.abort()`) was a silent no-op.
+ * The card kept showing "Downloading…" with a Cancel button that did nothing,
+ * and the row could never be reset. Always clearing the progress store and
+ * resetting the row makes Cancel mean what it says.
+ */
 export function cancelBackgroundDownload(regionId: string): void {
-  controllers.get(regionId)?.abort();
+  const controller = controllers.get(regionId);
+  if (controller) {
+    controller.abort();
+    return;
+  }
+
+  // No live download: reset the row and drop any partial files so the card
+  // returns to "Download" immediately.
+  useRegionDownloadStore.getState().removeRegion(regionId);
+  void (async () => {
+    try {
+      const db = await getDatabase();
+      await db.runAsync('UPDATE regions SET download_status = ?, last_updated = ? WHERE id = ?', [
+        'none',
+        Math.floor(Date.now() / 1000),
+        regionId,
+      ]);
+      await FileSystem.deleteAsync(`${FileSystem.documentDirectory}regions/${regionId}/`, {
+        idempotent: true,
+      }).catch(() => {});
+    } catch {
+      // Best effort — the next foreground resume reconciles the row.
+    }
+  })();
 }
 
 /**

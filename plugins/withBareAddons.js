@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PODFILE_MARKER = 'polaris-fix-bare-addon-min-os';
+const PODFILE_PRE_MARKER = 'polaris-link-bare-addons';
 
 /**
  * Vendor the Bare native addons into react-native-bare-kit's `ios/addons`.
@@ -58,8 +59,31 @@ function normalizeAddonMinOS(projectRoot) {
 function injectPodfileHook(projectRoot) {
   const podfile = path.join(projectRoot, 'ios', 'Podfile');
   if (!fs.existsSync(podfile)) return;
-  const contents = fs.readFileSync(podfile, 'utf8');
-  if (contents.includes(PODFILE_MARKER)) return;
+  let contents = fs.readFileSync(podfile, 'utf8');
+
+  if (!contents.includes(PODFILE_PRE_MARKER)) {
+    const preSnippet = [
+      `# @generated begin ${PODFILE_PRE_MARKER} - expo prebuild (DO NOT MODIFY)`,
+      '# Populate node_modules/react-native-bare-kit/ios/addons/*.xcframework BEFORE',
+      "# CocoaPods evaluates react-native-bare-kit.podspec's vendored_frameworks glob.",
+      'polaris_root = File.expand_path("..", __dir__)',
+      'bare_addons_out = File.join(polaris_root, "node_modules", "react-native-bare-kit", "ios", "addons")',
+      'bare_link_bin = File.join(polaris_root, "node_modules", ".bin", "bare-link")',
+      'if File.exist?(bare_link_bin) && Dir.glob(File.join(bare_addons_out, "*.xcframework")).empty?',
+      '  system(bare_link_bin, "--preset", "ios", "--out", bare_addons_out, File.join(polaris_root, "backend"))',
+      'end',
+      `# @generated end ${PODFILE_PRE_MARKER}`,
+    ].join('\n');
+    const preAnchor = /^prepare_react_native_project!\s*$/m;
+    if (preAnchor.test(contents)) {
+      contents = contents.replace(preAnchor, (line) => `${line}\n\n${preSnippet}`);
+    }
+  }
+
+  if (contents.includes(PODFILE_MARKER)) {
+    fs.writeFileSync(podfile, contents);
+    return;
+  }
 
   const snippet = [
     `    # @generated begin ${PODFILE_MARKER} - expo prebuild (DO NOT MODIFY)`,
@@ -76,7 +100,10 @@ function injectPodfileHook(projectRoot) {
     console.warn('[withBareAddons] no Podfile post_install block found — skipping min-OS hook');
     return;
   }
-  fs.writeFileSync(podfile, contents.replace(anchor, (line) => `${line}\n${snippet}`));
+  fs.writeFileSync(
+    podfile,
+    contents.replace(anchor, (line) => `${line}\n${snippet}`),
+  );
   console.log('[withBareAddons] injected Podfile min-OS normalization hook');
 }
 
