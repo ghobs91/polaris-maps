@@ -398,3 +398,125 @@ describe('per-asset sizes and availability', () => {
     expect(assetsOf(catalog).length).toBeGreaterThan(0);
   });
 });
+
+describe('integrity metadata for regions a cycle did not rebuild', () => {
+  let dir: string;
+  let catalogPath: string;
+
+  const previousCatalog = {
+    version: '1',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    regions: [
+      {
+        id: 'us-ny-new-york',
+        assets: [
+          { name: 'tiles.pmtiles', md5: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', sizeBytes: 1000 },
+        ],
+      },
+      {
+        id: 'jp-tokyo',
+        assets: [
+          { name: 'tiles.pmtiles', md5: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', sizeBytes: 2000 },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'polaris-carry-'));
+    catalogPath = join(dir, 'regions.json');
+    writeFileSync(
+      catalogPath,
+      JSON.stringify({
+        include: [
+          { id: 'us-ny-new-york', name: 'New York Metro', bbox: '-74.3,40.4,-73.2,41.0' },
+          { id: 'jp-tokyo', name: 'Tokyo', bbox: '139.5,35.5,140.0,35.9' },
+        ],
+      }),
+    );
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('keeps published md5 and size for a region this cycle did not rebuild', () => {
+    // Stamping rebuilds `assets[]` from scratch, so a region whose bytes did not
+    // change still gets its integrity metadata recomputed from whatever this run
+    // collected. With a missing or stale per-region checksums file that silently
+    // *removes* an md5 the published catalog already carried, which turns off
+    // delta-skip on every device holding that pack.
+    const previousPath = join(dir, 'previous.json');
+    writeFileSync(previousPath, JSON.stringify(previousCatalog));
+
+    const checksumsPath = join(dir, 'checksums.json');
+    writeFileSync(
+      checksumsPath,
+      // Only the rebuilt region has a fresh checksum; Tokyo's is absent.
+      JSON.stringify({ 'us-ny-new-york-tiles.pmtiles': 'cccccccccccccccccccccccccccccccc' }),
+    );
+    const sizesPath = join(dir, 'asset-sizes.json');
+    writeFileSync(sizesPath, JSON.stringify({ 'us-ny-new-york-tiles.pmtiles': 1234 }));
+
+    const rebuiltPath = join(dir, 'rebuilt.json');
+    writeFileSync(rebuiltPath, JSON.stringify(['us-ny-new-york']));
+
+    const outPath = join(dir, 'catalog.json');
+    execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        '--tag',
+        'map-data-2026-01',
+        '--catalog',
+        catalogPath,
+        '--out',
+        outPath,
+        '--checksums',
+        checksumsPath,
+        '--asset-sizes',
+        sizesPath,
+        '--previous',
+        previousPath,
+        '--rebuilt',
+        rebuiltPath,
+      ],
+      { stdio: 'pipe' },
+    );
+
+    const published = JSON.parse(readFileSync(outPath, 'utf8')) as {
+      regions: Array<{ id: string; assets: Array<Record<string, unknown>> }>;
+    };
+    const tilesOf = (id: string) =>
+      published.regions
+        .find((region) => region.id === id)!
+        .assets.find((asset) => asset.name === 'tiles.pmtiles')!;
+
+    // Rebuilt: the new bytes win.
+    expect(tilesOf('us-ny-new-york').md5).toBe('cccccccccccccccccccccccccccccccc');
+    expect(tilesOf('us-ny-new-york').sizeBytes).toBe(1234);
+
+    // Untouched: the published values survive instead of being dropped.
+    expect(tilesOf('jp-tokyo').md5).toBe('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(tilesOf('jp-tokyo').sizeBytes).toBe(2000);
+  });
+
+  it('treats every region as rebuilt when no previous catalog is given', () => {
+    const checksumsPath = join(dir, 'checksums.json');
+    writeFileSync(checksumsPath, JSON.stringify({}));
+    const outPath = join(dir, 'catalog.json');
+
+    execFileSync(
+      process.execPath,
+      [SCRIPT, '--tag', 'map-data-2026-01', '--catalog', catalogPath, '--out', outPath],
+      { stdio: 'pipe' },
+    );
+
+    const published = JSON.parse(readFileSync(outPath, 'utf8')) as {
+      regions: Array<{ assets: Array<Record<string, unknown>> }>;
+    };
+    for (const region of published.regions) {
+      for (const asset of region.assets) expect(asset.md5).toBeUndefined();
+    }
+  });
+});

@@ -625,7 +625,7 @@ jobs:
           # scripts/pack-release-tag.mjs. Enumerate them all: assets, sizes and
           # checksums are per-tag; the catalog is global.
           DATE_YM="$(date +%Y-%m)"
-          rm -rf checksums && mkdir -p checksums
+          rm -rf checksums assets-manifest && mkdir -p checksums assets-manifest
           ASSETS_JSON="[]"
           # The unsuffixed tag is enumerated for one transition: packs uploaded
           # before the sibling-tag split live there, and dropping them from the
@@ -637,7 +637,16 @@ jobs:
             if ! gh release view "$TAG_S" --repo "${{ github.repository }}" >/dev/null 2>&1; then
               continue
             fi
-            TAG_ASSETS=$(gh release view "$TAG_S" --repo "${{ github.repository }}" --json assets --jq '[.assets[].name]')
+            # One listing per tag, kept: the names feed the asset manifest and
+            # the per-asset `updatedAt` is what proves which regions this cycle
+            # re-uploaded (see the rebuilt set below).
+            gh release view "$TAG_S" --repo "${{ github.repository }}" \
+              --json assets --jq '[.assets[]|{name,updatedAt}]' > "assets-manifest/${TAG_S}.json"
+            TAG_ASSETS=$(node -e '
+              const fs = require("fs");
+              const a = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              process.stdout.write(JSON.stringify(a.map((x) => x.name)));
+            ' "assets-manifest/${TAG_S}.json")
             ASSETS_JSON=$(node -e '
               const a = JSON.parse(process.argv[1]), b = JSON.parse(process.argv[2]);
               process.stdout.write(JSON.stringify([...a, ...b]));
@@ -721,13 +730,47 @@ jobs:
             done
           fi
 
+          # ── Which regions did this cycle actually rebuild? ───────────────────
+          # The catalog is stamped after every chunk, so it must not rewrite sizes
+          # and checksums for the ~90% of regions a chunk did not touch: a missing
+          # or stale per-region checksums file would silently drop an md5 the
+          # published catalog already carried, which turns off delta-skip on every
+          # device holding that pack. Release assets carry `updatedAt`, so anything
+          # newer than the catalog already published was re-uploaded since — those
+          # regions, and only those, get fresh integrity metadata.
+          #
+          # Downloaded before `map-data-latest` is overwritten below, so this is
+          # genuinely the previous catalog.
+          PREV_ARGS=""
+          if gh release download map-data-latest --repo "${{ github.repository }}" \
+               --pattern catalog.json --dir prev --clobber 2>/dev/null; then
+            if node -e '
+              const fs = require("fs");
+              const prev = JSON.parse(fs.readFileSync("prev/catalog.json", "utf8"));
+              const cutoff = Date.parse(prev.updated_at || "") || 0;
+              const ids = new Set();
+              const suffix = /^(.+)-(tiles\.pmtiles|routing\.tar|geocoding\.db|search\.sqlite|transit\.sqlite|transit-timetable\.sqlite|search-shards\.tar|checksums\.json)$/;
+              for (const file of fs.readdirSync("assets-manifest")) {
+                for (const asset of JSON.parse(fs.readFileSync("assets-manifest/" + file, "utf8"))) {
+                  const match = suffix.exec(asset.name || "");
+                  if (!match) continue;
+                  if ((Date.parse(asset.updatedAt || "") || 0) > cutoff) ids.add(match[1]);
+                }
+              }
+              fs.writeFileSync("rebuilt.json", JSON.stringify([...ids]));
+              console.log(`rebuilt this cycle: ${ids.size} region(s); keeping published metadata for the rest`);
+            '; then
+              PREV_ARGS="--previous prev/catalog.json --rebuilt rebuilt.json"
+            fi
+          fi
+
           if [ "$ASSETS_JSON" != "[]" ]; then
             printf '%s' "$ASSETS_JSON" > release-assets.json
             node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
-              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG $MIRROR_ARGS
+              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG $MIRROR_ARGS $PREV_ARGS
           else
             node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
-              $MIRROR_ARGS
+              $MIRROR_ARGS $PREV_ARGS
           fi
 
           # ── Stable pointer release ──────────────────────────────────────────

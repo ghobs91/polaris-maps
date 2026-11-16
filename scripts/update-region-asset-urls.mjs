@@ -55,6 +55,8 @@ function parseArgs(argv) {
     else if (arg === '--checksums') args.checksums = argv[++i];
     else if (arg === '--asset-sizes') args.assetSizes = argv[++i];
     else if (arg === '--tags') args.tags = argv[++i];
+    else if (arg === '--previous') args.previous = argv[++i];
+    else if (arg === '--rebuilt') args.rebuilt = argv[++i];
     else if (arg === '--mirrors') {
       // Backwards compatible: a comma-separated list of base URLs.
       for (const base of String(argv[++i]).split(',')) {
@@ -113,6 +115,8 @@ export function stampCatalog(
     assetSizes = {},
     available = null,
     tags = null,
+    previous = null,
+    rebuilt = null,
   },
 ) {
   // Packs can be split across sibling tags (`map-data-2026-11-a`, …) because a
@@ -199,6 +203,29 @@ export function stampCatalog(
       stamped.assets = stamped.assets.filter((entry) =>
         available.has(assetName(region.id, entry.name)),
       );
+    }
+
+    // Integrity metadata is only rewritten for regions this cycle rebuilt.
+    //
+    // `stampCatalog` rebuilds `assets[]` from scratch, so a region whose bytes
+    // did not change still gets its size and md5 recomputed from whatever this
+    // run happened to collect. When a per-region `checksums.json` is missing or
+    // stale that silently drops an md5 the published catalog already carried,
+    // which disables delta-skip on every device that has the pack; when the
+    // values merely get rewritten identically the published catalog churns for
+    // no reason. Regions that *were* rebuilt still take the fresh values — their
+    // bytes changed, so their metadata must change with them.
+    if (previous && rebuilt && !rebuilt.has(region.id)) {
+      const prevRegion = (previous.regions ?? previous.include ?? []).find(
+        (entry) => entry.id === region.id,
+      );
+      const prevAssets = prevRegion?.assets ?? [];
+      for (const entry of stamped.assets) {
+        const prev = prevAssets.find((asset) => asset.name === entry.name);
+        if (!prev) continue;
+        if (typeof prev.md5 === 'string' && prev.md5.length > 0) entry.md5 = prev.md5;
+        if (typeof prev.sizeBytes === 'number') entry.sizeBytes = prev.sizeBytes;
+      }
     }
 
     return stamped;
@@ -293,6 +320,17 @@ function main() {
     ? JSON.parse(readFileSync(resolve(args.assetSizes), 'utf8'))
     : {};
   const tags = args.tags ? JSON.parse(readFileSync(resolve(args.tags), 'utf8')) : null;
+  // `--previous` is the catalog already published, `--rebuilt` the region ids
+  // whose assets were re-uploaded since it was stamped. Together they stop a
+  // publish from rewriting integrity metadata for regions nothing touched.
+  const previous = args.previous ? JSON.parse(readFileSync(resolve(args.previous), 'utf8')) : null;
+  const rebuiltList = args.rebuilt ? JSON.parse(readFileSync(resolve(args.rebuilt), 'utf8')) : null;
+  const rebuilt = rebuiltList ? new Set(rebuiltList) : null;
+  if (previous && !rebuilt) {
+    process.stderr.write(
+      'warning: --previous without --rebuilt — every region is treated as rebuilt\n',
+    );
+  }
   const stamped = stampCatalog(catalog, {
     tag: args.tag,
     base: args.base,
@@ -302,6 +340,8 @@ function main() {
     assetSizes,
     available: assets ? new Set(assets) : null,
     tags,
+    previous,
+    rebuilt,
   });
   const baseUrls = [args.base, ...mirrors].map((base) => String(base).replace(/\/+$/, ''));
   const updated = args.out
