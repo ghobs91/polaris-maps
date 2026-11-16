@@ -100,8 +100,11 @@ else
 fi
 
 if [ "$mirrored" -eq 0 ]; then
-  echo "error: no mirror origin was configured" >&2
-  exit 1
+  # Not an error: a deployment with no secondary origin is a supported state,
+  # and GitHub Releases is the only required origin. Failing here made every
+  # build red on a repo that had not configured a mirror yet.
+  echo "no mirror origin configured — nothing to publish (GitHub Releases is the only origin)"
+  exit 0
 fi
 
 echo "mirrored $TAG to $mirrored origin(s)"

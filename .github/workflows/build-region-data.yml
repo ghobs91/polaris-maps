@@ -522,16 +522,32 @@ jobs:
           RCLONE_CONFIG_IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
           RCLONE_CONFIG_IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+          # Ubuntu 22.04 ships rclone 1.53.3, and the `internetarchive` backend
+          # only landed in 1.59 — so `apt-get install rclone` fails at
+          # "didn't find backend called internetarchive" while the step stays
+          # green. Pin a release that has the backend instead of taking the
+          # distro copy.
+          RCLONE_VERSION=1.76.0
+          curl -fsSL "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
+          unzip -q -o /tmp/rclone.zip -d /tmp/rclone-dist
+          sudo install -m 0755 "/tmp/rclone-dist/rclone-v${RCLONE_VERSION}-linux-amd64/rclone" /usr/local/bin/rclone
+          rclone version | head -1
+
           # The same tag the release was uploaded under. Packs are split across
           # six sibling tags (~59 regions each) and the catalog stamps each
           # mirror URL as `${base}/${regionTag}/${asset}`. Using the bare month
           # tag here uploaded every mirrored byte to a path no client requests —
           # 100% of mirrored regions 404ed while the upload reported success.
           TAG=$(node scripts/pack-release-tag.mjs "${{ matrix.id }}")
-          # --dry-run keeps the step green when no origin is configured yet.
-          bash scripts/publish-region-mirrors.sh "$TAG" "work/${{ matrix.id }}" || \
-            echo "::warning::No pack mirror origin configured; GitHub Releases remains the only origin."
+          # A configured mirror that does not upload has to be loud. It used to
+          # end in `|| echo "::warning::"`, which reported the missing backend
+          # above as "no pack mirror origin configured" and kept the run green
+          # with zero bytes moved. GitHub Releases keeps the region either way,
+          # so failing here costs a re-dispatch, not the data.
+          if ! bash scripts/publish-region-mirrors.sh "$TAG" "work/${{ matrix.id }}"; then
+            echo "::error::Pack mirroring failed for ${{ matrix.id }}. GitHub Releases still has this region; re-dispatch it once the mirror origin is fixed."
+            exit 1
+          fi
 
       - name: Upload build artifacts (for debugging)
         if: failure()
