@@ -321,7 +321,32 @@ describe('uploadDriveToMapillary', () => {
     expect(mockUploadAsync).toHaveBeenCalledTimes(3);
   });
 
-  it('resumes a stale-offset upload from the server offset instead of failing', async () => {
+  it('restarts a partly-uploaded session under a fresh key instead of appending at the server offset', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+    // The server already holds a prefix of this session key.
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) =>
+      String(url).includes('rupload')
+        ? Promise.resolve(jsonResponse(200, { offset: 100 }))
+        : Promise.resolve(jsonResponse(200, { cluster_id: 'cluster-1' })),
+    );
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+    const [url, , options] = mockUploadAsync.mock.calls[0];
+    // A fresh key at offset 0: resuming a whole file at offset 100 would store
+    // a complete JPEG after the existing bytes and corrupt the object.
+    expect(url).not.toBe('https://rupload.facebook.com/mapillary_public_uploads/landscape.jpg');
+    expect(url).toMatch(/landscape-[0-9a-z]+\.jpg$/);
+    expect(options.headers.Offset).toBe('0');
+    expect(options.headers['X-Entity-Name']).toBe(url.split('/').pop());
+  });
+
+  it('restarts at offset 0 after a 412 offset conflict', async () => {
     mockUploadAsync.mockReset();
     mockUploadAsync
       .mockResolvedValueOnce({
@@ -332,14 +357,48 @@ describe('uploadDriveToMapillary', () => {
       })
       .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
       .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
-    // The fresh-session probe reports 0; the resumable re-probe reports 100.
-    let probeIndex = 0;
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) =>
+      String(url).includes('rupload')
+        ? Promise.resolve(jsonResponse(200, { offset: 0 }))
+        : Promise.resolve(jsonResponse(200, { cluster_id: 'cluster-1' })),
+    );
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+    expect(mockUploadAsync.mock.calls[1][1]).toBe(LANDSCAPE.localUri);
+    expect(mockUploadAsync.mock.calls[1][2].headers).toEqual(
+      expect.objectContaining({ Offset: '0' }),
+    );
+    expect(mockUploadAsync.mock.calls[1][0]).toMatch(/landscape-[0-9a-z]+\.jpg$/);
+  });
+
+  it('refreshes the token when rupload reports NotAuthorizedError as a 400', async () => {
+    // rupload answers a refused token with HTTP 400, not 401 — a bare status
+    // check turned every image into a permanent failure instead of a refresh.
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({
+        status: 400,
+        body: JSON.stringify({
+          debug_info: {
+            retriable: false,
+            type: 'NotAuthorizedError',
+            message: 'User not authorized to perform this request',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
     mockFetch.mockReset();
     mockFetch.mockImplementation((url: RequestInfo | URL) => {
-      if (String(url).includes('rupload')) {
-        const offset = probeIndex === 0 ? 0 : 100;
-        probeIndex += 1;
-        return Promise.resolve(jsonResponse(200, { offset }));
+      const href = String(url);
+      if (href.includes('rupload')) return Promise.resolve(jsonResponse(200, { offset: 0 }));
+      if (href.includes('/token')) {
+        return Promise.resolve(
+          jsonResponse(200, { access_token: 'fresh-token', expires_in: 9000 }),
+        );
       }
       return Promise.resolve(jsonResponse(200, { cluster_id: 'cluster-1' }));
     });
@@ -347,9 +406,87 @@ describe('uploadDriveToMapillary', () => {
     const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
 
     expect(result.uploaded).toBe(1);
-    // The retry resumed at the server-reported offset.
-    expect(mockUploadAsync.mock.calls[1][2].headers).toEqual(
-      expect.objectContaining({ Offset: '100' }),
+    expect(mockUploadAsync.mock.calls[1][2]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'OAuth fresh-token' }),
+      }),
+    );
+    expect(queue.setCaptureMapillaryStatus).not.toHaveBeenCalledWith(
+      LANDSCAPE.id,
+      'failed',
+      expect.anything(),
+    );
+  });
+
+  it('refreshes the token when the offset probe reports NotAuthorizedError', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+    let probes = 0;
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) => {
+      const href = String(url);
+      if (href.includes('rupload')) {
+        probes += 1;
+        return Promise.resolve(
+          probes === 1
+            ? jsonResponse(400, {
+                debug_info: { retriable: false, type: 'NotAuthorizedError' },
+              })
+            : jsonResponse(200, { offset: 0 }),
+        );
+      }
+      if (href.includes('/token')) {
+        return Promise.resolve(
+          jsonResponse(200, { access_token: 'fresh-token', expires_in: 9000 }),
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { cluster_id: 'cluster-1' }));
+    });
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(1);
+    expect(mockUploadAsync.mock.calls[0][2]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'OAuth fresh-token' }),
+      }),
+    );
+  });
+
+  it('names the token when a refreshed upload is still refused', async () => {
+    const refused = {
+      status: 400,
+      body: JSON.stringify({
+        debug_info: {
+          retriable: false,
+          type: 'NotAuthorizedError',
+          message: 'User not authorized to perform this request',
+        },
+      }),
+    };
+    mockUploadAsync.mockReset();
+    mockUploadAsync.mockResolvedValue(refused);
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) => {
+      const href = String(url);
+      if (href.includes('rupload')) return Promise.resolve(jsonResponse(200, { offset: 0 }));
+      if (href.includes('/token')) {
+        return Promise.resolve(
+          jsonResponse(200, { access_token: 'fresh-token', expires_in: 9000 }),
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { cluster_id: 'never' }));
+    });
+
+    await expect(uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true })).rejects.toThrow(
+      /reconnect Mapillary/i,
+    );
+    expect(queue.setCaptureMapillaryStatus).not.toHaveBeenCalledWith(
+      LANDSCAPE.id,
+      'failed',
+      expect.anything(),
     );
   });
 
@@ -397,6 +534,35 @@ describe('uploadDriveToMapillary', () => {
       expect.objectContaining({
         error: expect.stringContaining('Entity too large for this session'),
       }),
+    );
+    // The drive summary repeats the server reason instead of a bare "none".
+    expect(queue.setDriveStatus).toHaveBeenCalledWith(
+      'drive-1',
+      'partial',
+      expect.stringContaining('Entity too large for this session'),
+    );
+  });
+
+  it('names the finish_upload reason when no cluster lands', async () => {
+    mockUploadAsync.mockReset();
+    mockUploadAsync
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'image-handle' }) })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify({ h: 'manifest-handle' }) });
+    mockFetch.mockReset();
+    mockFetch.mockImplementation((url: RequestInfo | URL) =>
+      String(url).includes('rupload')
+        ? Promise.resolve(jsonResponse(200, { offset: 0 }))
+        : Promise.resolve(jsonResponse(400, { error: { message: 'Invalid manifest' } })),
+    );
+
+    const result = await uploadDriveToMapillary(SUMMARY, AUTH, { wifiOnly: true });
+
+    expect(result.uploaded).toBe(0);
+    expect(result.clusterIds).toEqual([]);
+    expect(queue.setDriveStatus).toHaveBeenCalledWith(
+      'drive-1',
+      'partial',
+      expect.stringContaining('Invalid manifest'),
     );
   });
 

@@ -108,17 +108,29 @@ function isTransientStatus(status: number): boolean {
  * rupload reports most errors as JSON with an optional `debug_info`. The
  * reference implementation (`mapillary_tools`) documents that rate limiting
  * arrives as HTTP 400 (and sometimes 429 with `retriable: false`) with a
- * `backoff` in ms, and that a `412` with `OffsetInvalidError` is retriable by
- * re-reading the offset and resuming — punish those as transient.
+ * `backoff` in ms, that a `412` with `OffsetInvalidError` means the server
+ * already holds a prefix of this session, and that auth failures arrive as a
+ * **400** with `debug_info.type: NotAuthorizedError` rather than 401 — only
+ * `401`/`403` is handled as auth by status alone, so a rejected upload token
+ * silently became a permanent per-image failure.
  */
 interface RUploadDebugInfo {
   retriable?: boolean;
   type?: string;
+  message?: string;
 }
 
 interface RUploadErrorBody {
   backoff?: number;
   debug_info?: RUploadDebugInfo;
+}
+
+/** Reason text when an rupload body says the token was refused, else null. */
+function ruploadAuthReason(body: RUploadErrorBody): string | null {
+  const type = body.debug_info?.type ?? '';
+  const message = body.debug_info?.message ?? '';
+  if (/not_?authori[sz]ed|unauthori[sz]ed/i.test(`${type} ${message}`)) return message || type;
+  return null;
 }
 
 function retryAfterFromRuploadBody(body: RUploadErrorBody): number | null {
@@ -415,12 +427,24 @@ interface OffsetResponse {
 }
 
 /**
- * How many times one upload may restart at a fresh server offset. A 412
- * (`OffsetInvalidError`) means the upload service already holds bytes for this
- * session key, so the request must resume instead of starting over; after
- * several contradictions give up and let the drive retry later.
+ * How many times one upload may restart under a fresh session key. A 412
+ * (`OffsetInvalidError`) means the upload service already holds bytes for a
+ * key we thought was new; after several contradictions give up and let the
+ * drive retry later.
  */
-const MAX_OFFSET_RESUMES = 3;
+const MAX_UPLOAD_RESTARTS = 3;
+
+/**
+ * A new key for the same entity, e.g. `abc.jpg` → `abc-1f3c9a2d.jpg`. The upload
+ * service keys sessions by name, so a fresh name always starts at offset 0.
+ */
+function freshSessionKey(sessionKey: string): string {
+  const dot = sessionKey.lastIndexOf('.');
+  const stem = dot > 0 ? sessionKey.slice(0, dot) : sessionKey;
+  const extension = dot > 0 ? sessionKey.slice(dot) : '';
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return `${stem}-${suffix}${extension}`;
+}
 
 async function readUploadOffset(auth: MapillaryAuth, sessionKey: string): Promise<number> {
   try {
@@ -428,11 +452,22 @@ async function readUploadOffset(auth: MapillaryAuth, sessionKey: string): Promis
       method: 'GET',
       headers: { ...tokenAuthHeader(auth.accessToken), Accept: 'application/json' },
     });
-    if (response.status === 401 || response.status === 403) {
-      throw new MapillaryAuthError();
+    const text = await response.text().catch(() => '');
+    const authReason = ruploadAuthReason(parseRuploadErrorBody(text));
+    if (response.status === 401 || response.status === 403 || authReason) {
+      throw new MapillaryAuthError(
+        authReason
+          ? `Mapillary rejected the upload token (${authReason}) — reconnect Mapillary in Settings`
+          : undefined,
+      );
     }
     if (!response.ok) return 0;
-    const payload = await readJson<OffsetResponse>(response);
+    let payload: OffsetResponse = {};
+    try {
+      payload = JSON.parse(text) as OffsetResponse;
+    } catch {
+      return 0;
+    }
     return typeof payload.offset === 'number' && payload.offset > 0
       ? Math.floor(payload.offset)
       : 0;
@@ -462,10 +497,18 @@ async function uploadBinary(
   contentType: string,
 ): Promise<string> {
   let offset = -1;
-  let resumes = 0;
+  let restarts = 0;
   const result = await withTransientRetry(async () => {
     if (offset < 0) {
       offset = await readUploadOffset(auth, sessionKey);
+    }
+    if (offset > 0) {
+      // A previous attempt left a prefix of this entity on the upload service.
+      // `FileSystem.uploadAsync` always sends the whole file, so resuming at
+      // the server offset would append a complete JPEG after the stored bytes
+      // and produce a corrupt object — start over under a fresh session key.
+      sessionKey = freshSessionKey(sessionKey);
+      offset = 0;
     }
     const response = await FileSystem.uploadAsync(
       `${MAPILLARY_UPLOAD_URL}/${sessionKey}`,
@@ -484,14 +527,17 @@ async function uploadBinary(
     );
     const body = parseRuploadErrorBody(response.body);
 
-    // The upload service already holds parts of this file; report the real
-    // offset (and keep it for the next attempt) instead of resending from 0.
+    // The upload service already holds parts of this file under this key;
+    // restart under a fresh key at offset 0 instead of resending a full file
+    // at a non-zero offset.
     if (response.status === 412) {
-      if (resumes < MAX_OFFSET_RESUMES) {
-        resumes += 1;
-        offset = await readUploadOffset(auth, sessionKey);
+      if (restarts < MAX_UPLOAD_RESTARTS) {
+        restarts += 1;
+        const previousKey = sessionKey;
+        sessionKey = freshSessionKey(sessionKey);
+        offset = 0;
         throw new MapillaryTransientError(
-          `Mapillary upload stale offset (${sessionKey}); resuming at ${offset}`,
+          `Mapillary upload session ${previousKey} was already partly uploaded; restarting`,
         );
       }
       throw new Error(describeUploadFailure(response.status, response.body ?? ''));
@@ -504,8 +550,15 @@ async function uploadBinary(
       );
     }
 
-    if (response.status === 401 || response.status === 403) {
-      throw new MapillaryAuthError();
+    // Auth failures on rupload arrive as HTTP 400 with NotAuthorizedError in
+    // the body, so both signals have to be checked before the generic 4xx path.
+    const authReason = ruploadAuthReason(body);
+    if (response.status === 401 || response.status === 403 || authReason) {
+      throw new MapillaryAuthError(
+        authReason
+          ? `Mapillary rejected the upload token (${authReason}) — reconnect Mapillary in Settings`
+          : undefined,
+      );
     }
 
     // rupload reports rate limiting as a 4xx with a backoff / retriable flag
@@ -584,11 +637,18 @@ async function finishUpload(auth: MapillaryAuth, manifestHandle: string): Promis
     }
     return result;
   });
-  if (response.status === 401 || response.status === 403) {
-    throw new MapillaryAuthError();
-  }
   if (!response.ok) {
-    const text = await (response.bodyUsed ? Promise.resolve('') : response.text().catch(() => ''));
+    const text = await response.text().catch(() => '');
+    // Graph reports an expired/refused token as 401/403, but some endpoints
+    // return 400 with NotAuthorizedError in the body.
+    const authReason = ruploadAuthReason(parseRuploadErrorBody(text));
+    if (response.status === 401 || response.status === 403 || authReason) {
+      throw new MapillaryAuthError(
+        authReason
+          ? `Mapillary rejected the upload token (${authReason}) — reconnect Mapillary in Settings`
+          : undefined,
+      );
+    }
     throw new Error(describeUploadFailure(response.status, text));
   }
   const payload = await readJson<{ cluster_id?: string }>(response);
@@ -718,6 +778,12 @@ export async function uploadDriveToMapillary(
   const uploadedIds: string[] = [];
   let failed = 0;
   let segmentFailures = 0;
+  // The first per-image or per-batch reason. Without it a drive where nothing
+  // landed reported "no images could be uploaded" and hid the server's answer.
+  let firstFailure: string | null = null;
+  const noteFailure = (error: unknown) => {
+    if (!firstFailure) firstFailure = errorMessage(error);
+  };
 
   const reportProgress = async () => {
     options.onProgress?.({
@@ -758,6 +824,7 @@ export async function uploadDriveToMapillary(
             throw error;
           }
           failed += 1;
+          noteFailure(error);
           await setCaptureMapillaryStatus(capture.id, 'failed', { error: errorMessage(error) });
         }
         await reportProgress();
@@ -792,6 +859,7 @@ export async function uploadDriveToMapillary(
         // The image handles are stored, so a retry re-submits this manifest
         // instead of re-uploading every photo.
         segmentFailures += 1;
+        noteFailure(error);
         await updateUploadBatch(batch.id, { status: 'uploading', error: errorMessage(error) });
       }
       await reportProgress();
@@ -810,7 +878,9 @@ export async function uploadDriveToMapillary(
   }
 
   if (clusterIds.length === 0) {
-    const message = 'No Mapillary images could be uploaded';
+    const message = firstFailure
+      ? `No Mapillary images could be uploaded: ${firstFailure}`
+      : 'No Mapillary images could be uploaded';
     await updateUploadBatch(batch.id, {
       status: 'failed',
       uploaded: 0,
@@ -826,12 +896,13 @@ export async function uploadDriveToMapillary(
   // long drive does not keep several GB in the document directory.
   const skipped = portrait.length;
   const partial = failed > 0 || skipped > 0 || segmentFailures > 0;
+  const detailSuffix = firstFailure ? ` (${firstFailure})` : '';
   const error = partial
     ? [
-        failed > 0 ? `${failed} photo${failed === 1 ? '' : 's'} failed` : null,
+        failed > 0 ? `${failed} photo${failed === 1 ? '' : 's'} failed${detailSuffix}` : null,
         skipped > 0 ? `${skipped} portrait photo${skipped === 1 ? '' : 's'} skipped` : null,
         segmentFailures > 0
-          ? `${segmentFailures} upload batch${segmentFailures === 1 ? '' : 'es'} could not finish`
+          ? `${segmentFailures} upload batch${segmentFailures === 1 ? '' : 'es'} could not finish${detailSuffix}`
           : null,
       ]
         .filter(Boolean)
