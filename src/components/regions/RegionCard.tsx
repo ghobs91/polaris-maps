@@ -9,6 +9,7 @@ import {
   packScopeLabel,
   packScopeDescription,
 } from '../../services/regions/packSummary';
+import type { PackSourceChoice } from '../../stores/settingsStore';
 import type { Region } from '../../models/region';
 
 interface RegionCardProps {
@@ -19,7 +20,21 @@ interface RegionCardProps {
   onDelete?: (region: Region) => void;
   /** Whether a newer tile version is available from OpenFreeMap. */
   updateAvailable?: boolean;
+  /**
+   * Developer-only origin pin for this pack. Pass `onChangeSource` (and a value)
+   * to render the picker; omit both for the normal release card.
+   */
+  sourceChoice?: PackSourceChoice;
+  onChangeSource?: (choice: PackSourceChoice) => void;
+  /** Whether the catalog advertises any mirror for this region. */
+  mirrorAdvertised?: boolean;
 }
+
+const SOURCE_LABELS: Record<PackSourceChoice, string> = {
+  auto: 'Auto',
+  primary: 'GitHub',
+  mirror: 'Archive',
+};
 
 export const RegionCard = memo(function RegionCard({
   region,
@@ -28,6 +43,9 @@ export const RegionCard = memo(function RegionCard({
   onCancel,
   onDelete,
   updateAvailable,
+  sourceChoice,
+  onChangeSource,
+  mirrorAdvertised,
 }: RegionCardProps) {
   const styles = useThemedStyles(createStyles);
   const toMb = (b?: number | null) =>
@@ -142,6 +160,48 @@ export const RegionCard = memo(function RegionCard({
           </>
         )}
       </View>
+
+      {/*
+        Developer-only origin pin. Both origins are supposed to serve identical
+        bytes, and the only way to confirm that is to fetch a pack from each on
+        its own. Only shown before a download starts, because the choice is read
+        when the transfer begins — changing it mid-download would do nothing and
+        look broken.
+      */}
+      {onChangeSource &&
+        (region.downloadStatus === 'none' || region.downloadStatus === 'failed') && (
+          <View>
+            <View style={styles.sourceRow}>
+              <Text style={styles.sourceLabel}>Source</Text>
+              {(['auto', 'primary', 'mirror'] as const).map((choice) => {
+                const active = (sourceChoice ?? 'auto') === choice;
+                return (
+                  <Pressable
+                    key={choice}
+                    onPress={() => onChangeSource(choice)}
+                    style={({ pressed }) => [
+                      styles.sourceBtn,
+                      active && styles.sourceBtnActive,
+                      pressed && styles.actionPressed,
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={`Download from ${SOURCE_LABELS[choice]}`}
+                  >
+                    <Text style={[styles.sourceText, active && styles.sourceTextActive]}>
+                      {SOURCE_LABELS[choice]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {sourceChoice === 'mirror' && mirrorAdvertised === false && (
+              <Text style={styles.sourceWarn}>
+                No mirror advertised for this pack — it will fall back to GitHub.
+              </Text>
+            )}
+          </View>
+        )}
     </View>
   );
 });
@@ -234,4 +294,29 @@ const createStyles = ({ colors }: Theme) =>
     dangerText: { color: colors.error },
     cancelBtn: { borderColor: colors.textSecondary },
     cancelText: { color: colors.textSecondary },
+    sourceRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
+    sourceLabel: { ...typography.caption, color: colors.textSecondary, marginRight: 2 },
+    sourceBtn: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: borderRadius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+    },
+    sourceBtnActive: { borderColor: colors.primary, backgroundColor: colors.primary + '15' },
+    sourceText: { ...typography.caption, fontSize: 11, color: colors.textSecondary },
+    sourceTextActive: { color: colors.primary, fontWeight: '600' },
+    sourceWarn: {
+      ...typography.caption,
+      fontSize: 11,
+      color: colors.warning,
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.sm,
+    },
   });

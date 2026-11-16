@@ -19,6 +19,7 @@ import { LoadingSpinner } from '../common';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useSettingsStore } from '../../stores/settingsStore';
 
 /**
  * Region catalogue: a shelf of what is already on disk, then a search field over
@@ -31,6 +32,10 @@ import { useTheme } from '../../contexts/ThemeContext';
 export function RegionsContent() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Developer-only: pin a pack's origin so each can be verified on its own.
+  const devMode = useSettingsStore((s) => s.devMode);
+  const packSourcePreferences = useSettingsStore((s) => s.packSourcePreferences);
+  const setPackSourcePreference = useSettingsStore((s) => s.setPackSourcePreference);
   const [regions, setRegions] = useState<Region[]>([]);
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   /** Filter for the pack list: 193 packs are unusable as a plain scroll. */
@@ -229,6 +234,13 @@ export function RegionsContent() {
             onCancel={handleCancel}
             onDelete={handleDelete}
             updateAvailable={staleRegionIds.has(region.id)}
+            sourceChoice={devMode ? (packSourcePreferences[region.id] ?? 'auto') : undefined}
+            onChangeSource={
+              devMode ? (choice) => setPackSourcePreference(region.id, choice) : undefined
+            }
+            mirrorAdvertised={(region.assets ?? []).some(
+              (asset) => (asset.mirrors ?? []).length > 0,
+            )}
           />
         ))}
         {visiblePacks.length === 0 && (

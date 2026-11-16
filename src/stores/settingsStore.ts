@@ -23,6 +23,18 @@ export type PlaceSortMode = 'recent' | 'name' | 'distance';
 /** Sort order for the saved-lists screen. */
 export type SavedListsSortMode = 'recent' | 'name';
 
+/**
+ * Which origin a pack's assets are fetched from.
+ *
+ * `auto` is the normal path: every advertised origin, rotated by `mirrorHealth`
+ * with failure cooldowns. `primary` and `mirror` pin one class so each origin
+ * can be proven independently — both are supposed to serve identical bytes and
+ * the only way to confirm that is to fetch from each on its own. Only honoured
+ * while `devMode` is on, so a release build cannot end up pinned to an origin
+ * that is having a bad day.
+ */
+export type PackSourceChoice = 'auto' | 'primary' | 'mirror';
+
 export interface StreetViewPreferences {
   /** Master opt-in for contributing street imagery during navigation. */
   enabled: boolean;
@@ -97,6 +109,12 @@ interface PersistedSettings {
   autoDownloadRegions: boolean;
   /** Allow automatic region downloads over cellular / metered links. */
   allowMeteredRegionDownloads: boolean;
+  /**
+   * Developer-only per-region origin pin, keyed by region id.
+   *
+   * Absent means `auto`. Cleared from Settings → Developer tools.
+   */
+  packSourcePreferences: Record<string, PackSourceChoice>;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -115,6 +133,8 @@ interface SettingsState extends PersistedSettings {
   setDevMode: (enabled: boolean) => void;
   setAutoDownloadRegions: (enabled: boolean) => void;
   setAllowMeteredRegionDownloads: (enabled: boolean) => void;
+  setPackSourcePreference: (regionId: string, choice: PackSourceChoice) => void;
+  clearPackSourcePreferences: () => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -165,6 +185,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   autoDownloadRegions: true,
   allowMeteredRegionDownloads: false,
   devMode: false,
+  packSourcePreferences: {},
 };
 
 function loadSettings(): PersistedSettings {
@@ -195,6 +216,7 @@ function loadSettings(): PersistedSettings {
           ...DEFAULT_SETTINGS.dashCam,
           ...(parsed.dashCam ?? {}),
         },
+        packSourcePreferences: { ...(parsed.packSourcePreferences ?? {}) },
       };
     } catch {
       // ignore corrupt data
@@ -222,6 +244,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       devMode: state.devMode,
       autoDownloadRegions: state.autoDownloadRegions,
       allowMeteredRegionDownloads: state.allowMeteredRegionDownloads,
+      packSourcePreferences: state.packSourcePreferences,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -286,6 +309,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setAllowMeteredRegionDownloads: (allowMeteredRegionDownloads) => {
       set({ allowMeteredRegionDownloads });
+      persist();
+    },
+    setPackSourcePreference: (regionId, choice) => {
+      set({ packSourcePreferences: { ...get().packSourcePreferences, [regionId]: choice } });
+      persist();
+    },
+    clearPackSourcePreferences: () => {
+      set({ packSourcePreferences: {} });
       persist();
     },
   };

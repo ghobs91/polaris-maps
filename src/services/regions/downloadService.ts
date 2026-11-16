@@ -29,6 +29,8 @@ import { registerPackShards } from './shardCatalog';
 import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
+import { useSettingsStore, type PackSourceChoice } from '../../stores/settingsStore';
+import { resolveSourceClass } from './packSourcePolicy';
 import {
   buildSourceList,
   downloadResumable,
@@ -701,9 +703,36 @@ const TILES_PMTILES = 'tiles.pmtiles';
  * Internet Archive. Rotation spreads first attempts across all four instead of
  * funnelling every client at the primary, and origins that recently failed are
  * pushed to the back so their timeout is not paid again.
+ *
+ * With developer mode on, `regionId` can pin one class of origin (primary or
+ * mirror) so each can be exercised on its own. The pin is ignored when the asset
+ * carries none of the requested class — falling back beats failing a download
+ * because a developer picked "Archive" in a region the catalog advertises no
+ * mirror for.
  */
-function orderedSourcesFor(asset: RegionAsset): string[] {
-  return orderMirrorSources(buildSourceList(asset.url, asset.mirrors ?? []));
+function orderedSourcesFor(asset: RegionAsset, regionId: string): string[] {
+  const primary = asset.url ? [asset.url] : [];
+  const mirrors = asset.mirrors ?? [];
+  const sourceClass = resolveSourceClass(
+    primary.length > 0,
+    mirrors.length > 0,
+    packSourceChoiceFor(regionId),
+  );
+  if (sourceClass === 'primary') return orderMirrorSources(primary);
+  if (sourceClass === 'mirror') return orderMirrorSources(mirrors);
+  return orderMirrorSources(buildSourceList(asset.url, mirrors));
+}
+
+/** Effective developer source pin for a region (`auto` unless devMode is on). */
+export function packSourceChoiceFor(regionId: string): PackSourceChoice {
+  try {
+    const settings = useSettingsStore.getState();
+    if (!settings.devMode) return 'auto';
+    return settings.packSourcePreferences[regionId] ?? 'auto';
+  } catch {
+    // Settings unavailable (early boot, tests) — behave like a release build.
+    return 'auto';
+  }
 }
 
 /**
@@ -756,7 +785,7 @@ async function downloadTilesArchive(
   });
 
   const archivePath = `${destDir}${TILES_PMTILES}`;
-  const sources = orderedSourcesFor(asset);
+  const sources = orderedSourcesFor(asset, region.id);
   const startedAt = Date.now();
 
   await downloadResumable({
@@ -1003,7 +1032,7 @@ async function fetchPackAsset(
   }
 
   const tempPath = asset.gzip ? `${finalPath}.gz` : finalPath;
-  const sources = orderedSourcesFor(asset);
+  const sources = orderedSourcesFor(asset, region.id);
   const startedAt = Date.now();
 
   await downloadResumable({
