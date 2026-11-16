@@ -94,6 +94,89 @@ workflow does not hold. Upload it to `map-data-latest` by hand after signing
    It probes the catalog, the config, a region asset and the tile origin, and
    prints the exact remedy for whatever is missing.
 
+## Mirrors
+
+GitHub Releases is the required origin and, until a mirror is listed, the only
+one. Its ceiling is discretionary: the Acceptable Use Policies reserve the right
+to throttle file hosting at "significantly excessive" bandwidth, which is not a
+number anyone can plan against. A mirror does not reduce bytes — it makes the
+throttle survivable.
+
+The client already handles mirrors end to end (`assets[].mirrors`,
+`assetBaseUrls`, rotation and failure cooldowns in `mirrorHealth.ts`, per-origin
+md5 verification in `downloadService.ts`). Publishing one is configuration, not
+code.
+
+### Internet Archive
+
+The Internet Archive is the correct first mirror because it is an institution
+with a mandate to host public data, not an individual's donation budget. Use one
+item per dated release and keep the same number of items as
+`prune-map-data-releases.mjs` keeps releases.
+
+**Layout.** `<item>/<tag>/<asset>`, which is what both the catalog builder and
+the uploader assume:
+
+```
+polaris-maps-map-data-2026-11/
+  map-data-2026-11-a/us-ny-new-york-tiles.pmtiles
+  map-data-2026-11-f/de-berlin-search.sqlite
+```
+
+**The tag must come from `scripts/pack-release-tag.mjs`.** Packs are split across
+six sibling tags (`-a` … `-f`, ~59 regions each) because a release holds at most
+1,000 assets. The catalog stamps each asset's mirror URL as
+`${base}/${regionTag}/${asset}`, so mirroring to the bare month tag puts every
+byte at a path no client requests — 100% of mirrored regions 404 while the
+upload reports success. This is why the workflow computes `TAG` with the script
+rather than `date +%Y-%m`.
+
+**Enable it in two phases.** Uploading and _advertising_ are separate switches,
+and they are set in this order — advertising first means the first catalog after
+the switch lists an origin that may still be ingesting.
+
+| GitHub name                 | Kind     | Value                                             | Phase         |
+| --------------------------- | -------- | ------------------------------------------------- | ------------- |
+| `IA_ITEM`                   | secret   | the item id, e.g. `polaris-maps-map-data-2026-11` | 1 — upload    |
+| `IA_ACCESS_KEY_ID`          | secret   | from archive.org/account/s3.php                   | 1 — upload    |
+| `IA_SECRET_ACCESS_KEY`      | secret   | from archive.org/account/s3.php                   | 1 — upload    |
+| `POLARIS_PACK_MIRRORS`      | variable | `true`                                            | 1 — upload    |
+| `POLARIS_PACK_MIRROR_BASES` | variable | `https://archive.org/download/<item>`             | 2 — advertise |
+
+The workflow maps the three secrets onto the `RCLONE_CONFIG_IA_*` variables
+rclone reads, so the names above are what to type in the GitHub UI — not the
+`RCLONE_` ones. `POLARIS_PACK_MIRROR_BASES` is what makes the catalog _advertise_
+the mirror (comma-separated, one base per origin); without it the bytes are
+uploaded and never requested.
+
+`RCLONE_CONFIG_IA_DISABLE_CHECKSUM` is pinned to `false` in the workflow. rclone
+defaults it to `true`, which uploads without computing an md5 and therefore never
+asks the Archive to verify the object — a mirror serving a corrupt file nobody
+can detect at either end.
+
+**Verify before shipping.** Never publish a catalog listing a mirror that does
+not serve the bytes: `mirrorHealth` will rotate devices onto it and demote it
+only after they have paid the failure.
+
+```bash
+node scripts/verify-pack-mirrors.mjs --catalog catalog.json
+```
+
+It probes every advertised URL with a one-byte ranged GET, compares the reported
+size against `sizeBytes`, and on archive.org cross-checks the item's own md5
+against the catalog's (no 27 GB download). A missing item answers `503`, not
+`404` — both are reported as "not served".
+
+**Two operational notes.**
+
+- Rotation is uniform: once a mirror is in the catalog it takes roughly _half_
+  of all first attempts, with no warm-up share. That is fine for an origin that
+  has been verified and bad for one that has not, which is what the check above
+  is for.
+- Uploads are not instantly servable — the Archive runs ingestion and derivation
+  before `/download/` is stable. Publish the catalog after verification, not
+  immediately after the upload finishes.
+
 ## The release gate
 
 `ios-testflight.yml` runs `verify-pack-origins.mjs` on every build, so the state
