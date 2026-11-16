@@ -415,8 +415,10 @@ jobs:
             const search = size("search.sqlite");
             const transit = size("transit.sqlite");
             const tiles = size("tiles.pmtiles");
+            const timetable = size("transit-timetable.sqlite");
             if (search !== undefined) out.searchIndexSizeBytes = search;
             if (transit !== undefined) out.transitIndexSizeBytes = transit;
+            if (timetable !== undefined) out.timetableSizeBytes = timetable;
             // Drives the auto-download size gate and tile download progress.
             if (tiles !== undefined) out.tilesSizeBytes = tiles;
             fs.writeFileSync(`${dir}/sizes.json`, JSON.stringify(out));
@@ -434,10 +436,22 @@ jobs:
             const dir = "work/${{ matrix.id }}";
             const region = "${{ matrix.id }}";
             const out = {};
-            for (const name of ["search.sqlite", "transit.sqlite", "tiles.pmtiles"]) {
+            // The timetable is the largest asset a metro pack can carry (Paris:
+            // 457 MB) and it was the one a mirror could serve truncated without
+            // the client noticing — `verifierFor` returns undefined when `md5`
+            // is absent. It is read in a stream so a metro pack does not need
+            // 457 MB of runner memory to checksum it.
+            for (const name of ["search.sqlite", "transit.sqlite", "tiles.pmtiles", "transit-timetable.sqlite"]) {
               try {
-                const bytes = fs.readFileSync(`${dir}/${name}`);
-                out[`${region}-${name}`] = crypto.createHash("md5").update(bytes).digest("hex");
+                const hash = crypto.createHash("md5");
+                const fd = fs.openSync(`${dir}/${name}`, "r");
+                const chunk = Buffer.allocUnsafe(4 * 1024 * 1024);
+                let read = 0;
+                while ((read = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+                  hash.update(chunk.subarray(0, read));
+                }
+                fs.closeSync(fd);
+                out[`${region}-${name}`] = hash.digest("hex");
               } catch { /* asset not built for this region */ }
             }
             fs.writeFileSync(`${dir}/checksums.json`, JSON.stringify(out));
@@ -499,11 +513,22 @@ jobs:
           RCLONE_CONFIG_B2_KEY: ${{ secrets.B2_APPLICATION_KEY }}
           IA_ITEM: ${{ secrets.IA_ITEM }}
           RCLONE_CONFIG_IA_TYPE: internetarchive
+          # rclone defaults this to TRUE, which uploads without computing an md5
+          # and therefore without asking the server to verify the object. For a
+          # mirror whose only contract is "serve the right bytes" that is the
+          # wrong default: it makes a corrupt upload undetectable at both ends.
+          # Costs a read pass over each file before upload.
+          RCLONE_CONFIG_IA_DISABLE_CHECKSUM: 'false'
           RCLONE_CONFIG_IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
           RCLONE_CONFIG_IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq rclone
-          TAG="map-data-$(date +%Y-%m)"
+          # The same tag the release was uploaded under. Packs are split across
+          # six sibling tags (~59 regions each) and the catalog stamps each
+          # mirror URL as `${base}/${regionTag}/${asset}`. Using the bare month
+          # tag here uploaded every mirrored byte to a path no client requests —
+          # 100% of mirrored regions 404ed while the upload reported success.
+          TAG=$(node scripts/pack-release-tag.mjs "${{ matrix.id }}")
           # --dry-run keeps the step green when no origin is configured yet.
           bash scripts/publish-region-mirrors.sh "$TAG" "work/${{ matrix.id }}" || \
             echo "::warning::No pack mirror origin configured; GitHub Releases remains the only origin."
@@ -544,6 +569,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          # Secondary pack origins, comma-separated, e.g.
+          #   https://archive.org/download/polaris-maps-map-data-2026-11
+          # The catalog is the only place the app learns about mirrors, so an
+          # origin that is not stamped here is never used even when it holds
+          # every byte. Empty by default: a build with no mirror publishes a
+          # catalog that advertises exactly the one origin that exists.
+          POLARIS_PACK_MIRROR_BASES: ${{ vars.POLARIS_PACK_MIRROR_BASES }}
         run: |
           # Packs live on sibling tags (map-data-YYYY-MM-a … f) — see
           # scripts/pack-release-tag.mjs. Enumerate them all: assets, sizes and
@@ -633,12 +665,25 @@ jobs:
             TAGS_ARG="--tags tags.json"
           fi
 
+          # Mirror bases become each asset's `mirrors[]` and the routing
+          # tarballs' `assetBaseUrls`; both are `${base}/${tag}/${asset}`, which
+          # is exactly the layout `scripts/publish-region-mirrors.sh` uploads.
+          MIRROR_ARGS=""
+          if [ -n "${POLARIS_PACK_MIRROR_BASES:-}" ]; then
+            IFS=',' read -ra MIRROR_LIST <<< "$POLARIS_PACK_MIRROR_BASES"
+            for base in "${MIRROR_LIST[@]}"; do
+              base="$(echo "$base" | xargs)"
+              [ -n "$base" ] && MIRROR_ARGS="$MIRROR_ARGS --mirror $base"
+            done
+          fi
+
           if [ "$ASSETS_JSON" != "[]" ]; then
             printf '%s' "$ASSETS_JSON" > release-assets.json
             node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
-              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG
+              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG $MIRROR_ARGS
           else
-            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json
+            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
+              $MIRROR_ARGS
           fi
 
           # ── Stable pointer release ──────────────────────────────────────────

@@ -273,6 +273,18 @@ function main() {
   const checksums = args.checksums ? JSON.parse(readFileSync(resolve(args.checksums), 'utf8')) : {};
   const mirrors = args.mirrorBases;
 
+  // A mirror without checksums publishes a catalog whose `assets[]` carries no
+  // `md5`. `stampCatalog` rebuilds `assets[]` from scratch, so omitting the
+  // flag does not merely skip adding checksums — it silently *removes* the ones
+  // the previous catalog had, which disables delta-skip on every device and
+  // leaves `verifierFor` returning undefined, so a mirror serving truncated
+  // bytes is accepted as a complete download.
+  if (mirrors.length > 0 && Object.keys(checksums).length === 0) {
+    process.stderr.write(
+      'warning: --mirror without --checksums — every asset will be stamped without md5\n',
+    );
+  }
+
   const assets = args.assets ? JSON.parse(readFileSync(resolve(args.assets), 'utf8')) : null;
   // `--asset-sizes` maps release asset name -> bytes, straight from
   // `gh release view --json assets`. It is what gives the app a size for the

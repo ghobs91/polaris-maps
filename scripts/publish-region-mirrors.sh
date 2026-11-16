@@ -47,6 +47,11 @@ INCLUDES=(
   --include "*-geocoding.db"
   --include "*-search.sqlite"
   --include "*-transit.sqlite"
+  # The timetable is the largest asset a metro pack carries (Paris: 457 MB).
+  # Leaving it out mirrored a pack's three small assets and not the one that
+  # dominates the download, while the catalog still advertised a mirror URL for
+  # it — a 404 on the heaviest asset of every mirrored metro.
+  --include "*-transit-timetable.sqlite"
   --include "*-search-shards.tar"
 )
 
