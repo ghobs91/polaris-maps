@@ -68,6 +68,34 @@ jobs:
       - name: Verify every region exists on Geofabrik
         run: node scripts/verify-geofabrik-paths.mjs
 
+      # Create the mirror item once, before the matrix fans out. Without this
+      # every one of ~20 concurrent build jobs races to auto-create it, and the
+      # losers' first upload attempt fails with `InvalidBucketName` (400) or
+      # `BucketAlreadyExists` (409) before the retry succeeds. That noise hides
+      # real failures and burns one of three retries on every region.
+      - name: Ensure the pack mirror item exists
+        if: ${{ vars.POLARIS_PACK_MIRRORS == 'true' }}
+        env:
+          IA_ITEM: ${{ secrets.IA_ITEM }}
+          RCLONE_CONFIG_IA_TYPE: internetarchive
+          RCLONE_CONFIG_IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_IA_DISABLE_CHECKSUM: 'false'
+        run: |
+          RCLONE_VERSION=1.76.0
+          curl -fsSL "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
+          unzip -q -o /tmp/rclone.zip -d /tmp/rclone-dist
+          sudo install -m 0755 "/tmp/rclone-dist/rclone-v${RCLONE_VERSION}-linux-amd64/rclone" /usr/local/bin/rclone
+          rclone version | head -1
+
+          # Idempotent: an item that already exists answers 409, which is fine.
+          rclone mkdir "ia:$IA_ITEM" 2>/dev/null || true
+          # Prove credentials + item in seconds instead of 200 failed regions.
+          if ! rclone lsjson "ia:$IA_ITEM" >/dev/null; then
+            echo "::error::cannot reach mirror item — check IA_ITEM and the IA rclone credentials"
+            exit 1
+          fi
+
       - name: Build matrix from catalog or dispatch inputs
         id: matrix
         run: |

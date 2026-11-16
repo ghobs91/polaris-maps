@@ -71,7 +71,7 @@ copy_origin() {
     "${INCLUDES[@]}" \
     --checksum \
     --transfers 4 \
-    --retries 3 \
+    --retries 5 \
     --stats-one-line
   mirrored=$((mirrored + 1))
 }
