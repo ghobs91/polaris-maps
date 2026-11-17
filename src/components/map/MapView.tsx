@@ -322,6 +322,25 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Last settled viewport, so entering satellite mode applies the scoped style
   // immediately instead of waiting for the next pan.
   const lastSatelliteViewportRef = useRef<{ bbox: BBox; zoom: number } | null>(null);
+  // Last settled camera center/zoom, so enabling the traffic layer seeds the
+  // area already on screen instead of waiting for the next pan.
+  const lastTrafficViewportRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+
+  // Enabling the traffic layer used to seed nothing: raster tile seeding was
+  // only triggered from the region-change handler, so the source mounted, every
+  // tile 404'd against the local server and the layer stayed blank until the map
+  // was moved. Seed immediately when the layer is switched on (and on first
+  // mount when the preference is already enabled), using the last settled
+  // viewport.
+  const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
+  useEffect(() => {
+    if (!trafficLayerVisible) return;
+    const last = lastTrafficViewportRef.current;
+    if (!last) return;
+    if (!getConnectivity().isConnected) return;
+    const { width, height } = Dimensions.get('window');
+    void seedTrafficTilesForViewport(last.lat, last.lng, last.zoom, width, height).catch(() => {});
+  }, [trafficLayerVisible]);
 
   // Sync external followCamera prop into ref
   useEffect(() => {
@@ -738,6 +757,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         // cached map stays readable (P2P sync is cheap, keep it running).
         const centerLat = (minLat + maxLat) / 2;
         const centerLng = (minLng + maxLng) / 2;
+        lastTrafficViewportRef.current = { lat: centerLat, lng: centerLng, zoom };
         // Rounded cell drives offline-pack lookups while the link is weak.
         setLookupCell(`${centerLat.toFixed(3)},${centerLng.toFixed(3)}`);
         const online = getConnectivity().isConnected;

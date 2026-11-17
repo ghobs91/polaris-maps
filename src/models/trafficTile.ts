@@ -27,8 +27,16 @@ export const MAX_TILE_BYTES = 48 * 1024;
 /** Max base64 payload length (48 KB × 4/3). */
 export const MAX_TILE_B64_LENGTH = 64 * 1024;
 
-/** How long to wait for peer tile responses. */
-export const TILE_QUERY_TIMEOUT_MS = 3_000;
+/**
+ * How long a cold tile waits for a peer before falling back to TomTom.
+ *
+ * This is a *head start* for the mesh, not a round-trip budget: a peer that
+ * holds a tile answers in tens of milliseconds on a healthy swarm, so a seeder
+ * that has not replied by now is not going to. The old 3 s value was paid by
+ * every cold tile in the viewport before the TomTom fetch was even allowed to
+ * start, which is what made the traffic layer take ~10 s to paint.
+ */
+export const TILE_QUERY_TIMEOUT_MS = 1_200;
 
 /** How many tiles we keep in the local disk cache. */
 export const MAX_CACHED_TILES = 2_000;

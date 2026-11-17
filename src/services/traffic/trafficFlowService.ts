@@ -48,6 +48,7 @@ import {
   ensureTrafficTileServer,
   ensureTrafficTiles,
   pruneTileCache,
+  setTrafficTilePeerCount,
 } from './trafficTileService';
 import { tilesForViewport } from './trafficTileMath';
 import { fetchOpenTrafficSegments, type FeedBounds } from './openTrafficFeed';
@@ -489,6 +490,8 @@ export async function initTrafficP2P(): Promise<void> {
   // Listen for peer count changes from the worklet
   peerCountUnsub = onPeerCount((count) => {
     useTrafficStore.getState().setSwarmPeerCount(count);
+    // The tile service asks the mesh first only while somebody can answer.
+    setTrafficTilePeerCount(count);
     updateTrafficMode(count);
     if (count < MIN_PEER_THRESHOLD) scheduleNostrFallback();
   });
@@ -595,6 +598,7 @@ export function resumeTrafficP2P(): void {
 async function refreshSwarmStatus(): Promise<void> {
   const status = await getSwarmStatus();
   useTrafficStore.getState().setSwarmStatus(status);
+  setTrafficTilePeerCount(status.peerCount);
   updateTrafficMode(status.peerCount);
 }
 
@@ -605,13 +609,39 @@ function updateTrafficMode(swarmPeerCount: number): void {
 
 // ── Traffic tile seeding (raster overlay) ───────────────────────────
 
-let lastSeedBumpAt = 0;
-const SEED_BUMP_THROTTLE_MS = 2_000;
+const SEED_BUMP_THROTTLE_MS = 1_000;
+let seedBumpTimer: ReturnType<typeof setTimeout> | null = null;
+let seedBumpQueued = false;
+
+/**
+ * Cache-bust the raster source so MapLibre re-requests the seeded tiles.
+ *
+ * Leading edge, then coalesced: the bump fires (or is queued) immediately, so
+ * the first tile that lands is painted instead of waiting for the whole
+ * viewport batch, and everything that lands inside the following throttle
+ * window produces exactly one more bump. The window always closes with a bump
+ * if anything arrived during it — the previous throttle simply dropped the
+ * event when it fired too soon after the last one, which left those tiles
+ * unrendered until the map was panned again.
+ */
+function scheduleSeedBump(): void {
+  if (seedBumpTimer) {
+    seedBumpQueued = true;
+    return;
+  }
+  useTrafficStore.getState().bumpTrafficTileSeedVersion();
+  seedBumpTimer = setTimeout(() => {
+    seedBumpTimer = null;
+    if (!seedBumpQueued) return;
+    seedBumpQueued = false;
+    scheduleSeedBump();
+  }, SEED_BUMP_THROTTLE_MS);
+}
 
 /**
  * Seed traffic tiles covering the visible viewport through the
- * disk → P2P → TomTom cascade. Bumps the raster source version when new
- * tiles were written so MapLibre re-requests the area.
+ * disk → P2P → TomTom cascade. Bumps the raster source version as tiles land
+ * so MapLibre paints progressively rather than all at once.
  */
 export async function seedTrafficTilesForViewport(
   centerLat: number,
@@ -623,14 +653,7 @@ export async function seedTrafficTilesForViewport(
   const tiles = tilesForViewport(centerLat, centerLng, zoom, screenWidth, screenHeight);
   if (tiles.length === 0) return;
 
-  const seeded = await ensureTrafficTiles(tiles);
-  if (seeded > 0) {
-    const now = Date.now();
-    if (now - lastSeedBumpAt >= SEED_BUMP_THROTTLE_MS) {
-      lastSeedBumpAt = now;
-      useTrafficStore.getState().bumpTrafficTileSeedVersion();
-    }
-  }
+  await ensureTrafficTiles(tiles, undefined, scheduleSeedBump);
 }
 
 export type { TrafficAreaCondition };

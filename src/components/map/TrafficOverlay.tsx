@@ -28,21 +28,28 @@ export function TrafficOverlay({ suppressRaster = false }: TrafficOverlayProps) 
   const [localTemplate, setLocalTemplate] = useState<string | null>(null);
 
   // Resolve the local tile server URL template once the native module is up.
+  // Quick polls (the server is started at app init, so this is normally one
+  // tick) and a bounded number of them: if the native server never comes up we
+  // stop polling and fall back to TomTom directly rather than leaving a timer
+  // running for the life of the screen.
   useEffect(() => {
     let cancelled = false;
+    let attempts = 0;
     const template = getTrafficTileUrlTemplate();
     if (template) {
       setLocalTemplate(template);
       return;
     }
-    // The tile service may still be starting; poll briefly for it.
     const timer = setInterval(() => {
+      attempts += 1;
       const t = getTrafficTileUrlTemplate();
       if (t) {
         clearInterval(timer);
         if (!cancelled) setLocalTemplate(t);
+        return;
       }
-    }, 500);
+      if (attempts >= 100) clearInterval(timer);
+    }, 100);
     return () => {
       cancelled = true;
       clearInterval(timer);

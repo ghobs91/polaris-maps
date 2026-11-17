@@ -25,6 +25,11 @@ import {
   isStarted as isSwarmStarted,
 } from './hyperswarmBridge';
 import { startTileServer, addTileSource, getTileServerBaseUrl } from '../../native/tileServer';
+import {
+  nextPeerMissStreak,
+  resetPeerMissStreak,
+  shouldQueryPeersForTile,
+} from './trafficTilePeerPolicy';
 
 /**
  * Traffic tile manager.
@@ -55,6 +60,31 @@ const pendingQueries = new Map<
 >();
 const inflightSeeds = new Set<string>();
 let requestCounter = 0;
+
+// ── Peer gating ─────────────────────────────────────────────────────
+
+/** Peers currently connected to the traffic swarm, fed by the peer-count listener. */
+let connectedPeers = 0;
+/** Consecutive cold-tile peer queries that came back empty. */
+let peerMissStreak = 0;
+
+/**
+ * Feed the connected peer count from the traffic swarm's peer-count listener.
+ * A topology change clears the miss streak: new peers are worth asking again.
+ */
+export function setTrafficTilePeerCount(count: number): void {
+  peerMissStreak = resetPeerMissStreak(connectedPeers, count, peerMissStreak);
+  connectedPeers = count;
+}
+
+/** True when a cold tile should spend its peer head start on the mesh. */
+function shouldAskPeers(): boolean {
+  return shouldQueryPeersForTile({
+    peersConnected: connectedPeers,
+    swarmStarted: isSwarmStarted(),
+    missStreak: peerMissStreak,
+  });
+}
 
 // ── Disk cache helpers ──────────────────────────────────────────────
 
@@ -149,7 +179,7 @@ function queryPeersForTile(
   key: TileKey,
   timeoutMs: number = TILE_QUERY_TIMEOUT_MS,
 ): Promise<string | null> {
-  if (!isSwarmStarted()) return Promise.resolve(null);
+  if (!isSwarmStarted() || connectedPeers <= 0) return Promise.resolve(null);
 
   return new Promise((resolve) => {
     const id = nextRequestId();
@@ -256,11 +286,14 @@ export async function ensureTrafficTile(key: TileKey): Promise<boolean> {
   inflightSeeds.add(cacheKey);
 
   try {
-    // 2. P2P
-    const peerB64 = await queryPeersForTile(key);
-    if (peerB64) {
-      await writeTileToDisk(key, peerB64);
-      return true;
+    // 2. P2P (short head start, skipped when the mesh cannot answer)
+    if (shouldAskPeers()) {
+      const peerB64 = await queryPeersForTile(key);
+      peerMissStreak = nextPeerMissStreak(peerMissStreak, peerB64 != null);
+      if (peerB64) {
+        await writeTileToDisk(key, peerB64);
+        return true;
+      }
     }
 
     // 3. TomTom
@@ -273,7 +306,11 @@ export async function ensureTrafficTile(key: TileKey): Promise<boolean> {
 
 async function refreshStaleTile(key: TileKey, cacheKey: string): Promise<void> {
   try {
-    const peerB64 = await queryPeersForTile(key);
+    // The stale copy keeps rendering, so this is the one path where waiting for
+    // a peer costs the user nothing visible — but it still returns null fast
+    // when the mesh has nobody on it.
+    const peerB64 = shouldAskPeers() ? await queryPeersForTile(key) : null;
+    peerMissStreak = nextPeerMissStreak(peerMissStreak, peerB64 != null);
     const b64 = peerB64 ?? (await seedFromTomTom(key));
     if (b64) await writeTileToDisk(key, b64);
   } catch {
@@ -283,10 +320,16 @@ async function refreshStaleTile(key: TileKey, cacheKey: string): Promise<void> {
   }
 }
 
-/** Ensure a batch of tiles (ordered by priority), with limited concurrency. */
+/**
+ * Ensure a batch of tiles (ordered by priority), with limited concurrency.
+ *
+ * `onTileSeeded` fires as each tile lands, so the caller can paint
+ * progressively instead of waiting for the slowest tile in the viewport.
+ */
 export async function ensureTrafficTiles(
   keys: TileKey[],
   concurrency: number = 6,
+  onTileSeeded?: () => void,
 ): Promise<number> {
   const queue = [...keys];
   let seeded = 0;
@@ -295,7 +338,10 @@ export async function ensureTrafficTiles(
     while (queue.length > 0) {
       const key = queue.shift()!;
       const ok = await ensureTrafficTile(key);
-      if (ok) seeded++;
+      if (ok) {
+        seeded++;
+        onTileSeeded?.();
+      }
     }
   };
 
