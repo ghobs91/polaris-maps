@@ -301,22 +301,73 @@ platform :ios do
     # Upload to TestFlight
     UI.header("Step 7/7: Uploading to TestFlight")
     verify_bundle_has_traffic_key
-    upload_to_testflight(
-      app_identifier: "com.polarismaps.app",
-      # Uses the App Store Connect API key for authentication
-      api_key: app_store_connect_api_key(
-        key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
-        issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
-        key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
-      ),
-      # Do NOT submit for App Review automatically
-      skip_submission: true,
-      # Do NOT wait for build processing — it takes 15-30 min
-      skip_waiting_for_build_processing: true,
-      # Notify external testers if the build is added to their group
-      # (default: false, uncomment to auto-notify)
-      # notify_external_testers: false,
+    api_key = app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_ISSUER_ID"],
+      key_filepath: ENV["APP_STORE_CONNECT_KEY_PATH"],
     )
+    expected_build = get_build_number(xcodeproj: "ios/PolarisMaps.xcodeproj")
+
+    begin
+      upload_to_testflight(
+        app_identifier: "com.polarismaps.app",
+        # Uses the App Store Connect API key for authentication
+        api_key: api_key,
+        # Do NOT submit for App Review automatically
+        skip_submission: true,
+        # Do NOT wait for build processing — it takes 15-30 min
+        skip_waiting_for_build_processing: true,
+        # Notify external testers if the build is added to their group
+        # (default: false, uncomment to auto-notify)
+        # notify_external_testers: false,
+      )
+    rescue => e
+      # Transporter writes a benign warning to stderr when its resume-state file
+      # is missing (always, on a first upload):
+      #
+      #   Failed to create URL for 'CDUploaderStateInfoResumeFilePath'. The file doesn't exist. (4)
+      #
+      # fastlane surfaces any stderr line from altool as a failure, so a
+      # completely successful upload ends with "fastlane finished with errors".
+      # That is worse than noise: it invites a re-run, and a re-run bumps the
+      # build number again — build 452 was burned this way one minute after 451
+      # uploaded successfully.
+      #
+      # Only this exact signature is tolerated, and only if App Store Connect
+      # actually lists the build we just made. "UPLOAD SUCCEEDED" on its own is
+      # not evidence that anything arrived.
+      raise unless e.message.include?("CDUploaderStateInfoResumeFilePath")
+
+      confirmed = false
+      12.times do
+        listed = begin
+          latest_testflight_build_number(
+            app_identifier: "com.polarismaps.app",
+            api_key: api_key,
+            initial_build_number: 1,
+          )
+        rescue StandardError
+          nil
+        end
+        if listed.to_i >= expected_build.to_i
+          confirmed = true
+          break
+        end
+        sleep 10
+      end
+
+      unless confirmed
+        UI.user_error!(
+          "Transporter reported a resume-state warning AND build #{expected_build} never appeared " \
+            "in App Store Connect. The upload did not complete:\n#{e.message}"
+        )
+      end
+
+      UI.important(
+        "Ignored Transporter's benign resume-state warning — build #{expected_build} is listed in " \
+          "App Store Connect"
+      )
+    end
 
     UI.success("✅ Build uploaded to TestFlight!")
     UI.message("Open TestFlight to distribute: https://appstoreconnect.apple.com/apps/6760763483/testflight")
