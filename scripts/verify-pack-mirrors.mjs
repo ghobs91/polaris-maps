@@ -27,6 +27,9 @@
  *   --mirror <base>       Only check URLs under this base (repeatable)
  *   --assets <names>      Comma-separated asset names to check (default: all)
  *   --regions <n>         Check the first n regions (default: all)
+ *   --regions-file <path> Only these region ids (JSON array) — used by CI to
+ *                        verify just the regions a run rebuilt
+ *   --json <path>         Write a machine-readable summary (ok/failed)
  *   --concurrency <n>     Parallel probes (default 4)
  *   --timeout <ms>        Per-request timeout (default 20000)
  *   --no-cross-check      Report mismatches without comparing to the primary
@@ -36,7 +39,7 @@
  * Exit codes: 0 every asset under test matched its catalog entry, 1 any did not.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -80,7 +83,8 @@ const DATA_REPO = process.env.EXPO_PUBLIC_REGION_DATA_REPO ?? 'ghobs91/polaris-m
 const DATA_BASE = `https://github.com/${DATA_REPO}/releases/download/map-data-latest`;
 
 const CATALOG_SPEC =
-  flag('--catalog', process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? '') || `${DATA_BASE}/catalog.json`;
+  flag('--catalog', process.env.EXPO_PUBLIC_REGION_CATALOG_URL ?? '') ||
+  `${DATA_BASE}/catalog.json`;
 const SOURCE = flag('--source', 'mirror');
 const MIRROR_FILTERS = flags('--mirror');
 const ASSET_FILTER = flag('--assets', '')
@@ -88,6 +92,8 @@ const ASSET_FILTER = flag('--assets', '')
   .map((name) => name.trim())
   .filter(Boolean);
 const REGION_LIMIT = Number(flag('--regions', '0'));
+const REGIONS_FILE = flag('--regions-file', '');
+const JSON_OUT = flag('--json', '');
 const CONCURRENCY = Math.max(1, Number(flag('--concurrency', '4')));
 const TIMEOUT_MS = Number(flag('--timeout', '20000'));
 const WARN_ONLY = args.includes('--warn-only');
@@ -99,6 +105,19 @@ if (!['mirror', 'primary', 'both'].includes(SOURCE)) {
 }
 
 const USER_AGENT = 'PolarisMaps/1.0 (+https://app.polarismaps.app)';
+
+/** Region ids to check, when the caller wants a subset (CI verifies what it rebuilt). */
+const ONLY_REGIONS = (() => {
+  if (!REGIONS_FILE) return null;
+  try {
+    const ids = JSON.parse(readFileSync(resolve(REGIONS_FILE), 'utf8'));
+    if (!Array.isArray(ids)) throw new Error('expected a JSON array of region ids');
+    return new Set(ids.map(String));
+  } catch (error) {
+    console.error(`--regions-file ${REGIONS_FILE}: ${error.message}`);
+    process.exit(1);
+  }
+})();
 
 async function loadCatalog(spec) {
   if (/^https?:\/\//i.test(spec)) {
@@ -178,10 +197,9 @@ async function iaMd5(url) {
 
 /** Every (region, asset, url) to probe, for the requested source(s). */
 function collectTargets(catalog) {
-  const regions = (catalog.regions ?? catalog.include ?? []).slice(
-    0,
-    REGION_LIMIT > 0 ? REGION_LIMIT : undefined,
-  );
+  const regions = (catalog.regions ?? catalog.include ?? [])
+    .filter((region) => !ONLY_REGIONS || ONLY_REGIONS.has(region.id))
+    .slice(0, REGION_LIMIT > 0 ? REGION_LIMIT : undefined);
   const targets = [];
 
   for (const region of regions) {
@@ -311,7 +329,12 @@ async function checkTarget(target) {
     const observedSize = probeResult.size;
     if (observedSize != null && target.sizeBytes != null && observedSize !== target.sizeBytes) {
       const reason = `size ${observedSize} ≠ catalog ${target.sizeBytes}`;
-      return { ...target, ok: false, observedSize, ...(await classify(target, reason, observedSize)) };
+      return {
+        ...target,
+        ok: false,
+        observedSize,
+        ...(await classify(target, reason, observedSize)),
+      };
     }
     if (probeResult.acceptRanges && probeResult.acceptRanges !== 'bytes') {
       return {
@@ -328,9 +351,20 @@ async function checkTarget(target) {
     const remoteMd5 = await iaMd5(target.url);
     if (remoteMd5 && target.md5 && remoteMd5 !== target.md5) {
       const reason = `md5 ${remoteMd5} ≠ catalog ${target.md5}`;
-      return { ...target, ok: false, observedSize, ...(await classify(target, reason, observedSize)) };
+      return {
+        ...target,
+        ok: false,
+        observedSize,
+        ...(await classify(target, reason, observedSize)),
+      };
     }
-    return { ...target, ok: true, verdict: 'ok', remoteMd5: remoteMd5 ?? undefined, ms: probeResult.ms };
+    return {
+      ...target,
+      ok: true,
+      verdict: 'ok',
+      remoteMd5: remoteMd5 ?? undefined,
+      ms: probeResult.ms,
+    };
   } catch (error) {
     return {
       ...target,
@@ -381,12 +415,39 @@ for (const result of results) {
     ? `${result.ms ?? '?'}ms${result.remoteMd5 ? ' md5 ok' : ''}`
     : `${result.verdict}: ${result.reason}`;
   const kind = result.kind === 'primary' ? 'primary' : 'mirror ';
-  console.log(`  ${label}  ${kind}  ${result.asset.padEnd(12)} ${result.regionId.padEnd(34)} ${detail}`);
+  console.log(
+    `  ${label}  ${kind}  ${result.asset.padEnd(12)} ${result.regionId.padEnd(34)} ${detail}`,
+  );
 }
 
 const failed = results.filter((result) => !result.ok);
+
+if (JSON_OUT) {
+  const summary = {
+    source: SOURCE,
+    catalog: CATALOG_SPEC,
+    total: results.length,
+    ok: results.length - failed.length,
+    failed: failed.map((result) => ({
+      regionId: result.regionId,
+      asset: result.asset,
+      kind: result.kind,
+      url: result.url,
+      verdict: result.verdict,
+      reason: result.reason,
+    })),
+  };
+  try {
+    writeFileSync(resolve(JSON_OUT), `${JSON.stringify(summary, null, 2)}\n`);
+  } catch (error) {
+    console.error(`could not write ${JSON_OUT}: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 const byVerdict = new Map();
-for (const result of failed) byVerdict.set(result.verdict, (byVerdict.get(result.verdict) ?? 0) + 1);
+for (const result of failed)
+  byVerdict.set(result.verdict, (byVerdict.get(result.verdict) ?? 0) + 1);
 
 console.log('');
 if (failed.length === 0) {

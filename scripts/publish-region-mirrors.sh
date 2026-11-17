@@ -52,7 +52,11 @@ INCLUDES=(
   # dominates the download, while the catalog still advertised a mirror URL for
   # it — a 404 on the heaviest asset of every mirrored metro.
   --include "*-transit-timetable.sqlite"
-  --include "*-search-shards.tar"
+  # `*-search-shards.tar` is deliberately NOT mirrored. No client fetches it:
+  # `registerPackShards` reads `shards.json` / `shards.manifest.json` out of a
+  # pack already on disk, and the only tar the download path extracts is
+  # `routing.tar`. It was 4.33 GB of a 62 GB mirror (7%) for an asset with no
+  # consumer.
 )
 
 mirrored=0
@@ -67,11 +71,20 @@ copy_origin() {
   echo "[$name] mirroring → $remote:$dest/$TAG/"
   # --checksum: skip files whose size+hash already match, so re-running after a
   # partial failure resumes instead of re-uploading whole packs.
+  #
+  # Timeouts are set explicitly because the defaults make a broken upload very
+  # expensive: `s3.us.archive.org` drops connections under concurrent PUTs
+  # (`ContentLength=N with Body length 0`), and with rclone's 5m request timeout
+  # a single region spent ~50 minutes across five attempts before failing. Two
+  # transfers instead of four halves the concurrent PUTs that provoke it.
   rclone copy "$SRC" "$remote:$dest/$TAG/" \
     "${INCLUDES[@]}" \
     --checksum \
-    --transfers 4 \
-    --retries 5 \
+    --transfers 2 \
+    --retries 3 \
+    --timeout 120s \
+    --contimeout 20s \
+    --low-level-retries 3 \
     --stats-one-line
   mirrored=$((mirrored + 1))
 }

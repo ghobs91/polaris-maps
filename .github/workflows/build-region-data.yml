@@ -766,12 +766,50 @@ jobs:
 
           if [ "$ASSETS_JSON" != "[]" ]; then
             printf '%s' "$ASSETS_JSON" > release-assets.json
-            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
-              --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG $MIRROR_ARGS $PREV_ARGS
-          else
-            node scripts/update-region-asset-urls.mjs --tag "map-data-${DATE_YM}" --out catalog.json \
-              $MIRROR_ARGS $PREV_ARGS
           fi
+
+          STAMP_ARGS="--tag map-data-${DATE_YM}"
+          if [ "$ASSETS_JSON" != "[]" ]; then
+            STAMP_ARGS="$STAMP_ARGS --assets release-assets.json $CHECKSUMS_ARG $ASSET_SIZES_ARG $TAGS_ARG"
+          fi
+
+          # ── Advertise only mirrors proven to serve the bytes ────────────────
+          # The catalog is what points every client at an origin, and
+          # `mirrorHealth` only demotes one *after* a device has paid for the
+          # failure. So "listed" has to imply "verified" here, not depend on
+          # somebody remembering to run the verifier. Scoped to the regions this
+          # run rebuilt, which is a few dozen range requests rather than 1,084.
+          NO_MIRROR_ARG=""
+          if [ -n "$MIRROR_ARGS" ] && [ -f rebuilt.json ]; then
+            node scripts/update-region-asset-urls.mjs $STAMP_ARGS $MIRROR_ARGS $PREV_ARGS \
+              --out mirror-preview.json
+            node scripts/verify-pack-mirrors.mjs --catalog mirror-preview.json \
+              --regions-file rebuilt.json --json mirror-verify.json --warn-only --concurrency 8 || true
+            node -e '
+              const fs = require("fs");
+              let summary;
+              try { summary = JSON.parse(fs.readFileSync("mirror-verify.json", "utf8")); }
+              catch { process.exit(0); }
+              const bad = new Set();
+              for (const failure of summary.failed || []) {
+                if (failure.kind !== "mirror") continue;
+                // `catalog-stale` means both origins agree and the catalog is a
+                // step behind a rebuild — not a broken mirror.
+                if (failure.verdict === "catalog-stale") continue;
+                bad.add(failure.regionId);
+              }
+              fs.writeFileSync("unverified-mirrors.json", JSON.stringify([...bad]));
+              if (bad.size > 0) {
+                console.log(`::warning::${bad.size} rebuilt region(s) have no verified mirror; advertising their GitHub copy only`);
+              }
+            '
+            if [ -f unverified-mirrors.json ]; then
+              NO_MIRROR_ARG="--no-mirror unverified-mirrors.json"
+            fi
+          fi
+
+          node scripts/update-region-asset-urls.mjs $STAMP_ARGS $MIRROR_ARGS $PREV_ARGS \
+            $NO_MIRROR_ARG --out catalog.json
 
           # ── Stable pointer release ──────────────────────────────────────────
           # The app reads the catalog from a fixed tag, not `releases/latest`:
@@ -827,11 +865,11 @@ jobs:
   # every chunk, so the catalog is valid at every step.
   dispatch-next-chunk:
     needs: [publish-catalog]
-    # `!github.event.inputs.region_id` covers both '' (dispatch) and null
-    # (push): the previous `== ''` was false on push, so a push-triggered run
-    # built only the first chunk and stopped — the catalog stalled at whatever
-    # that chunk covered.
-    if: ${{ needs.publish-catalog.result == 'success' && !github.event.inputs.region_id }}
+    # `always()` matters twice over: a chunk where some regions failed still has
+    # to chain (otherwise the catalog stalls at whatever the failures covered),
+    # and without it GitHub skips this job whenever the run is not a clean
+    # success — which is how the chain silently stopped at 200 of 355 regions.
+    if: ${{ always() && needs.publish-catalog.result == 'success' }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -840,9 +878,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          # Read through env rather than inline: on a dispatch with no inputs
+          # `github.event.inputs` is null, and the old `!github.event.inputs.
+          # region_id` test was true in theory but the job never ran.
+          REGION_ID: ${{ github.event.inputs.region_id }}
+          REGION_START: ${{ github.event.inputs.region_start }}
+          REGION_COUNT: ${{ github.event.inputs.region_count }}
         run: |
-          START=${{ github.event.inputs.region_start || '0' }}
-          COUNT=${{ github.event.inputs.region_count || '200' }}
+          if [ -n "${REGION_ID:-}" ]; then
+            echo "Single-region run ($REGION_ID) — not chaining."
+            exit 0
+          fi
+          START="${REGION_START:-0}"
+          COUNT="${REGION_COUNT:-200}"
           TOTAL=$(jq '.include | length' scripts/regions.json)
           NEXT=$((START + COUNT))
           if [ "$NEXT" -lt "$TOTAL" ]; then

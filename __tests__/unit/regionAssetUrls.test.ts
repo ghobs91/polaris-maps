@@ -305,6 +305,51 @@ describe('update-region-asset-urls.mjs', () => {
     expect(out.startsWith('{')).toBe(true);
     expect(readFileSync(catalogPath, 'utf8')).toBe(before);
   });
+
+  it('omits mirrors for regions the caller could not verify', () => {
+    // `publish-catalog` stamps a preview, verifies the regions it rebuilt, and
+    // passes the failures here. An advertised mirror that 404s costs a device a
+    // failed transfer before `mirrorHealth` demotes it, so an unverified region
+    // must advertise its GitHub copy only.
+    const noMirrorPath = join(dir, 'no-mirror.json');
+    writeFileSync(noMirrorPath, JSON.stringify(['jp-tokyo']));
+    const outPath = join(dir, 'catalog.json');
+
+    execFileSync(
+      process.execPath,
+      [
+        SCRIPT,
+        '--tag',
+        'map-data-2026-01',
+        '--catalog',
+        catalogPath,
+        '--out',
+        outPath,
+        '--mirror',
+        'https://archive.org/download/polaris-item',
+        '--no-mirror',
+        noMirrorPath,
+      ],
+      { stdio: 'pipe' },
+    );
+
+    const published = JSON.parse(readFileSync(outPath, 'utf8')) as {
+      assetBaseUrls: string[];
+      regions: Array<{ id: string; assets: Array<Record<string, unknown>> }>;
+    };
+    const tilesOf = (id: string) =>
+      published.regions
+        .find((region) => region.id === id)!
+        .assets.find((asset) => asset.name === 'tiles.pmtiles')!;
+
+    // Verified region keeps the mirror; unverified one loses it.
+    expect((tilesOf('us-ny-new-york').mirrors as string[])?.[0]).toContain(
+      'archive.org/download/polaris-item/map-data-2026-01/us-ny-new-york-tiles.pmtiles',
+    );
+    expect(tilesOf('jp-tokyo').mirrors).toBeUndefined();
+    // The origin list is untouched: it also serves routing tarballs.
+    expect(published.assetBaseUrls).toContain('https://archive.org/download/polaris-item');
+  });
 });
 
 /**

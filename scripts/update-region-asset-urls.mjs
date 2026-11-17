@@ -57,6 +57,7 @@ function parseArgs(argv) {
     else if (arg === '--tags') args.tags = argv[++i];
     else if (arg === '--previous') args.previous = argv[++i];
     else if (arg === '--rebuilt') args.rebuilt = argv[++i];
+    else if (arg === '--no-mirror') args.noMirror = argv[++i];
     else if (arg === '--mirrors') {
       // Backwards compatible: a comma-separated list of base URLs.
       for (const base of String(argv[++i]).split(',')) {
@@ -117,6 +118,7 @@ export function stampCatalog(
     tags = null,
     previous = null,
     rebuilt = null,
+    noMirror = null,
   },
 ) {
   // Packs can be split across sibling tags (`map-data-2026-11-a`, …) because a
@@ -126,9 +128,14 @@ export function stampCatalog(
   const tagFor = (regionId) => (tags ? (tags[regionId] ?? tag) : tag);
   const regions = (catalog.regions ?? catalog.include ?? []).map((region) => {
     const prefix = `${base.replace(/\/+$/, '')}/${tagFor(region.id)}`;
-    const mirrorPrefixes = mirrors.map(
-      (mirror) => `${String(mirror).replace(/\/+$/, '')}/${tagFor(region.id)}`,
-    );
+    // Regions whose mirror could not be verified get no `mirrors[]` at all: the
+    // catalog must never advertise an origin that has not been shown to serve
+    // the bytes, because `mirrorHealth` only demotes after a client has paid for
+    // the failure. The primary URL is untouched either way.
+    const mirrorPrefixes =
+      noMirror && noMirror.has(region.id)
+        ? []
+        : mirrors.map((mirror) => `${String(mirror).replace(/\/+$/, '')}/${tagFor(region.id)}`);
     const size = sizes[region.id] ?? {};
     const searchName = assetName(region.id, 'search.sqlite');
     const transitName = assetName(region.id, 'transit.sqlite');
@@ -326,6 +333,10 @@ function main() {
   const previous = args.previous ? JSON.parse(readFileSync(resolve(args.previous), 'utf8')) : null;
   const rebuiltList = args.rebuilt ? JSON.parse(readFileSync(resolve(args.rebuilt), 'utf8')) : null;
   const rebuilt = rebuiltList ? new Set(rebuiltList) : null;
+  const noMirrorList = args.noMirror
+    ? JSON.parse(readFileSync(resolve(args.noMirror), 'utf8'))
+    : null;
+  const noMirror = noMirrorList ? new Set(noMirrorList) : null;
   if (previous && !rebuilt) {
     process.stderr.write(
       'warning: --previous without --rebuilt — every region is treated as rebuilt\n',
@@ -342,6 +353,7 @@ function main() {
     tags,
     previous,
     rebuilt,
+    noMirror,
   });
   const baseUrls = [args.base, ...mirrors].map((base) => String(base).replace(/\/+$/, ''));
   const updated = args.out
