@@ -75,13 +75,18 @@ copy_origin() {
   # Timeouts are set explicitly because the defaults make a broken upload very
   # expensive: `s3.us.archive.org` drops connections under concurrent PUTs
   # (`ContentLength=N with Body length 0`), and with rclone's 5m request timeout
-  # a single region spent ~50 minutes across five attempts before failing. Two
-  # transfers instead of four halves the concurrent PUTs that provoke it.
+  # a single region spent ~50 minutes across five attempts before failing.
+  #
+  # One transfer per job, not four: the Archive writes into a per-item queue
+  # whose limit is shared by everything uploading to that item, and ~20 build
+  # jobs run at once. At `--transfers 2` a 200-region cycle failed 61 regions on
+  # that step; the fix is fewer concurrent PUTs and more retries, not fewer
+  # retries.
   rclone copy "$SRC" "$remote:$dest/$TAG/" \
     "${INCLUDES[@]}" \
     --checksum \
-    --transfers 2 \
-    --retries 3 \
+    --transfers 1 \
+    --retries 6 \
     --timeout 120s \
     --contimeout 20s \
     --low-level-retries 3 \
