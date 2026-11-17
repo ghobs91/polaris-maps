@@ -22,14 +22,14 @@ probeCollectionCoordinator.ts → probeCollector.ts ──→ topicManager.ts (g
 hyperswarmBridge.ts ←─────────→ backend/traffic-swarm.mjs (Bare worklet)
     ↓                                  ↓
 nostrFallback.ts ←──────────→ Nostr relays (probes kind 20100, incidents kind 20101)
-nostrProfileExchange.ts ←──→ Nostr relays (stored weekly traffic profiles, kind 30110)
+nostrProfileExchange.ts ←──→ Nostr relays (stored weekly + holiday traffic profiles, kind 30110)
 nostrRelayDirectory.ts (health-probes and ranks the relay pool)
     ↓
 trafficAggregator.ts (5min rolling window)
     ↓
-trafficCascade.ts (6 tiers: local fresh → local history → P2P swarm + Nostr profiles → open feeds → TomTom → aged on-device fallback)
+trafficCascade.ts (6 tiers: local fresh → local history (incl. holiday rows) → P2P swarm + Nostr profiles → open feeds → TomTom → aged on-device fallback)
     ↓ (tiers 1–3 write into the index; upstream tiers 4–5 are cached by trafficSeedCache; tier 6 serves last-known data with stale coverage)
-trafficHistorySqlite.ts (weekly EMA profiles, probe-sample provenance per row)
+trafficHistorySqlite.ts (weekly EMA profiles + separate holiday table, probe-sample provenance per row)
 trafficSeedCache.ts (bounded 15-min in-memory cache for open-feed / TomTom answers)
 trafficAgedStore.ts (SQLite, ≤2 h served / 6 h retained, last-known upstream segments)
     ↓
@@ -52,6 +52,7 @@ trafficStore.incidents → IncidentLayer / IncidentAheadBanner
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `trafficFlowService.ts`         | Top-level orchestrator — resolves traffic through the cascade, merges with P2P probes, pushes to Zustand store on debounced refresh interval. Exports `initTrafficP2P`/`disposeTrafficP2P`/`suspendTrafficP2P`/`resumeTrafficP2P`.                                                                                                                                                                                                                                                                  |
 | `tomtomFetcher.ts`              | TomTom Traffic Flow API v4 client — fetches speed/freeflow data for a bounding box, normalizes to `NormalizedTrafficSegment`.                                                                                                                                                                                                                                                                                                                                                                       |
+| `trafficHolidayCalendar.ts`     | Pure major-holiday calendar (US federal-style set + eves) driving the holiday flag on time buckets. Deliberately excludes floating regional/religious observances — a wrong "holiday" flag splits a cell's data across keys.                                                                                                                                                                                                                                                                        |
 | `openTrafficFeed.ts`            | Free open-feed adapters (511 / DATEX II / NDW): fetches a bbox, normalizes to `NormalizedTrafficSegment[]`, and fails closed to no data. Configured via `EXPO_PUBLIC_OPEN_TRAFFIC_FEEDS`.                                                                                                                                                                                                                                                                                                           |
 | `trafficCoverage.ts`            | Pure mapping from a cascade resolve source to an explicit coverage status (P2P, open-feed, cold-start, on-device, stale, no-data), plus the one-line per-source breakdown used by the developer-mode badge and settings.                                                                                                                                                                                                                                                                            |
 | `trafficSeedCache.ts`           | Bounded in-memory cache (geohash5 cell → segments, 15-minute TTL, 5-minute negative TTL) for upstream bootstrap data. Makes repeated refreshes reuse an open-feed/TomTom answer without writing licensed content into the weekly probe index, and stops no-data cells from being re-queried on every refresh.                                                                                                                                                                                       |
@@ -76,22 +77,26 @@ trafficStore.incidents → IncidentLayer / IncidentAheadBanner
 | `reroutePolicy.ts`              | Pure reroute timing/improvement policy (check interval, full-compare interval, minimum saving, anti-thrash cooldown).                                                                                                                                                                                                                                                                                                                                                                               |
 | `routeTrafficService.ts`        | Fetches traffic data specifically for the active navigation route's bounding box. Feeds segments into `etaCalculator`.                                                                                                                                                                                                                                                                                                                                                                              |
 | `rerouteService.ts`             | Monitors the active route and, on congestion ahead or a periodic compare interval, scores traffic-aware candidate routes against the remaining time and surfaces a dismissible faster-route suggestion (never silently swaps the route).                                                                                                                                                                                                                                                            |
-| `tomtomRouteEta.ts`             | Direct TomTom Route API ETA query for comparison/validation against the local traffic-adjusted calculation.                                                                                                                                                                                                                                                                                                                                                                                         |
+| `tomtomRouteEta.ts`             | Direct TomTom Route API ETA query for comparison/validation against the local traffic-adjusted calculation. Answers are cached for 5 minutes in memory and mirrored into MMKV so a relaunch cannot re-ask for the same route.                                                                                                                                                                                                                                                                       |
+| `tilePixelSampler.ts`           | Decodes TomTom flow raster tiles and reads the flow colour at each point along a route. Reads the shared on-disk tile cache before calling the provider and writes fetched tiles back, so route sampling never pays twice for the same tile.                                                                                                                                                                                                                                                        |
+| `trafficTileDiskCache.ts`       | The durable tile directory (`<cache>/traffic-tiles/z/x/y.png`): read/write helpers, freshness-checked reads, and base64 ↔ ArrayBuffer conversion shared by the raster overlay and the route sampler.                                                                                                                                                                                                                                                                                                |
 | `rpcCommands.ts`                | Shared numeric RPC command ID constants used between the Bare worklet and React Native.                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ## Key Constants
 
-| Constant                          | Value   | Description                                                  |
-| --------------------------------- | ------- | ------------------------------------------------------------ |
-| `PUBLISH_INTERVAL_MS`             | 5,000   | GPS probe collection frequency                               |
-| `AGGREGATION_WINDOW_MS`           | 300,000 | 5-minute rolling window for probe averaging                  |
-| `MIN_PEER_THRESHOLD`              | 3       | Peer count below which Nostr fallback activates              |
-| `CONGESTION_CHECK_INTERVAL_MS`    | 30,000  | How often the monitor ticks on the active route              |
-| `FULL_ROUTE_COMPARE_INTERVAL_MS`  | 120,000 | Longest gap between candidate comparisons without congestion |
-| `MIN_FASTER_ROUTE_SAVING_SECONDS` | 120     | Minimum saving before a faster route is suggested            |
-| `SUGGESTION_TIMEOUT_MS`           | 20,000  | Auto-dismiss a suggestion the driver hasn't acted on         |
-| `REROUTE_COOLDOWN_MS`             | 120,000 | Anti-thrash window after a dismissed/expired suggestion      |
-| `MERGE_PROXIMITY_M`               | 30      | Haversine distance for matching multi-source segments        |
+| Constant                          | Value   | Description                                                                     |
+| --------------------------------- | ------- | ------------------------------------------------------------------------------- |
+| `PUBLISH_INTERVAL_MS`             | 5,000   | GPS probe collection frequency                                                  |
+| `AGGREGATION_WINDOW_MS`           | 300,000 | 5-minute rolling window for probe averaging                                     |
+| `MIN_PEER_THRESHOLD`              | 3       | Peer count below which Nostr fallback activates                                 |
+| `CONGESTION_CHECK_INTERVAL_MS`    | 30,000  | How often the monitor ticks on the active route                                 |
+| `FULL_ROUTE_COMPARE_INTERVAL_MS`  | 120,000 | Longest gap between candidate comparisons without congestion                    |
+| `MIN_FASTER_ROUTE_SAVING_SECONDS` | 120     | Minimum saving before a faster route is suggested                               |
+| `SUGGESTION_TIMEOUT_MS`           | 20,000  | Auto-dismiss a suggestion the driver hasn't acted on                            |
+| `REROUTE_COOLDOWN_MS`             | 120,000 | Anti-thrash window after a dismissed/expired suggestion                         |
+| `MERGE_PROXIMITY_M`               | 30      | Haversine distance for matching multi-source segments                           |
+| `HISTORICAL_MAX_AGE_DAYS`         | 31      | Weekly-profile rows up to this age are served (and preferred over the provider) |
+| `HOLIDAY_MAX_AGE_DAYS`            | 400     | Holiday-profile rows are served up to this age (recurs yearly)                  |
 
 ## Density controls
 
@@ -126,7 +131,14 @@ normal spend but cannot make it confidential. Guard rails:
   feeds opt out of negative caching so a transient feed outage does not hand
   their cells to the paid bridge;
 - flow raster tiles resolve disk → P2P → TomTom, with a 15-minute TTL and a
-  2,000-tile cap; route ETA answers are cached for 5 minutes;
+  2,000-tile cap. The disk cache (`trafficTileDiskCache`) is the single durable
+  copy: the route sampler reads it before it ever calls the provider, and
+  writes back whatever it fetches, so the same z/x/y PNG is never downloaded
+  twice — not by the overlay and the sampler in one session, and not again
+  after a relaunch inside the freshness window;
+- route ETA answers (`calculateRoute`) are cached for 5 minutes in memory and
+  mirrored into MMKV, so reopening the app and re-requesting the same route
+  inside that window costs no request either;
 - a per-session budget of 400 requests stops runaway loops;
 - HTTP 403/429 opens a 30-minute breaker; repeated 5xx/network failures open a
   10-minute breaker (both logged to diagnostics);
@@ -151,8 +163,10 @@ rendering empty.
   the write time, so re-caching a 15-minute-old seed cannot make it look fresh.
 - **Local only.** Aged rows are never published through Nostr/Hyperdrive and
   never counted as probe samples — licensed upstream content stays on device.
-- **ETA guard.** When the visible traffic is only aged fallback, `useTrafficEta`
-  prefers the fresh route-ETA API over the stale local estimate (`prefersRouteApiEta`).
+- **Local data wins.** `useTrafficEta` consults the route-ETA API only when
+  fewer than 10% of the route's segments matched any local traffic — saved
+  data (weekly profile, holiday rows, aged segments) covering the route is
+  not re-asked of the provider (`prefersRouteApiEta`).
 
 ## Related Files
 
