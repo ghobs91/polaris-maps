@@ -19,13 +19,12 @@ import './process-shim.mjs';
 import RPC from 'bare-rpc';
 import Hyperswarm from 'hyperswarm';
 import Hyperdrive from 'hyperdrive';
-import Corestore from 'corestore';
 import b4a from 'b4a';
 import fs from 'bare-fs';
 import path from 'bare-path';
 import goodbye from 'graceful-goodbye';
 import { ungzip } from 'pako';
-import { sha256 } from './node_modules/@noble/hashes/sha256.js';
+import { createSeedCore } from './seed-core.mjs';
 import { answerQuery, parseJsonl, shardPathFor, shardTopic } from './shard-answer.mjs';
 import { unpackPmtiles } from './pmtiles.mjs';
 
@@ -41,63 +40,27 @@ const CMD_HD_SHARD_QUERY = 6; // RN → worklet: ask peers for a shard answer
 const CMD_HD_UNPACK_PMTILES = 7; // RN → worklet: expand tiles.pmtiles into {z}/{x}/{y}.pbf
 const CMD_HD_DOWNLOAD_PROGRESS = 20; // worklet → RN
 
-// ── State ───────────────────────────────────────────────────────────
+// ── Seed core ───────────────────────────────────────────────────────
+//
+// Corestore lifetime, canonical read-only replicas, and discovery joins live in
+// `seed-core.mjs` so the desktop relay runs the exact same rules. This file is
+// the Bare adapter: RPC in, `bare-fs`/`bare-path` injected, the shard-query
+// protocol bound to each new peer connection.
 
-let swarm = null;
-const seededDrives = new Map(); // regionId → { drive, discovery, store, readOnly, contentHash, bytes, root }
-// Corestores are file-locked. Reuse one per storage path and close it on
-// release, otherwise a second open of the same path fails to lock
-// ("File descriptor could not be locked").
-const stores = new Map(); // storePath → Corestore
-
-function getStore(storePath) {
-  let store = stores.get(storePath);
-  if (!store) {
-    store = new Corestore(storePath);
-    stores.set(storePath, store);
-  }
-  return store;
-}
-
-async function closeStore(storePath) {
-  const store = stores.get(storePath);
-  if (!store) return;
-  stores.delete(storePath);
-  try {
-    await store.close();
-  } catch {
-    /* already closed */
-  }
-}
-
-const { IPC } = BareKit;
-const rpc = new RPC(IPC, (req) => {
-  // `handleRequest` is async: never let its rejection escape unhandled — Bare
-  // aborts the whole worklet (and therefore the host app) on an unhandled
-  // rejection, and bare-rpc only guards synchronous handlers.
-  handleRequest(req).catch((err) => {
-    console.error('[hyperdrive] RPC handler failed:', err);
-  });
+const core = createSeedCore({
+  fs,
+  path,
+  createSwarm: () => new Hyperswarm(),
+  onConnection: (conn) => attachShardProtocol(conn),
 });
 
-function reply(req, obj) {
-  req.reply(b4a.from(JSON.stringify(obj)));
+const { getStore, closeStore } = core;
+
+function seededDrives() {
+  return core.drives();
 }
 
-function corestorePath(rootDir, regionId) {
-  return path.join(rootDir, regionId);
-}
-
-function ensureSwarm() {
-  if (swarm) return swarm;
-  swarm = new Hyperswarm();
-  swarm.on('connection', (conn) => {
-    for (const { store } of seededDrives.values()) store.replicate(conn);
-    attachShardProtocol(conn);
-  });
-  goodbye(() => swarm.destroy());
-  return swarm;
-}
+goodbye(() => core.destroy());
 
 async function handleRequest(req) {
   try {
@@ -162,7 +125,7 @@ async function answerFromSeededDrives(query) {
   if (!query || typeof query.shardId !== 'string') return null;
   const rel = shardPathFor(query.shardId);
 
-  for (const { drive } of seededDrives.values()) {
+  for (const { drive } of seededDrives().values()) {
     try {
       const buf = await drive.get(rel);
       if (!buf) continue;
@@ -236,7 +199,7 @@ async function handleShardQuery(req) {
   const { shardId, query, timeoutMs } = JSON.parse(b4a.toString(req.data));
   const budget = Math.max(1_000, Number(timeoutMs) || 20_000);
   const requestId = randomId();
-  const sw = ensureSwarm();
+  const sw = core.ensureSwarm();
 
   let discovery = null;
   let timer = null;
@@ -272,85 +235,30 @@ async function handleShardQuery(req) {
 }
 
 // ── Seed (author / read-only) ───────────────────────────────────────
+//
+// The canonical-key rules live in `seed-core.mjs`: a supplied key opens a
+// read-only replica (all seeders share the discovery key), no key authors the
+// writable drive. This handler only adapts RPC payloads to that call.
 
 async function handleSeed(req) {
   const { regionId, filesDir, key, corestoreRoot } = JSON.parse(b4a.toString(req.data));
-  const readOnly = Boolean(key);
-  const storePath = corestorePath(corestoreRoot, regionId);
-
-  if (!readOnly && !fs.existsSync(filesDir)) {
-    return reply(req, { error: `Pack directory not found: ${filesDir}` });
+  try {
+    reply(req, await core.seed({ regionId, filesDir, key, corestoreRoot }));
+  } catch (err) {
+    reply(req, { error: err && err.message ? err.message : String(err) });
   }
-
-  const existing = seededDrives.get(regionId);
-  if (existing) {
-    const existingKey = b4a.toString(existing.drive.key, 'hex');
-    if (!key || existingKey === key) {
-      return reply(req, {
-        key: existingKey,
-        discoveryKey: b4a.toString(existing.drive.discoveryKey, 'hex'),
-        readOnly: existing.readOnly,
-        contentHash: existing.contentHash || undefined,
-        bytes: existing.bytes,
-      });
-    }
-    await existing.discovery.destroy();
-    await closeStore(storePath);
-    seededDrives.delete(regionId);
-  }
-
-  const store = getStore(storePath);
-  let drive;
-  let contentHash = null;
-  let bytes = 0;
-
-  if (readOnly) {
-    drive = new Hyperdrive(store, b4a.from(key, 'hex'));
-    await drive.ready();
-  } else {
-    drive = new Hyperdrive(store);
-    await drive.ready();
-
-    const files = collectFiles(filesDir, filesDir);
-    for (const { rel, abs } of files) {
-      await drive.put(rel, fs.readFileSync(abs));
-    }
-    ({ contentHash, bytes } = computePackIndex(files));
-  }
-
-  const sw = ensureSwarm();
-  const discovery = sw.join(drive.discoveryKey);
-  await discovery.flushed();
-
-  seededDrives.set(regionId, {
-    drive,
-    discovery,
-    store,
-    readOnly,
-    contentHash,
-    bytes,
-    root: corestoreRoot,
-  });
-
-  reply(req, {
-    key: b4a.toString(drive.key, 'hex'),
-    discoveryKey: b4a.toString(drive.discoveryKey, 'hex'),
-    readOnly,
-    contentHash: contentHash || undefined,
-    bytes,
-  });
 }
 
 // ── Download ────────────────────────────────────────────────────────
 
 async function handleDownload(req) {
   const { driveKey, destDir, corestoreRoot } = JSON.parse(b4a.toString(req.data));
-  const storePath = corestorePath(corestoreRoot, '_dl_' + driveKey.slice(0, 16));
+  const storePath = path.join(corestoreRoot, '_dl_' + driveKey.slice(0, 16));
   const store = getStore(storePath);
   const drive = new Hyperdrive(store, b4a.from(driveKey, 'hex'));
   await drive.ready();
 
-  const sw = ensureSwarm();
+  const sw = core.ensureSwarm();
   sw.on('connection', (conn) => store.replicate(conn));
 
   const discovery = sw.join(drive.discoveryKey);
@@ -398,27 +306,12 @@ async function handleDownload(req) {
 // ── Status / unseed ─────────────────────────────────────────────────
 
 function handleStatus(req) {
-  const drives = [];
-  for (const [regionId, { drive }] of seededDrives) {
-    drives.push({
-      regionId,
-      key: b4a.toString(drive.key, 'hex'),
-      discoveryKey: b4a.toString(drive.discoveryKey, 'hex'),
-      peers: drive.core.peers ? drive.core.peers.length : 0,
-    });
-  }
-  reply(req, { drives, swarmConnections: swarm ? swarm.connections.size : 0 });
+  reply(req, core.status());
 }
 
 async function handleUnseed(req) {
   const { regionId } = JSON.parse(b4a.toString(req.data));
-  const entry = seededDrives.get(regionId);
-  if (entry) {
-    await entry.discovery.destroy();
-    await closeStore(corestorePath(entry.root, regionId));
-    seededDrives.delete(regionId);
-  }
-  reply(req, { success: true });
+  reply(req, await core.unseed({ regionId }));
 }
 
 // ── File transforms (region-pack assembly) ──────────────────────────
@@ -530,31 +423,4 @@ function handleExtractTar(req) {
   reply(req, { success: true });
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────
-
-/** Recursively collect files as `/relative` paths under `baseDir`. */
-function collectFiles(baseDir, currentDir, result = []) {
-  for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
-    const abs = path.join(currentDir, entry.name);
-    if (entry.isDirectory()) collectFiles(baseDir, abs, result);
-    else result.push({ rel: '/' + path.relative(baseDir, abs), abs });
-  }
-  return result;
-}
-
-/**
- * Deterministic pack index hash + total size. MUST match
- * `computePackContentHash` in src/services/regions/regionManifest.ts
- * (sorted `path\0size` lines, SHA-256 hex).
- */
-function computePackIndex(files) {
-  const entries = files
-    .map(({ rel, abs }) => ({ path: rel, size: fs.statSync(abs).size }))
-    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const contentHash = b4a.toString(
-    sha256(b4a.from(entries.map((e) => `${e.path}\u0000${e.size}`).join('\n'))),
-    'hex',
-  );
-  const bytes = entries.reduce((n, e) => n + e.size, 0);
-  return { contentHash, bytes };
-}
+// File collection and pack hashing live in `seed-core.mjs`.
