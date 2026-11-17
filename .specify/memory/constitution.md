@@ -51,6 +51,25 @@
 
 ### II. Testing Standards (NON-NEGOTIABLE)
 
+- A change MUST be exercised in a real scenario before it is called complete,
+  fixed, or ready to push/deploy. Mocked or unit-level tests are the minimum,
+  never sufficient evidence. Real scenario means the runtime the code ships
+  into: a device or simulator for app behavior, the real provider/network for
+  an integration, the real SQLite/filesystem/native module for storage.
+- Verification MUST produce evidence that can be inspected: an observed log
+  line, request counter, database row, screenshot, or measurement, together
+  with the steps that produced it.
+- Behavior that cannot be observed MUST be made observable (counter, log,
+  dev-mode readout) as part of the change, before it can be claimed to work.
+- Reports MUST state what was executed for real, what was only simulated, and
+  what was not run. Mocked behavior MUST NOT be described as verified, and a
+  fix MUST NOT be asserted from code review alone.
+- When a real-scenario run is impossible, the result MUST be labelled
+  UNVERIFIED and MUST NOT be pushed, merged, or deployed without the user's
+  explicit acceptance of that risk.
+- A user reporting the same defect twice means the earlier fix was unverified:
+  the response is instrument → reproduce for real → fix → re-run the same
+  scenario, not a second speculative change.
 - Every user-facing feature MUST have at least one integration
   test that exercises the feature end-to-end before it is
   considered complete.

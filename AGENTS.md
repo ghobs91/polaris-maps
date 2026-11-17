@@ -97,6 +97,22 @@ iOS local build/release workflow (Fastlane lanes, signing, TestFlight): see `doc
 
 ## Testing Expectations
 
+- **Definition of done requires a real run.** Per `.specify/memory/constitution.md`
+  Principle II, a change is not complete/fixed/ready-to-push until it has been
+  exercised in the real runtime: a device or simulator (`pnpm ios`, TestFlight
+  build) for app behavior, the real provider/network for integrations, real
+  SQLite/filesystem/native modules for storage. Unit and integration suites are
+  the floor, never sufficient evidence on their own.
+- **Collect evidence, and make behavior observable.** An observed log line,
+  request counter, DB row, or screenshot, plus the steps that produced it. If the
+  outcome cannot be observed today (e.g. "did this code path call TomTom?" has no
+  counter or log), adding that signal is part of the task, not an optional extra.
+- **Report exactly what ran.** State what was executed for real (and where), what
+  was mocked, and what was not run. Never describe mocked behavior as verified,
+  and never assert a fix from reading the code. Label unverified work `UNVERIFIED`
+  and do not push/deploy it without explicit acceptance.
+- **Same bug twice = the earlier fix was unverified.** Instrument, reproduce for
+  real, then fix, then re-run that same scenario — do not ship a second guess.
 - Per `.specify/memory/constitution.md`: every user-facing feature must have an integration test; every public function must have unit tests (happy path, error case, boundary).
 - Jest suites live in `__tests__/{unit,integration,benchmark}`.
 - **Known issue**: the test suite currently has pre-existing failures (Jest ESM transform config + unrelated unit failures); CI runs `pnpm test` as advisory (`continue-on-error: true`). Do not assume `pnpm test` is green; report actual results.
