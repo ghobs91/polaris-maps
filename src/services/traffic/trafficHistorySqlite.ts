@@ -4,8 +4,12 @@ import type { TimeBucket, TrafficAreaCondition } from '../../models/trafficHisto
 /**
  * SQLite-backed implementation of the historical traffic condition index.
  *
- * Uses expo-sqlite (already an app dependency). The table is keyed by
- * (geohash5, day_of_week, half_hour); each row holds EMA-merged averages.
+ * Uses expo-sqlite (already an app dependency). Rows live in two tables with
+ * identical shape: `traffic_conditions` (regular weekly profile, keyed by
+ * geohash5 + day_of_week + half_hour) and `traffic_conditions_holiday`
+ * (same key, but for buckets that fell on a major holiday). Splitting them
+ * keeps holiday observations from ever being EMA-averaged into — or served
+ * as — the regular weekly pattern.
  *
  * expo-sqlite is required lazily (inside db()) so this module can be imported
  * in environments where the native SQLite module is unavailable; unit tests
@@ -46,6 +50,17 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
         last_updated INTEGER NOT NULL,
         PRIMARY KEY (geohash5, day_of_week, half_hour)
       );
+      CREATE TABLE IF NOT EXISTS traffic_conditions_holiday (
+        geohash5 TEXT NOT NULL,
+        day_of_week INTEGER NOT NULL,
+        half_hour INTEGER NOT NULL,
+        avg_speed_mph REAL NOT NULL,
+        avg_congestion_ratio REAL NOT NULL,
+        free_flow_speed_mph REAL NOT NULL,
+        sample_count INTEGER NOT NULL,
+        last_updated INTEGER NOT NULL,
+        PRIMARY KEY (geohash5, day_of_week, half_hour)
+      );
     `);
     // Migration: probe_samples was added when profile republish gating
     // landed. Existing rows predate provenance tracking, so 0 (unknown —
@@ -76,10 +91,10 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
     }
   }
 
-  async insert(condition: TrafficAreaCondition): Promise<void> {
+  private async insertInto(table: string, condition: TrafficAreaCondition): Promise<void> {
     const db = await this.db();
     await db.runAsync(
-      `INSERT OR REPLACE INTO traffic_conditions
+      `INSERT OR REPLACE INTO ${table}
         (geohash5, day_of_week, half_hour, avg_speed_mph, avg_congestion_ratio,
          free_flow_speed_mph, sample_count, last_updated, probe_samples,
          observed_span_days, last_observed_day)
@@ -98,10 +113,17 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
     );
   }
 
-  async update(condition: TrafficAreaCondition): Promise<void> {
+  async insert(condition: TrafficAreaCondition): Promise<void> {
+    await this.insertInto(
+      condition.holiday ? 'traffic_conditions_holiday' : 'traffic_conditions',
+      condition,
+    );
+  }
+
+  private async updateIn(table: string, condition: TrafficAreaCondition): Promise<void> {
     const db = await this.db();
     await db.runAsync(
-      `UPDATE traffic_conditions SET
+      `UPDATE ${table} SET
         avg_speed_mph = ?, avg_congestion_ratio = ?, free_flow_speed_mph = ?,
         sample_count = ?, last_updated = ?, probe_samples = ?,
         observed_span_days = ?, last_observed_day = ?
@@ -120,7 +142,20 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
     );
   }
 
-  async getByKey(cells: string[], bucket: TimeBucket): Promise<TrafficAreaCondition[]> {
+  async update(condition: TrafficAreaCondition): Promise<void> {
+    await this.updateIn(
+      condition.holiday ? 'traffic_conditions_holiday' : 'traffic_conditions',
+      condition,
+    );
+  }
+
+  private async getByKeyFrom(
+    table: string,
+    cells: string[],
+    dayOfWeek: number,
+    halfHour: number,
+    holiday: boolean,
+  ): Promise<TrafficAreaCondition[]> {
     if (cells.length === 0) return [];
     const db = await this.db();
     const placeholders = cells.map(() => '?').join(',');
@@ -140,11 +175,11 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       `SELECT geohash5, day_of_week, half_hour, avg_speed_mph, avg_congestion_ratio,
               free_flow_speed_mph, sample_count, last_updated, probe_samples,
               observed_span_days, last_observed_day
-       FROM traffic_conditions
+       FROM ${table}
        WHERE geohash5 IN (${placeholders}) AND day_of_week = ? AND half_hour = ?`,
       ...cells,
-      bucket.dayOfWeek,
-      bucket.halfHour,
+      dayOfWeek,
+      halfHour,
     );
     return rows.map((r) => ({
       geohash5: r.geohash5,
@@ -158,7 +193,18 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
       probeSamples: r.probe_samples,
       observedSpanDays: r.observed_span_days,
       lastObservedDay: r.last_observed_day,
+      ...(holiday ? { holiday: true } : {}),
     }));
+  }
+
+  async getByKey(cells: string[], bucket: TimeBucket): Promise<TrafficAreaCondition[]> {
+    return this.getByKeyFrom(
+      bucket.holiday ? 'traffic_conditions_holiday' : 'traffic_conditions',
+      cells,
+      bucket.dayOfWeek,
+      bucket.halfHour,
+      bucket.holiday === true,
+    );
   }
 
   async getAll(): Promise<TrafficAreaCondition[]> {
@@ -181,25 +227,61 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
               observed_span_days, last_observed_day
        FROM traffic_conditions`,
     );
-    return rows.map((r) => ({
-      geohash5: r.geohash5,
-      dayOfWeek: r.day_of_week,
-      halfHour: r.half_hour,
-      avgSpeedMph: r.avg_speed_mph,
-      avgCongestionRatio: r.avg_congestion_ratio,
-      freeFlowSpeedMph: r.free_flow_speed_mph,
-      sampleCount: r.sample_count,
-      lastUpdated: r.last_updated,
-      probeSamples: r.probe_samples,
-      observedSpanDays: r.observed_span_days,
-      lastObservedDay: r.last_observed_day,
-    }));
+    const holidayRows = await db.getAllAsync<{
+      geohash5: string;
+      day_of_week: number;
+      half_hour: number;
+      avg_speed_mph: number;
+      avg_congestion_ratio: number;
+      free_flow_speed_mph: number;
+      sample_count: number;
+      last_updated: number;
+      probe_samples: number;
+      observed_span_days: number;
+      last_observed_day: number;
+    }>(
+      `SELECT geohash5, day_of_week, half_hour, avg_speed_mph, avg_congestion_ratio,
+              free_flow_speed_mph, sample_count, last_updated, probe_samples,
+              observed_span_days, last_observed_day
+       FROM traffic_conditions_holiday`,
+    );
+    return [
+      ...rows.map((r) => ({
+        geohash5: r.geohash5,
+        dayOfWeek: r.day_of_week,
+        halfHour: r.half_hour,
+        avgSpeedMph: r.avg_speed_mph,
+        avgCongestionRatio: r.avg_congestion_ratio,
+        freeFlowSpeedMph: r.free_flow_speed_mph,
+        sampleCount: r.sample_count,
+        lastUpdated: r.last_updated,
+        probeSamples: r.probe_samples,
+        observedSpanDays: r.observed_span_days,
+        lastObservedDay: r.last_observed_day,
+      })),
+      ...holidayRows.map((r) => ({
+        geohash5: r.geohash5,
+        dayOfWeek: r.day_of_week,
+        halfHour: r.half_hour,
+        avgSpeedMph: r.avg_speed_mph,
+        avgCongestionRatio: r.avg_congestion_ratio,
+        freeFlowSpeedMph: r.free_flow_speed_mph,
+        sampleCount: r.sample_count,
+        lastUpdated: r.last_updated,
+        probeSamples: r.probe_samples,
+        observedSpanDays: r.observed_span_days,
+        lastObservedDay: r.last_observed_day,
+        holiday: true as const,
+      })),
+    ];
   }
 
   async remove(cell: string, bucket: TimeBucket): Promise<void> {
     const db = await this.db();
     await db.runAsync(
-      `DELETE FROM traffic_conditions WHERE geohash5 = ? AND day_of_week = ? AND half_hour = ?`,
+      `DELETE FROM ${
+        bucket.holiday ? 'traffic_conditions_holiday' : 'traffic_conditions'
+      } WHERE geohash5 = ? AND day_of_week = ? AND half_hour = ?`,
       cell,
       bucket.dayOfWeek,
       bucket.halfHour,
@@ -209,7 +291,9 @@ export class SqliteTrafficHistoryBackend implements TrafficHistoryBackend {
   async count(): Promise<number> {
     const db = await this.db();
     const row = await db.getFirstAsync<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM traffic_conditions`,
+      `SELECT
+        (SELECT COUNT(*) FROM traffic_conditions) +
+        (SELECT COUNT(*) FROM traffic_conditions_holiday) AS n`,
     );
     return row?.n ?? 0;
   }

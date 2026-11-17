@@ -178,7 +178,9 @@ describe('canPublishProfile', () => {
   });
 
   it('rejects rows older than the retention window', () => {
-    const stale = row({ lastUpdated: now - 22 * 86_400 });
+    // A month: flow patterns change slowly, so the window is generous — but
+    // rows past it must stop being republished.
+    const stale = row({ lastUpdated: now - 32 * 86_400 });
     expect(canPublishProfile(stale, now)).toBe(false);
   });
 });
@@ -448,5 +450,96 @@ describe('queryNostrProfiles', () => {
     const entries = await queryNostrProfiles([], { dayOfWeek: 2, halfHour: 34 }, 200);
     expect(entries).toEqual([]);
     expect(mockGetActiveRelays).not.toHaveBeenCalled();
+  });
+});
+
+describe('holiday profiles', () => {
+  beforeEach(() => {
+    mockSockets.length = 0;
+    mockQueuedEvents.length = 0;
+    mockGetActiveRelays.mockResolvedValue(['wss://relay.test']);
+    mockPublishStoredEvent.mockClear();
+  });
+
+  it('carries the holiday flag through content + parse', () => {
+    const holiday = row({ holiday: true });
+    const content = buildProfileContent([holiday]);
+    expect(content).toContain('"ho":1');
+
+    const event = signEvent(TRAFFIC_PROFILE_KIND, content, buildProfileTags('dr72h', true), 1);
+    const entries = parseProfileEvent(event);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.ho).toBe(1);
+  });
+
+  it('publishes holiday rows under their own replaceable event', async () => {
+    const holiday = row({ holiday: true });
+    const regular = row();
+    await publishProfileConditions([holiday, regular], { minIntervalMs: 0 });
+
+    const payloads = mockPublishStoredEvent.mock.calls.map(
+      (c) => (c[0] as NostrEvent).tags.find((t) => t[0] === 'd')![1],
+    );
+    expect(payloads.sort()).toEqual(['dr72h:week', 'dr72h:week:holiday']);
+  });
+
+  it('prefers holiday profiles for a holiday bucket query, regular for the rest', async () => {
+    const holiday = row({ holiday: true });
+    const regular = row();
+    mockQueuedEvents.push(
+      signEvent(
+        TRAFFIC_PROFILE_KIND,
+        buildProfileContent([holiday]),
+        buildProfileTags('dr72h', true),
+        1,
+      ),
+      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent([regular]), buildProfileTags('dr72h'), 2),
+    );
+
+    // Holiday request: the holiday profile wins.
+    const holidayEntries = await queryNostrProfiles(
+      ['dr72h'],
+      { dayOfWeek: 2, halfHour: 34, holiday: true },
+      500,
+    );
+    expect(holidayEntries).toHaveLength(1);
+    expect(holidayEntries[0]!.ho).toBe(1);
+
+    // Regular request: holiday profiles must never leak in.
+    const regularEntries = await queryNostrProfiles(['dr72h'], { dayOfWeek: 2, halfHour: 34 }, 500);
+    expect(regularEntries).toHaveLength(1);
+    expect(regularEntries[0]!.ho).toBeUndefined();
+  }, 5000);
+
+  it('falls back to the regular weekly profile when no holiday profile exists', async () => {
+    const regular = row();
+    mockQueuedEvents.push(
+      signEvent(TRAFFIC_PROFILE_KIND, buildProfileContent([regular]), buildProfileTags('dr72h'), 1),
+    );
+
+    const entries = await queryNostrProfiles(
+      ['dr72h'],
+      { dayOfWeek: 2, halfHour: 34, holiday: true },
+      500,
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.ho).toBeUndefined();
+  }, 5000);
+});
+
+describe('canPublishProfile holiday window', () => {
+  const now = Math.floor(Date.now() / 1000);
+
+  it('lets well-sampled holiday rows publish within the longer holiday window', () => {
+    // A row observed on last year's run of the same holiday: far past the
+    // regular one-month window, well inside the holiday one.
+    const yearOld = row({
+      holiday: true,
+      lastUpdated: now - 300 * 86_400,
+      observedSpanDays: 365,
+    });
+    expect(canPublishProfile(yearOld, now)).toBe(true);
+    // The same row without the holiday flag is out of the regular window.
+    expect(canPublishProfile({ ...yearOld, holiday: undefined }, now)).toBe(false);
   });
 });

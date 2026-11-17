@@ -302,3 +302,103 @@ describe('probe-sample provenance', () => {
     expect(merged.probeSamples).toBe(1);
   });
 });
+
+describe('holiday buckets', () => {
+  // A Friday 23:30 bucket on Christmas Eve 2026 vs a regular Friday 23:30.
+  const HOLIDAY_BUCKET = { dayOfWeek: 5, halfHour: 47, holiday: true };
+  const REGULAR_BUCKET = { dayOfWeek: 5, halfHour: 47 };
+
+  const obs = {
+    geohash5: CELL,
+    avgSpeedMph: 12,
+    avgCongestionRatio: 0.2,
+    freeFlowSpeedMph: 55,
+  };
+
+  it('records holiday observations outside the regular weekly profile', async () => {
+    const { service } = makeHistory();
+    await service.recordObservation(HOLIDAY_BUCKET, obs);
+
+    // The holiday row must not answer a regular Friday query…
+    expect(await service.getFresh([CELL], REGULAR_BUCKET)).toHaveLength(0);
+    // …and a regular observation must not answer a holiday query.
+    await service.recordObservation(REGULAR_BUCKET, {
+      geohash5: 'otherCell',
+      avgSpeedMph: 45,
+      avgCongestionRatio: 0.9,
+      freeFlowSpeedMph: 55,
+    });
+    expect(await service.getFresh([CELL], HOLIDAY_BUCKET)).toHaveLength(1);
+    expect(await service.getFresh(['otherCell'], HOLIDAY_BUCKET)).toHaveLength(0);
+  });
+
+  it('serves a holiday row after a single observation', async () => {
+    const { service } = makeHistory({ minHistoricalSamples: 3 });
+    await service.recordObservation(HOLIDAY_BUCKET, obs);
+
+    // One sample suffices: the next chance to observe the same holiday
+    // bucket is a year away, and the deviation is the point of the key.
+    const rows = await service.getHistorical([CELL], HOLIDAY_BUCKET);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sampleCount: 1, holiday: true });
+  });
+
+  it('falls back to the regular weekly profile for cells without holiday data', async () => {
+    const { service } = makeHistory({ minHistoricalSamples: 3 });
+    await service.recordObservation(HOLIDAY_BUCKET, { ...obs, geohash5: CELL });
+    await service.recordObservation(REGULAR_BUCKET, {
+      ...obs,
+      geohash5: 'otherCell',
+      avgSpeedMph: 45,
+      avgCongestionRatio: 0.9,
+    });
+    await service.recordObservation(REGULAR_BUCKET, {
+      ...obs,
+      geohash5: 'otherCell',
+      avgSpeedMph: 45,
+      avgCongestionRatio: 0.9,
+    });
+    await service.recordObservation(REGULAR_BUCKET, {
+      ...obs,
+      geohash5: 'otherCell',
+      avgSpeedMph: 45,
+      avgCongestionRatio: 0.9,
+    });
+
+    const rows = await service.getHistorical([CELL, 'otherCell'], HOLIDAY_BUCKET);
+    // CELL answered from the holiday table, otherCell from the regular one.
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.geohash5 === CELL)).toMatchObject({ holiday: true });
+    expect(rows.find((r) => r.geohash5 === 'otherCell')?.holiday).toBeFalsy();
+  });
+
+  it('keeps holiday rows beyond the regular one-month window', async () => {
+    const { service, now } = makeHistory({ minHistoricalSamples: 1 });
+    await service.recordObservation(HOLIDAY_BUCKET, obs);
+
+    now.value += 60 * 86_400; // two months later — past the regular window
+    // Next year's same holiday is 366 days out; last year's row still answers.
+    expect(await service.getHistorical([CELL], HOLIDAY_BUCKET)).toHaveLength(1);
+  });
+
+  it('does not serve holiday rows to a regular-day query', async () => {
+    const { service } = makeHistory({ minHistoricalSamples: 1 });
+    await service.recordObservation(HOLIDAY_BUCKET, obs);
+    expect(await service.getHistorical([CELL], REGULAR_BUCKET)).toHaveLength(0);
+  });
+
+  it('prunes holiday rows on the holiday window, regular rows on theirs', async () => {
+    const { service, now } = makeHistory({ minHistoricalSamples: 1 });
+    await service.recordObservation(HOLIDAY_BUCKET, obs);
+    await service.recordObservation(REGULAR_BUCKET, { ...obs, geohash5: 'otherCell' });
+
+    now.value += 60 * 86_400; // two months: regular rows expired, holiday not
+    expect(await service.prune()).toBe(1);
+    expect(await service.count()).toBe(1);
+    expect(await service.getHistorical([CELL], HOLIDAY_BUCKET)).toHaveLength(1);
+
+    now.value += 400 * 86_400; // past the holiday window too
+    expect(await service.prune()).toBe(1);
+    expect(await service.count()).toBe(0);
+  });
+});

@@ -3,7 +3,11 @@ import type {
   TrafficAreaCondition,
   WireConditionEntry,
 } from '../../models/trafficHistory';
-import { HISTORICAL_MAX_AGE_DAYS, MAX_SAMPLE_COUNT } from '../../models/trafficHistory';
+import {
+  HISTORICAL_MAX_AGE_DAYS,
+  HOLIDAY_MAX_AGE_DAYS,
+  MAX_SAMPLE_COUNT,
+} from '../../models/trafficHistory';
 import { consumePublishBudget, qualifiesForPublish } from './publishBudget';
 import type { NostrEvent } from './nostrFallback';
 import { createSignedEvent, publishStoredEvent, verifyEvent } from './nostrFallback';
@@ -63,13 +67,18 @@ const PROFILE_CONTENT_VERSION = 2;
 /**
  * Whether a historical row may be republished through shared transports:
  * enough total samples, a probe-sample share above the threshold, and still
- * inside the retention window.
+ * inside the retention window (regular rows 1 month, holiday rows longer —
+ * they recur yearly).
  */
 export function canPublishProfile(row: TrafficAreaCondition, nowSec: number): boolean {
   // Scale-safe gate: probe-dominant, well-sampled, observed on more than one
   // day (so a single drive is never broadcast as a weekly pattern), and still
   // inside the retention window.
-  return qualifiesForPublish(row, nowSec, HISTORICAL_MAX_AGE_DAYS);
+  return qualifiesForPublish(
+    row,
+    nowSec,
+    row.holiday ? HOLIDAY_MAX_AGE_DAYS : HISTORICAL_MAX_AGE_DAYS,
+  );
 }
 
 function wireEntryFor(row: TrafficAreaCondition): Record<string, number | string> {
@@ -81,6 +90,7 @@ function wireEntryFor(row: TrafficAreaCondition): Record<string, number | string
     f: row.freeFlowSpeedMph,
     n: row.sampleCount,
     u: row.lastUpdated,
+    ...(row.holiday ? { ho: 1 } : {}),
   };
 }
 
@@ -98,10 +108,16 @@ export function buildProfileContent(rows: readonly TrafficAreaCondition[]): stri
   });
 }
 
-/** NIP-33 tags: one replaceable event per cell per week. */
-export function buildProfileTags(cell: string): string[][] {
+/**
+ * NIP-33 tags: one replaceable event per cell per week.
+ *
+ * Holiday rows publish under their own `d` tag so a holiday profile can
+ * never overwrite (or be overwritten by) the regular weekly profile for the
+ * same cell — both are replaceable events with the same `g` filter target.
+ */
+export function buildProfileTags(cell: string, holiday?: boolean): string[][] {
   return [
-    ['d', `${cell}:week`],
+    ['d', holiday ? `${cell}:week:holiday` : `${cell}:week`],
     ['g', cell],
   ];
 }
@@ -147,7 +163,7 @@ export function parseProfileEvent(event: NostrEvent): WireConditionEntry[] {
       return entry ? [entry] : [];
     }
 
-    // v2: { v:2, g, p, e: [ { d, h, s, r, f, n, u }, ... ] }
+    // v2: { v:2, g, p, e: [ { d, h, s, r, f, n, u, ho? }, ... ] }
     if (content.v === PROFILE_CONTENT_VERSION && Array.isArray(content.e)) {
       if (typeof content.g !== 'string' || content.g.length < 4 || content.g.length > 12) return [];
       const out: WireConditionEntry[] = [];
@@ -179,7 +195,8 @@ function entryFromWire(
   if (typeof f !== 'number' || !Number.isFinite(f) || f <= 0) return null;
   if (typeof n !== 'number' || n < 0 || n > MAX_SAMPLE_COUNT) return null;
   if (typeof u !== 'number' || u <= 0) return null;
-  return { g: cell, d, h, s, r, f, n, u, fr: 0, p: probeSamples };
+  const ho = raw.ho === 1 ? 1 : 0;
+  return { g: cell, d, h, s, r, f, n, u, fr: 0, p: probeSamples, ...(ho ? { ho } : {}) };
 }
 
 /**
@@ -202,11 +219,6 @@ export function mergeConditionEntries(
 
 const lastPublishAt = new Map<string, number>();
 
-/** Throttle is per cell: one replaceable event carries the cell's whole week. */
-function throttleKey(cell: string): string {
-  return `${cell}:week`;
-}
-
 /**
  * Publish probe-derived historical rows as traffic profile events to all
  * connected relays. Skips rows below the probe-share gate and cells
@@ -221,22 +233,24 @@ export async function publishProfileConditions(
   const minInterval = opts.minIntervalMs ?? PROFILE_PUBLISH_THROTTLE_MS;
   const nowSec = Math.floor(nowMs / 1000);
 
-  // Group by cell: one replaceable event per cell carries the whole week, so
-  // relay storage grows with (devices × cells), not (devices × cells × buckets).
+  // Group by cell + kind: one replaceable event per cell carries the whole
+  // week (regular and holiday profiles publish as separate events), so relay
+  // storage grows with (devices × cells), not (devices × cells × buckets).
   const byCell = new Map<string, TrafficAreaCondition[]>();
   for (const row of rows) {
     if (!canPublishProfile(row, nowSec)) continue;
-    const group = byCell.get(row.geohash5);
+    const group = byCell.get(cellKey(row));
     if (group) group.push(row);
-    else byCell.set(row.geohash5, [row]);
+    else byCell.set(cellKey(row), [row]);
   }
 
   let sent = 0;
   const events: NostrEvent[] = [];
   const signing: Promise<void>[] = [];
 
-  for (const [cell, cellRows] of byCell) {
-    const key = throttleKey(cell);
+  for (const [key, cellRows] of byCell) {
+    const cell = cellRows[0].geohash5;
+    const holiday = cellRows[0].holiday === true;
     const last = lastPublishAt.get(key) ?? 0;
     if (nowMs - last < minInterval) continue;
     // Hard per-device daily cap: one install cannot flood public relays.
@@ -246,7 +260,7 @@ export async function publishProfileConditions(
       createSignedEvent(
         TRAFFIC_PROFILE_KIND,
         buildProfileContent(cellRows),
-        buildProfileTags(cell),
+        buildProfileTags(cell, holiday),
         nowSec,
       ).then((event) => {
         events.push(event);
@@ -284,7 +298,12 @@ export async function queryNostrProfiles(
   }
   if (relayUrls.length === 0) return [];
 
-  const sinceSec = Math.floor(Date.now() / 1000) - HISTORICAL_MAX_AGE_DAYS * 86_400;
+  // The filter window must cover holiday profiles (they recur yearly, so a
+  // useful one can be almost HOLIDAY_MAX_AGE_DAYS old); entries are
+  // age-checked per entry below, where the regular/holiday distinction is
+  // known.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const sinceSec = nowSec - HOLIDAY_MAX_AGE_DAYS * 86_400;
   const filter = buildProfileFilter(cells, sinceSec);
 
   const collected = new Map<string, WireConditionEntry>();
@@ -295,15 +314,34 @@ export async function queryNostrProfiles(
     new Promise((resolve) => setTimeout(resolve, timeoutMs)),
   ]);
 
-  // Only entries matching the requested bucket are usable by the cascade.
-  return Array.from(collected.values()).filter(
-    (e) => e.d === bucket.dayOfWeek && e.h === bucket.halfHour,
+  // Only entries matching the requested bucket — and still inside their own
+  // retention window (regular 1 month, holiday longer) — are usable.
+  const matching = Array.from(collected.values()).filter(
+    (e) =>
+      e.d === bucket.dayOfWeek &&
+      e.h === bucket.halfHour &&
+      e.u >= nowSec - (e.ho === 1 ? HOLIDAY_MAX_AGE_DAYS : HISTORICAL_MAX_AGE_DAYS) * 86_400,
   );
+  if (!bucket.holiday) {
+    // A regular-day request must never be answered with holiday profiles.
+    return matching.filter((e) => e.ho !== 1);
+  }
+  // Holiday request: holiday profiles win; cells nobody observed on a
+  // holiday fall back to the regular weekly profile for that bucket.
+  const holidayEntries = matching.filter((e) => e.ho === 1);
+  if (holidayEntries.length === 0) return matching;
+  const covered = new Set(holidayEntries.map((e) => e.g));
+  return [...holidayEntries, ...matching.filter((e) => e.ho !== 1 && !covered.has(e.g))];
 }
 
-/** Dedupe key for a profile entry: one condition per cell + bucket. */
+/** Map key grouping rows of the same cell + profile kind. */
+function cellKey(row: TrafficAreaCondition): string {
+  return row.holiday ? `${row.geohash5}:holiday` : row.geohash5;
+}
+
+/** Dedupe key for a profile entry: one condition per cell + bucket + kind. */
 function entryKey(entry: WireConditionEntry): string {
-  return `${entry.g}|${entry.d}|${entry.h}`;
+  return `${entry.g}|${entry.d}|${entry.h}|${entry.ho === 1 ? 'holiday' : 'regular'}`;
 }
 
 function collectFromRelay(

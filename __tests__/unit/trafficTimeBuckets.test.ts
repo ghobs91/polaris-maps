@@ -12,27 +12,27 @@ import {
 describe('timeBucketFor', () => {
   it('maps midnight to bucket 0', () => {
     const d = new Date(2026, 0, 5, 0, 0, 0); // Monday
-    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 0 });
+    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 0, holiday: false });
   });
 
   it('maps the first minute of a 30-minute slot into that slot', () => {
     const d = new Date(2026, 0, 5, 8, 0, 0); // Monday 08:00
-    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 16 });
+    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 16, holiday: false });
   });
 
   it('maps the last minute of a slot into that slot (08:29)', () => {
     const d = new Date(2026, 0, 5, 8, 29, 59);
-    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 16 });
+    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 16, holiday: false });
   });
 
   it('rolls into the next slot at the 30-minute boundary (08:30)', () => {
     const d = new Date(2026, 0, 5, 8, 30, 0);
-    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 17 });
+    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 17, holiday: false });
   });
 
   it('maps late night to bucket 47', () => {
     const d = new Date(2026, 0, 5, 23, 45, 0);
-    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 47 });
+    expect(timeBucketFor(d)).toEqual({ dayOfWeek: 1, halfHour: 47, holiday: false });
   });
 
   it('treats Sunday as day 0 and Saturday as day 6', () => {
@@ -42,7 +42,15 @@ describe('timeBucketFor', () => {
 
   it('accepts epoch milliseconds', () => {
     const d = new Date(2026, 0, 5, 9, 15, 0);
-    expect(timeBucketFor(d.getTime())).toEqual({ dayOfWeek: 1, halfHour: 18 });
+    expect(timeBucketFor(d.getTime())).toEqual({ dayOfWeek: 1, halfHour: 18, holiday: false });
+  });
+
+  it('flags buckets on a major holiday and its eve', () => {
+    // Christmas Day 2026 is a Friday; its eve (Thursday) is flagged too.
+    expect(timeBucketFor(new Date(2026, 11, 25, 17, 30, 0)).holiday).toBe(true);
+    expect(timeBucketFor(new Date(2026, 11, 24, 17, 30, 0)).holiday).toBe(true);
+    // An ordinary weekday is not.
+    expect(timeBucketFor(new Date(2026, 11, 9, 17, 30, 0)).holiday).toBe(false); // Wed
   });
 });
 

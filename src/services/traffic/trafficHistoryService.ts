@@ -8,7 +8,9 @@ import {
   CURRENT_FRESH_SEC,
   EMA_ALPHA,
   HISTORICAL_MIN_SAMPLES,
+  HISTORICAL_MIN_SAMPLES_HOLIDAY,
   HISTORICAL_MAX_AGE_DAYS,
+  HOLIDAY_MAX_AGE_DAYS,
   MAX_SAMPLE_COUNT,
 } from '../../models/trafficHistory';
 
@@ -46,6 +48,8 @@ export interface TrafficHistoryOptions {
   historicalMaxAgeDays?: number;
   /** Overrides for tests: minimum samples for a usable historical row. */
   minHistoricalSamples?: number;
+  /** Overrides for tests: max age (days) for holiday rows. */
+  holidayMaxAgeDays?: number;
   /** Overrides for tests: EMA weight for new observations. */
   emaAlpha?: number;
   /** Overrides for tests: fixed "now" (epoch seconds). */
@@ -102,6 +106,7 @@ export class TrafficHistoryService {
   private readonly freshSec: number;
   private readonly historicalMaxAgeDays: number;
   private readonly minHistoricalSamples: number;
+  private readonly holidayMaxAgeDays: number;
   private readonly emaAlpha: number;
   private readonly nowFn: () => number;
   private ready: Promise<void> | null = null;
@@ -111,6 +116,7 @@ export class TrafficHistoryService {
     this.freshSec = opts.freshSec ?? CURRENT_FRESH_SEC;
     this.historicalMaxAgeDays = opts.historicalMaxAgeDays ?? HISTORICAL_MAX_AGE_DAYS;
     this.minHistoricalSamples = opts.minHistoricalSamples ?? HISTORICAL_MIN_SAMPLES;
+    this.holidayMaxAgeDays = opts.holidayMaxAgeDays ?? HOLIDAY_MAX_AGE_DAYS;
     this.emaAlpha = opts.emaAlpha ?? EMA_ALPHA;
     this.nowFn = opts.now ?? (() => Math.floor(Date.now() / 1000));
   }
@@ -126,6 +132,10 @@ export class TrafficHistoryService {
   /**
    * Record a condition observation for a cell at a time bucket.
    * If the row already exists, EMA-merge into it; otherwise insert.
+   *
+   * Holiday buckets are recorded into the holiday table (keyed separately),
+   * so an atypical holiday observation never EMA-blends into the regular
+   * weekly profile for the same weekday + time.
    */
   async recordObservation(bucket: TimeBucket, obs: ConditionObservation): Promise<void> {
     await this.init();
@@ -150,6 +160,7 @@ export class TrafficHistoryService {
         observedSpanDays: 0,
         lastObservedDay: Math.floor(now / 86_400),
         lastUpdated: now,
+        ...(bucket.holiday ? { holiday: true } : {}),
       });
     }
   }
@@ -178,30 +189,57 @@ export class TrafficHistoryService {
   }
 
   /**
-   * Fetch historical-average rows for the given cells + bucket: enough
-   * samples and not older than the retention window. Includes rows that
-   * are also fresh (callers check fresh first).
+   * Fetch historical-average rows for the given cells + bucket.
+   *
+   * Rows up to a month old are usable — flow patterns for a cell × weekday ×
+   * time of day change slowly, so saved data is preferred over re-asking an
+   * upstream provider. Includes rows that are also fresh (callers check
+   * fresh first).
+   *
+   * Holiday buckets resolve in two steps: a holiday row (up to
+   * `HOLIDAY_MAX_AGE_DAYS` old — holidays recur yearly, so last year's
+   * observation is exactly the wanted pattern, and one sample is enough)
+   * wins; cells without one fall back to the regular weekly profile for the
+   * same weekday + time, which is still better than a provider call.
    */
   async getHistorical(cells: string[], bucket: TimeBucket): Promise<TrafficAreaCondition[]> {
     await this.init();
+    if (bucket.holiday) {
+      const holidayCutoff = this.nowFn() - this.holidayMaxAgeDays * 86_400;
+      const holidayRows = (await this.backend.getByKey(cells, { ...bucket, holiday: true })).filter(
+        (r) => r.lastUpdated >= holidayCutoff && r.sampleCount >= HISTORICAL_MIN_SAMPLES_HOLIDAY,
+      );
+      const covered = new Set(holidayRows.map((r) => r.geohash5));
+      const remaining = cells.filter((c) => !covered.has(c));
+      return [...holidayRows, ...(await this.regularRows(remaining, bucket))];
+    }
+    return this.regularRows(cells, bucket);
+  }
+
+  /** Regular-table rows for these cells: retention window + min samples. */
+  private async regularRows(cells: string[], bucket: TimeBucket): Promise<TrafficAreaCondition[]> {
+    if (cells.length === 0) return [];
     const cutoff = this.nowFn() - this.historicalMaxAgeDays * 86_400;
-    const rows = await this.backend.getByKey(cells, bucket);
+    const rows = await this.backend.getByKey(cells, { ...bucket, holiday: false });
     return rows.filter(
       (r) => r.lastUpdated >= cutoff && r.sampleCount >= this.minHistoricalSamples,
     );
   }
 
-  /** Remove rows older than the retention window. */
+  /** Remove rows older than their retention window (regular vs holiday). */
   async prune(): Promise<number> {
     await this.init();
-    const cutoff = this.nowFn() - this.historicalMaxAgeDays * 86_400;
+    const regularCutoff = this.nowFn() - this.historicalMaxAgeDays * 86_400;
+    const holidayCutoff = this.nowFn() - this.holidayMaxAgeDays * 86_400;
     const rows = await this.backend.getAll();
     let removed = 0;
     for (const row of rows) {
+      const cutoff = row.holiday ? holidayCutoff : regularCutoff;
       if (row.lastUpdated < cutoff) {
         await this.backend.remove(row.geohash5, {
           dayOfWeek: row.dayOfWeek,
           halfHour: row.halfHour,
+          ...(row.holiday ? { holiday: true } : {}),
         });
         removed++;
       }

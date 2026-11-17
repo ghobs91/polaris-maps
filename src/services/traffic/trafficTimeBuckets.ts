@@ -1,10 +1,13 @@
 import type { TimeBucket } from '../../models/trafficHistory';
+import { isMajorHolidayOrEve } from './trafficHolidayCalendar';
 
 /**
  * 30-minute time-of-day bucketing, day-of-week aware.
  *
  * Buckets are local-time based (the traffic patterns users care about are
- * local: morning rush, evening rush, etc.).
+ * local: morning rush, evening rush, etc.). Buckets falling on (or the
+ * evening before) a major holiday are flagged, so their observations are
+ * kept out of the regular weekly profile.
  */
 
 /** Convert a Date (or epoch ms) into a day-of-week + half-hour bucket. */
@@ -13,6 +16,7 @@ export function timeBucketFor(date: Date | number): TimeBucket {
   return {
     dayOfWeek: d.getDay(),
     halfHour: Math.floor((d.getHours() * 60 + d.getMinutes()) / 30),
+    holiday: isMajorHolidayOrEve(d),
   };
 }
 

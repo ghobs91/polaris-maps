@@ -362,12 +362,13 @@ export function resume(): void {
 /**
  * Broadcast a traffic condition request to all connected peers.
  * Serialized in the worklet's compact envelope format:
- * `{ t:'cr', id, c:[cells], d:dayOfWeek, h:halfHour, a:maxAgeSec }`
+ * `{ t:'cr', id, c:[cells], d:dayOfWeek, h:halfHour, a:maxAgeSec, o:holiday }`.
+ * `o` is optional so old peers simply answer with their regular-bucket data.
  */
 export function requestConditions(req: {
   id: string;
   cells: string[];
-  bucket: { dayOfWeek: number; halfHour: number };
+  bucket: { dayOfWeek: number; halfHour: number; holiday?: boolean };
   maxAgeSec: number;
 }): void {
   sendCommand(
@@ -379,6 +380,7 @@ export function requestConditions(req: {
       d: req.bucket.dayOfWeek,
       h: req.bucket.halfHour,
       a: req.maxAgeSec,
+      ...(req.bucket.holiday ? { o: 1 } : {}),
     }),
   );
 }

@@ -613,7 +613,12 @@ function notifyConditionRequest(msg, connId) {
           connId,
           id: msg.id || '',
           cells: msg.c || [],
-          bucket: { dayOfWeek: msg.d ?? 0, halfHour: msg.h ?? 0 },
+          bucket: {
+            dayOfWeek: msg.d ?? 0,
+            halfHour: msg.h ?? 0,
+            // 1 = the requester is asking for a major-holiday bucket
+            holiday: msg.o === 1,
+          },
           maxAgeSec: msg.a ?? 900,
         }),
       ),

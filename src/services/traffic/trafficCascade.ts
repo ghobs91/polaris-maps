@@ -231,8 +231,13 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
       const entry = wireToEntry(w);
       // Peer answers originate from other devices' probe histories — count
       // toward the row's probe share so locally-merged peer data can later
-      // be republished.
-      await req.history.recordObservation(req.bucket, { ...entry, source: 'p2p' });
+      // be republished. Holiday-flagged answers are recorded into the
+      // holiday table; answers without the flag (old peers) are regular
+      // weekly data and land in the regular table even on a holiday.
+      await req.history.recordObservation(
+        { ...req.bucket, holiday: entry.holiday === true },
+        { ...entry, source: 'p2p' },
+      );
       conditions.set(entry.geohash5, {
         ...entry,
         probeSamples: w.p ?? 0,

@@ -494,3 +494,98 @@ describe('segmentsFromConditions', () => {
     expect(segments).toHaveLength(1);
   });
 });
+
+describe('holiday buckets in the cascade', () => {
+  // Same Friday 23:30 bucket, flagged as a major holiday (e.g. NYE).
+  const HOLIDAY_BUCKET = { ...BUCKET, holiday: true };
+  const HOLIDAY_POINTS = POINTS;
+
+  it('answers a holiday request from the holiday table before TomTom', async () => {
+    // Only the first cell has a holiday observation — one sample is enough.
+    // Recorded an hour ago so tier 1 (fresh) does not answer first.
+    const backend = new InMemoryTrafficHistoryBackend();
+    const now = { value: 1_800_000_000 };
+    const history = new TrafficHistoryService({ backend, now: () => now.value });
+    await history.recordObservation(HOLIDAY_BUCKET, {
+      geohash5: CELLS[0],
+      avgSpeedMph: 20,
+      avgCongestionRatio: 0.3,
+      freeFlowSpeedMph: 50,
+      source: 'probe',
+    });
+    now.value += 60 * 60;
+    const seed = jest.fn(async () => [] as NormalizedTrafficSegment[]);
+    const p2p = jest.fn(async () => []);
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: HOLIDAY_BUCKET,
+      points: HOLIDAY_POINTS,
+      history,
+      seedFromTomTom: seed,
+      p2pQuery: p2p,
+    });
+
+    expect(result.source).toBe('local-history');
+    // The two cells without saved data proceed down the tiers in order.
+    expect(p2p).toHaveBeenCalledWith([CELLS[1], CELLS[2]], HOLIDAY_BUCKET);
+    // TomTom is asked only for those same cells.
+    expect(seed).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
+  });
+
+  it('answers a holiday request entirely from the regular weekly profile', async () => {
+    // No holiday rows exist; the cells' regular Friday rows are recent enough
+    // — saved data still beats a provider call, per the provider rule.
+    const history = makeHistory(CELLS.map((c) => makeCondition(c, { lastUpdated: 1_800_000_000 })));
+    const seed = jest.fn(async () => [] as NormalizedTrafficSegment[]);
+    const p2p = jest.fn(async () => []);
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: HOLIDAY_BUCKET,
+      points: HOLIDAY_POINTS,
+      history,
+      seedFromTomTom: seed,
+      p2pQuery: p2p,
+    });
+
+    expect(result.source).toBe('local-history');
+    expect(result.unresolvedCells).toHaveLength(0);
+    expect(p2p).not.toHaveBeenCalled();
+    expect(seed).not.toHaveBeenCalled();
+  });
+
+  it('records holiday-flagged peer answers into the holiday table', async () => {
+    const history = makeHistory();
+    await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: HOLIDAY_BUCKET,
+      points: HOLIDAY_POINTS,
+      history,
+      seedFromTomTom: async () => [],
+      p2pQuery: async (cells) =>
+        cells.map((c) => conditionToWire(makeCondition(c), true)).map((e) => ({ ...e, ho: 1 })),
+    });
+
+    // Peer data labelled holiday must land in the holiday table…
+    const holidayRows = await history.getFresh(CELLS, HOLIDAY_BUCKET);
+    expect(holidayRows).toHaveLength(3);
+    // …and never in the regular weekly profile for that same Friday bucket.
+    expect(await history.getFresh(CELLS, BUCKET)).toHaveLength(0);
+  });
+
+  it('records unlabelled peer answers (old peers) into the regular table', async () => {
+    const history = makeHistory();
+    await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: HOLIDAY_BUCKET,
+      points: HOLIDAY_POINTS,
+      history,
+      seedFromTomTom: async () => [],
+      p2pQuery: async (cells) => cells.map((c) => conditionToWire(makeCondition(c), true)),
+    });
+
+    expect(await history.getFresh(CELLS, HOLIDAY_BUCKET)).toHaveLength(0);
+    expect(await history.getFresh(CELLS, BUCKET)).toHaveLength(3);
+  });
+});

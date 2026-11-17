@@ -17,6 +17,8 @@ export interface WireConditionSource {
   lastUpdated: number;
   /** Optional probe-sample share — forwarded as `p` on the wire. */
   probeSamples?: number;
+  /** True for holiday-bucket rows — forwarded as `ho: 1` on the wire. */
+  holiday?: boolean;
 }
 
 /** Serialize a local condition row into the compact P2P wire format. */
@@ -32,6 +34,7 @@ export function conditionToWire(entry: WireConditionSource, fresh: boolean): Wir
     u: entry.lastUpdated,
     fr: fresh ? 1 : 0,
     ...(entry.probeSamples !== undefined ? { p: entry.probeSamples } : {}),
+    ...(entry.holiday ? { ho: 1 } : {}),
   };
 }
 
@@ -46,5 +49,6 @@ export function wireToEntry(w: WireConditionEntry): WireConditionSource {
     freeFlowSpeedMph: w.f,
     sampleCount: w.n,
     lastUpdated: w.u,
+    ...(w.ho === 1 ? { holiday: true } : {}),
   };
 }

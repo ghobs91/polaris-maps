@@ -11,6 +11,13 @@ export interface TimeBucket {
   dayOfWeek: number;
   /** 30-minute slot of the day: 0 (00:00–00:29) … 47 (23:30–23:59). */
   halfHour: number;
+  /**
+   * True when this bucket falls on (or the evening before) a major holiday.
+   * Holiday observations are kept out of the regular weekly profile: a
+   * Friday 23:30 before New Year's Eve must not be averaged into what a
+   * regular Friday 23:30 looks like. Undefined/absent means a regular day.
+   */
+  holiday?: boolean;
 }
 
 /** A single condition observation/aggregate for one cell + bucket. */
@@ -44,6 +51,12 @@ export interface TrafficAreaCondition {
   observedSpanDays: number;
   /** UTC day index (epoch days) of the most recent observation. */
   lastObservedDay: number;
+  /**
+   * True when the row belongs to a major-holiday bucket rather than the
+   * regular weekly profile (storage keys them separately). Absent/undefined
+   * = regular row.
+   */
+  holiday?: boolean;
 }
 
 /**
@@ -63,6 +76,8 @@ export interface WireConditionEntry {
   fr: number;
   /** Optional: publisher's probe-sample share (see TrafficAreaCondition). */
   p?: number;
+  /** 1 = observed on a major holiday (see TimeBucket.holiday). Old peers omit it. */
+  ho?: number;
 }
 
 /** Where a single condition observation came from. */
@@ -127,8 +142,34 @@ export const P2P_QUERY_TIMEOUT_MS = 3_500;
 /** Minimum observations before a historical average is considered usable. */
 export const HISTORICAL_MIN_SAMPLES = 3;
 
-/** Historical rows older than this are considered too stale to use. */
-export const HISTORICAL_MAX_AGE_DAYS = 21;
+/**
+ * Historical rows older than this are considered too stale to use.
+ *
+ * A month: flow patterns for a given cell × weekday × time of day change
+ * slowly, so rows up to this age are the preferred answer for their bucket —
+ * over re-asking an upstream provider for conditions it already answered.
+ */
+export const HISTORICAL_MAX_AGE_DAYS = 31;
+
+/**
+ * How old a holiday row may be and still answer a request.
+ *
+ * Holidays recur yearly, so last year's Christmas Eve profile is exactly the
+ * data wanted this Christmas Eve — a 1-month rule would make holiday data
+ * unusable by construction. 400 days covers the same holiday next year
+ * (366 for a leap year) plus a few weeks of margin.
+ */
+export const HOLIDAY_MAX_AGE_DAYS = 400;
+
+/**
+ * Minimum observations before a holiday-row average is considered usable.
+ *
+ * Regular weekly rows need several samples because any single drive can be
+ * an outlier. A holiday observation is different: the whole point of the
+ * holiday key is that the day is atypical, and the next chance to observe
+ * the same bucket is a year away — so one observation is enough to serve.
+ */
+export const HISTORICAL_MIN_SAMPLES_HOLIDAY = 1;
 
 /** Weight given to a new observation when EMA-merging into an existing row. */
 export const EMA_ALPHA = 0.35;
