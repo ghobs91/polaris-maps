@@ -177,6 +177,59 @@ against the catalog's (no 27 GB download). A missing item answers `503`, not
   before `/download/` is stable. Publish the catalog after verification, not
   immediately after the upload finishes.
 
+### What the mirror actually costs
+
+`assets[]` enumerates only `tiles.pmtiles`, `search.sqlite`, `transit.sqlite` and
+`transit-timetable.sqlite` — 27.9 GB catalog-wide. The mirror also carries
+`*-routing.tar` and `*-geocoding.db`, which the client reaches through
+`assetBaseUrls` and the geocoding pack asset and which the catalog never sizes.
+Measured on the first run (200 of 355 regions mirrored, 62 GB):
+
+| class               | share |
+| ------------------- | ----- |
+| `routing.tar`       | 57%   |
+| `geocoding.db`      | 16%   |
+| `tiles.pmtiles`     | 7%    |
+| `search.sqlite`     | 7%    |
+| `transit-timetable` | 4%    |
+| `transit.sqlite`    | 1%    |
+
+So budget **~110 GB per monthly tag** at full coverage, not the catalog's 28 GB.
+`*-search-shards.tar` is deliberately not mirrored: no client fetches it.
+
+### Retention
+
+One item per dated release, retained as long as the GitHub release behind it
+(`prune-map-data-releases.mjs --keep`, default 2 months). The Archive cannot be
+pruned with rclone; retire an item by darkening it rather than deleting it, and
+keep the item count in step with the GitHub retention or storage doubles.
+
+Each item also gets an `_archive.torrent` for free. Nothing consumes it today —
+a distribution path that costs nobody anything to leave available.
+
+### Re-mirroring after a failed upload
+
+A region whose mirror step failed is still complete on GitHub Releases; only the
+copy on the mirror is missing. Do not rebuild it (20–50 minutes) to retry an
+upload:
+
+```bash
+node scripts/remirror-regions.mjs --regions-file failed-regions.json
+```
+
+It resolves each region's tag and asset list from the catalog, pulls those
+assets back down with `gh release download`, and re-runs the upload. rclone skips
+anything already present.
+
+### Advertised means verified
+
+`publish-catalog` stamps a preview catalog, verifies the mirror URLs for the
+regions **this run rebuilt** (`--regions-file rebuilt.json`), and passes
+`--no-mirror` for anything it could not verify. A `catalog-stale` verdict is
+ignored: that means both origins agree and the catalog is one step behind a
+rebuild, not that the mirror is broken. The cost is a few dozen range requests
+per chunk rather than 1,084.
+
 ## The release gate
 
 `ios-testflight.yml` runs `verify-pack-origins.mjs` on every build, so the state
