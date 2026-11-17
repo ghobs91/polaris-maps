@@ -1,0 +1,17 @@
+{
+  "name": "polaris-relay",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Always-on desktop seeder for the Polaris Maps P2P network. Replicates canonical region packs read-only over Hyperswarm/Hyperdrive, independent of the Polaris Maps app lifecycle.",
+  "bin": {
+    "polaris-relay": "./src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs serve",
+    "test": "node --test test/"
+  }
+}

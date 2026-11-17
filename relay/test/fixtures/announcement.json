@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "relayPubkey": "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+  "regions": [
+    {
+      "regionId": "de-berlin",
+      "version": "map-data-2026-01",
+      "driveKey": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "bytes": 51200000
+    },
+    {
+      "regionId": "us-ny-new-york",
+      "version": "map-data-2026-01",
+      "driveKey": "abababababababababababababababababababababababababababababababab",
+      "bytes": 96468992
+    }
+  ],
+  "capacityBytes": 26843545600,
+  "usedBytes": 7516192768,
+  "uplinkKbps": 100000,
+  "paused": false,
+  "pausedReason": null,
+  "servedBytes24h": 12884901888,
+  "updatedAt": 1767225600000,
+  "signature": "3bd0fac3ef79fefc2497a64fb3b5ff4006b67fc67f164e3fd84031bc557ec2692ba1f2d04b06efca86d50924fd9d37bd6ef82b40388da634e6f3382d90b0ab1d"
+}

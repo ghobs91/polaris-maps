@@ -127,3 +127,6 @@ AppStore_*.mobileprovision
 # App Store screenshot working dirs (large binaries)
 screenshots/raw/
 screenshots/out/
+
+# Polaris Relay controller build output (built by relay/controller/build.sh)
+relay/controller/build/

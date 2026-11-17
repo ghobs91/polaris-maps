@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Polaris Relay launch agent template.
+
+  `install.sh` substitutes the __PLACEHOLDERS__ and writes the result to
+  ~/Library/LaunchAgents/app.polarismaps.relay.plist.
+
+  Why a LaunchAgent and not the app:
+    - RunAtLoad starts it at login, with no Polaris Maps process involved.
+    - KeepAlive{SuccessfulExit:false} restarts it after a crash but honours a
+      deliberate `polaris-relay` stop (a clean exit is not restarted).
+    - ProcessType=Background and LowPriorityIO keep replication out of the way of
+      whatever the user is actually doing.
+    - It is per-user, not a LaunchDaemon: no root, and it only ever touches this
+      user's own seed store and bandwidth grant.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>app.polarismaps.relay</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__REPO__/relay/src/cli.mjs</string>
+    <string>serve</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>POLARIS_RELAY_HOME</key>
+    <string>__RELAY_HOME__</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/relay.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/relay.error.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+</dict>
+</plist>
