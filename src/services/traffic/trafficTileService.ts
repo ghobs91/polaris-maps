@@ -30,6 +30,14 @@ import {
   resetPeerMissStreak,
   shouldQueryPeersForTile,
 } from './trafficTilePeerPolicy';
+import {
+  arrayBufferToBase64,
+  fileAgeSec,
+  readCachedTile,
+  trafficTileCacheDir,
+  trafficTilePath,
+  writeCachedTile,
+} from './trafficTileDiskCache';
 
 /**
  * Traffic tile manager.
@@ -38,17 +46,16 @@ import {
  * native local HTTP tile server, backed by a disk cache that is populated
  * in layers:
  *
- *   1. local disk cache (written by earlier fetches)
+ *   1. local disk cache (written by earlier fetches, by this service or by
+ *      `tilePixelSampler` — see `trafficTileDiskCache`)
  *   2. P2P peers (tile request/response over the traffic swarm)
  *   3. TomTom API seed (only when no local/peer copy exists)
  *
  * Tiles that this node holds are also served to peers on demand.
  */
 
-const CACHE_DIR_NAME = 'traffic-tiles';
 const SOURCE_ID = 'traffic';
 
-let cacheDir: string | null = null;
 let serverBaseUrl: string | null = null;
 let serverStarted = false;
 let listenerWired = false;
@@ -86,53 +93,6 @@ function shouldAskPeers(): boolean {
   });
 }
 
-// ── Disk cache helpers ──────────────────────────────────────────────
-
-function tilePath(key: TileKey): string {
-  return `${cacheDir!}/${key.z}/${key.x}/${key.y}.png`;
-}
-
-async function ensureCacheDir(): Promise<void> {
-  if (!cacheDir) {
-    cacheDir = `${FileSystem.cacheDirectory}${CACHE_DIR_NAME}`;
-  }
-  const info = await FileSystem.getInfoAsync(cacheDir);
-  if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
-  }
-}
-
-async function readTileFromDisk(key: TileKey): Promise<string | null> {
-  try {
-    const info = await FileSystem.getInfoAsync(tilePath(key));
-    if (!info.exists) return null;
-    const b64 = await FileSystem.readAsStringAsync(tilePath(key), {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    return b64;
-  } catch {
-    return null;
-  }
-}
-
-async function writeTileToDisk(key: TileKey, b64: string): Promise<void> {
-  await ensureCacheDir();
-  const dir = `${cacheDir}/${key.z}/${key.x}`;
-  const dirInfo = await FileSystem.getInfoAsync(dir);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-  }
-  await FileSystem.writeAsStringAsync(tilePath(key), b64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-}
-
-function tileAgeSec(info: { exists?: boolean; modificationTime?: number } | null): number {
-  const mtime = (info as { modificationTime?: number } | undefined)?.modificationTime;
-  if (!mtime) return Infinity;
-  return Math.floor(Date.now() / 1000) - mtime;
-}
-
 // ── Local HTTP tile server ──────────────────────────────────────────
 
 /**
@@ -141,12 +101,12 @@ function tileAgeSec(info: { exists?: boolean; modificationTime?: number } | null
  */
 export async function ensureTrafficTileServer(): Promise<string | null> {
   if (serverBaseUrl) return serverBaseUrl;
-  await ensureCacheDir();
+  const cacheDir = await trafficTileCacheDir();
   try {
     const port = await startTileServer({ cachePath: `${FileSystem.cacheDirectory}`, port: 0 });
     if (port > 0) {
       // Native URL(fileURLWithPath:) needs a raw path, not a file:// URI.
-      await addTileSource({ id: SOURCE_ID, filePath: cacheDir!.replace(/^file:\/\//, '') });
+      await addTileSource({ id: SOURCE_ID, filePath: cacheDir.replace(/^file:\/\//, '') });
       serverBaseUrl = getTileServerBaseUrl();
       serverStarted = serverBaseUrl.length > 0;
     }
@@ -218,7 +178,8 @@ export function initTrafficTileService(): void {
   // Serve our cached tiles to peers on demand
   bridgeOnTileRequest((req) => {
     void (async () => {
-      const b64 = await readTileFromDisk({ z: req.z, x: req.x, y: req.y });
+      const cached = await readCachedTile({ z: req.z, x: req.x, y: req.y });
+      const b64 = cached?.b64 ?? null;
       if (b64 && b64.length <= MAX_TILE_B64_LENGTH) {
         const payload: WireTilePayload = { z: req.z, x: req.x, y: req.y, b64 };
         bridgeSendTileResponse(req.connId, req.id, payload);
@@ -242,22 +203,12 @@ async function seedFromTomTom(key: TileKey): Promise<string | null> {
     const bytes = await res.arrayBuffer();
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_TILE_BYTES) return null;
     const b64 = arrayBufferToBase64(bytes);
-    await writeTileToDisk(key, b64);
+    await writeCachedTile(key, b64);
     return b64;
   } catch {
     noteTomTomNetworkError();
     return null;
   }
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
 }
 
 /**
@@ -266,12 +217,11 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
  */
 export async function ensureTrafficTile(key: TileKey): Promise<boolean> {
   // 1. Disk
-  const existing = await readTileFromDisk(key);
+  const existing = await readCachedTile(key);
   if (existing) {
     // Refresh stale tiles in the background (fire-and-forget) so the index
     // keeps serving fresh conditions without blocking rendering.
-    const info = await FileSystem.getInfoAsync(tilePath(key));
-    if (tileAgeSec(info) > TILE_MAX_AGE_SEC) {
+    if (existing.ageSec > TILE_MAX_AGE_SEC) {
       const cacheKey = tileKeyToString(key);
       if (!inflightSeeds.has(cacheKey)) {
         inflightSeeds.add(cacheKey);
@@ -291,7 +241,7 @@ export async function ensureTrafficTile(key: TileKey): Promise<boolean> {
       const peerB64 = await queryPeersForTile(key);
       peerMissStreak = nextPeerMissStreak(peerMissStreak, peerB64 != null);
       if (peerB64) {
-        await writeTileToDisk(key, peerB64);
+        await writeCachedTile(key, peerB64);
         return true;
       }
     }
@@ -312,7 +262,7 @@ async function refreshStaleTile(key: TileKey, cacheKey: string): Promise<void> {
     const peerB64 = shouldAskPeers() ? await queryPeersForTile(key) : null;
     peerMissStreak = nextPeerMissStreak(peerMissStreak, peerB64 != null);
     const b64 = peerB64 ?? (await seedFromTomTom(key));
-    if (b64) await writeTileToDisk(key, b64);
+    if (b64) await writeCachedTile(key, b64);
   } catch {
     /* keep the stale tile */
   } finally {
@@ -358,8 +308,8 @@ export { tilesForViewport, clampTrafficZoom } from './trafficTileMath';
 
 /** Prune the disk cache to MAX_CACHED_TILES, oldest first. */
 export async function pruneTileCache(): Promise<number> {
-  if (!cacheDir) return 0;
   try {
+    const cacheDir = await trafficTileCacheDir();
     const entries: Array<{ key: TileKey; age: number }> = [];
     await collectTiles(cacheDir, entries, 0);
     if (entries.length <= MAX_CACHED_TILES) return 0;
@@ -369,7 +319,9 @@ export async function pruneTileCache(): Promise<number> {
     let removed = 0;
     for (let i = 0; i < excess; i++) {
       try {
-        await FileSystem.deleteAsync(tilePath(entries[i].key), { idempotent: true });
+        await FileSystem.deleteAsync(trafficTilePath(cacheDir, entries[i].key), {
+          idempotent: true,
+        });
         removed++;
       } catch {
         /* ignore */
@@ -400,7 +352,7 @@ async function collectTiles(
       const y = Number(f.replace('.png', ''));
       if (Number.isNaN(y)) continue;
       const info = await FileSystem.getInfoAsync(`${dir}/${f}`);
-      out.push({ key: { z, x, y }, age: tileAgeSec(info) });
+      out.push({ key: { z, x, y }, age: fileAgeSec(info) });
     }
     return;
   }

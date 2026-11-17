@@ -1,6 +1,7 @@
 import { tomtomApiKey } from '../../constants/config';
 import { decodePolyline } from '../../utils/polyline';
 import { TtlCache } from '../../utils/ttlCache';
+import { getStorageSync } from '../storage/mmkv';
 import {
   canCallTomTom,
   isTomTomConfigured,
@@ -13,13 +14,83 @@ const TOMTOM_ROUTE_URL = 'https://api.tomtom.com/routing/1/calculateRoute';
 /** Route ETAs are stable for a few minutes and are re-requested every 60 s. */
 const ROUTE_ETA_TTL_MS = 5 * 60 * 1000;
 const ROUTE_ETA_CACHE_ENTRIES = 32;
+/** Persisted mirror of the in-memory cache (see `readPersistedRouteEta`). */
+const ROUTE_ETA_STORAGE_KEY = 'traffic.route-eta.v1';
 
 interface RouteEta {
   travelTimeSeconds: number;
   trafficDelaySeconds: number;
 }
 
+interface PersistedRouteEta extends RouteEta {
+  /** Epoch ms the provider answered. */
+  storedAt: number;
+}
+
 const routeEtaCache = new TtlCache<string, RouteEta>(ROUTE_ETA_TTL_MS, ROUTE_ETA_CACHE_ENTRIES);
+
+/**
+ * Read the persisted mirror of the ETA cache.
+ *
+ * The in-memory cache dies with the process, so before this existed the first
+ * directions request after every relaunch re-asked the provider for the exact
+ * same route — the storage layer throws when MMKV is not initialised yet, and
+ * that simply degrades to the old behaviour.
+ */
+function readRouteEtaStore(): Record<string, PersistedRouteEta> {
+  try {
+    const raw = getStorageSync().getString(ROUTE_ETA_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<string, PersistedRouteEta>;
+  } catch {
+    return {};
+  }
+}
+
+function isValidEntry(entry: unknown): entry is PersistedRouteEta {
+  if (!entry || typeof entry !== 'object') return false;
+  const candidate = entry as Partial<PersistedRouteEta>;
+  return (
+    typeof candidate.travelTimeSeconds === 'number' &&
+    Number.isFinite(candidate.travelTimeSeconds) &&
+    typeof candidate.trafficDelaySeconds === 'number' &&
+    Number.isFinite(candidate.trafficDelaySeconds) &&
+    typeof candidate.storedAt === 'number' &&
+    Number.isFinite(candidate.storedAt)
+  );
+}
+
+/** Fresh persisted answer for this key, or null (also drops expired entries). */
+function readPersistedRouteEta(cacheKey: string, now: number): RouteEta | null {
+  const entry = readRouteEtaStore()[cacheKey];
+  if (!isValidEntry(entry)) return null;
+  if (now - entry.storedAt >= ROUTE_ETA_TTL_MS) return null;
+  return {
+    travelTimeSeconds: entry.travelTimeSeconds,
+    trafficDelaySeconds: entry.trafficDelaySeconds,
+  };
+}
+
+/** Persist one answer, pruning expired entries and keeping the newest ones. */
+function writePersistedRouteEta(cacheKey: string, eta: RouteEta, now: number): void {
+  try {
+    const kept = Object.entries(readRouteEtaStore()).filter(
+      ([key, entry]) =>
+        key !== cacheKey && isValidEntry(entry) && now - entry.storedAt < ROUTE_ETA_TTL_MS,
+    );
+    // Oldest first, so the cap below drops the least useful entries.
+    kept.sort((a, b) => a[1].storedAt - b[1].storedAt);
+    const trimmed = kept.slice(Math.max(0, kept.length - (ROUTE_ETA_CACHE_ENTRIES - 1)));
+    const next: Record<string, PersistedRouteEta> = {};
+    for (const [key, entry] of trimmed) next[key] = entry;
+    next[cacheKey] = { ...eta, storedAt: now };
+    getStorageSync().set(ROUTE_ETA_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* cache-only: a failed write just costs one provider request later */
+  }
+}
 
 function routeEtaCacheKey(
   origin: { lat: number; lng: number },
@@ -42,7 +113,10 @@ export async function fetchTomTomRouteEta(
   if (!isTomTomConfigured()) return null;
 
   const cacheKey = routeEtaCacheKey(origin, destination);
-  const cached = routeEtaCache.get(cacheKey);
+  const cached = routeEtaCache.get(cacheKey) ?? readPersistedRouteEta(cacheKey, Date.now());
+  // Deliberately not re-inserted into the in-memory cache: its TTL would
+  // restart, and a persisted answer that is nearly expired would then keep
+  // being served for a full extra window.
   if (cached) return cached;
 
   if (!canCallTomTom()) return null;
@@ -64,6 +138,7 @@ export async function fetchTomTomRouteEta(
       trafficDelaySeconds: summary.trafficDelayInSeconds ?? 0,
     };
     routeEtaCache.set(cacheKey, result);
+    writePersistedRouteEta(cacheKey, result, Date.now());
     return result;
   } catch {
     noteTomTomNetworkError();
@@ -71,9 +146,14 @@ export async function fetchTomTomRouteEta(
   }
 }
 
-/** Test-only: clear the ETA cache. */
+/** Test-only: clear the ETA cache (memory + persisted mirror). */
 export function __resetTomTomRouteEtaCacheForTests(): void {
   routeEtaCache.clear();
+  try {
+    getStorageSync().delete(ROUTE_ETA_STORAGE_KEY);
+  } catch {
+    /* MMKV not initialised in this test — nothing persisted to clear */
+  }
 }
 
 /**

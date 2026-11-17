@@ -5,6 +5,12 @@ import { TtlCache } from '../../utils/ttlCache';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { TOMTOM_FLOW_TILES_BASE_URL, tomtomApiKey } from '../../constants/config';
 import {
+  base64ToArrayBuffer,
+  arrayBufferToBase64,
+  readFreshCachedTile,
+  writeCachedTile,
+} from './trafficTileDiskCache';
+import {
   canCallTomTom,
   isTomTomConfigured,
   noteTomTomNetworkError,
@@ -248,10 +254,49 @@ function readPixel(tile: DecodedTile, px: number, py: number): [number, number, 
  */
 const tileCache = new TtlCache<string, DecodedTile>(TILE_MAX_AGE_SEC * 1000, 32);
 
+/**
+ * Decode a PNG tile, or null when the bytes are not a usable tile.
+ * Announced with the tile key so a provider change (recoloured tiles,
+ * different palette) is visible in the logs instead of silently dropping data.
+ */
+function decodeTile(key: string, buffer: ArrayBuffer): DecodedTile | null {
+  let decoded: DecodedTile | null = null;
+  try {
+    decoded = decodePng(buffer);
+  } catch (err) {
+    console.warn(`[TileSampler] tile ${key} PNG decode threw:`, err);
+    return null;
+  }
+  if (!decoded) {
+    console.warn(`[TileSampler] tile ${key} PNG decode returned null (${buffer.byteLength} bytes)`);
+    return null;
+  }
+  if (__DEV__) console.log(`[TileSampler] tile ${key} decoded ${decoded.width}x${decoded.height}`);
+  return decoded;
+}
+
+/**
+ * Load a tile, preferring the durable on-disk copy.
+ *
+ * The disk layer is what makes a route re-checked after a relaunch free: the
+ * bytes the device already paid for (`trafficTileService` seeds the same
+ * directory for the raster overlay) are re-read instead of re-requested. A
+ * decoded in-memory copy is per-process, so without this the first directions
+ * request after every app start re-downloaded exactly the same tiles.
+ */
 async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<DecodedTile | null> {
   const key = `${z}/${x}/${y}`;
   const cached = tileCache.get(key);
   if (cached) return cached;
+
+  const diskB64 = await readFreshCachedTile({ z, x, y }, TILE_MAX_AGE_SEC);
+  if (diskB64) {
+    const decoded = decodeTile(key, base64ToArrayBuffer(diskB64));
+    if (decoded) {
+      tileCache.set(key, decoded);
+      return decoded;
+    }
+  }
 
   if (!canCallTomTom()) return null;
   noteTomTomRequest();
@@ -268,21 +313,12 @@ async function fetchAndDecodeTile(z: number, x: number, y: number): Promise<Deco
     }
     const buffer = await res.arrayBuffer();
     if (__DEV__) console.log(`[TileSampler] tile ${key} fetched ${buffer.byteLength} bytes`);
-    let decoded: DecodedTile | null = null;
-    try {
-      decoded = decodePng(buffer);
-    } catch (err) {
-      console.warn(`[TileSampler] tile ${key} PNG decode threw:`, err);
-      return null;
-    }
-    if (!decoded) {
-      console.warn(
-        `[TileSampler] tile ${key} PNG decode returned null (${buffer.byteLength} bytes)`,
-      );
-      return null;
-    }
-    if (__DEV__)
-      console.log(`[TileSampler] tile ${key} decoded ${decoded.width}x${decoded.height}`);
+    const decoded = decodeTile(key, buffer);
+    if (!decoded) return null;
+    // Keep the bytes for the next request — this process, the raster overlay,
+    // or the next launch. Fire-and-forget: a failed cache write is not a
+    // failed fetch.
+    void writeCachedTile({ z, x, y }, arrayBufferToBase64(buffer)).catch(() => {});
     tileCache.set(key, decoded);
     return decoded;
   } catch (err) {
