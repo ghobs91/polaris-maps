@@ -20,7 +20,7 @@ import { useTrafficStore } from '../../stores/trafficStore';
 import { computeRoute } from '../../services/routing/routingService';
 import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRouting';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
-import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
+import { fetchRouteTrafficEtaIfUnsaved } from '../../services/traffic/tomtomRouteEta';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import { decodePolyline } from '../../utils/polyline';
@@ -117,7 +117,7 @@ export function LocationActionPanel() {
           .catch(() => setShowParkAndRide(false));
 
         // Fetch traffic-adjusted ETA in background
-        fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+        fetchRouteTrafficEtaIfUnsaved(routes[0].geometry).then((result) => {
           if (result) {
             useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
           }

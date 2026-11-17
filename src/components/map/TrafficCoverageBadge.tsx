@@ -14,6 +14,7 @@ const COVERAGE_COLORS: Record<TrafficCoverage, string> = {
   'open-feed': '#0A84FF',
   'cold-start': '#FF9F0A',
   local: '#8E8E93',
+  saved: '#30D158',
   stale: '#FFD60A',
   'no-data': '#FF453A',
 };

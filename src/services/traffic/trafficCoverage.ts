@@ -1,7 +1,14 @@
 import type { TrafficSourceBreakdown } from '../../models/trafficHistory';
 
 /** Explicit traffic coverage status derived from the resolve source. */
-export type TrafficCoverage = 'p2p' | 'open-feed' | 'cold-start' | 'local' | 'stale' | 'no-data';
+export type TrafficCoverage =
+  | 'p2p'
+  | 'open-feed'
+  | 'cold-start'
+  | 'local'
+  | 'saved'
+  | 'stale'
+  | 'no-data';
 
 const STALE_AFTER_SEC = 10 * 60;
 
@@ -14,9 +21,10 @@ export function coverageFromResolveSource(source: string | null | undefined): Tr
       return 'open-feed';
     case 'tomtom':
       return 'cold-start';
-    case 'aged':
-      // Last-known data from earlier in the session/day: real, but not current.
-      return 'stale';
+    case 'saved-flow':
+      // Flow this device already fetched for this weekday + hour. Not stale:
+      // it is the bucket's answer, which is why the provider was not called.
+      return 'saved';
     case 'local-fresh':
     case 'local-history':
       return 'local';
@@ -46,6 +54,7 @@ export const TRAFFIC_COVERAGE_LABELS: Record<TrafficCoverage, string> = {
   'open-feed': 'Open data',
   'cold-start': 'Cold-start feed',
   local: 'On-device history',
+  saved: 'Saved weekday flow',
   stale: 'Stale traffic data',
   'no-data': 'No traffic data',
 };
@@ -66,7 +75,10 @@ export function summarizeTrafficBreakdown(breakdown: TrafficSourceBreakdown): st
   parts.push(`tomtom ${breakdown.coldStart}`);
   parts.push(`peers ${breakdown.p2p}`);
   parts.push(`open ${breakdown.openFeed}`);
-  if (breakdown.aged > 0) parts.push(`aged ${breakdown.aged}`);
+  if (breakdown.savedFlow > 0) parts.push(`saved ${breakdown.savedFlow}`);
   if (breakdown.unresolved > 0) parts.push(`none ${breakdown.unresolved}`);
+  // The paid cost of this resolution. `tomtom N (0 requests)` is the proof
+  // that the cold-start cells came from saved data rather than the network.
+  parts.push(`requests ${breakdown.providerRequests}`);
   return parts.join(' · ');
 }

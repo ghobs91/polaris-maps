@@ -12,9 +12,10 @@ function breakdown(overrides: Partial<TrafficSourceBreakdown> = {}): TrafficSour
     localSeeded: 0,
     p2p: 0,
     openFeed: 0,
+    savedFlow: 0,
     coldStart: 0,
-    aged: 0,
     unresolved: 0,
+    providerRequests: 0,
     ...overrides,
   };
 }
@@ -28,9 +29,10 @@ describe('coverageFromResolveSource', () => {
     expect(coverageFromResolveSource('local-history')).toBe('local');
   });
 
-  it('reports aged (last-known) data as stale, never as current', () => {
-    expect(coverageFromResolveSource('aged')).toBe('stale');
-    expect(resolveTrafficCoverage('aged', 10_000, 10_000)).toBe('stale');
+  it('reports saved upstream flow as saved, not stale and not cold-start', () => {
+    expect(coverageFromResolveSource('saved-flow')).toBe('saved');
+    // A saved bucket answer is current by definition: the bucket is the answer.
+    expect(resolveTrafficCoverage('saved-flow', 10_000, 10_000)).toBe('saved');
   });
 
   it('treats unknown/empty sources as no-data', () => {
@@ -59,7 +61,7 @@ describe('resolveTrafficCoverage', () => {
 describe('summarizeTrafficBreakdown', () => {
   it('always shows on-device, cold-start, peer, and open counts', () => {
     expect(summarizeTrafficBreakdown(breakdown({ localProbe: 12, coldStart: 5, p2p: 3 }))).toBe(
-      'device 12 · tomtom 5 · peers 3 · open 0',
+      'device 12 · tomtom 5 · peers 3 · open 0 · requests 0',
     );
   });
 
@@ -68,12 +70,12 @@ describe('summarizeTrafficBreakdown', () => {
       summarizeTrafficBreakdown(
         breakdown({ localProbe: 8, localSeeded: 4, coldStart: 5, unresolved: 3 }),
       ),
-    ).toBe('device 8 · seeded 4 · tomtom 5 · peers 0 · open 0 · none 3');
+    ).toBe('device 8 · seeded 4 · tomtom 5 · peers 0 · open 0 · none 3 · requests 0');
   });
 
-  it('shows an aged-fallback count when nothing live resolved', () => {
-    expect(summarizeTrafficBreakdown(breakdown({ aged: 4 }))).toBe(
-      'device 0 · tomtom 0 · peers 0 · open 0 · aged 4',
+  it('shows the saved-flow count and the provider requests it did not cost', () => {
+    expect(summarizeTrafficBreakdown(breakdown({ savedFlow: 4 }))).toBe(
+      'device 0 · tomtom 0 · peers 0 · open 0 · saved 4 · requests 0',
     );
   });
 

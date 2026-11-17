@@ -94,10 +94,10 @@ export const PROBE_DERIVED_SOURCES: readonly ConditionObservationSource[] = [
 export type TrafficResolveSource =
   | 'local-fresh'
   | 'local-history'
+  | 'saved-flow'
   | 'p2p'
   | 'open_feed'
   | 'tomtom'
-  | 'aged'
   | 'none';
 
 /**
@@ -120,12 +120,18 @@ export interface TrafficSourceBreakdown {
   p2p: number;
   /** Cells answered by a free open traffic feed. */
   openFeed: number;
+  /** Cells answered by saved upstream flow for this weekday + hour. */
+  savedFlow: number;
   /** Cells answered by the optional TomTom cold-start bridge. */
   coldStart: number;
-  /** Cells answered by aged on-device data (last-known, nothing live). */
-  aged: number;
   /** Cells no tier could answer. */
   unresolved: number;
+  /**
+   * Provider requests actually issued during the resolution (0 = fully local).
+   * The cell counts say which tier answered; only this proves whether that
+   * answer cost a network call.
+   */
+  providerRequests: number;
 }
 
 // ── Tunables ─────────────────────────────────────────────────────────
@@ -150,6 +156,16 @@ export const HISTORICAL_MIN_SAMPLES = 3;
  * over re-asking an upstream provider for conditions it already answered.
  */
 export const HISTORICAL_MAX_AGE_DAYS = 31;
+
+/**
+ * How old a saved upstream flow observation may be and still answer a request
+ * for its weekday + hour bucket.
+ *
+ * A month, matching the weekly profile — one freshness rule for all saved
+ * local traffic, whichever store holds it: if this device already fetched flow
+ * for "Tuesday 15:00", it answers from that instead of paying the provider.
+ */
+export const SAVED_FLOW_MAX_AGE_DAYS = HISTORICAL_MAX_AGE_DAYS;
 
 /**
  * How old a holiday row may be and still answer a request.
@@ -191,8 +207,9 @@ export const SOURCE_CONFIDENCE: Record<TrafficResolveSource, number> = {
   p2p: 0.7,
   open_feed: 0.75,
   tomtom: 0.9,
-  // Last resort: the data is real, but it can be up to `AGED_MAX_AGE_SEC` old
-  // and must lose a confidence-weighted merge against any live source.
-  aged: 0.3,
+  // Saved upstream flow for this weekday + hour: real road-level data, but
+  // observed on another occurrence of the same bucket (up to a month old), so
+  // it must lose a confidence-weighted merge to a live source.
+  'saved-flow': 0.6,
   none: 0,
 };

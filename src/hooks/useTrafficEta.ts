@@ -16,10 +16,10 @@ const MIN_MATCH_RATIO_FOR_LOCAL = 0.1;
  *
  * Only when too little of the route matched local traffic at all. Saved data
  * — fresh observations, the weekly profile (up to a month old), holiday
- * profiles, or the aged last-known segments — is granular road-level data the
- * device already has, so once it covers the route the provider is not asked
- * again (traffic patterns change slowly; the provider's answer would cost a
- * request and rarely differ meaningfully).
+ * profiles, holiday rows, saved weekday+hour flow, or the aged last-known
+ * segments — is granular road-level data the device already has, so once it
+ * covers the route the provider is not asked again (traffic patterns change
+ * slowly; the provider's answer would cost a request and rarely differ).
  */
 export function prefersRouteApiEta(matchRatio: number): boolean {
   return matchRatio < MIN_MATCH_RATIO_FOR_LOCAL;

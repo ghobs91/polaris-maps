@@ -48,6 +48,17 @@ export type IncidentType =
 
 export type TrafficSource = 'tomtom' | 'open_feed' | 'p2p' | 'history';
 
+/**
+ * Granularity of an upstream flow observation, so saved data is only reused
+ * for a request it is fine-grained enough to answer.
+ *
+ *   - `segment`: a real road segment (Flow Segment Data API, open feed) —
+ *     coordinates plus current and free-flow speed.
+ *   - `tile`: a point sample read out of a flow raster tile — a congestion
+ *     ratio at one coordinate, with no per-road speed.
+ */
+export type SavedFlowKind = 'segment' | 'tile';
+
 export interface NormalizedTrafficSegment {
   id: string;
   coordinates: [number, number][];

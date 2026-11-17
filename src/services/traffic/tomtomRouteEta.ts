@@ -157,6 +157,30 @@ export function __resetTomTomRouteEtaCacheForTests(): void {
 }
 
 /**
+ * Fetch a route-ETA preview only when the device does not already hold flow
+ * for the route's weekday + hour bucket.
+ *
+ * The panels used to call the Calculate Route API on every directions request.
+ * Saved flow covering the route (same weekday + hour, up to a month old) is the
+ * answer the API would return anyway, so the request is skipped — and the
+ * preview ETA is then filled from the local traffic set by `useTrafficEta`.
+ */
+export async function fetchRouteTrafficEtaIfUnsaved(
+  geometry: string,
+): Promise<{ travelTimeSeconds: number; trafficDelaySeconds: number } | null> {
+  const coords = decodePolyline(geometry);
+  if (coords.length < 2) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const saved = require('./trafficSavedFlowIndex') as typeof import('./trafficSavedFlowIndex');
+    if (await saved.hasSavedFlowForRoute(coords)) return null;
+  } catch {
+    /* saved-flow store unavailable: fall through to the provider */
+  }
+  return fetchRouteTrafficEta(geometry);
+}
+
+/**
  * Fetch traffic-adjusted ETA using the route geometry's start/end points.
  * Convenience wrapper that extracts endpoints from an encoded polyline.
  */

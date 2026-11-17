@@ -50,6 +50,16 @@ export function noteTomTomRequest(): void {
   requestsUsed++;
 }
 
+/**
+ * Provider requests issued this session. Exposed so callers can report what a
+ * resolution actually cost: the cascade reads it around the paid tier and
+ * publishes the delta, which is the only way "this came from saved data, no
+ * request was made" can be verified instead of inferred.
+ */
+export function getTomTomRequestsUsed(): number {
+  return requestsUsed;
+}
+
 function openBreaker(durationMs: number, reason: string, now: number): void {
   const until = now + durationMs;
   if (until > blockedUntil) {

@@ -1,4 +1,4 @@
-import type { NormalizedTrafficSegment } from '../../models/traffic';
+import type { NormalizedTrafficSegment, SavedFlowKind } from '../../models/traffic';
 import { MIN_PEER_THRESHOLD } from '../../models/traffic';
 import type { TrafficAreaCondition } from '../../models/trafficHistory';
 import { useTrafficStore } from '../../stores/trafficStore';
@@ -31,7 +31,14 @@ import type { TrafficSourceBreakdown } from '../../models/trafficHistory';
 import { publishProfileConditions } from './nostrProfileExchange';
 import { currentTimeBucket } from './trafficTimeBuckets';
 import { seedThroughCache } from './trafficSeedCache';
-import { getAgedTraffic, readAgedSegments, recordAgedSegments } from './trafficAgedIndex';
+import {
+  getSavedFlow,
+  readSavedFlow,
+  readSavedFlowCoverage,
+  recordSavedFlow,
+  savedFlowBucketForRequest,
+} from './trafficSavedFlowIndex';
+import { currentSavedFlowBucket } from './savedFlowBucket';
 import {
   resolveTrafficConditions,
   observationsFromSegments,
@@ -50,7 +57,7 @@ import {
   pruneTileCache,
   setTrafficTilePeerCount,
 } from './trafficTileService';
-import { tilesForViewport } from './trafficTileMath';
+import { tilesForViewport, tileCenter } from './trafficTileMath';
 import { fetchOpenTrafficSegments, type FeedBounds } from './openTrafficFeed';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,22 +127,27 @@ function logResolution(label: string, source: string, breakdown: TrafficSourceBr
       `(${breakdown.requestedCells} cells: device ${breakdown.localProbe}` +
       `${breakdown.localSeeded > 0 ? `+${breakdown.localSeeded} seeded` : ''}, ` +
       `tomtom ${breakdown.coldStart}, peers ${breakdown.p2p}, open ${breakdown.openFeed}` +
-      `${breakdown.aged > 0 ? `, aged ${breakdown.aged}` : ''}, ` +
-      `unresolved ${breakdown.unresolved})`,
+      `${breakdown.savedFlow > 0 ? `, saved ${breakdown.savedFlow}` : ''}, ` +
+      `unresolved ${breakdown.unresolved}, provider requests ${breakdown.providerRequests})`,
   );
 }
 
 /**
- * Wrap an upstream tier so whatever it fetches is also kept on device for the
- * aged fallback tier. Recording is fire-and-forget and preserves each segment's
- * own observation time, so re-serving a cached seed cannot make it look fresh.
+ * Wrap an upstream tier so whatever it fetches is saved under the weekday +
+ * hour bucket it was observed in, at the granularity it was observed at
+ * (`kind`). Recording is fire-and-forget and preserves each segment's own
+ * observation time, so re-saving a replay cannot make it look current.
+ *
+ * This is the other half of the saved-flow rule: a repeat request in the same
+ * bucket is answered from what this call stored, not from the provider.
  */
 function rememberForFallback(
+  kind: SavedFlowKind,
   fetch: (missing: string[]) => Promise<NormalizedTrafficSegment[]>,
 ): (missing: string[]) => Promise<NormalizedTrafficSegment[]> {
   return async (missing) => {
     const segments = await fetch(missing);
-    recordAgedSegments(segments);
+    recordSavedFlow(segments, kind);
     return segments;
   };
 }
@@ -180,7 +192,7 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       // Free feeds are cached for the same freshness window as cold-start
       // seeds: upstream answers answer requests, they never enter the probe
       // index.
-      openFeed: rememberForFallback((missing) =>
+      openFeed: rememberForFallback('segment', (missing) =>
         seedThroughCache(missing, () => fetchOpenTrafficSegments(viewport), {
           // Free feeds are retried next refresh if they came back empty: a
           // transient outage must not hand the cell to the cold-start bridge
@@ -191,11 +203,14 @@ async function fetchAndUpdateTraffic(viewport: ViewportBounds): Promise<void> {
       // TomTom is the optional cold-start bridge: only the cells the earlier
       // tiers could not resolve are queried, and only when no fresh cached
       // seed already covers them.
-      seedFromTomTom: rememberForFallback((missing) =>
+      seedFromTomTom: rememberForFallback('segment', (missing) =>
         seedThroughCache(missing, (stillMissing) => fetchTomTomTraffic(viewport, stillMissing)),
       ),
-      // Nothing live answered: fall back to what this device already fetched.
-      agedFallback: (missing) => readAgedSegments(missing),
+      // Flow this device already fetched for this weekday + hour answers
+      // before any provider call. The viewport resolves cells (colours per
+      // area), so either granularity is usable.
+      savedFlow: (missing, bucket) =>
+        readSavedFlow(missing, savedFlowBucketForRequest(bucket), ['segment', 'tile']),
     });
 
     logResolution('viewport', result.source, result.breakdown);
@@ -330,7 +345,7 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       bucket,
       points,
       history: getTrafficHistory(),
-      openFeed: rememberForFallback((missing) =>
+      openFeed: rememberForFallback('segment', (missing) =>
         seedThroughCache(missing, () => fetchOpenTrafficSegments(boundsFromCoords(routeCoords)), {
           negativeTtlMs: 0,
         }),
@@ -339,15 +354,16 @@ async function fetchAndUpdateRouteTraffic(routeCoords: [number, number][]): Prom
       // no fresh cached seed covers. Tile decoding is cached per z/x/y too, so
       // a route refreshed inside the window costs no provider request.
       seedFromTomTom: isTomTomConfigured()
-        ? rememberForFallback((missing) =>
+        ? rememberForFallback('tile', (missing) =>
             seedThroughCache(missing, (stillMissing) =>
               sampleRouteTileColors(routeCoords, stillMissing),
             ),
           )
         : async () => [],
-      // Last resort: a route re-checked later in an area whose live tiers are
-      // empty still gets last-known traffic colours and a stale-labelled ETA.
-      agedFallback: (missing) => readAgedSegments(missing),
+      // Route resolution needs per-point ratios, which tile point-samples
+      // carry; saved road segments are accepted too because they are finer.
+      savedFlow: (missing, bucket) =>
+        readSavedFlow(missing, savedFlowBucketForRequest(bucket), ['segment', 'tile']),
     });
 
     logResolution('route', result.source, result.breakdown);
@@ -481,9 +497,10 @@ export async function initTrafficP2P(): Promise<void> {
     .then((rows) => useTrafficStore.getState().setHistoryEntryCount(rows))
     .catch(() => {});
 
-  // Same for the aged fallback table: short-lived by design, but it still has
-  // to be trimmed between sessions.
-  void getAgedTraffic()
+  // Same for the saved-flow table: kept for a month so repeat requests in the
+  // same weekday + hour bucket stay free, and trimmed at launch so it cannot
+  // grow forever.
+  void getSavedFlow()
     .prune()
     .catch(() => {});
 
@@ -642,6 +659,11 @@ function scheduleSeedBump(): void {
  * Seed traffic tiles covering the visible viewport through the
  * disk → P2P → TomTom cascade. Bumps the raster source version as tiles land
  * so MapLibre paints progressively rather than all at once.
+ *
+ * The TomTom seed is skipped for tiles whose area already has saved flow for
+ * the current weekday + hour bucket. Without that gate the overlay would keep
+ * re-buying tiles on its own 15-minute clock even when the resolution was
+ * answered entirely from saved data.
  */
 export async function seedTrafficTilesForViewport(
   centerLat: number,
@@ -653,7 +675,29 @@ export async function seedTrafficTilesForViewport(
   const tiles = tilesForViewport(centerLat, centerLng, zoom, screenWidth, screenHeight);
   if (tiles.length === 0) return;
 
-  await ensureTrafficTiles(tiles, undefined, scheduleSeedBump);
+  const covered = await readSavedFlowCoverage(
+    [...new Set(tiles.map((t) => geohash5For(tileCenter(t).lat, tileCenter(t).lng)))],
+    currentSavedFlowBucket(),
+    ['segment', 'tile'],
+  );
+
+  await ensureTrafficTiles(
+    tiles,
+    undefined,
+    scheduleSeedBump,
+    covered.size === 0
+      ? {}
+      : {
+          skipTomTom: (key) => {
+            // Only at zooms where a tile is no bigger than a geohash5 cell
+            // (~5 km): below that the tile centre's cell does not represent the
+            // tile's area, and gating would starve the wide view of coverage.
+            if (key.z < 10) return false;
+            const center = tileCenter(key);
+            return covered.has(geohash5For(center.lat, center.lng));
+          },
+        },
+  );
 }
 
 export type { TrafficAreaCondition };

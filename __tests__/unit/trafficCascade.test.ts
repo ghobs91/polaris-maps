@@ -6,6 +6,7 @@ import {
 import { TrafficHistoryService } from '../../src/services/traffic/trafficHistoryService';
 import { InMemoryTrafficHistoryBackend } from '../../src/services/traffic/trafficHistoryInMemory';
 import { conditionToWire } from '../../src/services/traffic/p2pConditionWire';
+import { getTomTomRequestsUsed, noteTomTomRequest } from '../../src/services/traffic/tomtomAccess';
 import { encode as geohashEncode } from '../../src/utils/geohash';
 import type { TrafficAreaCondition } from '../../src/models/trafficHistory';
 import type { NormalizedTrafficSegment } from '../../src/models/traffic';
@@ -88,9 +89,10 @@ describe('resolveTrafficConditions cascade order', () => {
       localSeeded: 0,
       p2p: 0,
       openFeed: 0,
+      savedFlow: 0,
       coldStart: 0,
-      aged: 0,
       unresolved: 0,
+      providerRequests: 0,
     });
     expect(p2p).not.toHaveBeenCalled();
     expect(seed).not.toHaveBeenCalled();
@@ -187,7 +189,8 @@ describe('resolveTrafficConditions cascade order', () => {
     expect(seededCells[0].sort()).toEqual([CELLS[1], CELLS[2]].sort());
     expect(indexObservations).not.toHaveBeenCalled();
     expect(indexedCells).toHaveLength(0);
-    expect(result.source).toBe('tomtom');
+    // One cell came from the on-device index, so local outranks the bridge.
+    expect(result.source).toBe('local-fresh');
     expect(result.unresolvedCells).toHaveLength(0);
     expect(result.segments).toHaveLength(3);
     expect(result.breakdown).toMatchObject({ localProbe: 1, coldStart: 2, unresolved: 0 });
@@ -234,7 +237,10 @@ describe('resolveTrafficConditions cascade order', () => {
     expect(result.unresolvedCells).toHaveLength(0);
     // Only the third cell should reach TomTom
     expect(seed).toHaveBeenCalledWith([CELLS[2]]);
-    expect(result.source).toBe('tomtom');
+    // The label names the most authoritative tier that answered, not the last
+    // one that ran — the per-cell split is in the breakdown.
+    expect(result.source).toBe('local-fresh');
+    expect(result.breakdown).toMatchObject({ localProbe: 1, p2p: 1, coldStart: 1 });
   });
 
   it('uses the open feed before TomTom and skips TomTom when it resolves every cell', async () => {
@@ -278,7 +284,9 @@ describe('resolveTrafficConditions cascade order', () => {
     });
 
     expect(seed).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
-    expect(result.source).toBe('tomtom');
+    // Open feed outranks the paid bridge in the label.
+    expect(result.source).toBe('open_feed');
+    expect(result.breakdown).toMatchObject({ openFeed: 1, coldStart: 2 });
     expect(result.unresolvedCells).toHaveLength(0);
   });
 
@@ -303,90 +311,118 @@ describe('resolveTrafficConditions cascade order', () => {
     expect(result.unresolvedCells).toHaveLength(0);
   });
 
-  it('falls back to aged on-device data when nothing live resolves', async () => {
+  it('answers from saved upstream flow before the provider is asked', async () => {
+    // The device already fetched flow for this weekday + hour bucket: the
+    // request must be answered locally and cost zero provider requests.
     const history = makeHistory();
-    const aged = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.4)));
+    const savedFlow = jest.fn(async (cells: string[]) =>
+      cells.map((c) => makeTomTomSegment(c, 0.4)),
+    );
+    const seed = jest.fn(async () => [] as NormalizedTrafficSegment[]);
+    const p2p = jest.fn(async () => []);
 
     const result = await resolveTrafficConditions({
       cells: CELLS,
       bucket: BUCKET,
       points: POINTS,
       history,
-      seedFromTomTom: async () => [],
-      agedFallback: aged,
-      p2pQuery: async () => [],
+      savedFlow,
+      seedFromTomTom: seed,
+      p2pQuery: p2p,
     });
 
-    expect(aged).toHaveBeenCalledWith(CELLS);
-    expect(result.source).toBe('aged');
-    expect(result.breakdown.aged).toBe(3);
+    expect(savedFlow).toHaveBeenCalledWith(CELLS, BUCKET);
+    expect(p2p).not.toHaveBeenCalled();
+    expect(seed).not.toHaveBeenCalled();
+    expect(result.source).toBe('saved-flow');
+    expect(result.breakdown.savedFlow).toBe(3);
+    expect(result.breakdown.providerRequests).toBe(0);
     expect(result.unresolvedCells).toHaveLength(0);
     expect(result.segments).toHaveLength(3);
-    // Aged segments are synthesized with the lowest tier confidence so a
-    // confidence-weighted merge against live data always loses.
-    expect(result.segments.every((s) => s.confidence < 0.5)).toBe(true);
   });
 
-  it('never labels a live resolution as aged, and only asks for the missing cells', async () => {
+  it('only asks saved flow for the cells local tiers missed', async () => {
     const history = makeHistory([makeCondition(CELLS[0], { lastUpdated: 1_800_000_000 })]);
-    const seed = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.5)));
-    const aged = jest.fn(async () => [] as NormalizedTrafficSegment[]);
+    const savedFlow = jest.fn(async (cells: string[]) =>
+      cells.map((c) => makeTomTomSegment(c, 0.4)),
+    );
 
     const result = await resolveTrafficConditions({
       cells: CELLS,
       bucket: BUCKET,
       points: POINTS,
       history,
-      seedFromTomTom: seed,
-      agedFallback: aged,
-      p2pQuery: async () => [],
-    });
-
-    // TomTom answered the fresh cell's siblings, so the aged tier is never
-    // consulted — let alone allowed to override the label.
-    expect(seed).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
-    expect(aged).not.toHaveBeenCalled();
-    expect(result.source).toBe('tomtom');
-    expect(result.breakdown.aged).toBe(0);
-  });
-
-  it('keeps the live source when only some cells needed aged data', async () => {
-    const history = makeHistory([makeCondition(CELLS[0], { lastUpdated: 1_800_000_000 })]);
-    const aged = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.4)));
-
-    const result = await resolveTrafficConditions({
-      cells: CELLS,
-      bucket: BUCKET,
-      points: POINTS,
-      history,
+      savedFlow,
       seedFromTomTom: async () => [],
-      agedFallback: aged,
       p2pQuery: async () => [],
     });
 
-    expect(aged).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
-    // Coverage is only reported as stale when *nothing* live resolved.
+    expect(savedFlow).toHaveBeenCalledWith([CELLS[1], CELLS[2]], BUCKET);
+    // On-device probe data outranks saved upstream flow.
     expect(result.source).toBe('local-fresh');
-    expect(result.breakdown).toMatchObject({ localProbe: 1, aged: 2, unresolved: 0 });
+    expect(result.breakdown).toMatchObject({ localProbe: 1, savedFlow: 2, unresolved: 0 });
   });
 
-  it('treats a failing aged store as no data', async () => {
+  it('falls through to TomTom only for cells saved flow cannot answer', async () => {
+    const history = makeHistory();
+    const savedFlow = jest.fn(async (cells: string[]) =>
+      cells.includes(CELLS[0]) ? [makeTomTomSegment(CELLS[0], 0.4)] : [],
+    );
+    const seed = jest.fn(async (cells: string[]) => cells.map((c) => makeTomTomSegment(c, 0.5)));
+
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      savedFlow,
+      seedFromTomTom: seed,
+      p2pQuery: async () => [],
+    });
+
+    expect(seed).toHaveBeenCalledWith([CELLS[1], CELLS[2]]);
+    // Saved flow outranks the paid bridge, so it owns the label here.
+    expect(result.source).toBe('saved-flow');
+    expect(result.breakdown).toMatchObject({ savedFlow: 1, coldStart: 2, unresolved: 0 });
+  });
+
+  it('treats a failing saved-flow store as no data', async () => {
     const history = makeHistory();
     const result = await resolveTrafficConditions({
       cells: CELLS,
       bucket: BUCKET,
       points: POINTS,
       history,
-      seedFromTomTom: async () => [],
-      agedFallback: async () => {
+      savedFlow: async () => {
         throw new Error('sqlite closed');
       },
+      seedFromTomTom: async () => [],
       p2pQuery: async () => [],
     });
 
     expect(result.source).toBe('none');
-    expect(result.breakdown.aged).toBe(0);
+    expect(result.breakdown.savedFlow).toBe(0);
     expect(result.unresolvedCells).toHaveLength(3);
+  });
+
+  it('reports how many provider requests the paid tier actually made', async () => {
+    const history = makeHistory();
+    const before = getTomTomRequestsUsed();
+    const result = await resolveTrafficConditions({
+      cells: CELLS,
+      bucket: BUCKET,
+      points: POINTS,
+      history,
+      seedFromTomTom: async (cells) => {
+        // Simulate the provider tier issuing one request per cell batch.
+        noteTomTomRequest();
+        return cells.map((c) => makeTomTomSegment(c, 0.5));
+      },
+      p2pQuery: async () => [],
+    });
+
+    expect(getTomTomRequestsUsed() - before).toBe(1);
+    expect(result.breakdown.providerRequests).toBe(1);
   });
 });
 

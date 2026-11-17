@@ -62,7 +62,7 @@ import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRou
 import { buildRouteAlternatives } from '../../services/routing/routeAlternatives';
 import type { ValhallaRoute } from '../../models/route';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
-import { fetchRouteTrafficEta } from '../../services/traffic/tomtomRouteEta';
+import { fetchRouteTrafficEtaIfUnsaved } from '../../services/traffic/tomtomRouteEta';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
@@ -1580,7 +1580,7 @@ export function FloatingSearchPanel({
         // Fetch the traffic-adjusted ETA in the background — car only, since
         // TomTom traffic is meaningless for walking/cycling.
         if (costing === 'auto') {
-          fetchRouteTrafficEta(routes[0].geometry).then((result) => {
+          fetchRouteTrafficEtaIfUnsaved(routes[0].geometry).then((result) => {
             if (result) {
               useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
             }

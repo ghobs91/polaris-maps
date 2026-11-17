@@ -211,11 +211,25 @@ async function seedFromTomTom(key: TileKey): Promise<string | null> {
   }
 }
 
+/** Per-tile policy for a batch of seeds. */
+export interface TileSeedOptions {
+  /**
+   * Return true to skip the TomTom seed for this tile. Used when the device
+   * already holds saved flow for the tile's area in the current weekday + hour
+   * bucket: the provider is not asked again, and the locally cached (or absent)
+   * raster simply keeps what it has.
+   */
+  skipTomTom?: (key: TileKey) => boolean;
+}
+
 /**
  * Ensure a tile exists in the disk cache, resolving through
  * disk → P2P → TomTom. Returns true if the tile is cached afterwards.
  */
-export async function ensureTrafficTile(key: TileKey): Promise<boolean> {
+export async function ensureTrafficTile(
+  key: TileKey,
+  options: TileSeedOptions = {},
+): Promise<boolean> {
   // 1. Disk
   const existing = await readCachedTile(key);
   if (existing) {
@@ -246,7 +260,8 @@ export async function ensureTrafficTile(key: TileKey): Promise<boolean> {
       }
     }
 
-    // 3. TomTom
+    // 3. TomTom — unless saved flow already covers this area for the bucket.
+    if (options.skipTomTom?.(key)) return false;
     const b64 = await seedFromTomTom(key);
     return b64 != null;
   } finally {
@@ -280,6 +295,7 @@ export async function ensureTrafficTiles(
   keys: TileKey[],
   concurrency: number = 6,
   onTileSeeded?: () => void,
+  options: TileSeedOptions = {},
 ): Promise<number> {
   const queue = [...keys];
   let seeded = 0;
@@ -287,7 +303,7 @@ export async function ensureTrafficTiles(
   const worker = async () => {
     while (queue.length > 0) {
       const key = queue.shift()!;
-      const ok = await ensureTrafficTile(key);
+      const ok = await ensureTrafficTile(key, options);
       if (ok) {
         seeded++;
         onTileSeeded?.();

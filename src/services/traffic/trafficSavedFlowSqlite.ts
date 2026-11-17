@@ -1,13 +1,18 @@
-import type { AgedTrafficBackend, AgedTrafficRow } from './trafficAgedStore';
-import type { NormalizedTrafficSegment } from '../../models/traffic';
+import type { SavedFlowBackend, SavedFlowRow } from './trafficSavedFlowStore';
+import type { NormalizedTrafficSegment, SavedFlowKind } from '../../models/traffic';
 
 /**
- * SQLite backend for the aged traffic store.
+ * SQLite backend for saved upstream flow (weekday × hour buckets).
  *
- * A separate database from the weekly condition index on purpose: this table
- * is high-churn and short-lived (hours), while `traffic-history.db` holds
- * long-lived probe-derived weekly profiles. Mixing them would put licensed
- * upstream rows under the profile pruning rules and vice versa.
+ * A separate database from the weekly probe index on purpose: this table holds
+ * licensed upstream content, which must never be blended into (or republished
+ * as) probe-derived history. See `trafficSavedFlowStore` for the policy.
+ *
+ * The table is new (`saved_flow`) rather than an evolution of the old
+ * `traffic_aged` one: the key gained `day_of_week`, `hour` and `kind`, so old
+ * rows cannot be reinterpreted under the new rule — and the old rows were
+ * single-observation, hour-agnostic data that the new key would misattribute.
+ * Any leftover `traffic_aged` table is dropped at init.
  *
  * expo-sqlite is required lazily so this module can be imported where the
  * native module is unavailable (unit tests use the in-memory backend).
@@ -25,6 +30,9 @@ function openDb(): Promise<SqliteDb> {
 
 interface Row {
   cell: string;
+  day_of_week: number;
+  hour: number;
+  kind: string;
   segment_id: string;
   coordinates: string;
   source: string;
@@ -35,7 +43,10 @@ interface Row {
   observed_at: number;
 }
 
-export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
+const SELECT_COLUMNS = `cell, day_of_week, hour, kind, segment_id, coordinates, source,
+              current_speed_mph, free_flow_speed_mph, congestion_ratio, confidence, observed_at`;
+
+export class SqliteSavedFlowBackend implements SavedFlowBackend {
   private dbPromise: Promise<SqliteDb> | null = null;
 
   private db(): Promise<SqliteDb> {
@@ -49,8 +60,11 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
     const db = await this.db();
     await db.execAsync(`
       PRAGMA journal_mode = WAL;
-      CREATE TABLE IF NOT EXISTS traffic_aged (
+      CREATE TABLE IF NOT EXISTS saved_flow (
         cell TEXT NOT NULL,
+        day_of_week INTEGER NOT NULL,
+        hour INTEGER NOT NULL,
+        kind TEXT NOT NULL,
         segment_id TEXT NOT NULL,
         coordinates TEXT NOT NULL,
         source TEXT NOT NULL,
@@ -59,23 +73,26 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
         congestion_ratio REAL NOT NULL,
         confidence REAL NOT NULL,
         observed_at INTEGER NOT NULL,
-        PRIMARY KEY (cell, segment_id)
+        PRIMARY KEY (cell, day_of_week, hour, kind, segment_id)
       );
-      CREATE INDEX IF NOT EXISTS idx_traffic_aged_observed
-        ON traffic_aged(observed_at);
+      CREATE INDEX IF NOT EXISTS idx_saved_flow_bucket
+        ON saved_flow(day_of_week, hour, cell);
+      CREATE INDEX IF NOT EXISTS idx_saved_flow_observed
+        ON saved_flow(observed_at);
+      DROP TABLE IF EXISTS traffic_aged;
     `);
   }
 
-  async upsert(rows: AgedTrafficRow[]): Promise<void> {
+  async upsert(rows: SavedFlowRow[]): Promise<void> {
     if (rows.length === 0) return;
     const db = await this.db();
     for (const row of rows) {
       await db.runAsync(
-        `INSERT INTO traffic_aged
-          (cell, segment_id, coordinates, source, current_speed_mph,
-           free_flow_speed_mph, congestion_ratio, confidence, observed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(cell, segment_id) DO UPDATE SET
+        `INSERT INTO saved_flow
+          (cell, day_of_week, hour, kind, segment_id, coordinates, source,
+           current_speed_mph, free_flow_speed_mph, congestion_ratio, confidence, observed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(cell, day_of_week, hour, kind, segment_id) DO UPDATE SET
            coordinates = excluded.coordinates,
            source = excluded.source,
            current_speed_mph = excluded.current_speed_mph,
@@ -83,8 +100,11 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
            congestion_ratio = excluded.congestion_ratio,
            confidence = excluded.confidence,
            observed_at = excluded.observed_at
-         WHERE excluded.observed_at >= traffic_aged.observed_at`,
+         WHERE excluded.observed_at >= saved_flow.observed_at`,
         row.cell,
+        row.dayOfWeek,
+        row.hour,
+        row.kind,
         row.segmentId,
         JSON.stringify(row.coordinates),
         row.source,
@@ -97,25 +117,40 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
     }
   }
 
-  async getByCells(cells: string[], minObservedAt: number): Promise<AgedTrafficRow[]> {
-    if (cells.length === 0) return [];
+  async getByBucket(
+    cells: string[],
+    dayOfWeek: number,
+    hour: number,
+    kinds: SavedFlowKind[],
+    minObservedAt: number,
+  ): Promise<SavedFlowRow[]> {
+    if (cells.length === 0 || kinds.length === 0) return [];
     const db = await this.db();
-    const placeholders = cells.map(() => '?').join(',');
+    const cellPlaceholders = cells.map(() => '?').join(',');
+    const kindPlaceholders = kinds.map(() => '?').join(',');
     const rows = await db.getAllAsync<Row>(
-      `SELECT cell, segment_id, coordinates, source, current_speed_mph,
-              free_flow_speed_mph, congestion_ratio, confidence, observed_at
-       FROM traffic_aged
-       WHERE cell IN (${placeholders}) AND observed_at >= ?
+      `SELECT ${SELECT_COLUMNS}
+       FROM saved_flow
+       WHERE cell IN (${cellPlaceholders})
+         AND day_of_week = ? AND hour = ?
+         AND kind IN (${kindPlaceholders})
+         AND observed_at >= ?
        ORDER BY observed_at DESC`,
       ...cells,
+      dayOfWeek,
+      hour,
+      ...kinds,
       minObservedAt,
     );
-    const out: AgedTrafficRow[] = [];
+    const out: SavedFlowRow[] = [];
     for (const row of rows) {
       const coordinates = parseCoordinates(row.coordinates);
       if (!coordinates) continue; // corrupt row: drop rather than crash the cascade
       out.push({
         cell: row.cell,
+        dayOfWeek: row.day_of_week,
+        hour: row.hour,
+        kind: row.kind === 'tile' ? 'tile' : 'segment',
         segmentId: row.segment_id,
         coordinates,
         source: row.source as NormalizedTrafficSegment['source'],
@@ -132,7 +167,7 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
   async deleteOlderThan(cutoff: number): Promise<number> {
     const db = await this.db();
     const before = await this.count();
-    await db.runAsync(`DELETE FROM traffic_aged WHERE observed_at < ?`, cutoff);
+    await db.runAsync(`DELETE FROM saved_flow WHERE observed_at < ?`, cutoff);
     return Math.max(0, before - (await this.count()));
   }
 
@@ -141,8 +176,8 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
     const before = await this.count();
     if (before <= maxRows) return 0;
     await db.runAsync(
-      `DELETE FROM traffic_aged WHERE rowid NOT IN (
-         SELECT rowid FROM traffic_aged ORDER BY observed_at DESC LIMIT ?
+      `DELETE FROM saved_flow WHERE rowid NOT IN (
+         SELECT rowid FROM saved_flow ORDER BY observed_at DESC LIMIT ?
        )`,
       maxRows,
     );
@@ -151,7 +186,7 @@ export class SqliteAgedTrafficBackend implements AgedTrafficBackend {
 
   async count(): Promise<number> {
     const db = await this.db();
-    const row = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM traffic_aged`);
+    const row = await db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM saved_flow`);
     return row?.n ?? 0;
   }
 

@@ -4,6 +4,14 @@ import type { TileKey } from '../../models/trafficTile';
  * Pure Web Mercator tile math for traffic tile coverage (no native imports).
  */
 
+/** Web Mercator tile → its centre coordinate (lng, lat). */
+export function tileCenter(key: TileKey): { lng: number; lat: number } {
+  const n = Math.pow(2, key.z);
+  const lng = ((key.x + 0.5) / n) * 360 - 180;
+  const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * (key.y + 0.5)) / n)));
+  return { lng, lat: (latRad * 180) / Math.PI };
+}
+
 /** Round a zoom level into the range the traffic tile source supports. */
 export function clampTrafficZoom(zoom: number): number {
   return Math.max(4, Math.min(14, Math.round(zoom)));

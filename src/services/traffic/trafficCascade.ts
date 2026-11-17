@@ -10,21 +10,25 @@ import type { NormalizedTrafficSegment } from '../../models/traffic';
 import { encode as geohashEncode } from '../../utils/geohash';
 import { TrafficHistoryService, type ConditionObservation } from './trafficHistoryService';
 import { wireToEntry } from './p2pConditionWire';
+import { getTomTomRequestsUsed as tomTomRequestsUsed } from './tomtomAccess';
 
 /**
  * Layered traffic condition resolution.
  *
  * For each requested geohash5 cell (at a given time bucket) data is resolved
- * in this order — each tier only covers cells the earlier tiers missed, so
- * the optional TomTom cold-start bridge is only hit for cells that have no
- * usable local, P2P, or open-feed data:
+ * in this order — each tier only covers cells the earlier tiers missed, so the
+ * optional TomTom cold-start bridge is only hit when nothing on the device, no
+ * peer, and no open feed can answer:
  *
  *   1. local fresh       — observed within the current-fresh window
  *   2. local historical  — enough samples, within retention window
- *   3. p2p               — fresh data from connected Hyperswarm peers
- *   4. open feed         — free open traffic feed (511 / DATEX II / NDW)
- *   5. tomtom            — optional cold-start seed (cached outside this module)
- *   6. aged              — last-known upstream segments still on the device
+ *   3. saved upstream    — flow this device already fetched for this weekday +
+ *                          hour bucket (up to a month old); TomTom's own
+ *                          answers live here, which is what stops a repeat
+ *                          request from costing money
+ *   4. p2p               — fresh data from connected Hyperswarm peers
+ *   5. open feed         — free open traffic feed (511 / DATEX II / NDW)
+ *   6. tomtom            — optional cold-start seed (cached outside this module)
  *
  * Only tiers 1–3 write into the weekly condition index. Upstream tiers (open
  * feed, TomTom) answer the request but are cached by `trafficSeedCache`
@@ -32,11 +36,14 @@ import { wireToEntry } from './p2pConditionWire';
  * blending them into the weekly profile made the index both misattributed and
  * needlessly granular.
  *
- * The last tier is a "better than nothing" fallback: when every live tier came
- * back empty for a cell (no key, breaker open, no peers, no feed coverage), a
- * segment the device fetched earlier today still beats an empty overlay. It is
- * served only for cells nothing live resolved, and a resolution that had to use
- * it is labelled `stale` — never presented as current traffic.
+ * Saved upstream data is *not* a last resort any more: it is ranked above the
+ * paid bridge, because a flow observation for the same weekday + hour is the
+ * answer the provider would return anyway. A resolution that used it is
+ * labelled `saved-flow` so the UI can say where it came from.
+ *
+ * `breakdown.providerRequests` counts the requests the paid tier actually
+ * issued during the resolution, so "we reused saved data" is verifiable rather
+ * than inferred from the cell counts.
  */
 
 export interface CascadePoint {
@@ -65,11 +72,11 @@ export interface CascadeRequest {
    */
   seedFromTomTom: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
   /**
-   * Optional last-resort tier: segments the device already fetched for these
-   * cells earlier (see `trafficAgedStore`). Only asked for the cells every
-   * live tier missed.
+   * Saved upstream flow for these cells in the request's weekday + hour
+   * bucket (see `trafficSavedFlowStore`). Ranked above the paid bridge, so a
+   * repeat request inside the same bucket costs no provider call.
    */
-  agedFallback?: (cells: string[]) => Promise<NormalizedTrafficSegment[]>;
+  savedFlow?: (cells: string[], bucket: TimeBucket) => Promise<NormalizedTrafficSegment[]>;
   /** Request P2P data; injectable for tests. Defaults to the real bridge. */
   p2pQuery?: (cells: string[], bucket: TimeBucket) => Promise<WireConditionEntry[]>;
 }
@@ -190,9 +197,10 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     localSeeded: 0,
     p2p: 0,
     openFeed: 0,
+    savedFlow: 0,
     coldStart: 0,
-    aged: 0,
     unresolved: 0,
+    providerRequests: 0,
   };
 
   // Tier 1: local fresh
@@ -202,7 +210,7 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     for (const cond of fresh) conditions.set(cond.geohash5, cond);
     countLocalCells(fresh, breakdown);
     missing = missing.filter((c) => !found.has(c));
-    if (fresh.length > 0) source = 'local-fresh';
+    if (fresh.length > 0) source = raiseSource(source, 'local-fresh');
   }
 
   // Tier 2: local historical average
@@ -212,10 +220,45 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     for (const cond of hist) conditions.set(cond.geohash5, cond);
     countLocalCells(hist, breakdown);
     missing = missing.filter((c) => !found.has(c));
-    if (hist.length > 0 && source === 'none') source = 'local-history';
+    if (hist.length > 0) source = raiseSource(source, 'local-history');
   }
 
-  // Tier 3: P2P peers
+  // Tier 3: saved upstream flow for this weekday + hour. The device already
+  // paid for these observations, and they describe the same weekday + hour
+  // bucket the request is for, so they answer before the mesh (and long before
+  // the paid bridge). Only cells nothing local resolved are asked about.
+  if (missing.length > 0 && typeof req.savedFlow === 'function') {
+    const segments = await req
+      .savedFlow(missing, req.bucket)
+      .catch(() => [] as NormalizedTrafficSegment[]);
+    if (segments.length > 0) {
+      const observations = observationsFromSegments(segments, geohash5ForCoord);
+      let resolvedAny = 0;
+      for (const [cell, obs] of observations) {
+        if (!conditions.has(cell)) {
+          conditions.set(cell, {
+            geohash5: cell,
+            dayOfWeek: req.bucket.dayOfWeek,
+            halfHour: req.bucket.halfHour,
+            avgSpeedMph: Math.round(obs.avgSpeedMph * 10) / 10,
+            avgCongestionRatio: obs.avgCongestionRatio,
+            freeFlowSpeedMph: obs.freeFlowSpeedMph,
+            sampleCount: 1,
+            probeSamples: 0,
+            observedSpanDays: 0,
+            lastObservedDay: Math.floor(Date.now() / 86_400_000),
+            lastUpdated: Math.floor(Date.now() / 1000),
+          });
+          resolvedAny += 1;
+        }
+      }
+      breakdown.savedFlow += resolvedAny;
+      if (resolvedAny > 0) source = raiseSource(source, 'saved-flow');
+      missing = missing.filter((c) => !conditions.has(c));
+    }
+  }
+
+  // Tier 4: P2P peers
   if (missing.length > 0) {
     // Default query is lazy-required so this module stays testable without
     // the Bare worklet bridge (which pulls in native modules). The hybrid
@@ -247,11 +290,10 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
       if (pending.has(entry.geohash5)) breakdown.p2p += 1;
     }
     missing = missing.filter((c) => !conditions.has(c));
-    // P2P is a lower tier than the open feed and TomTom cold-start bridge.
-    if (entries.length > 0) source = 'p2p';
+    if (entries.length > 0) source = raiseSource(source, 'p2p');
   }
 
-  // Tier 4: free open traffic feeds (511 / DATEX II / NDW). Upstream data is
+  // Tier 5: free open traffic feeds (511 / DATEX II / NDW). Upstream data is
   // answered from here but never written into the weekly probe index.
   if (missing.length > 0 && typeof req.openFeed === 'function') {
     const segments = await req.openFeed(missing).catch(() => [] as NormalizedTrafficSegment[]);
@@ -278,20 +320,21 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
         }
       }
       breakdown.openFeed += resolvedAny;
-      if (resolvedAny > 0) source = 'open_feed';
+      if (resolvedAny > 0) source = raiseSource(source, 'open_feed');
       missing = missing.filter((c) => !conditions.has(c));
     }
   }
 
-  // Tier 5: TomTom cold-start seed (optional). Like the open feed, the answer
+  // Tier 6: TomTom cold-start seed (optional). Like the open feed, the answer
   // is cached by the caller (`trafficSeedCache`) and is never blended into the
-  // weekly probe index.
+  // weekly probe index. The request counter is read around this tier only, so
+  // `breakdown.providerRequests` reports exactly what the paid bridge cost.
   if (missing.length > 0) {
+    const requestsBefore = tomTomRequestsUsed();
     const segments = await req.seedFromTomTom(missing);
+    breakdown.providerRequests += Math.max(0, tomTomRequestsUsed() - requestsBefore);
     if (segments.length > 0) {
-      // TomTom is the highest tier — whenever it ran and found data,
-      // that is the authoritative source label for this resolution.
-      source = 'tomtom';
+      source = raiseSource(source, 'tomtom');
       const observations = observationsFromSegments(segments, geohash5ForCoord);
 
       let resolvedAny = 0;
@@ -318,38 +361,6 @@ export async function resolveTrafficConditions(req: CascadeRequest): Promise<Cas
     }
   }
 
-  // Tier 6: aged on-device fallback (last-known upstream segments).
-  if (missing.length > 0 && typeof req.agedFallback === 'function') {
-    const segments = await req.agedFallback(missing).catch(() => [] as NormalizedTrafficSegment[]);
-    if (segments.length > 0) {
-      const observations = observationsFromSegments(segments, geohash5ForCoord);
-      let resolvedAny = 0;
-      for (const [cell, obs] of observations) {
-        if (!conditions.has(cell)) {
-          conditions.set(cell, {
-            geohash5: cell,
-            dayOfWeek: req.bucket.dayOfWeek,
-            halfHour: req.bucket.halfHour,
-            avgSpeedMph: Math.round(obs.avgSpeedMph * 10) / 10,
-            avgCongestionRatio: obs.avgCongestionRatio,
-            freeFlowSpeedMph: obs.freeFlowSpeedMph,
-            sampleCount: 1,
-            probeSamples: 0,
-            observedSpanDays: 0,
-            lastObservedDay: Math.floor(Date.now() / 86_400_000),
-            lastUpdated: Math.floor(Date.now() / 1000),
-          });
-          resolvedAny += 1;
-        }
-      }
-      breakdown.aged += resolvedAny;
-      // Aged data never overrides a live label: coverage is only reported as
-      // stale when nothing live resolved anything at all.
-      if (resolvedAny > 0 && source === 'none') source = 'aged';
-      missing = missing.filter((c) => !conditions.has(c));
-    }
-  }
-
   breakdown.unresolved = missing.length;
 
   return {
@@ -371,6 +382,31 @@ function countLocalCells(rows: TrafficAreaCondition[], breakdown: TrafficSourceB
     if ((row.probeSamples ?? 0) > 0) breakdown.localProbe += 1;
     else breakdown.localSeeded += 1;
   }
+}
+
+/**
+ * How authoritative a tier is, for the single `source` label on a mixed
+ * resolution. Local data outranks saved upstream data, which outranks the mesh
+ * and the free feeds, which outrank the paid bridge — the same order the tiers
+ * are consulted in, so the label always names the best tier that answered
+ * rather than the last one that ran.
+ */
+const SOURCE_RANK: Record<TrafficResolveSource, number> = {
+  'local-fresh': 60,
+  'local-history': 55,
+  'saved-flow': 50,
+  p2p: 40,
+  open_feed: 30,
+  tomtom: 20,
+  none: 0,
+};
+
+/** Adopt `candidate` as the label when it outranks the current one. */
+function raiseSource(
+  current: TrafficResolveSource,
+  candidate: TrafficResolveSource,
+): TrafficResolveSource {
+  return SOURCE_RANK[candidate] > SOURCE_RANK[current] ? candidate : current;
 }
 
 /** Map a coordinate to its geohash5 cell (independent of the sample points). */
