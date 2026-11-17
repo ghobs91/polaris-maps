@@ -22,6 +22,7 @@ import { PACK_POI_SCHEMA_SQL } from '../../src/services/poi/localPoiIndex';
 import { PACK_TRANSIT_SCHEMA_SQL } from '../../src/services/transit/localTransitIndex';
 
 const BUILDER = resolve(__dirname, '../../scripts/osm-to-search-sqlite.py');
+const GEOCODING_BUILDER = resolve(__dirname, '../../scripts/osm-to-geocoding-sqlite.py');
 
 /** Extract a triple-quoted DDL constant from the Python builder. */
 function pythonDdl(source: string, constant: string): string {
@@ -133,5 +134,38 @@ describe('pack schema drift', () => {
       (column) => column.name,
     );
     expect(shapes).toEqual(['key', 'value', 'named_only', 'poi_count']);
+  });
+
+  it('geocoding.db carries every column the importer selects', () => {
+    // This schema used to live inline in `build-region-data.yml`, where no test
+    // could reach it — and it omitted `text`, the first column
+    // `downloadAndImportGeocodingBundle` selects. Every CI-built pack therefore
+    // failed to import with "no such column: text", swallowed by the
+    // best-effort wrapper, so a pack shipped 560 MB of geocoding data (Belgium)
+    // and imported none of it. Moving the DDL into scripts/ is what makes this
+    // assertion possible.
+    const ddl = pythonDdl(readFileSync(GEOCODING_BUILDER, 'utf8'), 'PACK_GEOCODING_SCHEMA_SQL');
+    const table = tableColumns(ddl).geocoding_data!;
+    const columns = table.map((column) => column.name);
+
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        'id',
+        'text',
+        'type',
+        'housenumber',
+        'street',
+        'city',
+        'state',
+        'postcode',
+        'country',
+        'lat',
+        'lng',
+        'region_id',
+      ]),
+    );
+    // `text` is NOT NULL in the app schema; a nullable copy imports as NULL and
+    // defeats the index it exists for.
+    expect(table.find((column) => column.name === 'text')!.notnull).toBe(1);
   });
 });

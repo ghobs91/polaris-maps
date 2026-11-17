@@ -298,7 +298,15 @@ export async function downloadRegion(
       downloadAndImportGeocodingBundle(region, destDir, onProgress, signal),
       POST_TRANSFER_STEP_TIMEOUT_MS,
       'geocoding bundle',
-    ).catch(() => {});
+    ).catch((error: unknown) => {
+      // Best-effort by design, but total silence is what hid a schema mismatch
+      // that made every CI-built pack unimportable: the region still reported
+      // "complete", just without the addresses it had already downloaded.
+      logDiagnostic('regions', 'warn', 'geocoding import failed', {
+        regionId: region.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     checkAborted(signal);
 
