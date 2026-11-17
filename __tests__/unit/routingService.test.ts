@@ -456,6 +456,74 @@ describe('routing cascade', () => {
         /Every routing tier failed/,
       );
     });
+
+    describe('forward departure on a deviation', () => {
+      // On-device answers cannot carry a start bearing, so they can come back
+      // as the road the driver just left (a reversal). These pin the re-ask.
+      const NORTH_TO_SOUTH = encodePolyline([
+        [-74.0, 40.72],
+        [-74.0, 40.71],
+        [-74.0, 40.7],
+      ]);
+      const SOUTH_TO_NORTH = encodePolyline([
+        [-74.0, 40.7],
+        [-74.0, 40.71],
+        [-74.0, 40.72],
+      ]);
+
+      it('re-asks the heading-aware tiers when the answer leaves the other way', async () => {
+        const svc = loadRoutingService();
+        mockNativeReroute.mockResolvedValue({ ...nativeRoute(), geometry: NORTH_TO_SOUTH });
+        // Once: a leaked implementation would answer the later tiers' tests.
+        mockOsrmComputeRoute.mockResolvedValueOnce([
+          { ...osrmRoute(1111), geometry: SOUTH_TO_NORTH },
+        ]);
+
+        await svc.initRouting('/tiles/');
+        const route = await svc.reroute(reroutePos, destination, 'auto', {
+          heading: 0,
+          preferForwardDeparture: true,
+        });
+
+        expect(mockNativeReroute).toHaveBeenCalledTimes(1);
+        expect(mockOsrmComputeRoute).toHaveBeenCalledTimes(1);
+        // OSRM carries the GPS course as `bearings`.
+        const options = mockOsrmComputeRoute.mock.calls[0][2] as { originHeading?: number };
+        expect(options.originHeading).toBe(0);
+        expect(route.summary.distanceMeters).toBe(1111);
+        expect(svc.getRoutingTierState()).toMatchObject({ tier: 'osrm' });
+      });
+
+      it('keeps the on-device answer while offline (no tier can do better)', async () => {
+        const svc = loadRoutingService();
+        mockIsOnline.mockReturnValue(false);
+        mockNativeReroute.mockResolvedValue({ ...nativeRoute(), geometry: NORTH_TO_SOUTH });
+
+        await svc.initRouting('/tiles/');
+        const route = await svc.reroute(reroutePos, destination, 'auto', {
+          heading: 0,
+          preferForwardDeparture: true,
+        });
+
+        expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
+        expect((route.summary as unknown as { distance_meters: number }).distance_meters).toBe(
+          1500,
+        );
+      });
+
+      it('does not re-ask for a wrong-way correction, where a reversal is right', async () => {
+        const svc = loadRoutingService();
+        mockNativeReroute.mockResolvedValue({ ...nativeRoute(), geometry: NORTH_TO_SOUTH });
+
+        await svc.initRouting('/tiles/');
+        const route = await svc.reroute(reroutePos, destination, 'auto', { heading: 0 });
+
+        expect(mockOsrmComputeRoute).not.toHaveBeenCalled();
+        expect((route.summary as unknown as { distance_meters: number }).distance_meters).toBe(
+          1500,
+        );
+      });
+    });
   });
 
   // ── multi-leg geometry ───────────────────────────────────────────────

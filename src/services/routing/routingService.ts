@@ -5,6 +5,7 @@ import { summarizeRoutingGraphProblem } from './routingGraphStatus';
 import { isOnline } from '../regions/connectivityService';
 import { Platform } from 'react-native';
 import { decodePolyline, encodePolyline } from '../../utils/polyline';
+import { angleDifferenceDeg, departureBearingDeg } from '../../utils/routeSnap';
 import type {
   ValhallaRoute,
   ValhallaManeuver,
@@ -796,6 +797,88 @@ export interface RerouteOptions {
    *  `heading` on the online request so the engine routes forward instead
    *  of demanding an immediate U-turn. Omit when unknown/stationary. */
   heading?: number;
+  /** True for an off-route deviation: the answer must leave along the road the
+   *  driver is actually on, so a route that departs opposite the GPS course is
+   *  re-asked from the heading-aware tiers.
+   *
+   *  Leave unset for a wrong-way correction, where the correct answer is a
+   *  reversal and would be rejected by that check. */
+  preferForwardDeparture?: boolean;
+}
+
+/** Departure-vs-course mismatch (degrees) that counts as "sends you back the
+ *  way you came". A 90° turn off the current road still departs forward; only
+ *  a reversal does not. */
+const BACKWARD_DEPARTURE_DEG = 100;
+
+/** True when `route` leaves in the direction of travel (or cannot be judged). */
+function departsForward(route: ValhallaRoute, heading: number): boolean {
+  const bearing = departureBearingDeg(decodePolyline(route.geometry));
+  if (bearing == null) return true;
+  return angleDifferenceDeg(bearing, heading) <= BACKWARD_DEPARTURE_DEG;
+}
+
+/**
+ * Re-ask the heading-aware tiers for a reroute that leaves along the road the
+ * driver is on. The bundled on-device Valhalla build has no start-bearing
+ * field, so a deviation reroute can come back as the road the driver just
+ * left — the same route again, driven in the opposite direction. When that
+ * happens and the network tiers are reachable, prefer their answer: they take
+ * the GPS course (`originHeading` / MapKit's reroute bearing).
+ *
+ * Returns null when every heading-aware tier fails or also departs backwards,
+ * leaving the on-device answer in place.
+ */
+async function headingAwareReroute(
+  waypoints: Array<{ lat: number; lng: number }>,
+  currentPosition: { lat: number; lng: number; bearing: number },
+  destination: { lat: number; lng: number },
+  costing: CostingModel,
+  options: RouteCascadeOptions,
+  heading: number,
+): Promise<ValhallaRoute | null> {
+  if (isOnline() && isOsrmSupported(costing)) {
+    try {
+      const routes = await computeOsrmRoute(waypoints, costing, {
+        alternates: options.alternates,
+        originHeading: options.originHeading,
+      });
+      const forward = routes.find((route) => departsForward(route, heading));
+      if (forward) {
+        recordRoutingTier('osrm', []);
+        return forward;
+      }
+    } catch {
+      // Fall through to the next heading-aware tier.
+    }
+  }
+
+  if (Platform.OS === 'ios' && MapKitRouting.isMapKitAvailable()) {
+    try {
+      const route = await mapKitRerouteOrCompute(waypoints, currentPosition, destination, costing);
+      if (departsForward(route, heading)) {
+        recordRoutingTier('mapkit', []);
+        return route;
+      }
+    } catch {
+      // Fall through to the public Valhalla instances.
+    }
+  }
+
+  if (isOnline()) {
+    try {
+      const routes = await computeRouteOnline(waypoints, costing, options);
+      const forward = routes.find((route) => departsForward(route, heading));
+      if (forward) {
+        recordRoutingTier('fossgis', []);
+        return forward;
+      }
+    } catch {
+      // Nothing else can answer.
+    }
+  }
+
+  return null;
 }
 
 async function mapKitRerouteOrCompute(
@@ -827,8 +910,8 @@ export async function reroute(
   // Same tier order as a fresh route: on-device first, then OSRM, then the
   // network-backed last resorts. `heading` only reaches the network tiers —
   // the bundled Valhalla build cannot take a start bearing — so an on-device
-  // reroute may still pick the wrong direction at a stop; the next fix is
-  // normally enough to snap back.
+  // reroute may still pick the wrong direction; `preferForwardDeparture`
+  // below re-asks the heading-aware tiers when it does.
   const routes = await runRouteCascade(
     waypoints,
     costing,
@@ -842,6 +925,34 @@ export async function reroute(
   );
 
   if (!routes.length) throw new Error('No route found');
+
+  // A deviation reroute must send the driver on from where they are, not back
+  // down the road they came in on. The on-device tier cannot take a start
+  // bearing, so when it answers with a reversal ask the tiers that can — but
+  // keep its answer if they all fail (offline, or they also reverse).
+  const heading = options?.heading;
+  if (
+    options?.preferForwardDeparture &&
+    heading != null &&
+    Number.isFinite(heading) &&
+    !departsForward(routes[0], heading)
+  ) {
+    const forward = await headingAwareReroute(
+      waypoints,
+      currentPosition,
+      destination,
+      costing,
+      {
+        avoidTolls: options?.avoidTolls,
+        avoidHighways: options?.avoidHighways,
+        avoidFerries: options?.avoidFerries,
+        originHeading: heading,
+      },
+      heading,
+    );
+    if (forward) return forward;
+  }
+
   return routes[0];
 }
 

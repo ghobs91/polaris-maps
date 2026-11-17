@@ -1,6 +1,7 @@
 import {
   computeBearing,
   computeRemainingMeters,
+  departureBearingDeg,
   haversineMeters,
   snapToRoute,
   isOffRoute,
@@ -225,6 +226,40 @@ describe('routeSnap', () => {
       // Offset ~555m north (0.005° latitude ≈ 555m)
       const result = snapToRoute([-73.995, 40.005], coords);
       expect(result.distanceMeters).toBeGreaterThan(500);
+    });
+  });
+
+  describe('departureBearingDeg', () => {
+    it('reports the road direction, not the first vertex pair', () => {
+      // A route that starts on a kerb offset and then heads due east.
+      const coords: [number, number][] = [
+        [-74.0, 40.7],
+        [-74.0, 40.70002],
+        [-73.999, 40.70002],
+        [-73.998, 40.70002],
+      ];
+      expect(departureBearingDeg(coords)).toBeCloseTo(90, -1);
+    });
+
+    it('returns ~180° for a route that leaves the opposite way', () => {
+      const coords: [number, number][] = [
+        [-74.0, 40.702],
+        [-74.0, 40.7015],
+        [-74.0, 40.701],
+      ];
+      expect(departureBearingDeg(coords)).toBeCloseTo(180, 0);
+    });
+
+    it('returns null for geometry shorter than a real direction', () => {
+      expect(departureBearingDeg([[-74.0, 40.7]])).toBeNull();
+      expect(departureBearingDeg([])).toBeNull();
+      // ~0 m between the two points: no direction to read.
+      expect(
+        departureBearingDeg([
+          [-74.0, 40.7],
+          [-74.0, 40.7],
+        ]),
+      ).toBeNull();
     });
   });
 

@@ -35,6 +35,34 @@ export interface RouteSnapResult {
   distanceMeters: number;
 }
 
+/** Route distance (m) sampled before a departure bearing is trusted. Short
+ *  enough to describe the road the car is leaving, long enough that polyline
+ *  quantisation and a first vertex on the kerb cannot flip it. */
+export const DEPARTURE_SAMPLE_METERS = 25;
+
+/**
+ * Direction a route actually leaves in, measured over its first
+ * `minMeters` of geometry (0 = north, clockwise). Returns null for a
+ * degenerate or zero-length route, where no direction can be read.
+ *
+ * A route's first two vertices sit on the snapped origin and can point in a
+ * meaningless direction; walking a short distance first reports the road the
+ * driver is being sent down.
+ */
+export function departureBearingDeg(
+  coords: ReadonlyArray<[number, number]>,
+  minMeters = DEPARTURE_SAMPLE_METERS,
+): number | null {
+  if (coords.length < 2) return null;
+  let walked = 0;
+  for (let i = 1; i < coords.length; i++) {
+    walked += haversineMeters(coords[i - 1], coords[i]);
+    if (walked >= minMeters) return computeBearing(coords[0], coords[i]);
+  }
+  // Shorter than the sample: still a real direction if the route moved at all.
+  return walked > 1 ? computeBearing(coords[0], coords[coords.length - 1]) : null;
+}
+
 export interface SnapToRouteOptions {
   /**
    * Segment index of the previous fix. When provided, the snap is constrained

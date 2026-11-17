@@ -724,7 +724,14 @@ describe('trackingService — off-route detection & rerouting', () => {
     // The driver already reached the first stop.
     useNavigationStore.setState({ currentLegIndex: 1 });
     startTracking(makeRoute());
-    mockReroute.mockResolvedValue(makeRoute());
+    // A route that runs along the road the driver deviated onto, so it is
+    // adoptable (the leg re-baseline only happens for an adopted reroute).
+    mockReroute.mockResolvedValue(
+      makeRoute([
+        [A[0] + 0.01, A[1]],
+        [A[0] + 0.01, B[1]],
+      ]),
+    );
 
     processFix(farOffRouteFix());
     processFix(farOffRouteFix());
@@ -750,6 +757,101 @@ describe('trackingService — off-route detection & rerouting', () => {
 
     expect(mockReroute).toHaveBeenCalledTimes(1);
     expect(mockReroute.mock.calls[0][3]).toMatchObject({ via: undefined });
+  });
+
+  it('asks for a forward departure on a deviation, but not on a wrong-way reading', async () => {
+    startNav(makeRoute());
+    startTracking(makeRoute());
+    mockReroute.mockResolvedValue(makeRoute());
+
+    // Deviation: well east of the route, still heading north.
+    for (let i = 1; i <= 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: A[1] + i * 0.0001, lng: A[0] + 0.01, speed: 13, heading: 0 }));
+    }
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+    expect(mockReroute.mock.calls[0][3]).toMatchObject({ preferForwardDeparture: true });
+
+    // Wrong-way: on the route, driving the other way. A U-turn *is* the answer
+    // there, so the reversal must not be rejected.
+    mockReroute.mockClear();
+    stopTracking();
+    startNav(makeRoute());
+    startTracking(makeRoute());
+    for (let i = 1; i <= 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: A[1] + i * 0.002, lng: A[0], speed: 13, heading: 0 }));
+    }
+    for (let i = 0; i < 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: A[1] + 0.006 - i * 0.002, lng: A[0], speed: 13, heading: 180 }));
+    }
+    expect(mockReroute).toHaveBeenCalled();
+    expect(mockReroute.mock.calls[0][3]).toMatchObject({ preferForwardDeparture: false });
+  });
+
+  it('keeps the deviation state and backs off when the answer is the road it left', async () => {
+    // 80 vertices ~11 m apart heading north; the driver is ~600 m east.
+    const routeCoords: [number, number][] = Array.from({ length: 80 }, (_, i) => [
+      -74.0,
+      40.7 + i * 0.0001,
+    ]);
+    const route = makeRoute(routeCoords);
+    startNav(route);
+    startTracking(route);
+
+    // The on-device engine (no start bearing) answers with the same road.
+    mockReroute.mockResolvedValue(route);
+
+    for (let i = 1; i <= 12; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: 40.703 + i * 0.0001, lng: -74.0 + 0.006, speed: 13 }));
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
+    // One attempt, not one every three fixes: the old code adopted the same
+    // route, cleared the deviation, and re-triggered the identical request
+    // ~3 s later — the endless "reloads the same route" loop.
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+    // Still genuinely off-route, so the banner/flags stay up...
+    const nav = useNavigationStore.getState();
+    expect(nav.hasDeviated).toBe(true);
+    expect(nav.isRerouting).toBe(false);
+    // ...and the puck stays on live GPS instead of being snapped back onto the
+    // road the car is 600 m away from (which faced it down a route it was not
+    // driving).
+    const anchor = getAnchor()!;
+    expect(anchor.pos[0]).toBeCloseTo(-74.0 + 0.006, 4);
+  });
+
+  it('adopts a reroute that the car is actually on', async () => {
+    const routeCoords: [number, number][] = Array.from({ length: 40 }, (_, i) => [
+      -74.0,
+      40.7 + i * 0.0001,
+    ]);
+    const route = makeRoute(routeCoords);
+    startNav(route);
+    startTracking(route);
+
+    // The engine answers from the deviation point: a parallel road ~600 m east.
+    const parallel = makeRoute(
+      Array.from({ length: 40 }, (_, i) => [-73.994, 40.702 + i * 0.0001]),
+    );
+    mockReroute.mockResolvedValue(parallel);
+
+    for (let i = 1; i <= 3; i++) {
+      nowMs += 1000;
+      processFix(makeFix({ lat: 40.702 + i * 0.0001, lng: -73.994, speed: 13 }));
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const nav = useNavigationStore.getState();
+    expect(nav.activeRoute).toBe(parallel);
+    expect(nav.hasDeviated).toBe(false);
+    expect(getRouteCoords()[0][0]).toBeCloseTo(-73.994, 5);
+    expect(getAnchor()!.pos[0]).toBeCloseTo(-73.994, 5);
   });
 });
 

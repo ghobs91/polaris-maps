@@ -33,6 +33,28 @@ carries a `reason` — the per-tier failure clauses explaining why the tiers abo
 the winner were skipped — so a degraded route says _why_ instead of just
 degrading.
 
+## Deviation reroutes
+
+A reroute after the driver leaves the route has two extra rules on top of the
+cascade, because the on-device tiers cannot take a start bearing:
+
+- **It must leave in the direction of travel.** `reroute(..., {
+preferForwardDeparture: true })` is set for an off-route deviation. If the
+  winning route's departure bearing (`departureBearingDeg`, over the first ~25 m
+  of geometry) opposes the GPS course by more than 100°, the heading-aware tiers
+  are re-asked and their answer wins — they carry the course as OSRM `bearings`
+  / MapKit's reroute bearing. Offline, or when they also reverse, the original
+  answer stands. A wrong-way correction must **not** set the flag: there the
+  reversal is the correct answer.
+- **It is only adopted when the car is on it.** `trackingService` snaps the
+  latest live fix onto the answer with the GPS course; if the car is still
+  beyond the 50 m off-route threshold of it, the trip keeps the route it has and
+  stays in the deviation state (live GPS puck, banner up) on the same
+  exponential backoff a failed request gets. Adopting such an answer snapped the
+  puck back onto the road the driver had left, cleared the deviation, and
+  re-triggered the identical reroute ~3 s later — an endless "reloads the same
+  route" loop with the puck facing down a road the car was not on.
+
 ## Offline graph install and selection
 
 Tier 1 can only answer when a Valhalla graph is on disk, so the two halves that

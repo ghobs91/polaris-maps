@@ -374,9 +374,9 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
 
   const store = useNavigationStore.getState();
   const backoffElapsed = Date.now() >= nextRerouteAllowedAt;
-  const needsReroute =
-    (isOffRoute(distFromRoute, offRouteCount) || wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT) &&
-    backoffElapsed;
+  const offRouteReading = isOffRoute(distFromRoute, offRouteCount);
+  const wrongWayReading = wrongWayCount >= WRONG_WAY_CONSECUTIVE_COUNT;
+  const needsReroute = (offRouteReading || wrongWayReading) && backoffElapsed;
 
   // While a reroute is in flight, keep tracking the live position — do NOT
   // early-return. Dropping fixes here froze the puck at the deviation point.
@@ -414,11 +414,38 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
         // GPS heading (or the 0 fallback) would bias the engine toward a
         // phantom direction and produce U-turn-heavy "weird" routes.
         heading: rerouteHeading,
+        // A deviation must be resolved in the direction of travel. A wrong-way
+        // reading is the opposite: there the correct answer is a reversal, so
+        // keep the engine's choice.
+        preferForwardDeparture: offRouteReading,
       },
     )
       .then((newRoute) => {
         const navStore = useNavigationStore.getState();
-        if (navStore.isNavigating) {
+        // Re-anchor to the LATEST live position — not the stale fix that
+        // triggered the reroute. The user keeps moving during the request;
+        // anchoring to newCoords[0] snapped the puck back to the deviation
+        // point.
+        const anchorFix = latestFixWhileRerouting ?? location;
+        const anchorPos: [number, number] = [anchorFix.coords.longitude, anchorFix.coords.latitude];
+        const anchorSpeed = (anchorFix.coords.speed ?? -1) >= 0 ? anchorFix.coords.speed! : 0;
+        const newCoords = decodePolyline(newRoute.geometry);
+        // Is the car actually ON the answer? The on-device engine has no start
+        // bearing, so it can reply with the road the driver just left, whose
+        // nearest point is hundreds of metres away. Adopting that snapped the
+        // puck onto the abandoned road, cleared the deviation state, and
+        // re-triggered the very same reroute two fixes later — the endless
+        // "reloads the same route" loop, with the puck gliding (and facing)
+        // along a road the car was not on. Snap with the course so a route
+        // that passes back over the car is read on the pass being driven.
+        const anchorSnap =
+          newCoords.length >= 2
+            ? snapToRoute(anchorPos, newCoords, { heading: lastGpsHeading ?? undefined })
+            : null;
+        const reconciled =
+          anchorSnap != null && anchorSnap.distanceMeters <= OFF_ROUTE_THRESHOLD_METERS;
+
+        if (navStore.isNavigating && reconciled) {
           // The reroute was computed from the current position through the
           // stops still ahead, so re-baseline the waypoint list and leg index
           // to keep next-stop ETAs and arrival detection aligned with its legs.
@@ -429,54 +456,53 @@ export function processFix(location: LocationObject, opts?: ProcessFixOptions): 
           if (!isBackground) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
           }
-          const newCoords = decodePolyline(newRoute.geometry);
-          if (newCoords.length >= 2) {
-            // Adopt the new route into this tracker without resetting
-            // bookkeeping the caller may still rely on.
-            coords = newCoords;
-            allManeuvers = newRoute.legs.flatMap((l) => l.maneuvers);
-            activeRouteSummaryDistanceMeters = newRoute.summary.distanceMeters;
-            activeRouteSummaryDurationSeconds = newRoute.summary.durationSeconds;
-            // Re-anchor to the LATEST live position — not the stale fix
-            // that triggered the reroute. The user keeps moving during the
-            // network request; anchoring to newCoords[0] snapped the puck
-            // back to where they deviated.
-            const anchorFix = latestFixWhileRerouting ?? location;
-            const anchorPos: [number, number] = [
-              anchorFix.coords.longitude,
-              anchorFix.coords.latitude,
-            ];
-            const { snapped: anchorSnapped, segmentIndex: anchorSeg } = snapToRoute(
-              anchorPos,
-              newCoords,
+          // Adopt the new route into this tracker without resetting
+          // bookkeeping the caller may still rely on.
+          coords = newCoords;
+          // Keep this module's own geometry key in step with what it tracks; a
+          // later `startTracking` for the same route must not read as "some
+          // other route" and drop the anchor established here.
+          trackedGeometry = newRoute.geometry;
+          allManeuvers = newRoute.legs.flatMap((l) => l.maneuvers);
+          activeRouteSummaryDistanceMeters = newRoute.summary.distanceMeters;
+          activeRouteSummaryDurationSeconds = newRoute.summary.durationSeconds;
+          drAnchor = {
+            pos: anchorSnap.snapped,
+            segIdx: anchorSnap.segmentIndex,
+            speedMps: anchorSpeed,
+            time: performance.now(),
+          };
+          gpsSegmentIndex = anchorSnap.segmentIndex;
+          offRouteCount = 0;
+          rerouteFailureCount = 0;
+          nextRerouteAllowedAt = 0;
+        } else if (navStore.isNavigating) {
+          // The engine answered with a route the car is not on. Keep the trip
+          // that is running and stay in the deviation state: the puck then
+          // holds live GPS and the real course (see the freeze in this module
+          // and in the navigation screen), the banner stays up, and the next
+          // attempt waits out the same exponential backoff a failed request
+          // gets instead of hammering the engine every three seconds.
+          navStore.setRerouting(false);
+          navStore.setDeviated(true);
+          offRouteCount = Math.max(offRouteCount, OFF_ROUTE_CONSECUTIVE_COUNT);
+          rerouteFailureCount += 1;
+          nextRerouteAllowedAt =
+            Date.now() +
+            Math.min(
+              REROUTE_MAX_BACKOFF_MS,
+              REROUTE_BASE_BACKOFF_MS * 2 ** (rerouteFailureCount - 1),
             );
-            const anchorSpeed = (anchorFix.coords.speed ?? -1) >= 0 ? anchorFix.coords.speed! : 0;
-            drAnchor = {
-              pos: anchorSnapped,
-              segIdx: anchorSeg,
-              speedMps: anchorSpeed,
-              time: performance.now(),
-            };
-            gpsSegmentIndex = anchorSeg;
-            // If the fresh position is still far from the new route
-            // (user kept driving away), keep the off-route counter so the
-            // next fix immediately triggers a follow-up reroute instead of
-            // declaring success prematurely.
-            const anchorDist = haversineMeters(anchorPos, anchorSnapped);
-            offRouteCount = anchorDist > OFF_ROUTE_THRESHOLD_METERS ? 1 : 0;
-          } else {
-            offRouteCount = 0;
-          }
         } else {
           offRouteCount = 0;
+          rerouteFailureCount = 0;
+          nextRerouteAllowedAt = 0;
         }
         latestFixWhileRerouting = null;
         wrongWayCount = 0;
         wrongWayActive = false;
         lastGpsRemaining = null;
         reroutingFix = false;
-        rerouteFailureCount = 0;
-        nextRerouteAllowedAt = 0;
       })
       .catch(() => {
         // Reroute failed (e.g., no connectivity) — back off exponentially

@@ -541,6 +541,33 @@ describe('background navigation task handler', () => {
     const route = makeTrackedRoute();
     useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
     startTracking(route);
+    // The engine answers from the deviation point: a road running along it.
+    const alongDeviation = makeTrackedRoute();
+    alongDeviation.geometry = encodePolyline([
+      [-73.99, 40.7],
+      [-73.99, 40.71],
+    ]);
+    mockReroute.mockResolvedValue(alongDeviation);
+
+    const fix = offRouteFix();
+    await getHandler()({ data: { locations: [fix, fix, fix] } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockReroute).toHaveBeenCalledTimes(1);
+    // The answer is the road the car is on, so it is adopted and the banner
+    // flags clear.
+    expect(useNavigationStore.getState().activeRoute).toBe(alongDeviation);
+    expect(useNavigationStore.getState().isRerouting).toBe(false);
+    expect(useNavigationStore.getState().hasDeviated).toBe(false);
+  });
+
+  it('keeps the deviation flags when the reroute answers with the road it left', async () => {
+    const route = makeTrackedRoute();
+    useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
+    startTracking(route);
+    // Same geometry back: the on-device engine re-snapped the origin onto the
+    // road the driver deviated from (~850 m away), so the car is not on it.
     mockReroute.mockResolvedValue(route);
 
     const fix = offRouteFix();
@@ -549,9 +576,12 @@ describe('background navigation task handler', () => {
     await Promise.resolve();
 
     expect(mockReroute).toHaveBeenCalledTimes(1);
-    // The successful reroute replaced the route and cleared the banner flags.
+    // Not adopted: the trip keeps running, the spinner stops, and the trip
+    // stays flagged deviated so the puck shows live GPS on every surface
+    // instead of gliding along a road the car is not on.
+    expect(useNavigationStore.getState().activeRoute).toBe(route);
     expect(useNavigationStore.getState().isRerouting).toBe(false);
-    expect(useNavigationStore.getState().hasDeviated).toBe(false);
+    expect(useNavigationStore.getState().hasDeviated).toBe(true);
   });
 
   it('reroutes while the phone is locked, skipping haptics', async () => {
@@ -559,7 +589,12 @@ describe('background navigation task handler', () => {
     const route = makeTrackedRoute();
     useNavigationStore.getState().startNavigation(route, [], { lat: 40.71, lng: -74.0 }, 'auto');
     startTracking(route);
-    mockReroute.mockResolvedValue(route);
+    const alongDeviation = makeTrackedRoute();
+    alongDeviation.geometry = encodePolyline([
+      [-73.99, 40.7],
+      [-73.99, 40.71],
+    ]);
+    mockReroute.mockResolvedValue(alongDeviation);
 
     const fix = offRouteFix();
     await getHandler()({ data: { locations: [fix, fix, fix] } });
