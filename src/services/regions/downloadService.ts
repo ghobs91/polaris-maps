@@ -30,7 +30,7 @@ import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
 import { useSettingsStore, type PackSourceChoice } from '../../stores/settingsStore';
-import { resolveSourceClass } from './packSourcePolicy';
+import { resolveSourceClass, synthesizeMirrorUrl } from './packSourcePolicy';
 import {
   buildSourceList,
   downloadResumable,
@@ -712,12 +712,20 @@ const TILES_PMTILES = 'tiles.pmtiles';
  */
 function orderedSourcesFor(asset: RegionAsset, regionId: string): string[] {
   const primary = asset.url ? [asset.url] : [];
-  const mirrors = asset.mirrors ?? [];
-  const sourceClass = resolveSourceClass(
-    primary.length > 0,
-    mirrors.length > 0,
-    packSourceChoiceFor(regionId),
-  );
+  const choice = packSourceChoiceFor(regionId);
+  const advertised = asset.mirrors ?? [];
+  // Developer-only: reach a mirror the catalog does not advertise yet, so the
+  // origin can be exercised before POLARIS_PACK_MIRROR_BASES points every
+  // client at it. Synthesised only for an explicit "Archive" pick — an "Auto"
+  // download in a dev build must behave exactly like production.
+  const mirrors =
+    advertised.length > 0 || choice !== 'mirror'
+      ? advertised
+      : [synthesizeMirrorUrl(asset.url, useSettingsStore.getState().devPackMirrorBase)].filter(
+          (url): url is string => typeof url === 'string',
+        );
+
+  const sourceClass = resolveSourceClass(primary.length > 0, mirrors.length > 0, choice);
   if (sourceClass === 'primary') return orderMirrorSources(primary);
   if (sourceClass === 'mirror') return orderMirrorSources(mirrors);
   return orderMirrorSources(buildSourceList(asset.url, mirrors));

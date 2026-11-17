@@ -8,7 +8,10 @@
  * fails", and the card does not say why.
  */
 
-import { resolveSourceClass } from '../../src/services/regions/packSourcePolicy';
+import {
+  resolveSourceClass,
+  synthesizeMirrorUrl,
+} from '../../src/services/regions/packSourcePolicy';
 
 describe('resolveSourceClass', () => {
   it('uses every origin when unpinned', () => {
@@ -35,5 +38,34 @@ describe('resolveSourceClass', () => {
     expect(resolveSourceClass(false, true, 'primary')).toBe('all');
     // Neither: nothing to pin, still every (empty) origin.
     expect(resolveSourceClass(false, false, 'mirror')).toBe('all');
+  });
+});
+
+describe('synthesizeMirrorUrl', () => {
+  const primary =
+    'https://github.com/ghobs91/polaris-maps/releases/download/map-data-2026-11-a/us-ny-new-york-tiles.pmtiles';
+
+  it('mirrors the path the catalog builder stamps and the uploader writes', () => {
+    expect(
+      synthesizeMirrorUrl(primary, 'https://archive.org/download/polaris-maps-map-data-2026-11'),
+    ).toBe(
+      'https://archive.org/download/polaris-maps-map-data-2026-11/map-data-2026-11-a/us-ny-new-york-tiles.pmtiles',
+    );
+  });
+
+  it('tolerates whitespace and a trailing slash on the base', () => {
+    expect(synthesizeMirrorUrl(primary, '  https://example.org/item/  ')).toBe(
+      'https://example.org/item/map-data-2026-11-a/us-ny-new-york-tiles.pmtiles',
+    );
+  });
+
+  it('produces nothing rather than a 404 when the shape is unexpected', () => {
+    expect(synthesizeMirrorUrl(primary, '')).toBeNull();
+    expect(synthesizeMirrorUrl(primary, null)).toBeNull();
+    expect(synthesizeMirrorUrl(null, 'https://example.org/item')).toBeNull();
+    // A mirror URL that is already a mirror, not a release download.
+    expect(
+      synthesizeMirrorUrl('https://archive.org/download/item/tag/file.pmtiles', 'https://x.org/i'),
+    ).toBeNull();
   });
 });

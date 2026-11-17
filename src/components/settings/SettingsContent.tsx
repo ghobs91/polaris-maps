@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   Switch,
+  TextInput,
   Linking,
   Alert,
   type LayoutChangeEvent,
@@ -81,6 +82,9 @@ export function SettingsContent({
   const setShowOnboardingOnLaunch = useSettingsStore((s) => s.setShowOnboardingOnLaunch);
   const devMode = useSettingsStore((s) => s.devMode);
   const setDevMode = useSettingsStore((s) => s.setDevMode);
+  const devPackMirrorBase = useSettingsStore((s) => s.devPackMirrorBase);
+  const setDevPackMirrorBase = useSettingsStore((s) => s.setDevPackMirrorBase);
+  const clearPackSourcePreferences = useSettingsStore((s) => s.clearPackSourcePreferences);
   const { colors, isDark } = useTheme();
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
@@ -452,6 +456,41 @@ export function SettingsContent({
                 <Switch value={devMode} onValueChange={setDevMode} trackColor={trackColor} />
               }
             />
+            {/*
+              Lets the developer Source picker reach a mirror the catalogue does
+              not advertise yet. Without it the picker can only choose among
+              origins already published, so verifying the mirror before flipping
+              POLARIS_PACK_MIRROR_BASES is circular.
+            */}
+            {devMode && (
+              <>
+                <View style={styles.devField}>
+                  <Text style={styles.devFieldLabel}>Pack mirror base</Text>
+                  <TextInput
+                    style={styles.devFieldInput}
+                    value={devPackMirrorBase}
+                    onChangeText={setDevPackMirrorBase}
+                    placeholder="https://archive.org/download/<item>"
+                    placeholderTextColor={colors.textSecondary}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    returnKeyType="done"
+                  />
+                  <Text style={styles.devFieldHint}>
+                    Used by the Source picker on Download More Maps, so a mirror can be tested
+                    before every client is pointed at it.
+                  </Text>
+                </View>
+                <SettingsRow
+                  title="Reset Pack Source Choices"
+                  onPress={() => {
+                    clearPackSourcePreferences();
+                    Alert.alert('Reset', 'Every pack download is back to Auto.');
+                  }}
+                />
+              </>
+            )}
             <SettingsRow
               title="Clear Cached Place Details"
               value={cachedPlaceCount != null ? `${cachedPlaceCount} cached` : undefined}
@@ -678,6 +717,19 @@ const createStyles = (isDark: boolean) => {
     accountCaption: { ...typography.caption, fontSize: 12, color: captionColor, marginTop: 1 },
     signinBtn: { alignSelf: 'stretch' },
     signinBlock: { paddingVertical: spacing.sm, gap: spacing.sm },
+    devField: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
+    devFieldLabel: { ...typography.caption, color: captionColor, fontWeight: '600' },
+    devFieldInput: {
+      ...typography.body,
+      fontSize: 13,
+      color: primaryTextColor,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: captionColor,
+      borderRadius: 8,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+    },
+    devFieldHint: { ...typography.caption, fontSize: 11, color: captionColor },
     errorText: { ...typography.caption, color: '#FF453A' },
   });
 };

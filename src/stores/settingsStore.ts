@@ -115,6 +115,15 @@ interface PersistedSettings {
    * Absent means `auto`. Cleared from Settings → Developer tools.
    */
   packSourcePreferences: Record<string, PackSourceChoice>;
+  /**
+   * Developer-only mirror base for a catalogue that does not advertise one yet.
+   *
+   * The picker can otherwise only choose among origins the catalogue already
+   * lists, which makes it useless for the one job it has: proving the mirror
+   * serves the right bytes *before* `POLARIS_PACK_MIRROR_BASES` points every
+   * client at it.
+   */
+  devPackMirrorBase: string;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -135,6 +144,7 @@ interface SettingsState extends PersistedSettings {
   setAllowMeteredRegionDownloads: (enabled: boolean) => void;
   setPackSourcePreference: (regionId: string, choice: PackSourceChoice) => void;
   clearPackSourcePreferences: () => void;
+  setDevPackMirrorBase: (base: string) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -186,6 +196,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   allowMeteredRegionDownloads: false,
   devMode: false,
   packSourcePreferences: {},
+  devPackMirrorBase: '',
 };
 
 function loadSettings(): PersistedSettings {
@@ -217,6 +228,8 @@ function loadSettings(): PersistedSettings {
           ...(parsed.dashCam ?? {}),
         },
         packSourcePreferences: { ...(parsed.packSourcePreferences ?? {}) },
+        devPackMirrorBase:
+          typeof parsed.devPackMirrorBase === 'string' ? parsed.devPackMirrorBase : '',
       };
     } catch {
       // ignore corrupt data
@@ -245,6 +258,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       autoDownloadRegions: state.autoDownloadRegions,
       allowMeteredRegionDownloads: state.allowMeteredRegionDownloads,
       packSourcePreferences: state.packSourcePreferences,
+      devPackMirrorBase: state.devPackMirrorBase,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -317,6 +331,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     clearPackSourcePreferences: () => {
       set({ packSourcePreferences: {} });
+      persist();
+    },
+    setDevPackMirrorBase: (devPackMirrorBase) => {
+      set({ devPackMirrorBase });
       persist();
     },
   };

@@ -33,3 +33,28 @@ export function resolveSourceClass(
   if (choice === 'mirror' && hasMirror) return 'mirror';
   return 'all';
 }
+
+/**
+ * Build the mirror URL for an asset the catalog does not advertise one for.
+ *
+ * The developer picker has to be able to exercise the mirror *before* the
+ * catalog advertises it: flipping `POLARIS_PACK_MIRROR_BASES` is what tells
+ * every client to start using it, so waiting for that to test it is circular.
+ * The layout is the one `stampCatalog` writes and `publish-region-mirrors.sh`
+ * uploads — `${base}/${tag}/${fileName}` — with both parts read out of the
+ * primary URL, so the two can never disagree about the path.
+ *
+ * Returns null when the primary is not a release-download URL: an unexpected
+ * catalog shape then produces no source at all, instead of a 404 the caller
+ * cannot explain.
+ */
+export function synthesizeMirrorUrl(
+  primaryUrl: string | null | undefined,
+  mirrorBase: string | null | undefined,
+): string | null {
+  const base = (mirrorBase ?? '').trim().replace(/\/+$/, '');
+  if (!base || !primaryUrl) return null;
+  const match = /\/releases\/download\/([^/]+)\/([^/]+)$/.exec(primaryUrl);
+  if (!match) return null;
+  return `${base}/${match[1]}/${match[2]}`;
+}
