@@ -30,7 +30,8 @@ import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
 import { useSettingsStore, type PackSourceChoice } from '../../stores/settingsStore';
-import { resolveSourceClass, synthesizeMirrorUrl } from './packSourcePolicy';
+import { preferredSources, resolveSourceClass, synthesizeMirrorUrl } from './packSourcePolicy';
+import { resolvePackMirrorBase } from './packMirrorSource';
 import {
   buildSourceList,
   downloadResumable,
@@ -729,13 +730,20 @@ function orderedSourcesFor(asset: RegionAsset, regionId: string): string[] {
   const mirrors =
     advertised.length > 0 || choice !== 'mirror'
       ? advertised
-      : [synthesizeMirrorUrl(asset.url, useSettingsStore.getState().devPackMirrorBase)].filter(
-          (url): url is string => typeof url === 'string',
-        );
+      : [
+          synthesizeMirrorUrl(
+            asset.url,
+            // Resolved, not raw: an empty setting must still point somewhere, and
+            // the published item rolls over monthly.
+            resolvePackMirrorBase(useSettingsStore.getState().devPackMirrorBase),
+          ),
+        ].filter((url): url is string => typeof url === 'string');
 
   const sourceClass = resolveSourceClass(primary.length > 0, mirrors.length > 0, choice);
-  if (sourceClass === 'primary') return orderMirrorSources(primary);
-  if (sourceClass === 'mirror') return orderMirrorSources(mirrors);
+  // A pin names what to try first, not the only thing to try: the mirror lags
+  // the release by a build cycle, so a strict pin dead-ends on any region not
+  // uploaded yet. Auto keeps rotating for load spreading.
+  if (sourceClass !== 'all') return preferredSources(primary, mirrors, choice);
   return orderMirrorSources(buildSourceList(asset.url, mirrors));
 }
 
@@ -804,7 +812,7 @@ async function downloadTilesArchive(
   const sources = orderedSourcesFor(asset, region.id);
   const startedAt = Date.now();
 
-  await downloadResumable({
+  const tilesResult = await downloadResumable({
     destPath: archivePath,
     sources,
     signal,
@@ -835,6 +843,10 @@ async function downloadTilesArchive(
     regionId: region.id,
     bytes: asset.sizeBytes ?? 0,
     ms: Date.now() - startedAt,
+    // Which origin actually answered. With a source pinned, a mirror miss falls
+    // through to the primary, and without this the log would call that a
+    // successful mirror download.
+    source: tilesResult.source,
   });
 }
 
@@ -1051,7 +1063,7 @@ async function fetchPackAsset(
   const sources = orderedSourcesFor(asset, region.id);
   const startedAt = Date.now();
 
-  await downloadResumable({
+  const assetResult = await downloadResumable({
     destPath: tempPath,
     sources,
     signal,
@@ -1079,6 +1091,7 @@ async function fetchPackAsset(
     asset: asset.name,
     ms: Date.now() - startedAt,
     sources: sources.length,
+    source: assetResult.source,
   });
 }
 

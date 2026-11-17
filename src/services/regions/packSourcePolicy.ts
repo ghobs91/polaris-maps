@@ -58,3 +58,32 @@ export function synthesizeMirrorUrl(
   if (!match) return null;
   return `${base}/${match[1]}/${match[2]}`;
 }
+
+/**
+ * Ordered origin list for a pinned choice.
+ *
+ * A pin names what to try *first*, not the only thing to try. "Archive" on a
+ * region whose mirror has not been uploaded yet — the mirror lags the GitHub
+ * release by a build cycle — used to fail the whole download with a bare
+ * `HTTP 404 from https://archive.org/…`, which reads like a broken mirror when
+ * it only means "not mirrored yet". The fallback keeps the test usable; the
+ * winning origin is logged by the downloader, so a silent fallback cannot be
+ * mistaken for a working mirror.
+ *
+ * Deterministic order is deliberate: `orderMirrorSources` rotates for load
+ * spreading, which is right for `auto` and wrong here — a pin that rotates is
+ * not a pin.
+ */
+export function preferredSources(
+  primary: ReadonlyArray<string>,
+  mirrors: ReadonlyArray<string>,
+  choice: PackSourceChoice,
+): string[] {
+  const first = choice === 'mirror' ? mirrors : primary;
+  const rest = choice === 'mirror' ? primary : mirrors;
+  const out: string[] = [];
+  for (const url of [...first, ...rest]) {
+    if (url && !out.includes(url)) out.push(url);
+  }
+  return out;
+}

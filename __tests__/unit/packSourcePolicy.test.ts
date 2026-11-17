@@ -9,6 +9,7 @@
  */
 
 import {
+  preferredSources,
   resolveSourceClass,
   synthesizeMirrorUrl,
 } from '../../src/services/regions/packSourcePolicy';
@@ -67,5 +68,35 @@ describe('synthesizeMirrorUrl', () => {
     expect(
       synthesizeMirrorUrl('https://archive.org/download/item/tag/file.pmtiles', 'https://x.org/i'),
     ).toBeNull();
+  });
+});
+
+describe('preferredSources', () => {
+  const primary = ['https://github.com/r/releases/download/t/a-tiles.pmtiles'];
+  const mirror = ['https://archive.org/download/item/t/a-tiles.pmtiles'];
+
+  it('puts the pinned origin first and keeps the other as a fallback', () => {
+    // The mirror lags the GitHub release by a build cycle, so a strict pin
+    // dead-ends on any region not uploaded yet with a bare HTTP 404.
+    expect(preferredSources(primary, mirror, 'mirror')).toEqual([...mirror, ...primary]);
+    expect(preferredSources(primary, mirror, 'primary')).toEqual([...primary, ...mirror]);
+  });
+
+  it('is deterministic — a pin that rotates is not a pin', () => {
+    const many = ['https://b/x', 'https://c/x'];
+    expect(preferredSources(primary, many, 'mirror')).toEqual([...many, ...primary]);
+    expect(preferredSources(primary, many, 'mirror')).toEqual([...many, ...primary]);
+  });
+
+  it('dedupes, so a mirrored primary is not fetched twice', () => {
+    expect(preferredSources(primary, [...primary, ...mirror], 'mirror')).toEqual([
+      ...primary,
+      ...mirror,
+    ]);
+  });
+
+  it('still returns the other origin when the pinned class is empty', () => {
+    expect(preferredSources(primary, [], 'mirror')).toEqual(primary);
+    expect(preferredSources([], mirror, 'primary')).toEqual(mirror);
   });
 });

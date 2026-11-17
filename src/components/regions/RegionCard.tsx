@@ -26,8 +26,6 @@ interface RegionCardProps {
    */
   sourceChoice?: PackSourceChoice;
   onChangeSource?: (choice: PackSourceChoice) => void;
-  /** Whether the catalog advertises any mirror for this region. */
-  mirrorAdvertised?: boolean;
 }
 
 const SOURCE_LABELS: Record<PackSourceChoice, string> = {
@@ -45,7 +43,6 @@ export const RegionCard = memo(function RegionCard({
   updateAvailable,
   sourceChoice,
   onChangeSource,
-  mirrorAdvertised,
 }: RegionCardProps) {
   const styles = useThemedStyles(createStyles);
   const toMb = (b?: number | null) =>
@@ -195,9 +192,9 @@ export const RegionCard = memo(function RegionCard({
                 );
               })}
             </View>
-            {sourceChoice === 'mirror' && mirrorAdvertised === false && (
-              <Text style={styles.sourceWarn}>
-                No mirror advertised for this pack — it will fall back to GitHub.
+            {sourceChoice === 'mirror' && (
+              <Text style={styles.sourceHint}>
+                Tries the Internet Archive first, then GitHub if this pack is not mirrored yet.
               </Text>
             )}
           </View>
@@ -312,10 +309,10 @@ const createStyles = ({ colors }: Theme) =>
     sourceBtnActive: { borderColor: colors.primary, backgroundColor: colors.primary + '15' },
     sourceText: { ...typography.caption, fontSize: 11, color: colors.textSecondary },
     sourceTextActive: { color: colors.primary, fontWeight: '600' },
-    sourceWarn: {
+    sourceHint: {
       ...typography.caption,
       fontSize: 11,
-      color: colors.warning,
+      color: colors.textSecondary,
       paddingHorizontal: spacing.md,
       paddingBottom: spacing.sm,
     },

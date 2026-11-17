@@ -36,9 +36,6 @@ export function RegionsContent() {
   const devMode = useSettingsStore((s) => s.devMode);
   const packSourcePreferences = useSettingsStore((s) => s.packSourcePreferences);
   const setPackSourcePreference = useSettingsStore((s) => s.setPackSourcePreference);
-  const devPackMirrorBase = useSettingsStore((s) => s.devPackMirrorBase);
-  /** A dev-configured base makes "Archive" reachable before the catalog lists it. */
-  const devMirrorConfigured = devMode && devPackMirrorBase.trim().length > 0;
   const [regions, setRegions] = useState<Region[]>([]);
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   /** Filter for the pack list: 193 packs are unusable as a plain scroll. */
@@ -240,10 +237,6 @@ export function RegionsContent() {
             sourceChoice={devMode ? (packSourcePreferences[region.id] ?? 'auto') : undefined}
             onChangeSource={
               devMode ? (choice) => setPackSourcePreference(region.id, choice) : undefined
-            }
-            mirrorAdvertised={
-              devMirrorConfigured ||
-              (region.assets ?? []).some((asset) => (asset.mirrors ?? []).length > 0)
             }
           />
         ))}

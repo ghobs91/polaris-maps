@@ -25,6 +25,11 @@ import { useAtprotoAuthStore } from '../../stores/atprotoAuthStore';
 import { useOsmAuthStore } from '../../stores/osmAuthStore';
 import { Button, SettingsChoiceRow, SettingsGroup, SettingsRow, SFSymbol } from '../common';
 import { StreetViewSettings } from './StreetViewSettings';
+import {
+  derivedPackMirrorBase,
+  discoverPackMirrorBase,
+  resolvePackMirrorBase,
+} from '../../services/regions/packMirrorSource';
 import { DashCamSettings } from './DashCamSettings';
 import { OfflineMapsSection } from './OfflineMapsSection';
 import { SettingsSectionNav, type SettingsSection } from './SettingsSectionNav';
@@ -88,6 +93,24 @@ export function SettingsContent({
   const { colors, isDark } = useTheme();
   const router = useRouter();
   const styles = useMemo(() => createStyles(isDark), [isDark]);
+  /**
+   * Keep the pack mirror base filled without asking. The Archive item rolls over
+   * monthly (`polaris-maps-map-data-YYYY-MM`), so a value the developer typed
+   * once goes stale; this seeds this month's item immediately and then replaces
+   * it with whatever is actually published once the lookup answers.
+   */
+  useEffect(() => {
+    if (!devMode || devPackMirrorBase.trim().length > 0) return;
+    setDevPackMirrorBase(derivedPackMirrorBase());
+    let cancelled = false;
+    void discoverPackMirrorBase().then((base) => {
+      if (!cancelled && base) setDevPackMirrorBase(base);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [devMode, devPackMirrorBase, setDevPackMirrorBase]);
+
   const [cachedPlaceCount, setCachedPlaceCount] = useState<number | null>(null);
   const [identityPubkey, setIdentityPubkey] = useState<string | null>(null);
   /** Content offsets of each settings group, for the "jump to" strip. */
@@ -479,9 +502,30 @@ export function SettingsContent({
                   />
                   <Text style={styles.devFieldHint}>
                     Used by the Source picker on Download More Maps, so a mirror can be tested
-                    before every client is pointed at it.
+                    before every client is pointed at it. Autofilled from the newest published item;
+                    clear it to fall back to this month.
                   </Text>
                 </View>
+                <SettingsRow
+                  title="Find Newest Pack Mirror"
+                  value={resolvePackMirrorBase(devPackMirrorBase).replace(
+                    'https://archive.org/download/',
+                    '',
+                  )}
+                  onPress={() => {
+                    void discoverPackMirrorBase().then((base) => {
+                      if (base) {
+                        setDevPackMirrorBase(base);
+                        Alert.alert('Mirror base updated', base);
+                      } else {
+                        Alert.alert(
+                          'Lookup failed',
+                          'Could not reach the Internet Archive. Using the value already set.',
+                        );
+                      }
+                    });
+                  }}
+                />
                 <SettingsRow
                   title="Reset Pack Source Choices"
                   onPress={() => {
