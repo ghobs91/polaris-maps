@@ -1,0 +1,73 @@
+name: Re-mirror region packs
+
+# Re-upload published packs to the secondary origins without rebuilding them.
+#
+# A region whose mirror step failed during a build is still complete on GitHub
+# Releases — only the copy on the mirror is missing, and rebuilding it costs
+# 20–50 minutes of planetiler/Valhalla to produce bytes the release already
+# holds. This runs `scripts/remirror-regions.mjs`, which downloads the published
+# assets and re-runs the upload; rclone skips anything already present, so it is
+# safe to repeat.
+#
+# Deliberately a separate workflow from `build-region-data.yml`: that one
+# triggers on pushes to itself, and recovering nine regions should never start a
+# 200-region rebuild.
+#
+# Dispatch it after a cycle with:
+#   gh workflow run remirror-packs.yml -f regions=africa-liberia,asia-south-korea
+# or, from a verifier summary's `failed[].regionId` list, paste them
+# comma-separated.
+
+on:
+  workflow_dispatch:
+    inputs:
+      regions:
+        description: 'Comma-separated region ids to re-mirror'
+        required: true
+      dry_run:
+        description: 'Only print the plan'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+permissions:
+  contents: read
+
+jobs:
+  remirror:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Pinned for the same reason as the build workflow: Ubuntu 22.04 ships
+      # rclone 1.53.3, which has no `internetarchive` backend at all.
+      - name: Install rclone
+        run: |
+          RCLONE_VERSION=1.76.0
+          curl -fsSL "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-amd64.zip" -o /tmp/rclone.zip
+          unzip -q -o /tmp/rclone.zip -d /tmp/rclone-dist
+          sudo install -m 0755 "/tmp/rclone-dist/rclone-v${RCLONE_VERSION}-linux-amd64/rclone" /usr/local/bin/rclone
+          rclone version | head -1
+
+      - name: Re-mirror the requested regions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IA_ITEM: ${{ secrets.IA_ITEM }}
+          RCLONE_CONFIG_IA_TYPE: internetarchive
+          RCLONE_CONFIG_IA_ACCESS_KEY_ID: ${{ secrets.IA_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_IA_SECRET_ACCESS_KEY: ${{ secrets.IA_SECRET_ACCESS_KEY }}
+          # rclone defaults this to true, which uploads without an md5 and never
+          # asks the Archive to verify the object.
+          RCLONE_CONFIG_IA_DISABLE_CHECKSUM: 'false'
+          REGIONS: ${{ github.event.inputs.regions }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          ARGS=(--regions "$REGIONS")
+          if [ "${DRY_RUN:-false}" = "true" ]; then ARGS+=(--dry-run); fi
+          node scripts/remirror-regions.mjs "${ARGS[@]}"
