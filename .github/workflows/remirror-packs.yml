@@ -37,7 +37,10 @@ permissions:
 jobs:
   remirror:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    # Sequential per region with one transfer each: a 60-region batch after a
+    # 200-region cycle needs the headroom, and a timed-out job leaves the rest
+    # of the batch unmirrored with no record of where it stopped.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
