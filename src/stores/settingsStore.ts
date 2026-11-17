@@ -35,6 +35,17 @@ export type SavedListsSortMode = 'recent' | 'name';
  */
 export type PackSourceChoice = 'auto' | 'primary' | 'mirror';
 
+/**
+ * Whether this device seeds region packs it downloads.
+ *
+ * `auto` (the default) seeds only where no verified desktop relay covers the
+ * region: a phone seeding a 50-400 MB pack from its own data plan and battery is
+ * the cost the relay exists to remove. `always` and `never` are the escape
+ * hatches — the decision itself lives in `relaySeedingPolicy.ts` so it is tested
+ * rather than implied by the settings screen.
+ */
+export type DeviceSeedingPreference = 'auto' | 'always' | 'never';
+
 export interface StreetViewPreferences {
   /** Master opt-in for contributing street imagery during navigation. */
   enabled: boolean;
@@ -124,6 +135,8 @@ interface PersistedSettings {
    * client at it.
    */
   devPackMirrorBase: string;
+  /** Whether this device seeds downloaded packs (see `DeviceSeedingPreference`). */
+  deviceSeeding: DeviceSeedingPreference;
 }
 
 interface SettingsState extends PersistedSettings {
@@ -145,6 +158,7 @@ interface SettingsState extends PersistedSettings {
   setPackSourcePreference: (regionId: string, choice: PackSourceChoice) => void;
   clearPackSourcePreferences: () => void;
   setDevPackMirrorBase: (base: string) => void;
+  setDeviceSeeding: (pref: DeviceSeedingPreference) => void;
 }
 
 const STORAGE_KEY = 'settings';
@@ -197,6 +211,8 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   devMode: false,
   packSourcePreferences: {},
   devPackMirrorBase: '',
+  // Default: seed only where no desktop relay covers the region.
+  deviceSeeding: 'auto',
 };
 
 function loadSettings(): PersistedSettings {
@@ -230,6 +246,10 @@ function loadSettings(): PersistedSettings {
         packSourcePreferences: { ...(parsed.packSourcePreferences ?? {}) },
         devPackMirrorBase:
           typeof parsed.devPackMirrorBase === 'string' ? parsed.devPackMirrorBase : '',
+        deviceSeeding:
+          parsed.deviceSeeding === 'always' || parsed.deviceSeeding === 'never'
+            ? parsed.deviceSeeding
+            : 'auto',
       };
     } catch {
       // ignore corrupt data
@@ -259,6 +279,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
       allowMeteredRegionDownloads: state.allowMeteredRegionDownloads,
       packSourcePreferences: state.packSourcePreferences,
       devPackMirrorBase: state.devPackMirrorBase,
+      deviceSeeding: state.deviceSeeding,
     };
     storage.set(STORAGE_KEY, JSON.stringify(payload));
   };
@@ -335,6 +356,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => {
     },
     setDevPackMirrorBase: (devPackMirrorBase) => {
       set({ devPackMirrorBase });
+      persist();
+    },
+    setDeviceSeeding: (deviceSeeding) => {
+      set({ deviceSeeding });
       persist();
     },
   };

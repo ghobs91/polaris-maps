@@ -44,6 +44,9 @@ import { isFeatureEnabled } from '../config/remoteConfig';
 import { logDiagnostic } from '../diagnostics/diagnosticsLog';
 import { usePeerStore } from '../../stores/peerStore';
 import { shouldTryPeerDownload } from './peerDownloadPolicy';
+import { shouldSeedLocallyOnDevice } from './relaySeedingPolicy';
+import { getRelayCoverage, isRegionRelayCovered } from '../relay/relayAnnouncements';
+import { getConnectivity } from './connectivityService';
 
 /** Cached OpenFreeMap tile URL template resolved from TileJSON. */
 let cachedTileUrlTemplate: string | null = null;
@@ -236,6 +239,7 @@ export async function downloadRegion(
     const peerWorthTrying = shouldTryPeerDownload({
       canonicalKey,
       peersConnected,
+      relayCovers: isRegionRelayCovered(region.id),
       hasHttpFallback,
     });
     if (canonicalKey && !peerWorthTrying) {
@@ -850,12 +854,45 @@ async function downloadTilesArchive(
   });
 }
 
-/** Seed a downloaded region in the background and persist the canonical key. */
+/**
+ * Seed a downloaded region in the background and persist the canonical key.
+ *
+ * Whether this device should seed at all is a policy decision, not a foregone
+ * conclusion: a 50-400 MB pack seeded from a phone's cellular plan and battery is
+ * the cost this relay coverage exists to remove (`relaySeedingPolicy`).
+ */
 async function autoSeedRegion(
   regionId: string,
   filesDir: string,
   db: Awaited<ReturnType<typeof getDatabase>>,
 ): Promise<void> {
+  const coverage = getRelayCoverage(regionId);
+  const connectivity = getConnectivity();
+  const decision = shouldSeedLocallyOnDevice({
+    relayCovers: coverage.covered,
+    relayHealthy: coverage.healthy,
+    userPref: useSettingsStore.getState().deviceSeeding,
+    // Battery state needs `expo-battery`, which is not a dependency, so on-device
+    // seeding is not gated on power yet. The relay is the answer to the battery
+    // case; this is tracked in the relay change's tasks.
+    power: 'charging',
+    link: !connectivity.isConnected
+      ? 'none'
+      : connectivity.type === 'cellular'
+        ? 'metered'
+        : 'unmetered',
+    freeDiskRatio: 2, // the download itself already checked disk headroom
+  });
+
+  if (!decision.seed) {
+    logDiagnostic('regions', 'info', 'Not seeding downloaded region', {
+      regionId,
+      reason: decision.reason,
+      relay: coverage.relayPubkey ?? 'none',
+    });
+    return;
+  }
+
   // Seed against the canonical pack key when known (read-only replica shared by
   // every peer); otherwise author the canonical drive on this device.
   const canonicalKey = getRegionManifest(regionId)?.driveKey;

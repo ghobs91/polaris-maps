@@ -25,11 +25,22 @@ export interface PeerDownloadDecisionInput {
    * get the region, so it is attempted even with no peers visible.
    */
   hasHttpFallback: boolean;
+  /**
+   * A verified desktop-relay announcement covers this region.
+   *
+   * A relay is the best origin there is: always on, on the same swarm, and it
+   * costs no third-party egress. Its presence is also why `peersConnected` is
+   * not the right gate — `activePeers` counts established connections, and a
+   * relay the device has not dialled yet reads as zero peers. Without this the
+   * download falls back to HTTP precisely when the best seeder is available.
+   */
+  relayCovers?: boolean;
 }
 
 /** True when the P2P attempt is worth making before falling back to HTTP. */
 export function shouldTryPeerDownload(input: PeerDownloadDecisionInput): boolean {
   if (!input.canonicalKey) return false;
+  if (input.relayCovers) return true;
   if (input.peersConnected) return true;
   return !input.hasHttpFallback;
 }

@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Button, SettingsGroup, SettingsRow } from '../common';
+import { Button, SettingsChoiceRow, SettingsGroup, SettingsRow } from '../common';
 import { getDownloadedRegions } from '../../services/regions/regionRepository';
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
+import { useSettingsStore, type DeviceSeedingPreference } from '../../stores/settingsStore';
+import { getRelayCoverage } from '../../services/relay/relayAnnouncements';
 import { spacing } from '../../constants/theme';
 import type { Region } from '../../models/region';
 
@@ -38,6 +40,12 @@ function formatMb(bytes: number): string {
   return mb >= 10 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
 }
 
+const SEEDING_OPTIONS: Array<{ label: string; value: DeviceSeedingPreference }> = [
+  { label: 'Auto', value: 'auto' },
+  { label: 'Always', value: 'always' },
+  { label: 'Never', value: 'never' },
+];
+
 /**
  * Settings → Offline maps.
  *
@@ -52,6 +60,8 @@ export function OfflineMapsSection({ onOpenRegions, icon }: OfflineMapsSectionPr
   // Reload when a background download starts or finishes, so the list does not
   // show a stale set of maps while the user is looking at it.
   const activeDownloadCount = useRegionDownloadStore((s) => s.activeIds.length);
+  const deviceSeeding = useSettingsStore((s) => s.deviceSeeding);
+  const setDeviceSeeding = useSettingsStore((s) => s.setDeviceSeeding);
 
   const load = useCallback(() => {
     getDownloadedRegions()
@@ -83,6 +93,18 @@ export function OfflineMapsSection({ onOpenRegions, icon }: OfflineMapsSectionPr
 
   const totalBytes = regions.reduce((sum, region) => sum + regionBytes(region), 0);
 
+  // Why the current setting resolves the way it does: "Auto" is meaningless
+  // without saying whether a desktop relay is covering this device right now.
+  const relayCoveredRegion = regions.find((region) => getRelayCoverage(region.id).healthy);
+  const seedingDetail =
+    deviceSeeding === 'auto'
+      ? relayCoveredRegion
+        ? 'Handled by a desktop relay'
+        : 'Seeding uncovered regions'
+      : deviceSeeding === 'always'
+        ? 'Seeding every downloaded map'
+        : 'Not seeding';
+
   return (
     <SettingsGroup
       header="Offline maps"
@@ -105,6 +127,13 @@ export function OfflineMapsSection({ onOpenRegions, icon }: OfflineMapsSectionPr
       ) : (
         <SettingsRow title={loaded ? 'No maps downloaded' : 'Loading…'} />
       )}
+      <SettingsChoiceRow
+        title="Seed maps to other devices"
+        options={SEEDING_OPTIONS}
+        value={deviceSeeding}
+        onChange={setDeviceSeeding}
+        detail={seedingDetail}
+      />
       <View style={styles.action}>
         <Button title="Download More Maps" variant="primary" onPress={openRegions} />
       </View>

@@ -218,6 +218,31 @@ function RootLayoutInner() {
     };
   }, []);
 
+  useEffect(() => {
+    // Discover desktop-relay announcements over the same Gun.js channel used for
+    // manifests. Verified coverage is what lets the download path prefer a relay
+    // over HTTP and lets `autoSeedRegion` decline to seed a pack that an
+    // always-on machine already serves.
+    let stop: (() => void) | undefined;
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        try {
+          const [{ getGun }, { subscribeRelayAnnouncements }] = await Promise.all([
+            import('@/services/gun/init'),
+            import('@/services/relay/relayAnnouncements'),
+          ]);
+          stop = subscribeRelayAnnouncements(getGun());
+        } catch {
+          // Gun unavailable — relay discovery is best-effort.
+        }
+      })();
+    });
+    return () => {
+      task.cancel();
+      stop?.();
+    };
+  }, []);
+
   // Theme-aware header chrome so the nav bar matches dark/light Settings.
   const screenOptions = useMemo(
     () => ({
