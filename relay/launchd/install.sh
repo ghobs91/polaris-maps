@@ -8,6 +8,9 @@
 #      absolute paths baked in.
 #   3. Bootstraps the agent so it starts now and at every login, and keeps
 #      running when the Polaris Maps app is quit.
+#   4. Builds the menu-bar app, installs it to ~/Applications, registers it as a
+#      login item, and opens it — because a seeder with no visible presence is a
+#      service the user cannot tell is running, let alone stop.
 #
 # Re-run this after moving the repo, changing Node, or editing the template: the
 # installed plist is what executes.
@@ -25,6 +28,10 @@ LOG_DIR="$HOME/Library/Logs/Polaris Relay"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 TEMPLATE="$REPO/relay/launchd/app.polarismaps.relay.plist.template"
 DOMAIN="gui/$(id -u)"
+CONTROLLER_LABEL="app.polarismaps.relay.controller"
+CONTROLLER_PLIST="$HOME/Library/LaunchAgents/$CONTROLLER_LABEL.plist"
+CONTROLLER_DEST="$HOME/Applications/Polaris Relay.app"
+CONTROLLER_SRC="$REPO/relay/controller/build/Polaris Relay.app"
 
 NODE="$(command -v node || true)"
 if [ -z "$NODE" ]; then
@@ -66,15 +73,102 @@ sed \
   "$TEMPLATE" > "$PLIST"
 chmod 644 "$PLIST"
 
-# Replace any previous instance. `bootout` fails harmlessly when nothing is loaded.
+# Replace any previous instance. `bootout` fails harmlessly when nothing is
+# loaded, but it is asynchronous: bootstrapping in the same breath can fail with
+# `Bootstrap failed: 5: Input/output error` because the old job is still going
+# away. Retry instead of reporting a scary error the user cannot act on.
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$PLIST"
+bootstrapped=0
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+    bootstrapped=1
+    break
+  fi
+  sleep 1
+done
+if [ "$bootstrapped" != "1" ]; then
+  echo "warning: could not load $LABEL automatically. Run:" >&2
+  echo "  launchctl bootstrap $DOMAIN \"$PLIST\"" >&2
+fi
 launchctl enable "$DOMAIN/$LABEL" 2>/dev/null || true
+
+echo
+# A previously clean exit leaves the agent loaded but stopped (that is how an
+# explicit stop survives a reboot). Installing is an explicit start, so force one.
+launchctl kickstart -k "$DOMAIN/$LABEL" 2>/dev/null || true
+
+# ── Menu-bar app ────────────────────────────────────────────────────
+# Built here rather than shipped: it is a thin client of the control socket, and
+# `swiftc` is all it needs. Without this step the relay runs invisibly and the
+# only way to see or stop it is the command line.
+if [ "${SKIP_CONTROLLER:-0}" != "1" ]; then
+  if [ ! -d "$CONTROLLER_SRC" ]; then
+    echo
+    echo "Building the menu-bar app…"
+    sh "$REPO/relay/controller/build.sh" >/dev/null
+  fi
+
+  mkdir -p "$HOME/Applications"
+  rm -rf "$CONTROLLER_DEST"
+  cp -R "$CONTROLLER_SRC" "$CONTROLLER_DEST"
+
+  # Launched as a login item by launchd rather than through System Events, which
+  # would need an Automation permission prompt to add it.
+  cat > "$CONTROLLER_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$CONTROLLER_LABEL</string>
+  <!-- Launched through LaunchServices, not as a bare binary: launchd refuses to
+       bootstrap an agent whose program is an .app executable ("Bootstrap failed:
+       5: Input/output error"), and going through `open` is also what gives the
+       app a proper GUI session. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-a</string>
+    <string>$CONTROLLER_DEST</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  <key>StandardOutPath</key>
+  <string>$LOG_DIR/controller.log</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG_DIR/controller.error.log</string>
+</dict>
+PLIST
+  chmod 644 "$CONTROLLER_PLIST"
+
+  launchctl bootout "$DOMAIN/$CONTROLLER_LABEL" 2>/dev/null || true
+  pkill -f "PolarisRelay" 2>/dev/null || true
+  sleep 1
+  controller_loaded=0
+  for attempt in 1 2 3 4 5; do
+    if launchctl bootstrap "$DOMAIN" "$CONTROLLER_PLIST" 2>/dev/null; then
+      controller_loaded=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$controller_loaded" = "1" ]; then
+    launchctl enable "$DOMAIN/$CONTROLLER_LABEL" 2>/dev/null || true
+    echo "Menu bar app installed at $CONTROLLER_DEST (look for the antenna icon)."
+  else
+    echo "Menu bar app installed at $CONTROLLER_DEST but not started. Open it once:"
+    echo "  open \"$CONTROLLER_DEST\""
+  fi
+fi
 
 echo
 echo "Installed $LABEL."
 echo "The relay now starts at login and restarts on crash, independently of the app."
+echo "The menu-bar icon shows whether it is serving; quitting that app stops the relay."
 echo
 echo "Check it:   node \"$REPO/relay/src/cli.mjs\" status"
-echo "Stop it:    launchctl bootout $DOMAIN/$LABEL && launchctl disable $DOMAIN/$LABEL"
+echo "Stop it:    click the menu bar icon → Quit Polaris Relay"
+echo "            or: node \"$REPO/relay/src/cli.mjs\" stop"
 echo "Uninstall:  $REPO/relay/launchd/uninstall.sh"

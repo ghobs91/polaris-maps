@@ -32,10 +32,20 @@ the bandwidth are yours, and the budgets below are enforced locally.
 ## Install
 
 ```bash
-relay/launchd/install.sh          # loads a per-user launch agent
+relay/launchd/install.sh          # daemon + menu-bar app, started now and at login
 relay/launchd/uninstall.sh        # stop seeding, keep the seed store
-relay/launchd/uninstall.sh --purge   # also delete packs, config and logs
+relay/launchd/uninstall.sh --purge   # also delete packs, config, logs and the app
 ```
+
+The installer does both halves, because a seeder with no visible presence is a
+service you cannot tell is running — let alone stop. It loads the daemon agent,
+builds the menu-bar app with `swiftc`, installs it to `~/Applications/Polaris
+Relay.app`, registers it as a login item and opens it. An antenna icon in the menu
+bar means it is installed; the icon's menu says whether it is serving and why not.
+
+The menu-bar app is **not** part of the iOS app or its TestFlight build — an iOS
+build cannot ship a macOS agent. `SKIP_CONTROLLER=1` skips that half if you only
+want the daemon.
 
 The installer records absolute paths (launchd does not read your shell profile),
 so re-run it after moving the repository or changing Node.
