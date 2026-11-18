@@ -8,10 +8,17 @@ import SwiftUI
 /// canonical key. That is shown honestly rather than hidden: "no signed manifest
 /// published yet" is a fact about the network, not a bug in the app.
 struct RegionCatalogView: View {
+    /// Pin a region that has a verified manifest (the relay resolves the key).
     let onPin: (String) -> Void
+    /// Pin a region with a key the user supplied (the "Advanced…" path).
+    let onPinWithKey: (String, String, String, Int) -> Void
     let onCancel: () -> Void
 
     @State private var snapshot: CatalogSnapshot?
+    /// Show only regions the relay can actually seed. On by default: a catalog where
+    /// 354 of 355 rows are dead weight is not a catalog, it is a list of things you
+    /// cannot do.
+    @State private var readyOnly = true
     @State private var selectedId: String?
     @State private var search = ""
     @State private var loading = true
@@ -20,10 +27,12 @@ struct RegionCatalogView: View {
 
     private var filtered: [CatalogRegion] {
         guard let regions = snapshot?.regions else { return [] }
-        guard !search.isEmpty else { return regions }
         let needle = search.lowercased()
-        return regions.filter {
-            $0.name.lowercased().contains(needle) || $0.regionId.lowercased().contains(needle)
+        return regions.filter { region in
+            if readyOnly && !region.pinnable { return false }
+            guard !needle.isEmpty else { return true }
+            return region.name.lowercased().contains(needle)
+                || region.regionId.lowercased().contains(needle)
         }
     }
 
@@ -54,8 +63,10 @@ struct RegionCatalogView: View {
         .sheet(isPresented: $showingManual) {
             PinRegionSheet { regionId, driveKey, version, bytes in
                 showingManual = false
-                onPin(regionId)
-                _ = (driveKey, version, bytes) // manual entry pins by key on the relay side
+                // Pass the entered key through: this used to call `onPin(regionId)` and
+                // silently drop it, so "Advanced…" pinned a region that had no manifest
+                // and always failed.
+                onPinWithKey(regionId, driveKey, version, bytes)
             } onCancel: {
                 showingManual = false
             }
@@ -71,9 +82,12 @@ struct RegionCatalogView: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Toggle("Ready only", isOn: $readyOnly)
+                .toggleStyle(.checkbox)
+                .help("Show only regions with a verified manifest, which are the ones a relay can seed")
             TextField("Search regions", text: $search)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
+                .frame(width: 200)
             Button {
                 Task { await reload(force: true) }
             } label: {
@@ -88,7 +102,8 @@ struct RegionCatalogView: View {
     private var subtitle: String {
         guard let snapshot else { return "loading…" }
         let source = snapshot.source == "network" ? "fetched just now" : snapshot.source
-        return "\(snapshot.regions.count) regions · \(snapshot.pinnableCount) with a verified key"
+        let ready = snapshot.pinnableCount
+        return "\(snapshot.regions.count) regions · \(ready) ready to seed"
             + " · \(source)"
             + (snapshot.error.map { " · \($0)" } ?? "")
     }
@@ -112,7 +127,14 @@ struct RegionCatalogView: View {
                 selectedId: selectedId,
                 onSelect: { selectedId = $0 }
             )
-            if let selected {
+            if filtered.isEmpty && !loading {
+                Text(readyOnly ? "No region here has a signed manifest yet — turn off Ready only to see all \(snapshot?.regions.count ?? 0)." : "Nothing matches that search.")
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                    .padding(10)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(14)
+            } else if let selected {
                 selectionCard(selected)
             } else {
                 Text("Click a region to select it")
@@ -200,6 +222,10 @@ struct RegionCatalogView: View {
             error = RelayStore.shared.lastCatalogError
                 ?? loaded?.error
                 ?? "the relay returned no regions"
+        }
+        if selectedId == nil {
+            selectedId = loaded?.regions.first(where: { $0.pinnable })?.regionId
+                ?? loaded?.regions.first?.regionId
         }
         loading = false
     }

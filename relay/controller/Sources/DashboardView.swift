@@ -40,12 +40,24 @@ struct DashboardView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { store.startPolling() }
         .sheet(isPresented: $showingCatalog) {
-            RegionCatalogView { regionId in
-                showingCatalog = false
-                Task { await store.perform("pin-region", ["regionId": regionId]) }
-            } onCancel: {
-                showingCatalog = false
-            }
+            RegionCatalogView(
+                onPin: { regionId in
+                    showingCatalog = false
+                    Task { await store.perform("pin-region", ["regionId": regionId]) }
+                },
+                onPinWithKey: { regionId, driveKey, version, bytes in
+                    showingCatalog = false
+                    Task {
+                        await store.perform("pin", [
+                            "regionId": regionId,
+                            "driveKey": driveKey,
+                            "version": version,
+                            "bytes": bytes,
+                        ])
+                    }
+                },
+                onCancel: { showingCatalog = false }
+            )
         }
         .sheet(isPresented: $showingManualPin) {
             PinRegionSheet { regionId, driveKey, version, bytes in
