@@ -42,6 +42,13 @@ struct PolarisRelayApp: App {
 /// Handles `--open-dashboard`, which exists so the window can be opened without a
 /// mouse (verification, and a shortcut for anyone who wants one).
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Any termination stops the relay, whatever triggered it. The menu item is the
+    /// documented path; this is the one that also covers Cmd-Q, a crash reporter's
+    /// "quit", and anyone who force-quits from Activity Monitor.
+    func applicationWillTerminate(_ notification: Notification) {
+        RelaySocket.shutdownRelayBlocking()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         if CommandLine.arguments.contains("--open-dashboard") {
             MainActor.assumeIsolated {

@@ -96,6 +96,17 @@ enum RelaySocket {
         throw Failure(message: object["error"] as? String ?? "the relay rejected the command")
     }
 
+    /// Stop the relay synchronously, for the app's termination path.
+    ///
+    /// `applicationWillTerminate` cannot await, and every quit path has to stop
+    /// seeding — not just the menu item. A Cmd-Q must not leave a daemon uploading
+    /// after the window it belonged to is gone.
+    static func shutdownRelayBlocking() {
+        _ = try? requestBlocking(["cmd": "shutdown"], timeout: 3)
+        LaunchControl.run(["bootout", LaunchControl.domain + "/" + LaunchControl.agentLabel])
+        LaunchControl.run(["disable", LaunchControl.domain + "/" + LaunchControl.agentLabel])
+    }
+
     /// `--selftest`: prove the socket client works without a GUI.
     static func selfTest() -> Int32 {
         do {

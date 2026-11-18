@@ -124,18 +124,22 @@ if [ "${SKIP_CONTROLLER:-0}" != "1" ]; then
 <dict>
   <key>Label</key>
   <string>$CONTROLLER_LABEL</string>
-  <!-- Launched through LaunchServices, not as a bare binary: launchd refuses to
-       bootstrap an agent whose program is an .app executable ("Bootstrap failed:
-       5: Input/output error"), and going through /usr/bin/open is also what
-       gives the app a proper GUI session. -->
+  <!-- The app binary directly, so launchd owns the process: it can report whether
+       the icon is actually up, and restart it if it crashes. Launching via
+       /usr/bin/open would leave the job "not running" one instant after login
+       because `open` exits as soon as the app is launched. KeepAlive restarts a
+       crash but not a Quit — Quit disables the job, so it stays down. -->
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/open</string>
-    <string>-a</string>
-    <string>$CONTROLLER_DEST</string>
+    <string>$CONTROLLER_DEST/Contents/MacOS/PolarisRelay</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>LimitLoadToSessionType</key>
   <string>Aqua</string>
   <key>StandardOutPath</key>
