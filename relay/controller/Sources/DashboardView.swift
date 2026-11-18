@@ -9,7 +9,8 @@ import SwiftUI
 /// seeding".
 struct DashboardView: View {
     @EnvironmentObject private var store: RelayStore
-    @State private var showingPin = false
+    @State private var showingCatalog = false
+    @State private var showingManualPin = false
     @State private var confirmingShutdown = false
 
     var body: some View {
@@ -37,9 +38,17 @@ struct DashboardView: View {
         .frame(minWidth: 520, minHeight: 560)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { store.startPolling() }
-        .sheet(isPresented: $showingPin) {
+        .sheet(isPresented: $showingCatalog) {
+            RegionCatalogView { regionId in
+                showingCatalog = false
+                Task { await store.perform("pin-region", ["regionId": regionId]) }
+            } onCancel: {
+                showingCatalog = false
+            }
+        }
+        .sheet(isPresented: $showingManualPin) {
             PinRegionSheet { regionId, driveKey, version, bytes in
-                showingPin = false
+                showingManualPin = false
                 Task {
                     await store.perform("pin", [
                         "regionId": regionId,
@@ -49,7 +58,7 @@ struct DashboardView: View {
                     ])
                 }
             } onCancel: {
-                showingPin = false
+                showingManualPin = false
             }
         }
         .alert("Stop the relay?", isPresented: $confirmingShutdown) {
@@ -121,8 +130,8 @@ struct DashboardView: View {
         Card("Regions seeded", subtitle: status.drives.isEmpty ? nil : ByteFormat.gib(status.storeUsed) + " on disk") {
             if status.drives.isEmpty {
                 Text(
-                    "Nothing pinned yet. A relay only seeds what you pin — pin the region you "
-                        + "actually live in."
+                    "Nothing pinned yet. A relay only seeds what you pin — open the map catalog and "
+                        + "pick the region you actually live in."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -152,7 +161,10 @@ struct DashboardView: View {
                 }
             }
             HStack {
-                Button("Add region…") { showingPin = true }.disabled(store.busy)
+                Button("Browse map catalog…") { showingCatalog = true }.disabled(store.busy)
+                Button("Enter a key manually…") { showingManualPin = true }
+                    .buttonStyle(.borderless)
+                    .disabled(store.busy)
                 Spacer()
             }
             .padding(.top, 4)

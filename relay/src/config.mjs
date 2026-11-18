@@ -39,6 +39,11 @@ export const DEFAULT_CONFIG = Object.freeze({
   announceIntervalSec: 300,
   /** Stop seeding a drive that no peer has requested for this long. */
   idleEvictionDays: 30,
+  /**
+   * Region catalog the picker reads. Empty means "use the same default the app
+   * uses"; override for a mirror or a local file during development.
+   */
+  catalogUrl: '',
 });
 
 const LIMITS = {
@@ -78,6 +83,12 @@ export function validateConfig(input) {
       } else {
         warnings.push(`${key} must be a boolean; keeping ${fallback}`);
       }
+      continue;
+    }
+
+    if (typeof fallback === 'string') {
+      if (typeof value === 'string') config[key] = value;
+      else warnings.push(`${key} must be a string; keeping the default`);
       continue;
     }
 

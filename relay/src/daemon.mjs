@@ -27,6 +27,8 @@ import { fileURLToPath } from 'node:url';
 
 import { createSeedCore } from '../../backend/seed-core.mjs';
 import { createTokenBucket, checkEgress, recordEgress } from './budgets.mjs';
+import { DEFAULT_CATALOG_URL, loadCatalog } from './catalog.mjs';
+import { catalogRegions, mergeManifests } from './manifests.mjs';
 import { loadConfig } from './config.mjs';
 import { startControlServer } from './control.mjs';
 import { planEviction, planIdleEviction, touchDemand } from './demand.mjs';
@@ -164,6 +166,11 @@ export async function startDaemon({
   let demand = usageState.demand;
   let servedBytes24h = usageState.servedBytes24h;
   let linkMetered = false;
+  /** Last catalog load, kept in memory so the picker does not refetch per request. */
+  let catalogState = null;
+  /** Manifests learned over gossip, newest per region. */
+  const gossipedManifests = new Map();
+  const catalogUrl = config.catalogUrl || process.env.POLARIS_CATALOG_URL || DEFAULT_CATALOG_URL;
   let powerState = {
     power: /** @type {'ac'|'battery'|'unknown'} */ ('unknown'),
     lowPowerMode: false,
@@ -506,6 +513,149 @@ export async function startDaemon({
         await publishStatus({ force: true });
         return { publishedAt: now() };
 
+      case 'catalog':
+      case 'refresh-catalog': {
+        // One loader for both: `refresh-catalog` just refuses the cache. The list is
+        // every region the catalog advertises, so the desktop can show a map of the
+        // world rather than only what happens to be pinnable today.
+        const loaded = await loadCatalog({
+          cachePath: dirs.catalog,
+          url: catalogUrl,
+          now: now(),
+          force: request.cmd === 'refresh-catalog',
+          log,
+        });
+        catalogState = loaded;
+        const { manifests, problems } = mergeManifests({
+          catalog: loaded.catalog,
+          gossiped: [...gossipedManifests.values()],
+        });
+        const regions = catalogRegions(loaded.catalog, manifests, {
+          pinnedIds: new Set(pins.map((p) => p.regionId)),
+        });
+
+        return {
+          fetchedAt: loaded.fetchedAt,
+          source: loaded.source,
+          error: loaded.error,
+          assetTag: loaded.catalog?.assetTag ?? null,
+          regions,
+          problems,
+        };
+      }
+
+      case 'pin-region': {
+        // Pin by region id using a verified manifest, so a key never has to be
+        // copied by hand — and cannot be pasted wrong.
+        const regionId = String(request.regionId ?? '');
+        if (!regionId) throw new Error('pin-region requires regionId');
+
+        const loaded =
+          catalogState ??
+          (catalogState = await loadCatalog({
+            cachePath: dirs.catalog,
+            url: catalogUrl,
+            now: now(),
+            log,
+          }));
+        const { manifests } = mergeManifests({
+          catalog: loaded.catalog,
+          gossiped: [...gossipedManifests.values()],
+        });
+        const found = manifests.get(regionId);
+        if (!found) {
+          throw new Error(
+            `no verified manifest for ${regionId}: publish one from Polaris Maps, or pin it with an explicit key`,
+          );
+        }
+        return pinRegion({
+          regionId,
+          driveKey: found.manifest.driveKey,
+          version: found.manifest.version,
+          bytes: found.manifest.bytes,
+        });
+      }
+
+      case 'evict-idle': {
+        const idle = planIdleEviction(
+          currentDrives().map((d) => ({
+            regionId: d.regionId,
+            bytes: Number(d.bytes) || 0,
+            lastRequestedAt: demand[d.regionId]?.lastRequestedAt ?? 0,
+            pinned: pins.some((p) => p.regionId === d.regionId),
+          })),
+          { now: now(), idleEvictionDays: config.idleEvictionDays },
+        );
+        return { evicted: idle };
+      }
+
+      case 'refresh':
+        await publishStatus({ force: true });
+        return { publishedAt: now() };
+
+      case 'catalog':
+      case 'refresh-catalog': {
+        // One loader for both: `refresh-catalog` just refuses the cache. The result
+        // carries verified entries *and* the rejected ones with reasons, so the
+        // picker can show "advertised but not trusted" rather than hide it.
+        const loaded = await loadCatalog({
+          cachePath: dirs.catalog,
+          url: catalogUrl,
+          now: now(),
+          force: request.cmd === 'refresh-catalog',
+          log,
+        });
+        catalogState = loaded;
+        const { pinnable, rejected } = loaded.catalog
+          ? pinnableRegions(loaded.catalog)
+          : { pinnable: [], rejected: [] };
+
+        const pinned = new Set(pins.map((p) => p.regionId));
+        return {
+          fetchedAt: loaded.fetchedAt,
+          source: loaded.source,
+          error: loaded.error,
+          regions: pinnable.map((region) => ({ ...region, pinned: pinned.has(region.regionId) })),
+          rejected,
+        };
+      }
+
+      case 'pin-region': {
+        // Pin by region id using the verified manifest, so a key never has to be
+        // copied by hand (and cannot be pasted wrong).
+        const regionId = String(request.regionId ?? '');
+        if (!regionId) throw new Error('pin-region requires regionId');
+        const loaded =
+          catalogState ??
+          (catalogState = await loadCatalog({
+            cachePath: dirs.catalog,
+            url: catalogUrl,
+            now: now(),
+            log,
+          }));
+        if (!loaded.catalog) {
+          throw new Error(
+            `the region catalog is unavailable${loaded.error ? ` (${loaded.error})` : ''}`,
+          );
+        }
+        const { pinnable, rejected } = pinnableRegions(loaded.catalog);
+        const region = pinnable.find((entry) => entry.regionId === regionId);
+        if (!region) {
+          const why = rejected.find((entry) => entry.regionId === regionId)?.reason;
+          throw new Error(
+            why
+              ? `cannot pin ${regionId}: ${why}`
+              : `${regionId} is not in the catalog with a signed manifest`,
+          );
+        }
+        return pinRegion({
+          regionId: region.regionId,
+          driveKey: region.driveKey,
+          version: region.version,
+          bytes: region.bytes,
+        });
+      }
+
       case 'shutdown':
         // A user asking the relay to quit means quit — stop seeding, then leave.
         // The reply is scheduled, not returned-and-forgotten: the socket has to
@@ -610,6 +760,13 @@ export async function startDaemon({
     bus = await busFactory({ relayPubkey: identity.publicKey });
     bus.subscribeCommands?.(identity.publicKey, (raw) => {
       void applyRemoteCommand(raw);
+    });
+    // Manifests published by devices are how the desktop learns canonical keys for
+    // regions the bundled set does not cover. Verified in `mergeManifests`, not here.
+    bus.subscribeManifests?.((manifest) => {
+      if (!manifest || typeof manifest !== 'object' || !manifest.regionId) return;
+      gossipedManifests.set(String(manifest.regionId), manifest);
+      catalogState = null; // force a re-merge on the next catalog read
     });
   } catch (err) {
     noteError(`gossip channel unavailable: ${err instanceof Error ? err.message : String(err)}`);

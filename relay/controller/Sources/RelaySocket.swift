@@ -108,9 +108,15 @@ enum RelaySocket {
     }
 
     /// `--selftest`: prove the socket client works without a GUI.
-    static func selfTest() -> Int32 {
+    ///
+    /// With `--catalog` it exercises the catalog path instead (fetch, verify,
+    /// decode every region), which is the code the map browser runs on.
+    static func selfTest(catalog: Bool = false) -> Int32 {
         do {
-            let status = try requestBlocking(["cmd": "status"], timeout: 8)
+            let status = try requestBlocking(
+                catalog ? ["cmd": "catalog"] : ["cmd": "status"],
+                timeout: catalog ? 30 : 8
+            )
             let data = try JSONSerialization.data(
                 withJSONObject: status,
                 options: [.prettyPrinted, .sortedKeys]

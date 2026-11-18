@@ -24,6 +24,8 @@ const HELP = `polaris-relay — Polaris Maps desktop seeder
 Usage:
   polaris-relay serve                    run the daemon (this is what launchd runs)
   polaris-relay status [--json]          show seeding state
+  polaris-relay regions                  list pinnable regions from the signed catalog
+  polaris-relay pin-region <regionId>    pin using the region's verified manifest
   polaris-relay pin <regionId> <driveKey> [--version <v>] [--bytes <n>]
   polaris-relay unpin <regionId>
   polaris-relay pause | resume
@@ -90,6 +92,56 @@ async function main() {
         return;
       }
       printStatus(status);
+      return;
+    }
+
+    case 'regions': {
+      const result = await controlRequest(
+        dirs.controlSocket,
+        { cmd: args.includes('--refresh') ? 'refresh-catalog' : 'catalog' },
+        { timeoutMs: 30_000 },
+      );
+      if (args.includes('--json')) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      const pinnable = result.regions.filter((region) => region.pinnable);
+      process.stdout.write(
+        `${result.regions.length} region(s) in the catalog, ${pinnable.length} with a verified ` +
+          `manifest (catalog: ${result.source}${result.error ? `, ${result.error}` : ''})\n`,
+      );
+      for (const region of pinnable) {
+        process.stdout.write(
+          `  ${region.regionId.padEnd(34)} ${region.name.slice(0, 26).padEnd(28)} ` +
+            `${formatBytes(region.bytes)}  ${region.manifestSource}${region.pinned ? '  (pinned)' : ''}\n`,
+        );
+      }
+      const withoutManifest = result.regions.length - pinnable.length;
+      if (withoutManifest > 0) {
+        process.stdout.write(
+          `  … ${withoutManifest} more region(s) advertised without a signed manifest yet\n`,
+        );
+      }
+      for (const problem of result.problems ?? []) {
+        process.stdout.write(`  ! ${problem.regionId} (${problem.source}): ${problem.reason}\n`);
+      }
+      return;
+    }
+
+    case 'pin-region': {
+      const regionId = args[1];
+      if (!regionId) throw new Error('pin-region requires a region id');
+      process.stdout.write(
+        `${JSON.stringify(
+          await controlRequest(
+            dirs.controlSocket,
+            { cmd: 'pin-region', regionId },
+            { timeoutMs: 30_000 },
+          ),
+          null,
+          2,
+        )}\n`,
+      );
       return;
     }
 
@@ -249,6 +301,13 @@ async function main() {
       process.stderr.write(`unknown command: ${command}\n\n${HELP}`);
       process.exitCode = 2;
   }
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value === 0) return 'size unknown';
+  if (value < 1024 ** 3) return `${Math.round(value / 1024 ** 2)} MB`;
+  return `${(value / 1024 ** 3).toFixed(1)} GiB`;
 }
 
 /** Human-readable status, sized for a menu bar or a terminal. */

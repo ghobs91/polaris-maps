@@ -20,6 +20,7 @@ import { unwrapBody } from './protocol.mjs';
 const DEFAULT_GUN_PEERS = ['wss://try.axe.eco/gun'];
 
 const NS_ROOT = 'polaris';
+const NS_MANIFESTS = 'region-manifests';
 const NS_RELAYS = 'relays';
 const NS_COMMANDS = 'relay-commands';
 const NS_ACKS = 'relay-acks';
@@ -91,6 +92,31 @@ export async function createRelayBus({ peers, log = () => {}, onConnected } = {}
             onCommand(record);
           } catch (err) {
             log(`command handler threw: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        });
+    },
+
+    /**
+     * Subscribe to signed region manifests published by devices.
+     *
+     * Two levels of `.map()` because the app publishes at
+     * `polaris/region-manifests/<regionId>/<publisherPubkey>`. Verification happens
+     * in `mergeManifests` — an open gossip namespace is exactly where an unsigned
+     * key would arrive from, so nothing here is trusted.
+     */
+    subscribeManifests(onManifest) {
+      gun
+        .get(NS_ROOT)
+        .get(NS_MANIFESTS)
+        .map()
+        .map()
+        .on((value) => {
+          const record = unwrapBody(value);
+          if (!record) return;
+          try {
+            onManifest(record);
+          } catch (err) {
+            log(`manifest handler threw: ${err instanceof Error ? err.message : String(err)}`);
           }
         });
     },

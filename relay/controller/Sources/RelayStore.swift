@@ -18,6 +18,8 @@ final class RelayStore: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var lastOutcome: String?
     @Published private(set) var lastRefreshed: Date?
+    /// Last catalog load error, shown by the catalog sheet rather than the dashboard.
+    @Published var lastCatalogError: String?
 
     private var pollTask: Task<Void, Never>?
 

@@ -25,7 +25,7 @@ struct PolarisRelayApp: App {
         // `--selftest` exercises the socket client and the status decoding without
         // a GUI, so the installer and CI can prove the app can talk to the daemon.
         if CommandLine.arguments.contains("--selftest") {
-            exit(RelaySocket.selfTest())
+            exit(RelaySocket.selfTest(catalog: CommandLine.arguments.contains("--catalog")))
         }
     }
 
