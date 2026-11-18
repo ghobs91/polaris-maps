@@ -53,11 +53,31 @@ so re-run it after moving the repository or changing Node.
 v1 runs the relay from this checkout. A self-contained `.app`/`.pkg` with an
 embedded Node runtime is tracked in the relay change's tasks.
 
-## Menu-bar controller (optional)
+## The macOS app
+
+There is a real macOS app: a menu-bar icon with a dashboard window. It talks to the
+daemon over the local control socket, so it needs no network, no Gun relay and no
+iOS app — the two are on the same machine.
 
 ```bash
-relay/controller/build.sh
-open "relay/controller/build/Polaris Relay.app"
+relay/controller/build.sh                      # build
+open "relay/controller/build/Polaris Relay.app" # run the build output
+```
+
+`install.sh` does this for you: builds it, copies it to
+`~/Applications/Polaris Relay.app`, registers it as a login item and opens it.
+
+The dashboard covers the whole relay: serving state and pause reason, power, uptime,
+what it served today, regions seeded (peers, size, last requested, unpin), budgets
+(store limit, monthly upload cap, max peers), the battery/metered switches,
+idle-drop, and the phones authorized to control it (with revoke). The window does
+not open at login — the icon is there and the window is on demand.
+
+`--selftest` exercises the socket client and the status decoding without a GUI,
+which is how the install can be checked without clicking anything:
+
+```bash
+"$HOME/Applications/Polaris Relay.app/Contents/MacOS/PolarisRelay" --selftest
 ```
 
 It shows whether the relay is serving, why it is paused, what it served today, and

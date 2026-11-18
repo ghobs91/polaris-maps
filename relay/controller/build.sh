@@ -44,7 +44,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-swiftc -O -o "$BINARY" "$HERE/main.swift" -framework AppKit
+# Multiple sources with a SwiftUI `@main` need `-parse-as-library`, and Swift 5
+# language mode keeps the build free of Swift 6 strict-concurrency errors in code
+# this small.
+swiftc -O -parse-as-library -swift-version 5 \
+  -o "$BINARY" \
+  "$HERE/Sources/"*.swift \
+  -framework AppKit -framework SwiftUI
 chmod +x "$BINARY"
 
 # Ad-hoc signature: proves the binary is intact. Real distribution needs a
@@ -53,4 +59,5 @@ codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "Built $APP"
 echo "Run it:   open \"$APP\""
+echo "Dashboard:   "$APP/Contents/MacOS/PolarisRelay" --selftest   # prove it can read the daemon"
 echo "Quitting it stops the relay: seeding ends, the daemon exits and the launch agent is disabled."

@@ -77,6 +77,9 @@ chmod 644 "$PLIST"
 # loaded, but it is asynchronous: bootstrapping in the same breath can fail with
 # `Bootstrap failed: 5: Input/output error` because the old job is still going
 # away. Retry instead of reporting a scary error the user cannot act on.
+# `enable` must come first: quitting the relay from the menu bar disables the label,
+# and `bootstrap` on a disabled job fails with the same opaque error 5.
+launchctl enable "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 bootstrapped=0
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
@@ -87,10 +90,10 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 if [ "$bootstrapped" != "1" ]; then
-  echo "warning: could not load $LABEL automatically. Run:" >&2
-  echo "  launchctl bootstrap $DOMAIN \"$PLIST\"" >&2
+  # Already loaded (bootstrap reports "already bootstrapped" as an error): a
+  # kickstart is the right way to make it run.
+  launchctl kickstart -k "$DOMAIN/$LABEL" 2>/dev/null || true
 fi
-launchctl enable "$DOMAIN/$LABEL" 2>/dev/null || true
 
 echo
 # A previously clean exit leaves the agent loaded but stopped (that is how an
@@ -123,8 +126,8 @@ if [ "${SKIP_CONTROLLER:-0}" != "1" ]; then
   <string>$CONTROLLER_LABEL</string>
   <!-- Launched through LaunchServices, not as a bare binary: launchd refuses to
        bootstrap an agent whose program is an .app executable ("Bootstrap failed:
-       5: Input/output error"), and going through `open` is also what gives the
-       app a proper GUI session. -->
+       5: Input/output error"), and going through /usr/bin/open is also what
+       gives the app a proper GUI session. -->
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/open</string>
@@ -140,9 +143,11 @@ if [ "${SKIP_CONTROLLER:-0}" != "1" ]; then
   <key>StandardErrorPath</key>
   <string>$LOG_DIR/controller.error.log</string>
 </dict>
+</plist>
 PLIST
   chmod 644 "$CONTROLLER_PLIST"
 
+  launchctl enable "$DOMAIN/$CONTROLLER_LABEL" 2>/dev/null || true
   launchctl bootout "$DOMAIN/$CONTROLLER_LABEL" 2>/dev/null || true
   pkill -f "PolarisRelay" 2>/dev/null || true
   sleep 1
@@ -154,8 +159,11 @@ PLIST
     fi
     sleep 1
   done
-  if [ "$controller_loaded" = "1" ]; then
-    launchctl enable "$DOMAIN/$CONTROLLER_LABEL" 2>/dev/null || true
+  if [ "$controller_loaded" != "1" ]; then
+    launchctl kickstart -k "$DOMAIN/$CONTROLLER_LABEL" 2>/dev/null || true
+  fi
+  sleep 2
+  if launchctl print "$DOMAIN/$CONTROLLER_LABEL" >/dev/null 2>&1; then
     echo "Menu bar app installed at $CONTROLLER_DEST (look for the antenna icon)."
   else
     echo "Menu bar app installed at $CONTROLLER_DEST but not started. Open it once:"

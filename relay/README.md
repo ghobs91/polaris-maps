@@ -10,20 +10,20 @@ The relay replicates **canonical region packs read-only** over Hyperswarm/Hyperd
 
 ## Layout
 
-| Path               | What it is                                                       |
-| ------------------ | ---------------------------------------------------------------- |
-| `src/cli.mjs`      | `serve` (the daemon launchd runs) and the `ctl` commands         |
-| `src/daemon.mjs`   | Wiring: pins, power, budgets, control socket, announcements      |
-| `src/control.mjs`  | Local control plane — Unix socket, newline-delimited JSON        |
-| `src/budgets.mjs`  | Egress accounting, monthly cap, token bucket                     |
-| `src/demand.mjs`   | Per-drive demand and LRU-by-demand eviction                      |
-| `src/power.mjs`    | `pmset` parsing and the pause matrix                             |
-| `src/config.mjs`   | Defaults, validation, clamping                                   |
-| `src/state.mjs`    | Pinned regions and usage counters (atomic JSON)                  |
-| `src/announce.mjs` | Signed availability announcements                                |
-| `launchd/`         | Agent template, installer, uninstaller                           |
-| `controller/`      | SwiftUI/AppKit menu-bar controller (built with `swiftc`)         |
-| `test/`            | `node --test` suites (pure modules + a socket-level daemon test) |
+| Path               | What it is                                                           |
+| ------------------ | -------------------------------------------------------------------- |
+| `src/cli.mjs`      | `serve` (the daemon launchd runs) and the `ctl` commands             |
+| `src/daemon.mjs`   | Wiring: pins, power, budgets, control socket, announcements          |
+| `src/control.mjs`  | Local control plane — Unix socket, newline-delimited JSON            |
+| `src/budgets.mjs`  | Egress accounting, monthly cap, token bucket                         |
+| `src/demand.mjs`   | Per-drive demand and LRU-by-demand eviction                          |
+| `src/power.mjs`    | `pmset` parsing and the pause matrix                                 |
+| `src/config.mjs`   | Defaults, validation, clamping                                       |
+| `src/state.mjs`    | Pinned regions and usage counters (atomic JSON)                      |
+| `src/announce.mjs` | Signed availability announcements                                    |
+| `launchd/`         | Agent template, installer, uninstaller                               |
+| `controller/`      | macOS app: menu-bar icon + SwiftUI dashboard over the control socket |
+| `test/`            | `node --test` suites (pure modules + a socket-level daemon test)     |
 
 The seeding rules themselves are **not** here: they live in `backend/seed-core.mjs` and are shared with the Bare worklet on the devices, so the two runtimes cannot disagree about canonical keys or read-only replication.
 
