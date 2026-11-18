@@ -125,3 +125,72 @@ export function applyPin(pins, { regionId, version, driveKey }, now) {
 export function applyUnpin(pins, regionId) {
   return pins.filter((p) => p.regionId !== regionId);
 }
+
+// ── Authorized devices ──────────────────────────────────────────────
+//
+// Who may stop this relay's seeding from their phone. Kept as a plain list in a
+// 0600 file so a user can audit and edit it without a tool: the control channel is
+// unauthenticated gossip, so this list is the entire authorization model.
+
+/** @typedef {{ pubkey: string, label: string, authorizedAt: number }} AuthorizedDevice */
+
+/**
+ * Load authorized devices.
+ *
+ * Invalid entries are dropped rather than repaired — an authorization that cannot
+ * be parsed is one that should not grant access.
+ *
+ * @param {string} file
+ * @returns {{ devices: AuthorizedDevice[], dropped: number }}
+ */
+export function loadDevices(file) {
+  const raw = readJson(file, { devices: [] });
+  const entries = Array.isArray(raw.devices) ? raw.devices : [];
+  /** @type {AuthorizedDevice[]} */
+  const devices = [];
+  let dropped = 0;
+
+  for (const entry of entries) {
+    const pubkey = typeof entry?.pubkey === 'string' ? entry.pubkey.toLowerCase() : '';
+    if (!/^[0-9a-f]{64}$/.test(pubkey)) {
+      dropped += 1;
+      continue;
+    }
+    devices.push({
+      pubkey,
+      label: typeof entry?.label === 'string' && entry.label ? entry.label : 'device',
+      authorizedAt: Number(entry?.authorizedAt) || 0,
+    });
+  }
+
+  return { devices, dropped };
+}
+
+/** @param {string} file @param {AuthorizedDevice[]} devices */
+export function saveDevices(file, devices) {
+  writeJsonAtomic(file, { devices });
+}
+
+/**
+ * Authorize a device. Authorizing twice keeps the original timestamp and label
+ * unless a new label is supplied, so the list reads as a history.
+ *
+ * @param {AuthorizedDevice[]} devices
+ * @param {{ pubkey: string, label?: string }} input
+ * @param {number} now
+ */
+export function applyAuthorize(devices, { pubkey, label }, now) {
+  const normalized = pubkey.toLowerCase();
+  const existing = devices.find((d) => d.pubkey === normalized);
+  const entry = {
+    pubkey: normalized,
+    label: label ?? existing?.label ?? 'device',
+    authorizedAt: existing?.authorizedAt || now,
+  };
+  return { devices: [...devices.filter((d) => d.pubkey !== normalized), entry], device: entry };
+}
+
+/** @param {AuthorizedDevice[]} devices @param {string} pubkey */
+export function applyRevoke(devices, pubkey) {
+  return devices.filter((d) => d.pubkey !== pubkey.toLowerCase());
+}

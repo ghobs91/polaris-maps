@@ -82,6 +82,8 @@ test('the canonical payload has a fixed field order and shape', () => {
       '',
       '12884901888',
       '1767225600000',
+      // statusHash: empty when the announcement carries no dashboard status.
+      '',
     ].join('\u0000'),
   );
 });

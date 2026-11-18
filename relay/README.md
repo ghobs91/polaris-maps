@@ -2,7 +2,7 @@
 
 An always-on desktop seeder for the Polaris Maps P2P network.
 
-The relay replicates **canonical region packs read-only** over Hyperswarm/Hyperdrive, so other devices (primarily phones) can download 50–400 MB packs from a machine on mains power instead of from GitHub Releases or from each other's data plans. It runs as a per-user launch agent: it starts at login, restarts after a crash, and **keeps seeding when the Polaris Maps app — or its menu-bar controller — is quit**.
+The relay replicates **canonical region packs read-only** over Hyperswarm/Hyperdrive, so other devices (primarily phones) can download 50–400 MB packs from a machine on mains power instead of from GitHub Releases or from each other's data plans. It runs as a per-user launch agent: it starts at login, restarts after a crash, and **keeps seeding when the Polaris Maps app is quit**. Quitting the relay's own menu-bar app, by contrast, **stops it completely** — see below.
 
 - Why this exists and what it trades off: `docs/decisions/0001-desktop-relay-primary-seeder.md`
 - Design, budgets, announcement format, phasing: `openspec/changes/add-desktop-relay-seeder/design.md`

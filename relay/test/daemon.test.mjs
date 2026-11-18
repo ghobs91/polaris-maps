@@ -8,6 +8,24 @@ import { controlRequest } from '../src/control.mjs';
 import { startDaemon } from '../src/daemon.mjs';
 import { loadSeeds, saveSeeds, applyPin, applyUnpin, loadUsage, saveUsage } from '../src/state.mjs';
 
+/**
+ * A bus stand-in. Tests must never reach the real Gun network: it keeps sockets
+ * open (so the test process never exits) and would make the suite depend on a
+ * third-party relay being up.
+ */
+function stubBus() {
+  const published = [];
+  const acks = [];
+  return {
+    published,
+    acks,
+    publishStatus: (record) => published.push(record),
+    publishAck: (ack) => acks.push(ack),
+    subscribeCommands: (_relayPubkey, _handler) => {},
+    close: () => {},
+  };
+}
+
 /** A swarm stand-in: the daemon's contract with it is on/join/connections. */
 function stubSwarm() {
   return {
@@ -33,6 +51,7 @@ test('the daemon serves, pins, pauses and resumes over the control socket', asyn
     log: () => {},
     overrides: {
       createSwarm: stubSwarm,
+      createBus: stubBus,
       readPowerState: async () => ({ power: 'ac', lowPowerMode: false }),
     },
   });
@@ -118,6 +137,7 @@ test('on battery the daemon stops serving and reports why, unless opted in', asy
     log: () => {},
     overrides: {
       createSwarm: stubSwarm,
+      createBus: stubBus,
       readPowerState: async () => ({ power: 'battery', lowPowerMode: false }),
     },
   });
@@ -144,6 +164,7 @@ test('a second daemon on the same root replaces the stale socket', async () => {
 
   const overrides = {
     createSwarm: stubSwarm,
+    createBus: stubBus,
     readPowerState: async () => ({ power: 'ac', lowPowerMode: false }),
   };
 
@@ -213,4 +234,156 @@ test('usage state survives a round trip and tolerates a missing file', () => {
     servedBytes24h: 42,
   });
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('shutdown acknowledges before stopping, so a caller can tell it from a crash', async () => {
+  const home = relayHome();
+  const { relayPaths } = await import('../src/paths.mjs');
+  const paths = relayPaths({ POLARIS_RELAY_HOME: home });
+
+  let shutdownRequested = false;
+  const daemon = await startDaemon({
+    paths,
+    log: () => {},
+    onShutdownRequest: () => {
+      shutdownRequested = true;
+    },
+    overrides: {
+      createSwarm: stubSwarm,
+      createBus: stubBus,
+      readPowerState: async () => ({ power: 'ac', lowPowerMode: false }),
+    },
+  });
+
+  try {
+    await controlRequest(paths.controlSocket, {
+      cmd: 'pin',
+      regionId: 'us-ny-new-york',
+      driveKey: 'ab'.repeat(32),
+    });
+
+    const reply = await controlRequest(paths.controlSocket, { cmd: 'shutdown' });
+    assert.deepEqual(reply, { stopping: true, serving: false });
+
+    // The teardown is scheduled so the reply above is written first.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(shutdownRequested, true);
+  } finally {
+    await daemon.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a signed command from an authorized device is applied and acknowledged', async () => {
+  const { schnorr } = await import('@noble/curves/secp256k1');
+  const { buildCommand, verifyAck } = await import('../src/protocol.mjs');
+
+  const home = relayHome();
+  const { relayPaths } = await import('../src/paths.mjs');
+  const paths = relayPaths({ POLARIS_RELAY_HOME: home });
+
+  const bus = stubBus();
+  const daemon = await startDaemon({
+    paths,
+    log: () => {},
+    overrides: {
+      createSwarm: stubSwarm,
+      createBus: () => bus,
+      readPowerState: async () => ({ power: 'ac', lowPowerMode: false }),
+    },
+  });
+
+  try {
+    const status = daemon.status();
+    const relayPubkey = status.relayPubkey;
+
+    // A device the user has authorized on the relay.
+    const devicePrivate = new Uint8Array(32).fill(0x44);
+    const devicePubkey = Buffer.from(schnorr.getPublicKey(devicePrivate)).toString('hex');
+    await controlRequest(paths.controlSocket, {
+      cmd: 'authorize',
+      devicePubkey,
+      label: "Andrew's iPhone",
+    });
+
+    const command = buildCommand({
+      commandId: 'cmd-authorized-1',
+      devicePubkey,
+      relayPubkey,
+      cmd: 'pause',
+      now: Date.now(),
+      privateKey: devicePrivate,
+    });
+
+    await daemon.applyRemoteCommand(command);
+
+    // Applied: the relay really did stop serving, and said so with a signed ack.
+    assert.equal(daemon.status().serving, false);
+    assert.equal(daemon.status().pauseReason, 'paused by user');
+
+    const ack = bus.acks.at(-1);
+    assert.ok(ack, 'the relay published an ack');
+    assert.equal(ack.ok, true);
+    assert.equal(ack.commandId, 'cmd-authorized-1');
+    assert.equal(verifyAck(ack, relayPubkey), true);
+
+    // Replaying the same command must not re-apply it.
+    const before = bus.acks.length;
+    await daemon.applyRemoteCommand(command);
+    assert.equal(bus.acks.length, before);
+    assert.equal(daemon.status().serving, false);
+  } finally {
+    await daemon.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a signed command from an unauthorized device is refused, not ignored', async () => {
+  const { schnorr } = await import('@noble/curves/secp256k1');
+  const { buildCommand, verifyAck } = await import('../src/protocol.mjs');
+
+  const home = relayHome();
+  const { relayPaths } = await import('../src/paths.mjs');
+  const paths = relayPaths({ POLARIS_RELAY_HOME: home });
+
+  const bus = stubBus();
+  const daemon = await startDaemon({
+    paths,
+    log: () => {},
+    overrides: {
+      createSwarm: stubSwarm,
+      createBus: () => bus,
+      readPowerState: async () => ({ power: 'ac', lowPowerMode: false }),
+    },
+  });
+
+  try {
+    const relayPubkey = daemon.status().relayPubkey;
+    const strangerPrivate = new Uint8Array(32).fill(0x55);
+    const strangerPubkey = Buffer.from(schnorr.getPublicKey(strangerPrivate)).toString('hex');
+
+    await daemon.applyRemoteCommand(
+      buildCommand({
+        commandId: 'cmd-stranger-1',
+        devicePubkey: strangerPubkey,
+        relayPubkey,
+        cmd: 'pause',
+        now: Date.now(),
+        privateKey: strangerPrivate,
+      }),
+    );
+
+    // The relay keeps serving: a stranger cannot stop somebody's seeder.
+    assert.equal(daemon.status().serving, true);
+
+    // But the refusal is acknowledged, so the dashboard can explain it.
+    const ack = bus.acks.at(-1);
+    assert.ok(ack, 'refusals are acknowledged');
+    assert.equal(ack.ok, false);
+    assert.match(ack.error, /not authorized/);
+    assert.equal(verifyAck(ack, relayPubkey), true);
+  } finally {
+    await daemon.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

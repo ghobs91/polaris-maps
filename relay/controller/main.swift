@@ -1,10 +1,18 @@
 // Polaris Relay — menu-bar controller.
 //
-// A controller, not the service. It reads state from the running daemon over the
-// local control socket and sends it commands. Quitting it does **not** stop
-// seeding: the daemon is a launch agent, and that separation is the entire point
-// of the design (a seeding process with an app's lifetime reproduces the phone's
-// problem at desktop scale).
+// The relay's own UI. It reads state from the daemon over the local control socket
+// and sends it commands.
+//
+// **Quitting this app stops the relay.** That is deliberate and it is the only
+// sane reading of a Quit: the user just told the relay's own window they are done,
+// so seeding must end, the daemon must exit cleanly, and the launch agent must be
+// unloaded and disabled so it does not quietly come back at the next login. A
+// menu-bar app that keeps uploading after Quit is precisely the hostile
+// background-service pattern this project should not ship.
+//
+// What stays true is the other half of the original rule: quitting *Polaris Maps*
+// does not stop the relay, because that is a different app and a different
+// intention. The two are separate processes for exactly that reason.
 //
 // Deliberately one file and no Xcode project: this is a status item with a menu,
 // and keeping it buildable with `swiftc` means it can be verified in CI-less
@@ -225,14 +233,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(disabled("Relay is not running"))
             menu.addItem(disabled(lastError ?? "unknown error"))
             menu.addItem(.separator())
+            menu.addItem(disabled("Not running — nothing is being seeded"))
+            menu.addItem(item("Start relay", #selector(startRelay)))
             menu.addItem(disabled("Install: relay/launchd/install.sh"))
         }
 
         menu.addItem(.separator())
-        // The distinction the whole design rests on: this quits the controller,
-        // not the seeder.
-        menu.addItem(disabled("Quitting this menu does not stop seeding"))
-        menu.addItem(item("Quit menu bar app", #selector(quit)))
+        menu.addItem(item("Quit Polaris Relay (stops seeding)", #selector(quit)))
         statusItem.menu = menu
     }
 
@@ -271,8 +278,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refresh()
     }
 
+    /// Quit means quit: stop seeding, then unload and disable the launch agent.
+    ///
+    /// Order matters. `shutdown` makes the daemon unseed and exit 0 (the agent's
+    /// `KeepAlive{SuccessfulExit:false}` then leaves it stopped); `bootout`
+    /// unloads it now; `disable` stops it returning at the next login. If the
+    /// daemon does not answer — wedged, or never started — the launchd calls still
+    /// run, so Quit cannot fail to stop seeding.
     @objc private func quit() {
+        _ = try? Control.request(["cmd": "shutdown"], timeout: 3)
+        for _ in 0..<25 {
+            if (try? Control.request(["cmd": "status"], timeout: 1)) == nil { break }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        runLaunchctl(["bootout", agentDomain, label])
+        runLaunchctl(["disable", "\(agentDomain)/\(label)"])
         NSApp.terminate(nil)
+    }
+
+    /// Start it again without a terminal, for people who quit by accident.
+    @objc private func startRelay() {
+        runLaunchctl(["enable", "\(agentDomain)/\(label)"])
+        runLaunchctl(["bootstrap", agentDomain, plistPath])
+        refresh()
+    }
+
+    private var agentDomain: String { "gui/\(getuid())" }
+    private let label = "app.polarismaps.relay"
+    private var plistPath: String {
+        (FileManager.default.homeDirectoryForCurrentUser.path as NSString)
+            .appendingPathComponent("Library/LaunchAgents/app.polarismaps.relay.plist")
+    }
+
+    @discardableResult
+    private func runLaunchctl(_ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        } catch {
+            return -1
+        }
     }
 }
 

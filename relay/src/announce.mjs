@@ -25,6 +25,7 @@
 
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
+import b4a from 'b4a';
 
 export const ANNOUNCEMENT_VERSION = 1;
 export const ANNOUNCEMENT_TTL_MS = 30 * 60 * 1000;
@@ -48,6 +49,7 @@ export const ANNOUNCEMENT_TTL_MS = 30 * 60 * 1000;
  * @param {string | null} announcement.pausedReason
  * @param {number} announcement.servedBytes24h
  * @param {number} announcement.updatedAt
+ * @param {string} announcement.statusHash
  * @returns {string}
  */
 export function announcementPayload(announcement) {
@@ -67,6 +69,7 @@ export function announcementPayload(announcement) {
     announcement.pausedReason ?? '',
     announcement.servedBytes24h,
     announcement.updatedAt,
+    announcement.statusHash ?? '',
   ]
     .map(String)
     .join('\u0000');
@@ -91,8 +94,15 @@ function bytesToHex(bytes) {
  * @param {string | null} input.pausedReason
  * @param {number} input.servedBytes24h
  * @param {number} input.updatedAt
+ * @param {object} [input.status] full dashboard status, hashed into the signature
  */
 export function buildAnnouncement(input) {
+  // The dashboard's status payload is carried as an opaque JSON string and bound
+  // to the signature by a hash. A string (not a nested field in the signed
+  // payload) so no ordering rule has to agree across runtimes: the client hashes
+  // the exact bytes it received.
+  const statusJson = input.status ? JSON.stringify(input.status) : '';
+  const statusHash = statusJson ? b4a.toString(sha256(b4a.from(statusJson)), 'hex') : '';
   const relayPubkey = bytesToHex(schnorr.getPublicKey(input.privateKey));
   const base = {
     v: ANNOUNCEMENT_VERSION,
@@ -107,6 +117,8 @@ export function buildAnnouncement(input) {
     pausedReason: input.pausedReason,
     servedBytes24h: input.servedBytes24h,
     updatedAt: input.updatedAt,
+    statusHash,
+    statusJson,
   };
 
   const digest = sha256(new TextEncoder().encode(announcementPayload(base)));
@@ -129,6 +141,14 @@ export function verifyAnnouncement(announcement) {
   }
   if (typeof announcement.signature !== 'string') return false;
   if (!Array.isArray(announcement.regions)) return false;
+
+  // The status payload must hash to what was signed, otherwise a reader could
+  // swap the dashboard numbers under a valid signature.
+  if (typeof announcement.statusHash === 'string' && announcement.statusHash) {
+    const json = typeof announcement.statusJson === 'string' ? announcement.statusJson : '';
+    const hash = b4a.toString(sha256(b4a.from(json)), 'hex');
+    if (hash !== announcement.statusHash) return false;
+  }
 
   try {
     const digest = sha256(new TextEncoder().encode(announcementPayload(announcement)));

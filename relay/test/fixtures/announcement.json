@@ -22,5 +22,7 @@
   "pausedReason": null,
   "servedBytes24h": 12884901888,
   "updatedAt": 1767225600000,
-  "signature": "3bd0fac3ef79fefc2497a64fb3b5ff4006b67fc67f164e3fd84031bc557ec2692ba1f2d04b06efca86d50924fd9d37bd6ef82b40388da634e6f3382d90b0ab1d"
+  "statusHash": "",
+  "statusJson": "",
+  "signature": "ebf97605dfa98d54efed4db1f8cdcef230e4b95b5073704dc6a9ffd2cda877d057abe273774230ab579800c62583a2e5f5c13f0f1f8d16c9203ee98ec9d1a6b1"
 }

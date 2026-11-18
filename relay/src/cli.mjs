@@ -27,7 +27,11 @@ Usage:
   polaris-relay pin <regionId> <driveKey> [--version <v>] [--bytes <n>]
   polaris-relay unpin <regionId>
   polaris-relay pause | resume
+  polaris-relay stop                     stop seeding and exit the daemon
   polaris-relay budget [--pack-store-gb <n>] [--egress-gb <n>] [--seed-on-battery <bool>]
+  polaris-relay devices                   list devices allowed to control this relay
+  polaris-relay authorize <pubkey> [--label <name>]
+  polaris-relay revoke <pubkey>
   polaris-relay seed --from <dir> <regionId>   develop: author a drive from a pack
   polaris-relay verify                   check a running daemon answers
 
@@ -56,18 +60,25 @@ async function main() {
   switch (command) {
     case 'serve': {
       const { startDaemon } = await import('./daemon.mjs');
-      const daemon = await startDaemon({ paths: dirs });
-
       let stopping = false;
-      const shutdown = async (signal) => {
+      const shutdown = async (reason) => {
         if (stopping) return;
         stopping = true;
-        process.stdout.write(`\n[relay] ${signal} received, stopping\n`);
+        process.stdout.write(`\n[relay] ${reason}, stopping\n`);
         await daemon.stop();
+        // Exit 0 on purpose: the launch agent uses KeepAlive{SuccessfulExit:false},
+        // so a clean exit leaves it stopped. A non-zero exit would look like a
+        // crash and be restarted — the opposite of what a user asking to quit
+        // wants.
         process.exit(0);
       };
-      process.on('SIGTERM', () => void shutdown('SIGTERM'));
-      process.on('SIGINT', () => void shutdown('SIGINT'));
+      const daemon = await startDaemon({
+        paths: dirs,
+        onShutdownRequest: () => void shutdown('shutdown requested'),
+      });
+
+      process.on('SIGTERM', () => void shutdown('SIGTERM received'));
+      process.on('SIGINT', () => void shutdown('SIGINT received'));
       process.stdout.write(`[relay] serving from ${dirs.root}\n`);
       return;
     }
@@ -102,6 +113,77 @@ async function main() {
       if (!regionId) throw new Error('unpin requires <regionId>');
       process.stdout.write(
         `${JSON.stringify(await controlRequest(dirs.controlSocket, { cmd: 'unpin', regionId }), null, 2)}\n`,
+      );
+      return;
+    }
+
+    case 'devices': {
+      const status = await controlRequest(dirs.controlSocket, { cmd: 'status' });
+      if (args.includes('--json')) {
+        process.stdout.write(`${JSON.stringify(status.devices ?? [], null, 2)}\n`);
+        return;
+      }
+      const devices = status.devices ?? [];
+      if (devices.length === 0) {
+        process.stdout.write(
+          'No device may control this relay yet.\n' +
+            "Open Polaris Maps → Settings → Desktop relay to get this phone's key, then run:\n" +
+            '  polaris-relay authorize <pubkey> --label "Andrew\'s iPhone"\n',
+        );
+        return;
+      }
+      for (const device of devices) {
+        process.stdout.write(
+          `${device.pubkey.slice(0, 12)}…  ${device.label}  authorized ${new Date(
+            device.authorizedAt,
+          ).toISOString()}\n`,
+        );
+      }
+      return;
+    }
+
+    case 'authorize': {
+      const pubkey = args[1];
+      if (!pubkey) throw new Error('authorize requires a device pubkey (64 hex characters)');
+      process.stdout.write(
+        `${JSON.stringify(
+          await controlRequest(dirs.controlSocket, {
+            cmd: 'authorize',
+            devicePubkey: pubkey,
+            label: flag(args, '--label'),
+          }),
+          null,
+          2,
+        )}\n`,
+      );
+      return;
+    }
+
+    case 'revoke': {
+      const pubkey = args[1];
+      if (!pubkey) throw new Error('revoke requires a device pubkey');
+      process.stdout.write(
+        `${JSON.stringify(
+          await controlRequest(dirs.controlSocket, { cmd: 'revoke', devicePubkey: pubkey }),
+          null,
+          2,
+        )}\n`,
+      );
+      return;
+    }
+
+    case 'stop': {
+      // Ask the daemon to stop, then confirm the socket is gone so the caller
+      // knows the seeding actually ended rather than the request merely landing.
+      const result = await controlRequest(dirs.controlSocket, { cmd: 'shutdown' });
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        if (!fs.existsSync(dirs.controlSocket)) break;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      process.stdout.write(
+        fs.existsSync(dirs.controlSocket)
+          ? `relay accepted the shutdown but the control socket is still present at ${dirs.controlSocket}\n`
+          : `relay stopped (was: ${JSON.stringify(result)})\n`,
       );
       return;
     }
@@ -181,8 +263,18 @@ function printStatus(status) {
     `store      ${gb(status.budgets.usedBytes)} of ${gb(status.budgets.packStoreBytes)}`,
   ];
   for (const drive of status.drives) {
-    lines.push(`  seeding  ${drive.regionId}  peers=${drive.peers}  ${gb(drive.bytes ?? 0)}`);
+    lines.push(
+      `  seeding  ${drive.regionId}  peers=${drive.peers}  ${gb(drive.bytes ?? 0)}` +
+        (drive.pinned ? '  (pinned)' : ''),
+    );
   }
+  lines.push(
+    `devices    ${
+      (status.devices ?? []).length === 0
+        ? 'none authorized — phones cannot control this relay'
+        : (status.devices ?? []).map((d) => d.label).join(', ')
+    }`,
+  );
   for (const warning of status.configWarnings ?? []) lines.push(`config     ${warning}`);
   process.stdout.write(`${lines.join('\n')}\n`);
 }

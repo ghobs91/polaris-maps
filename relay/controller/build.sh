@@ -53,4 +53,4 @@ codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "Built $APP"
 echo "Run it:   open \"$APP\""
-echo "It controls the relay over the local control socket; quitting it leaves seeding running."
+echo "Quitting it stops the relay: seeding ends, the daemon exits and the launch agent is disabled."
