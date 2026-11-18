@@ -258,9 +258,13 @@ export function mergeManifests({
  *
  * @param {object | null} catalog
  * @param {Map<string, { manifest: object, source: string, verified: boolean }>} manifests
- * @param {{ pinnedIds?: Set<string> }} [options]
+ * @param {{ pinnedIds?: Set<string>, trusted?: readonly string[] }} [options]
  */
-export function catalogRegions(catalog, manifests, { pinnedIds = new Set() } = {}) {
+export function catalogRegions(
+  catalog,
+  manifests,
+  { pinnedIds = new Set(), trusted = TRUSTED_REGION_PUBLISHERS } = {},
+) {
   const entries = Array.isArray(catalog?.regions) ? catalog.regions : [];
 
   return entries
@@ -269,7 +273,7 @@ export function catalogRegions(catalog, manifests, { pinnedIds = new Set() } = {
       const found = manifests.get(entry.id);
       const manifest = found?.manifest ?? null;
       const check = manifest
-        ? checkManifest(manifest)
+        ? checkManifest(manifest, trusted)
         : { ok: false, reason: 'no signed manifest published' };
       const pinnable = Boolean(found) && check.ok;
 

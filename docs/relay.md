@@ -150,6 +150,36 @@ node relay/src/cli.mjs pause | resume
 node relay/src/cli.mjs budget --pack-store-gb 25 --egress-gb 500 --seed-on-battery true
 ```
 
+## Seeding a region that has no manifest yet (relay as publisher)
+
+The published catalog lists 355 packs and signs a manifest for none of them, so
+"Pin this region" is greyed out for almost everything. The relay can fix that for
+itself: **Publish & seed** in the map catalog (or
+`polaris-relay publish-region <regionId>`) will
+
+1. download the region's assets from the catalog and verify each against its
+   published md5 — unverified bytes are never authored into a pack,
+2. author the **canonical writable drive** from those bytes, which fixes the key
+   every later seeder will replicate,
+3. sign a manifest binding `regionId → driveKey` with the relay's identity,
+4. publish it to the same manifest gossip devices already read, remember it in
+   `state/manifests.json`, and pin the result.
+
+What this trusts and what it does not:
+
+- **Content is still checked.** Canonical drives are writer-signed, every asset was
+  md5-verified before authoring, and clients verify checksums on download. A relay
+  can be stale or offline; it cannot serve different bytes under the same key.
+- **The key is trusted because you paired with that Mac.** A relay signs with its
+  own identity, which cannot be in the app's compiled-in allowlist. The phone
+  therefore accepts manifests from relays it has paired with (the QR code). Pairing
+  is the consent; revoking the pairing stops it.
+- **Re-publishing is refused** once a verified manifest exists for a region, so two
+  publishers cannot advertise two discovery keys for the same content.
+
+`polaris-relay regions --refresh` lists what is ready, where each key came from
+(`bundled`, `gossip` or a relay's own publication), and why the rest are not.
+
 ## Which regions are pinned
 
 Nothing is seeded until a region is pinned, and the pin carries the canonical pack

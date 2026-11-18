@@ -34,7 +34,13 @@ test('the trusted publisher list matches src/constants/regionPublishers.ts', () 
 test('the bundled manifests match src/constants/regionManifests.ts', () => {
   const source = read('src/constants/regionManifests.ts');
   for (const bundled of BUNDLED_REGION_MANIFESTS) {
-    for (const field of ['regionId', 'driveKey', 'discoveryKey', 'contentHash', 'publisherPubkey']) {
+    for (const field of [
+      'regionId',
+      'driveKey',
+      'discoveryKey',
+      'contentHash',
+      'publisherPubkey',
+    ]) {
       assert.ok(
         source.includes(String(bundled[field])),
         `${field} of ${bundled.regionId} is missing from the app's bundled manifests`,
@@ -110,7 +116,10 @@ test('every catalog region is listed, pinnable only where a manifest verifies', 
   assert.equal(paris.pinnable, false);
   assert.match(paris.reason, /no signed manifest/);
   // Size still comes from the assets, so the row is useful even when unpinnable.
-  assert.equal(regions.every((r) => typeof r.bytes === 'number'), true);
+  assert.equal(
+    regions.every((r) => typeof r.bytes === 'number'),
+    true,
+  );
 });
 
 test('the newest verified manifest wins for a region', async () => {

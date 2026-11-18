@@ -29,7 +29,9 @@ import { fileURLToPath } from 'node:url';
 import { createSeedCore } from '../../backend/seed-core.mjs';
 import { createTokenBucket, checkEgress, recordEgress } from './budgets.mjs';
 import { DEFAULT_CATALOG_URL, loadCatalog } from './catalog.mjs';
-import { catalogRegions, mergeManifests } from './manifests.mjs';
+import { fetchPack } from './fetchPack.mjs';
+import { catalogRegions, mergeManifests, TRUSTED_REGION_PUBLISHERS } from './manifests.mjs';
+import { buildManifestCore, signManifest, verifyOwnManifest } from './publisher.mjs';
 import { loadConfig } from './config.mjs';
 import { startControlServer } from './control.mjs';
 import { planEviction, planIdleEviction, touchDemand } from './demand.mjs';
@@ -41,9 +43,12 @@ import {
   applyRevoke,
   applyUnpin,
   loadDevices,
+  loadManifests,
   loadSeeds,
   loadUsage,
+  mergePublishedManifest,
   saveDevices,
+  saveManifests,
   saveSeeds,
   saveUsage,
 } from './state.mjs';
@@ -171,6 +176,11 @@ export async function startDaemon({
   let catalogState = null;
   /** Manifests learned over gossip, newest per region. */
   const gossipedManifests = new Map();
+  /** Manifests this relay published; it is the only party that knows them. */
+  let publishedManifests = loadManifests(dirs.manifests);
+  for (const manifest of publishedManifests) {
+    gossipedManifests.set(String(manifest.regionId), manifest);
+  }
   /**
    * An in-progress QR pairing: a one-time secret, valid for two minutes, that lets
    * one device authorize itself. Never persisted — a restart must not leave a live
@@ -178,6 +188,12 @@ export async function startDaemon({
    */
   let pairing = null;
   const catalogUrl = config.catalogUrl || process.env.POLARIS_CATALOG_URL || DEFAULT_CATALOG_URL;
+  /**
+   * Publishers this relay accepts: the shipped allowlist plus **itself**, because it
+   * publishes manifests for the packs it authors. Without this its own packs show up
+   * as "publisher is not trusted" in its own catalog.
+   */
+  const trustedPublishers = () => [...TRUSTED_REGION_PUBLISHERS, identity.publicKey];
   let powerState = {
     power: /** @type {'ac'|'battery'|'unknown'} */ ('unknown'),
     lowPowerMode: false,
@@ -569,9 +585,11 @@ export async function startDaemon({
         const { manifests, problems } = mergeManifests({
           catalog: loaded.catalog,
           gossiped: [...gossipedManifests.values()],
+          trusted: trustedPublishers(),
         });
         const regions = catalogRegions(loaded.catalog, manifests, {
           pinnedIds: new Set(pins.map((p) => p.regionId)),
+          trusted: trustedPublishers(),
         });
 
         return {
@@ -582,6 +600,109 @@ export async function startDaemon({
           regions,
           problems,
         };
+      }
+
+      case 'publish-region': {
+        // Relay-as-publisher: fetch the region's pack from the catalog (md5-verified
+        // as it lands), author the canonical drive from those bytes, sign a manifest
+        // for it, publish the manifest, and pin the result.
+        //
+        // Slow by nature (the pack has to arrive), so the caller is expected to
+        // treat this as a background action with a visible outcome rather than a
+        // button that answers immediately.
+        const regionId = String(request.regionId ?? '');
+        if (!regionId) throw new Error('publish-region requires regionId');
+
+        const loaded =
+          catalogState ??
+          (catalogState = await loadCatalog({
+            cachePath: dirs.catalog,
+            url: catalogUrl,
+            now: now(),
+            log,
+          }));
+        if (!loaded.catalog) {
+          throw new Error(
+            `the region catalog is unavailable${loaded.error ? ` (${loaded.error})` : ''}`,
+          );
+        }
+
+        const entry = (loaded.catalog.regions ?? []).find((region) => region?.id === regionId);
+        if (!entry) throw new Error(`${regionId} is not in the catalog`);
+
+        // Refuse to re-author a pack that already has a verified manifest: two
+        // publishers would advertise two discovery keys for the same content, which
+        // is precisely the failure canonical keys exist to prevent.
+        const merged = mergeManifests({
+          catalog: loaded.catalog,
+          gossiped: [...gossipedManifests.values()],
+          trusted: trustedPublishers(),
+        });
+        const existing = merged.manifests.get(regionId);
+        if (existing) {
+          return {
+            alreadyPublished: true,
+            manifest: existing.manifest,
+            source: existing.source,
+            pinned: pins.some((pin) => pin.regionId === regionId),
+          };
+        }
+
+        const packDir = path.join(dirs.packs, regionId);
+        const fetched = await fetchPack({
+          region: entry,
+          destDir: packDir,
+          log,
+        });
+        if (fetched.error) {
+          noteError(`could not fetch ${regionId}: ${fetched.error}`);
+          throw new Error(fetched.error);
+        }
+
+        // Publisher path: no `key`, so the seed core authors the canonical drive.
+        const authored = await core.seed({
+          regionId,
+          filesDir: packDir,
+          corestoreRoot: dirs.corestore,
+        });
+        seeded.add(regionId);
+
+        const core_ = buildManifestCore({
+          regionId,
+          version: entry.version ?? 'unknown',
+          driveKey: authored.key,
+          discoveryKey: authored.discoveryKey,
+          contentHash: authored.contentHash,
+          bytes: authored.bytes,
+          publisherPubkey: identity.publicKey,
+        });
+        const manifest = await signManifest(core_, identity.privateKey);
+
+        const own = verifyOwnManifest(manifest, trustedPublishers());
+        if (!own.ok) {
+          throw new Error(`the manifest this relay just signed does not verify: ${own.reason}`);
+        }
+
+        gossipedManifests.set(regionId, manifest);
+        publishedManifests = mergePublishedManifest(publishedManifests, manifest);
+        saveManifests(dirs.manifests, publishedManifests);
+        catalogState = null;
+        try {
+          bus?.publishManifest?.(manifest);
+        } catch (err) {
+          noteError(`manifest publish failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        const pinned = await pinRegion({
+          regionId,
+          driveKey: manifest.driveKey,
+          version: manifest.version,
+          bytes: manifest.bytes,
+        });
+
+        await publishStatus({ force: true });
+        log(`[relay] published manifest for ${regionId} (${manifest.driveKey.slice(0, 12)}…)`);
+        return { manifest, bytes: fetched.bytes, pinned: pinned.pin, alreadyPublished: false };
       }
 
       case 'pin-region': {
@@ -601,6 +722,7 @@ export async function startDaemon({
         const { manifests } = mergeManifests({
           catalog: loaded.catalog,
           gossiped: [...gossipedManifests.values()],
+          trusted: trustedPublishers(),
         });
         const found = manifests.get(regionId);
         if (!found) {
@@ -658,6 +780,109 @@ export async function startDaemon({
           regions: pinnable.map((region) => ({ ...region, pinned: pinned.has(region.regionId) })),
           rejected,
         };
+      }
+
+      case 'publish-region': {
+        // Relay-as-publisher: fetch the region's pack from the catalog (md5-verified
+        // as it lands), author the canonical drive from those bytes, sign a manifest
+        // for it, publish the manifest, and pin the result.
+        //
+        // Slow by nature (the pack has to arrive), so the caller is expected to
+        // treat this as a background action with a visible outcome rather than a
+        // button that answers immediately.
+        const regionId = String(request.regionId ?? '');
+        if (!regionId) throw new Error('publish-region requires regionId');
+
+        const loaded =
+          catalogState ??
+          (catalogState = await loadCatalog({
+            cachePath: dirs.catalog,
+            url: catalogUrl,
+            now: now(),
+            log,
+          }));
+        if (!loaded.catalog) {
+          throw new Error(
+            `the region catalog is unavailable${loaded.error ? ` (${loaded.error})` : ''}`,
+          );
+        }
+
+        const entry = (loaded.catalog.regions ?? []).find((region) => region?.id === regionId);
+        if (!entry) throw new Error(`${regionId} is not in the catalog`);
+
+        // Refuse to re-author a pack that already has a verified manifest: two
+        // publishers would advertise two discovery keys for the same content, which
+        // is precisely the failure canonical keys exist to prevent.
+        const merged = mergeManifests({
+          catalog: loaded.catalog,
+          gossiped: [...gossipedManifests.values()],
+          trusted: trustedPublishers(),
+        });
+        const existing = merged.manifests.get(regionId);
+        if (existing) {
+          return {
+            alreadyPublished: true,
+            manifest: existing.manifest,
+            source: existing.source,
+            pinned: pins.some((pin) => pin.regionId === regionId),
+          };
+        }
+
+        const packDir = path.join(dirs.packs, regionId);
+        const fetched = await fetchPack({
+          region: entry,
+          destDir: packDir,
+          log,
+        });
+        if (fetched.error) {
+          noteError(`could not fetch ${regionId}: ${fetched.error}`);
+          throw new Error(fetched.error);
+        }
+
+        // Publisher path: no `key`, so the seed core authors the canonical drive.
+        const authored = await core.seed({
+          regionId,
+          filesDir: packDir,
+          corestoreRoot: dirs.corestore,
+        });
+        seeded.add(regionId);
+
+        const core_ = buildManifestCore({
+          regionId,
+          version: entry.version ?? 'unknown',
+          driveKey: authored.key,
+          discoveryKey: authored.discoveryKey,
+          contentHash: authored.contentHash,
+          bytes: authored.bytes,
+          publisherPubkey: identity.publicKey,
+        });
+        const manifest = await signManifest(core_, identity.privateKey);
+
+        const own = verifyOwnManifest(manifest, trustedPublishers());
+        if (!own.ok) {
+          throw new Error(`the manifest this relay just signed does not verify: ${own.reason}`);
+        }
+
+        gossipedManifests.set(regionId, manifest);
+        publishedManifests = mergePublishedManifest(publishedManifests, manifest);
+        saveManifests(dirs.manifests, publishedManifests);
+        catalogState = null;
+        try {
+          bus?.publishManifest?.(manifest);
+        } catch (err) {
+          noteError(`manifest publish failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        const pinned = await pinRegion({
+          regionId,
+          driveKey: manifest.driveKey,
+          version: manifest.version,
+          bytes: manifest.bytes,
+        });
+
+        await publishStatus({ force: true });
+        log(`[relay] published manifest for ${regionId} (${manifest.driveKey.slice(0, 12)}…)`);
+        return { manifest, bytes: fetched.bytes, pinned: pinned.pin, alreadyPublished: false };
       }
 
       case 'pin-region': {

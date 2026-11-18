@@ -26,6 +26,7 @@ Usage:
   polaris-relay status [--json]          show seeding state
   polaris-relay regions                  list pinnable regions from the signed catalog
   polaris-relay pin-region <regionId>    pin using the region's verified manifest
+  polaris-relay publish-region <regionId>  fetch, author, sign and publish a manifest
   polaris-relay pin <regionId> <driveKey> [--version <v>] [--bytes <n>]
   polaris-relay unpin <regionId>
   polaris-relay pause | resume
@@ -126,6 +127,22 @@ async function main() {
       for (const problem of result.problems ?? []) {
         process.stdout.write(`  ! ${problem.regionId} (${problem.source}): ${problem.reason}\n`);
       }
+      return;
+    }
+
+    case 'publish-region': {
+      const regionId = args[1];
+      if (!regionId) throw new Error('publish-region requires a region id');
+      process.stdout.write(
+        `Fetching ${regionId} from the catalog, authoring the canonical drive and signing a ` +
+          `manifest. This can take a while for a large pack…\n`,
+      );
+      const result = await controlRequest(
+        dirs.controlSocket,
+        { cmd: 'publish-region', regionId },
+        { timeoutMs: 30 * 60_000 },
+      );
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       return;
     }
 

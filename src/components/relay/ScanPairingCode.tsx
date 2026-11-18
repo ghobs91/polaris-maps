@@ -6,6 +6,7 @@ import { Button } from '../common';
 import { spacing, typography } from '../../constants/theme';
 import { parsePairingPayload, type PairingCode } from '../../services/relay/protocol';
 import { pairRelayDevice } from '../../services/relay/relayClient';
+import { addPairedRelay } from '../../services/relay/pairedRelays';
 import { describeRefusal } from '../../services/relay/protocol';
 
 /**
@@ -77,7 +78,11 @@ export function ScanPairingCode({
           setCode(null);
           return;
         }
-        setStatus('Linked. This phone can now control the relay.');
+        // Trust this relay's signed manifests from now on: it publishes the
+        // canonical keys for the packs it seeds, and that is what lets the phone
+        // download from it peer-to-peer instead of the pack CDN.
+        addPairedRelay(pairing.relayPubkey);
+        setStatus('Linked. This phone can now control the relay and trust its pack manifests.');
         onPaired(pairing.relayPubkey);
       } catch (err) {
         setStatus(err instanceof Error ? err.message : String(err));

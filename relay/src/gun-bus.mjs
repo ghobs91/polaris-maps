@@ -104,6 +104,22 @@ export async function createRelayBus({ peers, log = () => {}, onConnected } = {}
     },
 
     /**
+     * Publish a signed region manifest so devices can find this pack's key.
+     *
+     * Path matches the app's reader: `polaris/region-manifests/<regionId>/<pubkey>`.
+     * Written as a `{ body }` envelope for the same reason as everything else here
+     * (Gun flattens arrays and deletes nulls).
+     */
+    publishManifest(manifest) {
+      gun
+        .get(NS_ROOT)
+        .get(NS_MANIFESTS)
+        .get(manifest.regionId)
+        .get(manifest.publisherPubkey)
+        .put({ body: JSON.stringify(manifest), updatedAt: Date.now() });
+    },
+
+    /**
      * Subscribe to signed region manifests published by devices.
      *
      * Two levels of `.map()` because the app publishes at

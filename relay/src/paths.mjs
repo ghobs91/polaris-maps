@@ -44,6 +44,7 @@ export function relayPaths(env = process.env) {
     seeds: path.join(root, 'state', 'seeds.json'),
     devices: path.join(root, 'state', 'devices.json'),
     catalog: path.join(root, 'state', 'catalog.json'),
+    manifests: path.join(root, 'state', 'manifests.json'),
     usage: path.join(root, 'state', 'usage.json'),
     controlSocket: path.join(root, 'control.sock'),
     logs: path.join(os.homedir(), 'Library', 'Logs', 'Polaris Relay'),

@@ -194,3 +194,42 @@ export function applyAuthorize(devices, { pubkey, label }, now) {
 export function applyRevoke(devices, pubkey) {
   return devices.filter((d) => d.pubkey !== pubkey.toLowerCase());
 }
+
+// ── Published manifests ─────────────────────────────────────────────
+//
+// A relay that publishes manifests is the only party that knows those keys, so it
+// has to remember them: the gossip network does not hand back what it took, and a
+// restart would otherwise leave the relay unable to seed (or even list) the packs it
+// authored itself.
+
+/**
+ * @param {string} file
+ * @returns {Array<Record<string, unknown>>}
+ */
+export function loadManifests(file) {
+  const raw = readJson(file, { manifests: [] });
+  const entries = Array.isArray(raw.manifests) ? raw.manifests : [];
+  return entries.filter(
+    (entry) =>
+      entry &&
+      typeof entry.regionId === 'string' &&
+      typeof entry.driveKey === 'string' &&
+      typeof entry.signature === 'string',
+  );
+}
+
+/** @param {string} file @param {Array<Record<string, unknown>>} manifests */
+export function saveManifests(file, manifests) {
+  // Bounded: one per region this relay has published, which is a handful in practice.
+  writeJsonAtomic(file, { manifests: manifests.slice(-200) });
+}
+
+/**
+ * Record a manifest, replacing any earlier one for the same region.
+ *
+ * @param {Array<Record<string, unknown>>} manifests
+ * @param {Record<string, unknown>} manifest
+ */
+export function mergePublishedManifest(manifests, manifest) {
+  return [...manifests.filter((entry) => entry.regionId !== manifest.regionId), manifest];
+}

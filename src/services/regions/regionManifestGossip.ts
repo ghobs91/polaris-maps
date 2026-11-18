@@ -17,6 +17,7 @@ import {
   type RegionManifest,
 } from './regionManifest';
 import { setRemoteRegionManifests } from './regionManifestResolver';
+import { getPairedRelays } from '../relay/pairedRelays';
 
 const STORE_KEY = 'region_manifests_v1';
 /** Total persisted remote manifests kept (bounded). */
@@ -139,6 +140,8 @@ export function startRegionManifestGossip(
   gun: GunLike,
   trusted: readonly string[] = TRUSTED_REGION_PUBLISHERS,
 ): () => void {
+  // `trusted` is supplied by the caller; `startRelayAwareManifestGossip` below is the
+  // variant the app uses, which also trusts relays this phone paired with.
   let manifests = loadPersistedManifests();
   setRemoteRegionManifests(manifests);
 
@@ -155,4 +158,15 @@ export function startRegionManifestGossip(
   for (const manifest of manifests) publishRegionManifest(gun, manifest);
 
   return () => {};
+}
+
+/**
+ * Gossip with the app's full trust set: the compiled-in publishers **plus** relays
+ * this phone paired with.
+ *
+ * Pairing is what makes relay-published manifests usable at all: the relay signs
+ * with its own identity, which by definition is not in the shipped allowlist.
+ */
+export function startRelayAwareManifestGossip(gun: GunLike): () => void {
+  return startRegionManifestGossip(gun, [...TRUSTED_REGION_PUBLISHERS, ...getPairedRelays()]);
 }

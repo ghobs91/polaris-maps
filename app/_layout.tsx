@@ -202,11 +202,11 @@ function RootLayoutInner() {
     const task = InteractionManager.runAfterInteractions(() => {
       void (async () => {
         try {
-          const [{ getGun }, { startRegionManifestGossip }] = await Promise.all([
+          const [{ getGun }, { startRelayAwareManifestGossip }] = await Promise.all([
             import('@/services/gun/init'),
             import('@/services/regions/regionManifestGossip'),
           ]);
-          stop = startRegionManifestGossip(getGun());
+          stop = startRelayAwareManifestGossip(getGun());
         } catch {
           // Gun unavailable — gossip is best-effort.
         }

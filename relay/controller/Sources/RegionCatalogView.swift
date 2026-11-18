@@ -24,6 +24,8 @@ struct RegionCatalogView: View {
     @State private var loading = true
     @State private var error: String?
     @State private var showingManual = false
+    @State private var publishing: String?
+    @State private var publishError: String?
 
     private var filtered: [CatalogRegion] {
         guard let regions = snapshot?.regions else { return [] }
@@ -54,6 +56,14 @@ struct RegionCatalogView: View {
                     regionList
                     mapPane
                 }
+            }
+            if let publishError {
+                Text(publishError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Divider()
             footer
@@ -163,11 +173,27 @@ struct RegionCatalogView: View {
                 .font(.caption)
                 .foregroundStyle(region.pinnable ? Color.secondary : Color.orange)
             HStack {
-                Button("Pin this region") { onPin(region.regionId) }
-                    .disabled(!region.pinnable || region.pinned)
+                if region.pinnable {
+                    Button("Pin this region") { onPin(region.regionId) }
+                        .disabled(region.pinned)
+                } else {
+                    // No manifest yet: this relay can become the publisher. It fetches
+                    // the pack from the catalog (md5-verified), authors the canonical
+                    // drive and signs a manifest for it.
+                    Button(publishing == region.regionId ? "Publishing…" : "Publish & seed") {
+                        Task { await publish(region) }
+                    }
+                    .disabled(region.pinned || publishing != nil)
+                }
                 Button("Advanced…") { showingManual = true }
                     .buttonStyle(.borderless)
                 Spacer()
+            }
+            if publishing == region.regionId {
+                Text("Fetching the pack, authoring the canonical drive and signing a manifest. Large regions take a few minutes.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(12)
@@ -212,6 +238,28 @@ struct RegionCatalogView: View {
     }
 
     // MARK: - Loading
+
+    /// Relay-as-publisher for one region, then refresh so the row flips to "ready".
+    private func publish(_ region: CatalogRegion) async {
+        publishing = region.regionId
+        publishError = nil
+        defer { publishing = nil }
+
+        do {
+            let raw = try await RelaySocket.request(
+                ["cmd": "publish-region", "regionId": region.regionId],
+                timeout: 1_800
+            )
+            if let manifest = raw["manifest"] as? [String: Any] {
+                let bytes = RelayStatus.number(manifest["bytes"])
+                publishError = "Published. This relay is now the canonical seeder for \(region.name) (\(ByteFormat.gib(bytes)))."
+            }
+            await reload(force: false)
+            selectedId = region.regionId
+        } catch {
+            publishError = error.localizedDescription
+        }
+    }
 
     private func reload(force: Bool) async {
         loading = true
