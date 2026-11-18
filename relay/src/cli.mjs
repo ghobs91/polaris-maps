@@ -188,6 +188,18 @@ function printStatus(status) {
 }
 
 main().catch((err) => {
-  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  const message = err instanceof Error ? err.message : String(err);
+  // The most common failure by far is running a control command before `serve`
+  // has ever started. Say what to do instead of printing a raw errno.
+  if (/ENOENT|ECONNREFUSED/.test(message)) {
+    process.stderr.write(
+      `The relay is not running (no control socket at ${relayPaths().controlSocket}).\n` +
+        'Start it for this session:  node relay/src/cli.mjs serve\n' +
+        'Or install it as a launch agent:  relay/launchd/install.sh\n',
+    );
+    process.exitCode = 1;
+    return;
+  }
+  process.stderr.write(`${message}\n`);
   process.exitCode = 1;
 });
