@@ -6,6 +6,7 @@ import {
   announcementPayload,
   isAnnouncementFresh,
   parseAnnouncement,
+  parseRelayStatus,
   verifyAnnouncement,
   type RelayAnnouncement,
 } from '../../src/services/relay/announcement';
@@ -178,5 +179,31 @@ describe('relayCoverageFor', () => {
     const coverage = relayCoverageFor([full], 'de-berlin', now);
     expect(coverage.covered).toBe(false);
     expect(coverage.reason).toMatch(/storage budget/);
+  });
+});
+
+describe('transport envelope', () => {
+  it('parses and verifies a record as the relay actually publishes it', () => {
+    // This is the shape that arrives from Gun: `{ body: "<json>", updatedAt }`.
+    // Reading it as the record itself made every relay invisible on the phone
+    // ("No relay found") while the relay was running and publishing fine.
+    const published = {
+      body: JSON.stringify(fixture()),
+      updatedAt: fixture().updatedAt,
+    };
+
+    const parsed = parseAnnouncement(published);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.relayPubkey).toBe(fixture().relayPubkey);
+    expect(verifyAnnouncement(parsed!)).toBe(true);
+    expect(parseRelayStatus(parsed!)).toBeNull();
+  });
+
+  it('still accepts a bare record from an older publisher', () => {
+    expect(parseAnnouncement(fixture())).not.toBeNull();
+  });
+
+  it('rejects a record whose body does not parse', () => {
+    expect(parseAnnouncement({ body: '{ broken', updatedAt: 1 })).toBeNull();
   });
 });

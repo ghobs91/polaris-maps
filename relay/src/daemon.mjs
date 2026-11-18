@@ -21,6 +21,7 @@
  * drift into different behaviour.
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,7 @@ import { loadConfig } from './config.mjs';
 import { startControlServer } from './control.mjs';
 import { planEviction, planIdleEviction, touchDemand } from './demand.mjs';
 import { decideServing, readPowerState } from './power.mjs';
-import { admitCommand, buildAck, unwrapBody } from './protocol.mjs';
+import { admitCommand, buildAck, PAIRING_TTL_MS, unwrapBody } from './protocol.mjs';
 import {
   applyAuthorize,
   applyPin,
@@ -170,6 +171,12 @@ export async function startDaemon({
   let catalogState = null;
   /** Manifests learned over gossip, newest per region. */
   const gossipedManifests = new Map();
+  /**
+   * An in-progress QR pairing: a one-time secret, valid for two minutes, that lets
+   * one device authorize itself. Never persisted — a restart must not leave a live
+   * capability behind — and marked `used` the moment it is redeemed.
+   */
+  let pairing = null;
   const catalogUrl = config.catalogUrl || process.env.POLARIS_CATALOG_URL || DEFAULT_CATALOG_URL;
   let powerState = {
     power: /** @type {'ac'|'battery'|'unknown'} */ ('unknown'),
@@ -179,6 +186,18 @@ export async function startDaemon({
   const errors = [];
   /** Command ids already applied. In-memory only: every command is idempotent, and the signed record's expiry bounds a re-apply after a restart. */
   const appliedCommandIds = new Set();
+  /**
+   * Recently published acks, re-published on every status tick.
+   *
+   * A Gun peer serves its current graph; it does not keep a history. A one-shot ack
+   * write was therefore invisible to a phone that subscribed a minute later — the
+   * command arrived (the relay keeps a live subscription) but the confirmation did
+   * not, which is exactly the "did my tap do anything?" hole. Re-publishing for 30
+   * minutes costs a few hundred bytes per tick and closes it.
+   */
+  const recentAcks = new Map();
+  const ACK_RETENTION_MS = 30 * 60 * 1000;
+  const ACK_RETENTION_MAX = 20;
 
   const bucket = createTokenBucket({
     bytesPerSecond: config.maxBitsPerSecond / 8,
@@ -301,6 +320,9 @@ export async function startDaemon({
         maxBitsPerSecond: config.maxBitsPerSecond,
         maxBitsPerSecondPerPeer: config.maxBitsPerSecondPerPeer,
       },
+      pairing: pairing
+        ? { active: !pairing.used && pairing.expiresAt > now(), expiresAt: pairing.expiresAt }
+        : null,
       preferences: {
         seedOnBattery: config.seedOnBattery,
         seedOnMetered: config.seedOnMetered,
@@ -348,8 +370,26 @@ export async function startDaemon({
 
     try {
       bus.publishStatus(announcement);
+      republishRecentAcks();
     } catch (err) {
       noteError(`announcement failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Re-send acks that are still inside the retention window (see `recentAcks`). */
+  function republishRecentAcks() {
+    if (!bus) return;
+    const cutoff = now() - ACK_RETENTION_MS;
+    for (const [commandId, ack] of recentAcks) {
+      if (ack.at < cutoff) {
+        recentAcks.delete(commandId);
+        continue;
+      }
+      try {
+        bus.publishAck(ack);
+      } catch {
+        /* the next tick retries */
+      }
     }
   }
 
@@ -656,6 +696,25 @@ export async function startDaemon({
         });
       }
 
+      case 'pairing-start': {
+        // The Mac app draws this secret as a QR code. Returned only over the local
+        // socket, so it can never be read off the gossip channel.
+        const secret = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('');
+        pairing = { secret, expiresAt: now() + PAIRING_TTL_MS, used: false };
+        return {
+          relayPubkey: identity.publicKey,
+          secret,
+          expiresAt: pairing.expiresAt,
+          payload: `polaris://pair?relay=${identity.publicKey}&secret=${secret}`,
+        };
+      }
+
+      case 'pairing-cancel':
+        pairing = null;
+        return { pairing: null };
+
       case 'shutdown':
         // A user asking the relay to quit means quit — stop seeding, then leave.
         // The reply is scheduled, not returned-and-forgotten: the socket has to
@@ -685,6 +744,7 @@ export async function startDaemon({
       authorizedDevices: devices.map((d) => d.pubkey),
       now: now(),
       appliedCommandIds,
+      pairing,
     });
 
     if (!admission.allowed) {
@@ -694,6 +754,19 @@ export async function startDaemon({
       if (admission.reason !== 'command was already applied' && bus) {
         sendAck(command, false, null, admission.reason);
       }
+      return;
+    }
+
+    // A pairing is redeemed exactly once, and authorizes the signing device.
+    if (command.cmd === 'pair') {
+      if (pairing) pairing = { ...pairing, used: true };
+      const label = String(command.args?.label ?? 'phone');
+      const applied = applyAuthorize(devices, { pubkey: command.devicePubkey, label }, now());
+      devices = applied.devices;
+      saveDevices(dirs.devices, devices);
+      log(`[relay] paired a device: ${label} (${command.devicePubkey.slice(0, 12)}…)`);
+      await publishStatus({ force: true });
+      sendAck(command, true, `paired as ${applied.device.pubkey.slice(0, 12)}`, null);
       return;
     }
 
@@ -723,18 +796,23 @@ export async function startDaemon({
 
   function sendAck(command, ok, result, error) {
     if (!bus) return;
+    const ack = buildAck({
+      commandId: command.commandId,
+      relayPubkey: identity.publicKey,
+      ok,
+      result,
+      error,
+      at: now(),
+      privateKey: identity.privateKey,
+    });
+    recentAcks.set(command.commandId, ack);
+    while (recentAcks.size > ACK_RETENTION_MAX) {
+      const oldest = [...recentAcks.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (!oldest) break;
+      recentAcks.delete(oldest[0]);
+    }
     try {
-      bus.publishAck(
-        buildAck({
-          commandId: command.commandId,
-          relayPubkey: identity.publicKey,
-          ok,
-          result,
-          error,
-          at: now(),
-          privateKey: identity.privateKey,
-        }),
-      );
+      bus.publishAck(ack);
     } catch (err) {
       noteError(`ack failed: ${err instanceof Error ? err.message : String(err)}`);
     }

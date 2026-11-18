@@ -11,6 +11,7 @@ struct DashboardView: View {
     @EnvironmentObject private var store: RelayStore
     @State private var showingCatalog = false
     @State private var showingManualPin = false
+    @State private var showingPairing = false
     @State private var confirmingShutdown = false
 
     var body: some View {
@@ -60,6 +61,10 @@ struct DashboardView: View {
             } onCancel: {
                 showingManualPin = false
             }
+        }
+        .sheet(isPresented: $showingPairing) {
+            PairPhoneSheet { showingPairing = false }
+                .environmentObject(store)
         }
         .alert("Stop the relay?", isPresented: $confirmingShutdown) {
             Button("Cancel", role: .cancel) {}
@@ -243,8 +248,8 @@ struct DashboardView: View {
         ) {
             if status.devices.isEmpty {
                 Text(
-                    "None. In Polaris Maps, open Settings → Offline maps → Desktop relay and run the "
-                        + "authorize command it shows."
+                    "None yet. Link a phone by showing it a QR code — that is the whole authorization "
+                        + "step, and it can be revoked here at any time."
                 )
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -269,6 +274,11 @@ struct DashboardView: View {
                     .padding(.vertical, 2)
                 }
             }
+            HStack {
+                Button("Link a phone…") { showingPairing = true }.disabled(store.busy)
+                Spacer()
+            }
+            .padding(.top, 4)
         }
     }
 

@@ -13,6 +13,7 @@ import {
 import { Stack } from 'expo-router';
 
 import { Button, SettingsGroup, SettingsRow } from '../src/components/common';
+import { ScanPairingCode } from '../src/components/relay/ScanPairingCode';
 import { useTheme } from '../src/contexts/ThemeContext';
 import { spacing, typography } from '../src/constants/theme';
 import { useRelayDashboard } from '../src/hooks/useRelayDashboard';
@@ -103,6 +104,7 @@ export default function RelayScreen() {
   const viewport = useMapStore((s) => s.viewport);
   const [pinningHere, setPinningHere] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   const styles = useMemo(
     () =>
@@ -239,7 +241,10 @@ export default function RelayScreen() {
               <Text style={styles.mono}>relay/launchd/install.sh</Text>
             </Text>
             <View style={styles.action}>
-              <Button title="Try again" variant="secondary" onPress={onRefresh} />
+              <Button title="Link this phone…" onPress={() => setScanning(true)} />
+            </View>
+            <View style={styles.action}>
+              <Button title="Try again" variant="outline" onPress={onRefresh} />
             </View>
           </View>
         )}
@@ -403,6 +408,15 @@ export default function RelayScreen() {
           />
         </SettingsGroup>
       </ScrollView>
+
+      <ScanPairingCode
+        visible={scanning}
+        onClose={() => setScanning(false)}
+        onPaired={() => {
+          setScanning(false);
+          onRefresh();
+        }}
+      />
     </>
   );
 }

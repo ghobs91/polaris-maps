@@ -387,3 +387,86 @@ test('a signed command from an unauthorized device is refused, not ignored', asy
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('QR pairing authorizes exactly one device, once', async () => {
+  const { schnorr } = await import('@noble/curves/secp256k1');
+  const { buildCommand, verifyAck } = await import('../src/protocol.mjs');
+
+  const home = relayHome();
+  const { relayPaths } = await import('../src/paths.mjs');
+  const paths = relayPaths({ POLARIS_RELAY_HOME: home });
+
+  const bus = stubBus();
+  const daemon = await startDaemon({
+    paths,
+    log: () => {},
+    overrides: {
+      createSwarm: stubSwarm,
+      createBus: () => bus,
+      readPowerState: async () => ({ power: 'ac', lowPowerMode: false }),
+    },
+  });
+
+  try {
+    const relayPubkey = daemon.status().relayPubkey;
+    const phonePrivate = new Uint8Array(32).fill(0x66);
+    const phonePubkey = Buffer.from(schnorr.getPublicKey(phonePrivate)).toString('hex');
+
+    // What the Mac shows as a QR code. Only the local socket hands out the secret.
+    const pairing = await controlRequest(paths.controlSocket, { cmd: 'pairing-start' });
+    assert.match(pairing.payload, /^polaris:\/\/pair\?relay=/);
+    assert.equal(daemon.status().pairing.active, true);
+    assert.equal(daemon.status().pairing.secret, undefined);
+
+    const pair = buildCommand({
+      commandId: 'pair-phone-1',
+      devicePubkey: phonePubkey,
+      relayPubkey,
+      cmd: 'pair',
+      args: { secret: pairing.secret, label: 'iPhone' },
+      now: Date.now(),
+      privateKey: phonePrivate,
+    });
+
+    await daemon.applyRemoteCommand(pair);
+    assert.equal(daemon.status().devices.length, 1);
+    assert.equal(daemon.status().devices[0].pubkey, phonePubkey);
+    assert.equal(daemon.status().devices[0].label, 'iPhone');
+    assert.equal(verifyAck(bus.acks.at(-1), relayPubkey), true);
+    // The code is spent.
+    assert.equal(daemon.status().pairing.active, false);
+
+    // The same QR code cannot pair a second device.
+    const otherPrivate = new Uint8Array(32).fill(0x77);
+    const otherPubkey = Buffer.from(schnorr.getPublicKey(otherPrivate)).toString('hex');
+    await daemon.applyRemoteCommand(
+      buildCommand({
+        commandId: 'pair-phone-2',
+        devicePubkey: otherPubkey,
+        relayPubkey,
+        cmd: 'pair',
+        args: { secret: pairing.secret, label: 'other' },
+        now: Date.now(),
+        privateKey: otherPrivate,
+      }),
+    );
+    assert.equal(daemon.status().devices.length, 1);
+    assert.match(bus.acks.at(-1).error ?? '', /already used/);
+
+    // And the paired phone can now control the relay.
+    await daemon.applyRemoteCommand(
+      buildCommand({
+        commandId: 'pause-after-pair',
+        devicePubkey: phonePubkey,
+        relayPubkey,
+        cmd: 'pause',
+        now: Date.now(),
+        privateKey: phonePrivate,
+      }),
+    );
+    assert.equal(daemon.status().serving, false);
+  } finally {
+    await daemon.stop();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

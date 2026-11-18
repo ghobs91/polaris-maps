@@ -36,6 +36,7 @@ export const RELAY_COMMANDS = [
   'set-budget',
   'evict-idle',
   'refresh',
+  'pair',
 ] as const;
 
 export type RelayCommandName = (typeof RELAY_COMMANDS)[number];
@@ -202,6 +203,39 @@ export function parseAck(value: unknown): RelayAck | null {
     at,
     signature: String(record.signature ?? ''),
   };
+}
+
+/**
+ * A pairing code, as the Mac draws it into a QR code.
+ *
+ *   polaris://pair?relay=<64 hex>&secret=<32 hex>
+ *
+ * The secret is a single-use, two-minute capability created on the Mac and never
+ * published: scanning it *is* the authorization, and redeeming it authorizes
+ * exactly one device.
+ */
+export interface PairingCode {
+  relayPubkey: string;
+  secret: string;
+}
+
+export function parsePairingPayload(text: string): PairingCode | null {
+  const trimmed = text.trim();
+  if (!trimmed.toLowerCase().startsWith('polaris://pair')) return null;
+
+  const queryStart = trimmed.indexOf('?');
+  if (queryStart === -1) return null;
+  const params = new Map<string, string>();
+  for (const pair of trimmed.slice(queryStart + 1).split('&')) {
+    const [key, value] = pair.split('=');
+    if (key && value) params.set(key.toLowerCase(), decodeURIComponent(value));
+  }
+
+  const relayPubkey = (params.get('relay') ?? '').toLowerCase();
+  const secret = (params.get('secret') ?? '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(relayPubkey)) return null;
+  if (!/^[0-9a-f]{16,64}$/.test(secret)) return null;
+  return { relayPubkey, secret };
 }
 
 /** Human sentence for a refused command, for the dashboard's toast/row. */

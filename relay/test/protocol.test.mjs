@@ -228,3 +228,81 @@ describe('unwrapBody', () => {
     }
   });
 });
+
+describe('pairing', () => {
+  const pairingContext = {
+    relayPubkey: 'cd'.repeat(32),
+    authorizedDevices: [],
+    now: NOW + 1_000,
+    pairing: { secret: 'ab'.repeat(16), expiresAt: NOW + 60_000, used: false },
+  };
+
+  const pairCommand = (overrides = {}) =>
+    buildCommand({
+      commandId: 'pair-0000001',
+      devicePubkey: device.publicKey,
+      relayPubkey: 'cd'.repeat(32),
+      cmd: 'pair',
+      args: { secret: 'ab'.repeat(16), label: 'iPhone' },
+      now: NOW,
+      privateKey: device.privateKey,
+      ...overrides,
+    });
+
+  it('admits an unauthorized device holding the secret — the QR is the consent', () => {
+    assert.deepEqual(admitCommand(pairCommand(), pairingContext), {
+      allowed: true,
+      reason: null,
+    });
+  });
+
+  it('refuses when no pairing is in progress', () => {
+    const admission = admitCommand(pairCommand(), { ...pairingContext, pairing: null });
+    assert.equal(admission.allowed, false);
+    assert.match(admission.reason, /no pairing is in progress/);
+  });
+
+  it('refuses a wrong secret', () => {
+    const admission = admitCommand(
+      pairCommand({ args: { secret: 'ff'.repeat(16), label: 'iPhone' } }),
+      pairingContext,
+    );
+    assert.equal(admission.allowed, false);
+    assert.match(admission.reason, /does not match/);
+  });
+
+  it('refuses an expired pairing code', () => {
+    const admission = admitCommand(pairCommand(), {
+      ...pairingContext,
+      now: NOW + 120_000,
+    });
+    assert.equal(admission.allowed, false);
+    assert.match(admission.reason, /expired/);
+  });
+
+  it('refuses a code that was already redeemed', () => {
+    const admission = admitCommand(pairCommand(), {
+      ...pairingContext,
+      pairing: { ...pairingContext.pairing, used: true },
+    });
+    assert.equal(admission.allowed, false);
+    assert.match(admission.reason, /already used/);
+  });
+
+  it('still requires a valid signature, so a stolen secret alone is not enough', () => {
+    const forged = { ...pairCommand(), signature: '00'.repeat(64) };
+    assert.equal(admitCommand(forged, pairingContext).allowed, false);
+  });
+
+  it('does not let pairing bypass the ordinary checks for other commands', () => {
+    const pause = buildCommand({
+      commandId: 'cmd-pairless',
+      devicePubkey: device.publicKey,
+      relayPubkey: 'cd'.repeat(32),
+      cmd: 'pause',
+      now: NOW,
+      privateKey: device.privateKey,
+    });
+    assert.equal(admitCommand(pause, pairingContext).allowed, false);
+  });
+});

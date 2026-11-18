@@ -32,6 +32,7 @@ Usage:
   polaris-relay stop                     stop seeding and exit the daemon
   polaris-relay budget [--pack-store-gb <n>] [--egress-gb <n>] [--seed-on-battery <bool>]
   polaris-relay devices                   list devices allowed to control this relay
+  polaris-relay pair                      start QR pairing, prints the link to show
   polaris-relay authorize <pubkey> [--label <name>]
   polaris-relay revoke <pubkey>
   polaris-relay seed --from <dir> <regionId>   develop: author a drive from a pack
@@ -191,6 +192,17 @@ async function main() {
           ).toISOString()}\n`,
         );
       }
+      return;
+    }
+
+    case 'pair': {
+      const started = await controlRequest(dirs.controlSocket, { cmd: 'pairing-start' });
+      process.stdout.write(
+        `Polaris Maps → Settings → Offline maps → Desktop relay → Link this phone\n` +
+          `and scan this, valid for ${Math.round(
+            (Number(started.expiresAt) - Date.now()) / 1000,
+          )} seconds:\n\n${started.payload}\n`,
+      );
       return;
     }
 

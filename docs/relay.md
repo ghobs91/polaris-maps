@@ -113,14 +113,30 @@ exposed. Two consequences the UI states rather than hides:
   running on your Mac. The relay itself keeps seeding regardless — local control
   (`polaris-relay …`) never depends on Gun.
 
-**Authorizing the phone.** A relay only obeys devices you list, so anyone who can
-write to that namespace cannot pause your seeder. The dashboard shows this
-phone's key and a ready-made command:
+## Linking a phone (QR)
+
+On the Mac: **Link a phone…** in the dashboard (or `polaris-relay pair`). It shows a
+QR code carrying the relay's key and a one-time secret:
+
+```
+polaris://pair?relay=<64 hex>&secret=<32 hex>
+```
+
+On the phone: Settings → Offline maps → Desktop relay → **Link this phone…**, and
+scan it. Scanning _is_ the authorization — nothing is granted until a camera is
+pointed at that window.
+
+- The secret is created on the Mac, returned **only over the local socket**, valid
+  for **two minutes**, and redeemable **once**. It never touches the gossip channel.
+- Redeeming authorizes the device whose key signed the request, and the request must
+  be signed — a stolen secret alone is not enough.
+- `polaris-relay devices` lists who can control the relay; **Revoke** in the Mac app
+  (or `polaris-relay revoke <pubkey>`) takes it back.
+
+Manual equivalent, if the camera path is unavailable:
 
 ```bash
 polaris-relay authorize <pubkey> --label "Andrew's iPhone"
-polaris-relay devices        # who can control it
-polaris-relay revoke <pubkey>
 ```
 
 ## Command line

@@ -50,7 +50,11 @@ export const COMMANDS = Object.freeze([
   'set-budget',
   'evict-idle',
   'refresh',
+  'pair',
 ]);
+
+/** How long a pairing secret is valid after the Mac shows its QR code. */
+export const PAIRING_TTL_MS = 2 * 60 * 1000;
 
 /**
  * Unwrap a record from its transport envelope.
@@ -237,6 +241,28 @@ export function admitCommand(command, context) {
     command.relayPubkey.toLowerCase() !== context.relayPubkey.toLowerCase()
   ) {
     return { allowed: false, reason: 'command is addressed to a different relay' };
+  }
+
+  // Pairing is the one command that does **not** require prior authorization: the
+  // QR code the Mac displayed is the authorization, and it is a single-use,
+  // short-lived bearer secret. Checking it here (not in the daemon) keeps "who may
+  // talk to this relay" in one place.
+  if (command.cmd === 'pair') {
+    const pairing = context.pairing;
+    if (!pairing || !pairing.secret) {
+      return { allowed: false, reason: 'no pairing is in progress on this relay' };
+    }
+    if (Number(pairing.expiresAt) <= context.now) {
+      return { allowed: false, reason: 'the pairing code expired — show a new one on the Mac' };
+    }
+    if (pairing.used) {
+      return { allowed: false, reason: 'that pairing code was already used' };
+    }
+    const supplied = String(command.args?.secret ?? '');
+    if (!supplied || supplied !== pairing.secret) {
+      return { allowed: false, reason: 'the pairing code does not match' };
+    }
+    return { allowed: true, reason: null };
   }
 
   if (!context.authorizedDevices.includes(command.devicePubkey.toLowerCase())) {

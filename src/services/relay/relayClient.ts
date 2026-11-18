@@ -34,6 +34,18 @@ const NS_ACKS = 'relay-acks';
 /** How long the UI waits for an ack before saying "no answer yet". */
 export const ACK_WAIT_MS = 25_000;
 
+/**
+ * How often an unanswered command is re-published.
+ *
+ * Gun peers serve their *current* graph and do not keep history, so a command
+ * published while the relay was reconnecting is simply gone — verified on a real
+ * relay: the same command succeeded when the Mac's subscription was live and
+ * vanished when it was not. Commands carry a stable id and the relay applies each id
+ * at most once, so re-publishing is safe, and it is the only thing that makes "scan
+ * the code and it works" true without polling infrastructure.
+ */
+export const COMMAND_RETRY_MS = 8_000;
+
 export interface SentCommand {
   commandId: string;
   cmd: RelayCommandName;
@@ -84,25 +96,57 @@ export async function sendRelayCommand(
   // still in flight, and a watcher attached afterwards would miss it.
   const ackPromise = waitForAck(gun, command.relayPubkey, commandId, timeoutMs);
 
-  try {
-    // Gun's TypeScript chain types are unusable for dynamic namespaces (the same
-    // reason `reputationService` and `editService` cast here).
-    (gun as unknown as { get: (key: string) => any })
-      .get(NS_ROOT)
-      .get(NS_COMMANDS)
-      .get(command.relayPubkey)
-      .get(commandId)
-      .put({ body: JSON.stringify(command), updatedAt: now });
-  } catch (err) {
-    logDiagnostic('relay', 'warn', 'Could not publish relay command', {
-      cmd,
-      message: err instanceof Error ? err.message : String(err),
-    });
-    return { ack: null, commandId };
-  }
+  const publish = () => {
+    try {
+      // Gun's TypeScript chain types are unusable for dynamic namespaces (the same
+      // reason `reputationService` and `editService` cast here).
+      (gun as unknown as { get: (key: string) => any })
+        .get(NS_ROOT)
+        .get(NS_COMMANDS)
+        .get(command.relayPubkey)
+        .get(commandId)
+        .put({ body: JSON.stringify(command), updatedAt: now });
+      return true;
+    } catch (err) {
+      logDiagnostic('relay', 'warn', 'Could not publish relay command', {
+        cmd,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  };
 
-  const ack = await ackPromise;
+  if (!publish()) return { ack: null, commandId };
+
+  // Re-publish until the ack arrives or the caller's timeout expires.
+  let retry: ReturnType<typeof setInterval> | null = setInterval(() => {
+    publish();
+  }, COMMAND_RETRY_MS);
+
+  const ack = await ackPromise.finally(() => {
+    if (retry) clearInterval(retry);
+    retry = null;
+  });
+
   return { ack, commandId };
+}
+
+/**
+ * Redeem a QR pairing code shown by the Mac.
+ *
+ * Sent to the relay named *in the code*, not to whatever the dashboard happens to
+ * have selected — pairing is how a device is introduced in the first place, so
+ * there may be no announcement to work from yet.
+ */
+export async function pairRelayDevice(
+  code: { relayPubkey: string; secret: string },
+  label = 'iPhone',
+  { timeoutMs = 60_000 }: { timeoutMs?: number } = {},
+): Promise<{ ack: RelayAck | null; commandId: string }> {
+  // Longer than an ordinary command: the user is standing there holding a phone at
+  // a QR code, and the retry loop above is what makes a slow first connection
+  // recoverable instead of a dead end.
+  return sendRelayCommand(code.relayPubkey, 'pair', { secret: code.secret, label }, { timeoutMs });
 }
 
 /**

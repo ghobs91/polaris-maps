@@ -1,5 +1,6 @@
 import { sha256 } from '@noble/hashes/sha256';
 import { verify } from '../identity/signing';
+import { unwrapBody } from './protocol';
 
 function sha256Bytes(text: string): Uint8Array {
   return sha256(new TextEncoder().encode(text));
@@ -170,8 +171,14 @@ function asNumber(value: unknown): number | null {
  * repaired — a record that does not fit the schema is dropped, not patched.
  */
 export function parseAnnouncement(value: unknown): RelayAnnouncement | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
+  // Records travel as `{ body: <json string>, updatedAt }` (see
+  // `relay/src/gun-bus.mjs`): Gun flattens arrays into objects and deletes keys set
+  // to null, so the signed record is carried as an opaque string. Reading the
+  // envelope as if it were the record silently makes every relay invisible — which
+  // is exactly what happened, and looked like "no relay found" on the phone.
+  const unwrapped = unwrapBody(value);
+  if (!unwrapped) return null;
+  const record = unwrapped;
 
   if (asNumber(record.v) !== ANNOUNCEMENT_VERSION) return null;
   if (typeof record.relayPubkey !== 'string' || !HEX_32_BYTES.test(record.relayPubkey)) return null;

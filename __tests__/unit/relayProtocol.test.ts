@@ -1,3 +1,6 @@
+import { readFileSync } from 'fs';
+import * as path from 'path';
+
 import {
   ACK_VERSION,
   COMMAND_TTL_MS,
@@ -9,6 +12,7 @@ import {
   describeRefusal,
   parseAck,
   parseCommand,
+  parsePairingPayload,
   unwrapBody,
   verifyAck,
   verifyCommand,
@@ -187,5 +191,51 @@ describe('dashboard helpers', () => {
 describe('command lifetime', () => {
   it('gives a command a ten minute window', () => {
     expect(COMMAND_TTL_MS).toBe(10 * 60 * 1000);
+  });
+});
+
+describe('pairing codes', () => {
+  const relayPubkey = 'ab'.repeat(32);
+  const secret = 'cd'.repeat(16);
+
+  it('parses the payload the Mac draws into the QR code', () => {
+    expect(parsePairingPayload(`polaris://pair?relay=${relayPubkey}&secret=${secret}`)).toEqual({
+      relayPubkey,
+      secret,
+    });
+  });
+
+  it('is case-insensitive on the scheme and hex', () => {
+    const payload = `POLARIS://PAIR?relay=${relayPubkey.toUpperCase()}&secret=${secret.toUpperCase()}`;
+    expect(parsePairingPayload(payload)).toEqual({ relayPubkey, secret });
+  });
+
+  it('rejects anything that is not a pairing code', () => {
+    // A camera sees a lot of QR codes; a URL or a wifi code must not be treated as
+    // an authorization attempt.
+    for (const value of [
+      '',
+      'https://example.com',
+      'WIFI:S:home;T:WPA;P:secret;;',
+      `polaris://pair?relay=${relayPubkey}`,
+      `polaris://pair?relay=short&secret=${secret}`,
+      `polaris://pair?relay=${relayPubkey}&secret=xyz`,
+    ]) {
+      expect(parsePairingPayload(value)).toBeNull();
+    }
+  });
+});
+
+describe('command list parity with the relay', () => {
+  it('exposes the same commands the relay will admit', () => {
+    // The relay refuses anything not on its own list before applying it, so a
+    // command that exists only on one side is a dead button.
+    const source = readFileSync(path.join(__dirname, '../../relay/src/protocol.mjs'), 'utf8');
+    const block = source.slice(
+      source.indexOf('export const COMMANDS'),
+      source.indexOf(']);', source.indexOf('export const COMMANDS')),
+    );
+    const remote = [...block.matchAll(/'([a-z-]+)'/g)].map((match) => match[1]).sort();
+    expect([...RELAY_COMMANDS].sort()).toEqual(remote);
   });
 });

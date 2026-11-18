@@ -52,6 +52,8 @@ export async function createRelayBus({ peers, log = () => {}, onConnected } = {}
     localStorage: false,
   });
 
+  let announced = false;
+
   return {
     /** Publish the signed status/announcement record for this relay. */
     publishStatus(announcement) {
@@ -60,7 +62,12 @@ export async function createRelayBus({ peers, log = () => {}, onConnected } = {}
         .get(NS_RELAYS)
         .get(announcement.relayPubkey)
         .put({ body: JSON.stringify(announcement), updatedAt: announcement.updatedAt });
-      onConnected?.(announcement.relayPubkey);
+      // Announce the first publish once, not on every tick: repeated "channel up"
+      // lines read like reconnects and hide the ones that matter.
+      if (!announced) {
+        announced = true;
+        onConnected?.(announcement.relayPubkey);
+      }
     },
 
     /** Publish the ack for one applied (or refused) command. */
