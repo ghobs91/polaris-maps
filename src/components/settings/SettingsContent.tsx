@@ -62,6 +62,16 @@ const NAV_SECTIONS: SettingsSection[] = [
 
 interface SettingsContentProps {
   showHeading?: boolean;
+  /**
+   * Render only these section ids, and drop the "jump to" strip.
+   *
+   * Used by the per-category settings screens: one category, one short page. Absent
+   * means the whole list, which is what the in-map panel shows and what other
+   * callers still get. Hidden groups are styled away rather than unmounted so this
+   * stays a data change: the JSX below is a 700-line tree, and restructuring it to
+   * conditionally mount each group would be a much larger diff for the same screen.
+   */
+  only?: readonly string[];
   /** Opens the regions manager in-place (floating panel); falls back to a route. */
   onOpenRegions?: () => void;
   /** Opens the node dashboard in-place (floating panel); falls back to a route. */
@@ -70,9 +80,13 @@ interface SettingsContentProps {
 
 export function SettingsContent({
   showHeading = true,
+  only,
   onOpenRegions,
   onOpenNodeDashboard,
 }: SettingsContentProps) {
+  /** Style that hides a group outside the current category. */
+  const groupStyle = (id: string) =>
+    only == null || only.includes(id) ? undefined : styles.hidden;
   const permissions = useSettingsStore((s) => s.permissions);
   const themeMode = useSettingsStore((s) => s.themeMode);
   const useMetric = useSettingsStore((s) => s.useMetric);
@@ -213,11 +227,13 @@ export function SettingsContent({
           <Text style={styles.heading}>Settings</Text>
         </View>
       )}
-      <SettingsSectionNav
-        sections={NAV_SECTIONS}
-        activeId={activeSection}
-        onSelect={jumpToSection}
-      />
+      {only != null ? null : (
+        <SettingsSectionNav
+          sections={NAV_SECTIONS}
+          activeId={activeSection}
+          onSelect={jumpToSection}
+        />
+      )}
       <ScrollView
         ref={scrollRef}
         style={styles.container}
@@ -226,7 +242,7 @@ export function SettingsContent({
         scrollEventThrottle={32}
         onScroll={handleScroll}
       >
-        <View onLayout={handleSectionLayout('display')}>
+        <View onLayout={handleSectionLayout('display')} style={groupStyle('display')}>
           <SettingsGroup header="Display" icon={rowIcon('color-palette-outline')}>
             <SettingsChoiceRow
               title="Theme"
@@ -243,14 +259,14 @@ export function SettingsContent({
           </SettingsGroup>
         </View>
 
-        <View onLayout={handleSectionLayout('offline-maps')}>
+        <View onLayout={handleSectionLayout('offline-maps')} style={groupStyle('offline-maps')}>
           <OfflineMapsSection
             onOpenRegions={onOpenRegions}
             icon={rowIcon('cloud-download-outline')}
           />
         </View>
 
-        <View onLayout={handleSectionLayout('navigation')}>
+        <View onLayout={handleSectionLayout('navigation')} style={groupStyle('navigation')}>
           <SettingsGroup header="Navigation" icon={rowIcon('navigate-outline')}>
             <SettingsRow
               title="Voice guidance"
@@ -296,15 +312,15 @@ export function SettingsContent({
           </SettingsGroup>
         </View>
 
-        <View onLayout={handleSectionLayout('street-imagery')}>
+        <View onLayout={handleSectionLayout('street-imagery')} style={groupStyle('street-imagery')}>
           <StreetViewSettings />
         </View>
 
-        <View onLayout={handleSectionLayout('dash-cam')}>
+        <View onLayout={handleSectionLayout('dash-cam')} style={groupStyle('dash-cam')}>
           <DashCamSettings />
         </View>
 
-        <View onLayout={handleSectionLayout('accounts')}>
+        <View onLayout={handleSectionLayout('accounts')} style={groupStyle('accounts')}>
           <SettingsGroup
             header="Accounts"
             icon={rowIcon('person-circle-outline')}
@@ -401,7 +417,7 @@ export function SettingsContent({
           </SettingsGroup>
         </View>
 
-        <View onLayout={handleSectionLayout('privacy')}>
+        <View onLayout={handleSectionLayout('privacy')} style={groupStyle('privacy')}>
           <SettingsGroup
             header="Privacy"
             icon={rowIcon('shield-checkmark-outline')}
@@ -467,7 +483,7 @@ export function SettingsContent({
           </SettingsGroup>
         </View>
 
-        <View onLayout={handleSectionLayout('developer')}>
+        <View onLayout={handleSectionLayout('developer')} style={groupStyle('developer')}>
           <SettingsGroup
             header="Developer"
             icon={rowIcon('construct-outline')}
@@ -678,7 +694,7 @@ export function SettingsContent({
           </SettingsGroup>
         </View>
 
-        <View onLayout={handleSectionLayout('about')}>
+        <View onLayout={handleSectionLayout('about')} style={groupStyle('about')}>
           <SettingsGroup header="About" icon={rowIcon('information-circle-outline')}>
             <SettingsRow
               title="Map Data & Attributions"
@@ -724,6 +740,9 @@ const createStyles = (isDark: boolean) => {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: pageBg },
     container: { flex: 1 },
+    // A group outside the current category: keeps the tree structure (and the
+    // section offset bookkeeping) without rendering anything.
+    hidden: { display: 'none' },
     content: {
       paddingHorizontal: spacing.md,
       paddingTop: spacing.sm,

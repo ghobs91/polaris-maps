@@ -10,13 +10,14 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassView } from '../common/GlassView';
 import { usePeerStore } from '../../stores/peerStore';
 import { joinNetwork, getLocalNode } from '../../services/sync/peerService';
 import { startPeerMonitor, stopPeerMonitor } from '../../services/sync/peerMonitor';
 import { NodeDashboard } from '../dashboard';
-import { SettingsContent } from '../settings';
+import { SettingsCategories } from '../settings/SettingsCategories';
 import { RegionsContent } from '../regions';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -54,6 +55,7 @@ export function FloatingMenuPanel({
 }: FloatingMenuPanelProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const [layer, setLayer] = useState<PanelLayer>('settings');
   const [show, setShow] = useState(false);
@@ -195,10 +197,14 @@ export function FloatingMenuPanel({
           </View>
 
           {layer === 'settings' ? (
-            <SettingsContent
+            // Categories here too, so the in-map panel and the Settings screen are
+            // the same map. Selecting one closes the panel and opens the route.
+            <SettingsCategories
               showHeading={false}
-              onOpenRegions={() => setLayer('regions')}
-              onOpenNodeDashboard={() => setLayer('dashboard')}
+              onSelect={(categoryId) => {
+                close();
+                router.push(`/settings/${categoryId}`);
+              }}
             />
           ) : null}
 

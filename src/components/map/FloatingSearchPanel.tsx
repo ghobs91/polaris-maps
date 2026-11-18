@@ -242,6 +242,14 @@ interface FloatingSearchPanelProps {
   bottomInsetExtra?: number;
   /** Called when the user taps the settings icon */
   onProfilePress?: () => void;
+  /**
+   * Icon for the trailing button in the search pill.
+   *
+   * It used to always be a person, even where the action opens Settings — an icon
+   * that says "account" and does "settings" is a small lie the user notices. The
+   * map passes `settings` because that is what its button does.
+   */
+  profileIcon?: 'person' | 'settings';
   /** Called when the user taps the locate/find-me button */
   onLocatePress?: () => void;
   /** When true, renders as an embedded panel (no absolute positioning, no map controls, no profile/bookmark buttons) */
@@ -640,6 +648,7 @@ function liveViewportContext(): { lat: number; lng: number; zoom: number } {
 export function FloatingSearchPanel({
   bottomInsetExtra = 0,
   onProfilePress,
+  profileIcon = 'person',
   onLocatePress,
   embedded = false,
 }: FloatingSearchPanelProps) {
@@ -2669,7 +2678,11 @@ export function FloatingSearchPanel({
                   style={styles.miniProfileBtn}
                 >
                   <GlassView material="clear" isInteractive style={styles.miniProfileCircle}>
-                    <Ionicons name="settings-outline" size={16} color="#EBEBF0" />
+                    <Ionicons
+                      name={profileIcon === 'settings' ? 'settings-outline' : 'person'}
+                      size={16}
+                      color="#EBEBF0"
+                    />
                   </GlassView>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -2890,7 +2903,11 @@ export function FloatingSearchPanel({
                   style={styles.profileBtn}
                 >
                   <GlassView material="clear" isInteractive style={styles.profileCircle}>
-                    <Ionicons name="person" size={18} color={isDark ? '#EBEBF0' : colors.text} />
+                    <Ionicons
+                      name={profileIcon === 'settings' ? 'settings-outline' : 'person'}
+                      size={18}
+                      color={isDark ? '#EBEBF0' : colors.text}
+                    />
                   </GlassView>
                 </TouchableOpacity>
               </View>

@@ -185,7 +185,7 @@ export default function MapScreen() {
               },
             ]}
           >
-            <FloatingSearchPanel embedded onLocatePress={handleLocate} />
+            <FloatingSearchPanel embedded profileIcon="settings" onLocatePress={handleLocate} />
           </View>
 
           <View
@@ -259,6 +259,7 @@ export default function MapScreen() {
           onMapLongPress={handleMapLongPress}
         />
         <FloatingSearchPanel
+          profileIcon="settings"
           onProfilePress={() => router.push('/settings')}
           onLocatePress={handleLocate}
         />
