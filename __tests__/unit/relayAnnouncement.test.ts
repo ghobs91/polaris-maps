@@ -30,7 +30,9 @@ describe('announcement payload parity with the relay', () => {
       '1\u00004f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa\u0000' +
         'de-berlin@map-data-2026-01@cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd,' +
         'us-ny-new-york@map-data-2026-01@abababababababababababababababababababababababababababababababab' +
-        '\u000026843545600\u00007516192768\u0000100000\u0000false\u0000\u000012884901888\u00001767225600000',
+        '\u000026843545600\u00007516192768\u0000100000\u0000false\u0000\u000012884901888\u00001767225600000' +
+        // statusHash is empty in this fixture (no dashboard status attached).
+        '\u0000',
     );
   });
 

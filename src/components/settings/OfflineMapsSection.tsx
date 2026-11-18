@@ -5,7 +5,7 @@ import { Button, SettingsChoiceRow, SettingsGroup, SettingsRow } from '../common
 import { getDownloadedRegions } from '../../services/regions/regionRepository';
 import { useRegionDownloadStore } from '../../stores/regionDownloadStore';
 import { useSettingsStore, type DeviceSeedingPreference } from '../../stores/settingsStore';
-import { getRelayCoverage } from '../../services/relay/relayAnnouncements';
+import { getAnnouncements, getRelayCoverage } from '../../services/relay/relayAnnouncements';
 import { spacing } from '../../constants/theme';
 import type { Region } from '../../models/region';
 
@@ -96,6 +96,7 @@ export function OfflineMapsSection({ onOpenRegions, icon }: OfflineMapsSectionPr
   // Why the current setting resolves the way it does: "Auto" is meaningless
   // without saying whether a desktop relay is covering this device right now.
   const relayCoveredRegion = regions.find((region) => getRelayCoverage(region.id).healthy);
+  const relayCount = getAnnouncements().length;
   const seedingDetail =
     deviceSeeding === 'auto'
       ? relayCoveredRegion
@@ -127,6 +128,17 @@ export function OfflineMapsSection({ onOpenRegions, icon }: OfflineMapsSectionPr
       ) : (
         <SettingsRow title={loaded ? 'No maps downloaded' : 'Loading…'} />
       )}
+      <SettingsRow
+        title="Desktop relay"
+        value={
+          relayCount === 0
+            ? 'Not running'
+            : relayCoveredRegion
+              ? 'Serving your maps'
+              : `${relayCount} found`
+        }
+        onPress={() => router.push('/relay')}
+      />
       <SettingsChoiceRow
         title="Seed maps to other devices"
         options={SEEDING_OPTIONS}

@@ -1,4 +1,27 @@
+import { sha256 } from '@noble/hashes/sha256';
 import { verify } from '../identity/signing';
+
+function sha256Bytes(text: string): Uint8Array {
+  return sha256(new TextEncoder().encode(text));
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** Decode the status payload, or null when it is absent or unparseable. */
+export function parseRelayStatus(announcement: RelayAnnouncement): RelayStatusPayload | null {
+  if (!announcement.statusJson) return null;
+  try {
+    const parsed = JSON.parse(announcement.statusJson) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as RelayStatusPayload;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Signed relay availability announcements.
@@ -35,6 +58,47 @@ export interface AnnouncedRegion {
   bytes: number;
 }
 
+/**
+ * The relay's full dashboard state, carried inside the announcement.
+ *
+ * Transported as an opaque JSON string (`statusJson`) and bound to the signature
+ * by `statusHash`, so no key-ordering rule has to agree across runtimes: the
+ * client hashes the exact bytes it received.
+ */
+export interface RelayStatusPayload {
+  version: number;
+  serving: boolean;
+  pauseReason: string | null;
+  power: 'ac' | 'battery' | 'unknown';
+  lowPowerMode: boolean;
+  metered: boolean;
+  relayPubkey: string;
+  uptimeSec: number;
+  drives: Array<{
+    regionId: string;
+    key: string;
+    discoveryKey: string;
+    peers: number;
+    readOnly: boolean;
+    bytes: number;
+    pinned: boolean;
+    lastRequestedAt: number;
+  }>;
+  pins: Array<{ regionId: string; version: string; pinnedAt: number }>;
+  devices: Array<{ pubkey: string; label: string; authorizedAt: number }>;
+  usage: { month: string; usedBytes: number; capBytes: number; servedBytes24h: number };
+  budgets: {
+    packStoreBytes: number;
+    usedBytes: number;
+    maxPeers: number;
+    maxBitsPerSecond: number;
+    maxBitsPerSecondPerPeer: number;
+  };
+  preferences: { seedOnBattery: boolean; seedOnMetered: boolean; pausedByUser: boolean };
+  configWarnings: string[];
+  errors: string[];
+}
+
 export interface RelayAnnouncement {
   v: number;
   relayPubkey: string;
@@ -46,6 +110,10 @@ export interface RelayAnnouncement {
   pausedReason: string | null;
   servedBytes24h: number;
   updatedAt: number;
+  /** Hash of `statusJson`; empty when the relay carries no status payload. */
+  statusHash: string;
+  /** Opaque JSON of `RelayStatusPayload`, integrity-bound by `statusHash`. */
+  statusJson: string;
   signature: string;
 }
 
@@ -63,6 +131,7 @@ export function announcementPayload(announcement: {
   pausedReason: string | null;
   servedBytes24h: number;
   updatedAt: number;
+  statusHash?: string;
 }): string {
   const regions = [...announcement.regions]
     .sort((a, b) => (a.regionId < b.regionId ? -1 : a.regionId > b.regionId ? 1 : 0))
@@ -80,6 +149,7 @@ export function announcementPayload(announcement: {
     announcement.pausedReason ?? '',
     announcement.servedBytes24h,
     announcement.updatedAt,
+    announcement.statusHash ?? '',
   ]
     .map(String)
     .join('\u0000');
@@ -122,6 +192,9 @@ export function parseAnnouncement(value: unknown): RelayAnnouncement | null {
     });
   }
 
+  const statusJson = typeof record.statusJson === 'string' ? record.statusJson : '';
+  const statusHash = typeof record.statusHash === 'string' ? record.statusHash : '';
+
   const capacityBytes = asNumber(record.capacityBytes);
   const usedBytes = asNumber(record.usedBytes);
   const uplinkKbps = asNumber(record.uplinkKbps);
@@ -148,6 +221,8 @@ export function parseAnnouncement(value: unknown): RelayAnnouncement | null {
     pausedReason: typeof record.pausedReason === 'string' ? record.pausedReason : null,
     servedBytes24h,
     updatedAt,
+    statusHash,
+    statusJson,
     signature: record.signature,
   };
 }
@@ -159,6 +234,13 @@ export function parseAnnouncement(value: unknown): RelayAnnouncement | null {
  * relay and the app cannot drift onto different schemes.
  */
 export function verifyAnnouncement(announcement: RelayAnnouncement): boolean {
+  // The status payload must hash to what was signed, otherwise a reader could swap
+  // the dashboard's numbers under a valid signature.
+  if (announcement.statusHash) {
+    const hash = bytesToHex(sha256Bytes(announcement.statusJson ?? ''));
+    if (hash !== announcement.statusHash) return false;
+  }
+
   try {
     return verify(
       announcementPayload(announcement),
