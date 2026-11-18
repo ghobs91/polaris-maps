@@ -45,11 +45,23 @@
 - [ ] 4.8 `seedDiagnostics.ts` records the device role (relay-covered consumer vs seeder) so the availability experiment distinguishes them
 - [ ] 4.9 Tests: policy truth table (`never`/`always` overrides, covered+healthy, covered+unreachable, uncovered, disk-short, metered, battery); announcement signature valid/tampered/expired/unknown; peer-policy relay awareness
 
+## 4b. In-app dashboard and remote control
+
+- [x] 4b.1 Signed command/ack protocol shared by both runtimes (`relay/src/protocol.mjs`, `src/services/relay/protocol.ts`), with the canonical payload pinned by a test on each side
+- [x] 4b.2 Relay applies remote commands only from authorized devices, with expiry, replay window and at-most-once ids; refusals are acknowledged, not ignored
+- [x] 4b.3 gossip channel wired into `serve` (status out, commands in, acks out) — best-effort, never fatal
+- [x] 4b.4 `authorize` / `revoke` / `devices` on the local socket and the CLI
+- [x] 4b.5 Full dashboard status carried inside the signed announcement, integrity-bound by `statusHash`
+- [x] 4b.6 Dashboard screen (`app/relay.tsx`) + `useRelayDashboard` hook + Settings entry
+- [ ] 4b.7 Verify the Gun transport end to end between a real relay and a device (the protocol, authorization and ack semantics are tested in-process; the public Gun hop is not)
+- [ ] 4b.8 Swarm-transport fallback for control, so the dashboard does not depend on a public Gun relay being reachable
+- [ ] 4b.9 Push "the region I am in" as a relay pin automatically as the user moves (today it is one tap on the dashboard)
+
 ## 5. Menu-bar controller (outside the App Store)
 
 - [x] 5.1 SwiftUI menu-bar app: state (seeding / paused + reason / capped), served-today, coverage list
 - [x] 5.2 Pin/unpin regions, set budgets, pause/resume — all via the control socket, never by managing the process
-- [x] 5.3 Quit behaviour: the app is a controller; quitting it leaves the agent loaded (state this in the UI)
+- [x] 5.3 Quit behaviour: **quitting stops everything** — `shutdown` over the socket, then `launchctl bootout` + `disable` so it does not return at the next login. Quitting _Polaris Maps_ still leaves the relay seeding.
 - [x] 5.4 First-run: explain what the relay does, defaults, and the "Polaris never operates a relay" framing
 - [ ] 5.5 Notarized `.dmg` with a documented install path from `docs/relay.md`
 

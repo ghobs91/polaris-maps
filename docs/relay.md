@@ -52,9 +52,46 @@ open "relay/controller/build/Polaris Relay.app"
 
 It shows whether the relay is serving, why it is paused, what it served today, and
 which regions it holds; it can pause/resume and toggle seeding on battery.
-**Quitting the menu bar app does not stop seeding** — that is the point of running
-the daemon as a launch agent. Use `polaris-relay` commands or `launchctl bootout`
-to stop it.
+
+**Quitting it stops the relay.** Seeding ends, the daemon exits cleanly, the launch
+agent is unloaded and disabled so it does not come back at the next login, and the
+menu says so on the Quit item. There is no hidden process left uploading. "Start
+relay" in the same menu turns it back on (or re-run `relay/launchd/install.sh`).
+
+What does _not_ stop the relay is quitting Polaris Maps — that is a different app
+and a different intention, and it is the entire reason the seeder is a separate
+process.
+
+## Dashboard (Polaris Maps → Settings → Offline maps → Desktop relay)
+
+The app can see and control a relay from anywhere: whether it is serving and why
+not, which regions it seeds and how many peers each has, what it served today,
+the budgets, and the battery/metered switches. "Seed this region here" pins the
+pack for wherever the map is looking, which is the default pin rule wired to the
+one place that knows your location.
+
+Controls are **signed commands** sent over the Gun.js gossip channel the two
+sides already share — the app never opens a socket to your Mac and no port is
+exposed. Two consequences the UI states rather than hides:
+
+- **A tap is not instantaneous.** Delivery is best-effort with seconds of latency,
+  so a command shows as pending until the relay's signed ack arrives. "No answer
+  yet" means exactly that: the command is still valid for 10 minutes and will be
+  ignored after that if it never lands.
+- **The channel needs a Gun relay.** If the public Gun pool is unreachable, the
+  dashboard shows no relay and commands do not arrive, even though the relay is
+  running on your Mac. The relay itself keeps seeding regardless — local control
+  (`polaris-relay …`) never depends on Gun.
+
+**Authorizing the phone.** A relay only obeys devices you list, so anyone who can
+write to that namespace cannot pause your seeder. The dashboard shows this
+phone's key and a ready-made command:
+
+```bash
+polaris-relay authorize <pubkey> --label "Andrew's iPhone"
+polaris-relay devices        # who can control it
+polaris-relay revoke <pubkey>
+```
 
 ## Command line
 

@@ -108,9 +108,9 @@ _Verification:_ a Node parity script in the style of `scripts/verify-shard-answe
 
 Not a `LaunchDaemon`: that runs as root, system-wide, before login, and has no business touching a user's files or bandwidth grants.
 
-Not embedded in the app bundle's process tree: launching a child from the app gives a process the app's lifetime and its sandbox, and macOS will not restart it after the app quits — precisely the failure being fixed. The menu-bar app is a **client of the socket** (D5); quitting it leaves the daemon running. `ctl stop` (not app quit) is what stops seeding.
+Not embedded in the app bundle's process tree: launching a child from the app gives a process the app's lifetime and its sandbox, and macOS will not restart it after the app quits — precisely the failure being fixed. The daemon holds its own Hyperswarm and Corestore handles in its own process, under its own user.
 
-Quitting the app must not even pause replication: the daemon holds its own Hyperswarm and Corestore handles in its own process, under its own user.
+**Two different Quits, and they must not be conflated.** Quitting _Polaris Maps_ must not pause replication — that is the whole point of a separate seeder process, and a map app quitting is not a request to stop seeding. Quitting the **relay's own menu-bar app** must stop everything: it sends `shutdown` (which unseeds and exits 0, so `KeepAlive{SuccessfulExit:false}` leaves it down), then `launchctl bootout` and `disable` so it does not return at the next login, and the Quit item says so. A background service that keeps uploading after the user closes its own window is the hostile anti-pattern this project should not ship, and "you must remember a CLI incantation to stop it" is the same bug with extra steps.
 
 **Sleep/power:** no native deps; poll `pmset -g ps` (source of power) and `pmset -g` (`lowpowermode`) once a minute, plus `NWPathMonitor` equivalents via a small helper for `isExpensive`/`isConstrained`. Replication pauses on battery or Low Power Mode by default (D11). The relay never requests wake — a laptop that sleeps seeds nothing, which is correct, and the LAN case resumes on wake without intervention.
 
@@ -281,14 +281,14 @@ Every pause has a `reason` string surfaced in `status` and the menu bar, because
 
 ## Rollout phases
 
-| Phase | Deliverable                                                                  | Gate                                                         |
-| ----- | ---------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| 0     | `backend/seed-core.mjs` extracted, worklet is an adapter, Node parity script | existing download/seed paths still work; parity script green |
-| 1     | `relay/` daemon + `ctl`, `pnpm relay:dev`, seed from a directory             | a simulator the relay seeds a real region end-to-end         |
-| 2     | launchd install/uninstall, budgets, control socket, logs                     | survives logout/login and app quit; respects every budget    |
-| 3     | announcements + `relaySeedingPolicy` + `autoSeedRegion` change               | covered phone stops seeding; uncovered phone still seeds     |
-| 4     | menu-bar controller (SwiftUI, outside the App Store)                         | quits cleanly with the daemon unaffected                     |
-| 5     | traffic tile serving                                                         | cold viewport from a LAN relay paints in < 1 s               |
+| Phase | Deliverable                                                                  | Gate                                                                      |
+| ----- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 0     | `backend/seed-core.mjs` extracted, worklet is an adapter, Node parity script | existing download/seed paths still work; parity script green              |
+| 1     | `relay/` daemon + `ctl`, `pnpm relay:dev`, seed from a directory             | a simulator the relay seeds a real region end-to-end                      |
+| 2     | launchd install/uninstall, budgets, control socket, logs                     | survives logout/login and app quit; respects every budget                 |
+| 3     | announcements + `relaySeedingPolicy` + `autoSeedRegion` change               | covered phone stops seeding; uncovered phone still seeds                  |
+| 4     | menu-bar controller (SwiftUI, outside the App Store)                         | Quit stops seeding and disables the agent; Polaris Maps quitting does not |
+| 5     | traffic tile serving                                                         | cold viewport from a LAN relay paints in < 1 s                            |
 
 Each phase is independently shippable and none of them regress a phone-only network.
 

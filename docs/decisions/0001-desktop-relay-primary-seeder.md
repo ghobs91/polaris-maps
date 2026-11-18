@@ -43,23 +43,31 @@ always-on desktop seeder cannot ship through the Mac App Store.
 2. **The relay is a background service, not an app.** A per-user `LaunchAgent`
    runs a headless Node daemon that seeds read-only canonical replicas over
    Hyperswarm/Hyperdrive. It starts at login, restarts on crash, and keeps
-   seeding when the Polaris Maps app — or its menu-bar controller — is quit.
-   Quitting the controller does not pause seeding; an explicit `ctl stop` does.
+   seeding when the Polaris Maps app is quit. Quitting the relay's **own** UI
+   stops everything: the daemon unseeds, exits 0, and the launch agent is
+   unloaded and disabled so it does not return at the next login. Two different
+   intents, so the two must not share a Quit: quitting a map app is not a request
+   to stop seeding, and quitting the seeder's window is.
 
 3. **Seed logic is shared, not duplicated.** The seeding rules move into a
    runtime-agnostic `backend/seed-core.mjs` (injected `fs`/`path`/swarm); the
    Bare worklet and the Node daemon are both thin adapters, following the
    precedent set by `backend/pmtiles.mjs` and `backend/shard-answer.mjs`.
 
-4. **Phones learn about coverage from signed announcements**, published on the
+4. **The user can always stop it.** Quitting the relay's menu-bar app ends
+   seeding and disables the agent; nothing continues uploading after a Quit. A
+   background service that keeps running after the user closes its own window is
+   the hostile pattern this design exists to avoid.
+
+5. **Phones learn about coverage from signed announcements**, published on the
    existing Gun.js gossip channel and verified with the existing identity
    primitives. Announcements carry availability only; content trust remains the
    canonical drive key plus the signed manifest plus per-asset verification.
 
-5. **The relay is distributed outside the Mac App Store** (Developer ID,
+6. **The relay is distributed outside the Mac App Store** (Developer ID,
    notarized) because the App Store sandbox forbids this shape.
 
-6. **Polaris operates no relay.** The project ships the software; relays are
+7. **Polaris operates no relay.** The project ships the software; relays are
    user-run. This keeps the rule already stated in `docs/scaling-p2p.md`.
 
 ## Consequences

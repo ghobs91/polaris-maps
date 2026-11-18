@@ -4,10 +4,20 @@
 
 The desktop relay SHALL seed region packs as a background service that continues across the Polaris Maps app being quit, force-quit, or updated, and across user logout/login, without requiring any UI process to be running.
 
-#### Scenario: App quit does not stop seeding
+#### Scenario: Quitting the map app does not stop seeding
 
-- **WHEN** the user quits the Polaris Maps app (or the menu-bar controller) while the relay is seeding a region
+- **WHEN** the user quits the Polaris Maps app while the relay is seeding a region
 - **THEN** the relay process keeps running and peers continue to replicate packs from it
+
+#### Scenario: Quitting the relay's own UI stops everything
+
+- **WHEN** the user quits the relay's menu-bar app while it is seeding
+- **THEN** the daemon stops seeding, exits cleanly, and the launch agent is unloaded and disabled so that it does not start again at the next login
+
+#### Scenario: Stop is discoverable, not a hidden incantation
+
+- **WHEN** the user opens the relay's menu-bar menu
+- **THEN** the Quit item states that quitting stops seeding, and no seeding continues afterwards
 
 #### Scenario: Relay restarts after a crash
 
