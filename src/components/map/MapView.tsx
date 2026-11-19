@@ -329,18 +329,26 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Enabling the traffic layer used to seed nothing: raster tile seeding was
   // only triggered from the region-change handler, so the source mounted, every
   // tile 404'd against the local server and the layer stayed blank until the map
-  // was moved. Seed immediately when the layer is switched on (and on first
-  // mount when the preference is already enabled), using the last settled
-  // viewport.
+  // was moved. Seed from whatever viewport we can name — the last settled one,
+  // or the store's camera on a cold start where no region event has fired yet.
+  //
+  // A cold start genuinely had no viewport: the layer toggle ran before the
+  // first `onRegionDidChange`, so the effect returned early and nothing was
+  // seeded until the user panned. The store's viewport is the camera we are
+  // about to render, so it is a valid answer rather than a reason to skip.
+  const seedTrafficForViewport = useCallback((lat: number, lng: number, zoom: number): void => {
+    if (!useMapStore.getState().trafficLayerVisible) return;
+    if (!getConnectivity().isConnected) return;
+    const { width, height } = Dimensions.get('window');
+    void seedTrafficTilesForViewport(lat, lng, zoom, width, height).catch(() => {});
+  }, []);
+
   const trafficLayerVisible = useMapStore((s) => s.trafficLayerVisible);
   useEffect(() => {
     if (!trafficLayerVisible) return;
-    const last = lastTrafficViewportRef.current;
-    if (!last) return;
-    if (!getConnectivity().isConnected) return;
-    const { width, height } = Dimensions.get('window');
-    void seedTrafficTilesForViewport(last.lat, last.lng, last.zoom, width, height).catch(() => {});
-  }, [trafficLayerVisible]);
+    const last = lastTrafficViewportRef.current ?? useMapStore.getState().viewport;
+    seedTrafficForViewport(last.lat, last.lng, last.zoom);
+  }, [trafficLayerVisible, seedTrafficForViewport]);
 
   // Sync external followCamera prop into ref
   useEffect(() => {
@@ -770,12 +778,8 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         onViewportChange(centerLat, centerLng);
 
         // Seed traffic raster tiles (disk → P2P → TomTom) for the visible area.
-        if (online && useMapStore.getState().trafficLayerVisible) {
-          const { width, height } = Dimensions.get('window');
-          void seedTrafficTilesForViewport(centerLat, centerLng, zoom, width, height).catch(
-            () => {},
-          );
-        }
+        // The helper re-checks the layer toggle and connectivity itself.
+        if (online) seedTrafficForViewport(centerLat, centerLng, zoom);
       }
 
       if (!rawBounds) return;
@@ -791,7 +795,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       loadViewportPois(visibleBounds, zoom);
     },
-    [navigationMode, loadViewportPois],
+    [navigationMode, loadViewportPois, seedTrafficForViewport],
   );
 
   // A search override replaces the viewport POIs without updating the fetch
@@ -1052,7 +1056,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       clearTimeout(styleLoadTimer.current);
       styleLoadTimer.current = null;
     }
-  }, []);
+    // The map is ready to draw, which is the first moment seeding can produce
+    // something visible. `onRegionDidChange` may not fire until the user moves
+    // the camera, so this is what makes traffic appear on a cold start.
+    const seeded = lastTrafficViewportRef.current ?? useMapStore.getState().viewport;
+    seedTrafficForViewport(seeded.lat, seeded.lng, seeded.zoom);
+  }, [seedTrafficForViewport]);
 
   // If the vector style stalls (slow link), fall back to raster after a
   // timeout instead of leaving a half-painted map. Poor links get a shorter

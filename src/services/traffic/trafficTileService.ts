@@ -192,22 +192,60 @@ export function initTrafficTileService(): void {
 
 // ── Seeding (TomTom fallback) ───────────────────────────────────────
 
+/**
+ * Wall-clock budget for one provider tile fetch.
+ *
+ * Without it a request that never settles pins the whole seeding pass: the
+ * promise stays pending, `inflightSeeds` keeps the tile "in flight" for the
+ * life of the process so it can never be retried, `trafficTileSeedVersion`
+ * never increments, and the raster source never mounts — the layer stayed
+ * blank until the app was force-quit. Measured provider TTFB is ~2–5 s, so the
+ * budget is generous enough for a healthy fetch and short enough to retry.
+ */
+export const TILE_FETCH_TIMEOUT_MS = 6_000;
+
+/**
+ * Provider fetch concurrency per seeding pass.
+ *
+ * A phone viewport is ~35 tiles at every zoom level, and each one is a full
+ * round-trip to the provider. Concurrency 6 meant ~6 serialized waves (~20–30 s
+ * for a full viewport at measured TTFB); the centre tile is seeded separately
+ * first, so this number only governs how fast the rest fills in.
+ */
+export const TILE_SEED_CONCURRENCY = 10;
+
 async function seedFromTomTom(key: TileKey): Promise<string | null> {
   if (!isTomTomConfigured() || !canCallTomTom()) return null;
   noteTomTomRequest();
   const url = `${TOMTOM_FLOW_TILES_BASE_URL}/${key.z}/${key.x}/${key.y}.png?key=${encodeURIComponent(tomtomApiKey)}&tileSize=256&thickness=3`;
+
+  // Bound the request. `AbortController` is the only way to make `fetch` give
+  // up: a stalled DNS lookup or TLS handshake otherwise hangs forever, and the
+  // `finally` in `ensureTrafficTile` never runs to clear the in-flight key.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TILE_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
     noteTomTomResponse(res.status);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (__DEV__) console.warn(`[TrafficTiles] ${key.z}/${key.x}/${key.y} HTTP ${res.status}`);
+      return null;
+    }
     const bytes = await res.arrayBuffer();
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_TILE_BYTES) return null;
     const b64 = arrayBufferToBase64(bytes);
     await writeCachedTile(key, b64);
     return b64;
-  } catch {
+  } catch (error) {
     noteTomTomNetworkError();
+    if (__DEV__) {
+      console.warn(
+        `[TrafficTiles] ${key.z}/${key.x}/${key.y} fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -290,15 +328,23 @@ async function refreshStaleTile(key: TileKey, cacheKey: string): Promise<void> {
  *
  * `onTileSeeded` fires as each tile lands, so the caller can paint
  * progressively instead of waiting for the slowest tile in the viewport.
+ *
+ * One `__DEV__` line reports the pass total. The failure this guards against is
+ * silent: a viewport that seeds 0/35 leaves `trafficTileSeedVersion` at 0, the
+ * raster source unmounted and the layer blank, with nothing in the log to say
+ * why. This is the signal that tells "no provider data" apart from "never
+ * attempted".
  */
 export async function ensureTrafficTiles(
   keys: TileKey[],
-  concurrency: number = 6,
+  concurrency: number = TILE_SEED_CONCURRENCY,
   onTileSeeded?: () => void,
   options: TileSeedOptions = {},
 ): Promise<number> {
+  if (keys.length === 0) return 0;
   const queue = [...keys];
   let seeded = 0;
+  const startedAt = Date.now();
 
   const worker = async () => {
     while (queue.length > 0) {
@@ -312,6 +358,12 @@ export async function ensureTrafficTiles(
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, keys.length) }, worker));
+  if (__DEV__) {
+    console.log(
+      `[TrafficTiles] seeded ${seeded}/${keys.length} at z${keys[0].z} ` +
+        `in ${Date.now() - startedAt}ms (peers=${connectedPeers}, concurrency=${concurrency})`,
+    );
+  }
   return seeded;
 }
 

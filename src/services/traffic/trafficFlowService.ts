@@ -52,10 +52,13 @@ import {
 } from './trafficP2pQuery';
 import {
   initTrafficTileService,
+  ensureTrafficTile,
   ensureTrafficTileServer,
   ensureTrafficTiles,
   pruneTileCache,
   setTrafficTilePeerCount,
+  TILE_SEED_CONCURRENCY,
+  type TileSeedOptions,
 } from './trafficTileService';
 import { tilesForViewport, tileCenter } from './trafficTileMath';
 import { fetchOpenTrafficSegments, type FeedBounds } from './openTrafficFeed';
@@ -660,6 +663,13 @@ function scheduleSeedBump(): void {
  * disk → P2P → TomTom cascade. Bumps the raster source version as tiles land
  * so MapLibre paints progressively rather than all at once.
  *
+ * The centre tile is seeded on its own before the rest of the viewport. The
+ * overlay only mounts its raster source once a tile exists (mounting earlier
+ * can only produce 404s, and MapLibre does not retry those), so the first tile
+ * decides how long the layer stays blank. Seeding it inside the concurrent
+ * batch made it compete with `TILE_SEED_CONCURRENCY - 1` other provider
+ * requests for the same connection budget; on its own it is one round-trip.
+ *
  * The TomTom seed is skipped for tiles whose area already has saved flow for
  * the current weekday + hour bucket. Without that gate the overlay would keep
  * re-buying tiles on its own 15-minute clock even when the resolution was
@@ -681,10 +691,7 @@ export async function seedTrafficTilesForViewport(
     ['segment', 'tile'],
   );
 
-  await ensureTrafficTiles(
-    tiles,
-    undefined,
-    scheduleSeedBump,
+  const options: TileSeedOptions =
     covered.size === 0
       ? {}
       : {
@@ -696,8 +703,18 @@ export async function seedTrafficTilesForViewport(
             const center = tileCenter(key);
             return covered.has(geohash5For(center.lat, center.lng));
           },
-        },
-  );
+        };
+
+  // Centre first, alone, so the layer can mount after one provider round-trip.
+  // The bump only fires for a tile that actually exists: mounting the source
+  // with nothing behind it can only produce 404s, and MapLibre does not retry
+  // those — the layer would then stay blank after the seed eventually landed.
+  const [centerTile, ...remaining] = tiles;
+  if (centerTile && (await ensureTrafficTile(centerTile, options))) {
+    scheduleSeedBump();
+  }
+
+  await ensureTrafficTiles(remaining, TILE_SEED_CONCURRENCY, scheduleSeedBump, options);
 }
 
 export type { TrafficAreaCondition };
