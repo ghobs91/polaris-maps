@@ -20,6 +20,7 @@ import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { Region } from '../../models/region';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useSettingsStore } from '../../stores/settingsStore';
+import { getAnnouncements } from '../../services/relay/relayAnnouncements';
 
 /**
  * Region catalogue: a shelf of what is already on disk, then a search field over
@@ -29,6 +30,14 @@ import { useSettingsStore } from '../../stores/settingsStore';
  * Download More Maps, so the user already knows what it is and the old heading,
  * auto-download status line and pack description only pushed the list down.
  */
+/** "Mac relay a1b2 is seeding this" or "no relay has announced it yet". */
+function describeRelaySeeds(labels: string[] | undefined): string | undefined {
+  if (!labels || labels.length === 0) return 'No relay has announced this pack yet.';
+  return labels.length === 1
+    ? `Relay ${labels[0]} has announced it — searching the swarm…`
+    : `${labels.length} relays have announced it — searching the swarm…`;
+}
+
 export function RegionsContent() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -37,6 +46,13 @@ export function RegionsContent() {
   const packSourcePreferences = useSettingsStore((s) => s.packSourcePreferences);
   const setPackSourcePreference = useSettingsStore((s) => s.setPackSourcePreference);
   const [regions, setRegions] = useState<Region[]>([]);
+  /**
+   * Who says they seed each pack, for the developer P2P source.
+   *
+   * Refreshed with the region list rather than on every render: announcements arrive
+   * on their own schedule and the answer only changes when one does.
+   */
+  const [relaySeeds, setRelaySeeds] = useState<Record<string, string[]>>({});
   const [staleRegionIds, setStaleRegionIds] = useState<Set<string>>(new Set());
   /** Filter for the pack list: 193 packs are unusable as a plain scroll. */
   const [packQuery, setPackQuery] = useState('');
@@ -80,6 +96,29 @@ export function RegionsContent() {
       setLoading(false);
     }
   }, []);
+
+  /**
+   * Which relays hold which packs, for the P2P source hint.
+   *
+   * Read from the verified announcements the phone already collects; no extra
+   * network calls, and it is the same data the download itself will rely on.
+   */
+  useEffect(() => {
+    if (!devMode) return;
+    const collect = () => {
+      const byRegion: Record<string, string[]> = {};
+      for (const relay of getAnnouncements()) {
+        if (relay.paused) continue;
+        for (const announced of relay.regions) {
+          (byRegion[announced.regionId] ??= []).push(relay.relayPubkey.slice(0, 6));
+        }
+      }
+      setRelaySeeds(byRegion);
+    };
+    collect();
+    const timer = setInterval(collect, 15_000);
+    return () => clearInterval(timer);
+  }, [devMode]);
 
   useEffect(() => {
     loadRegions();
@@ -235,6 +274,7 @@ export function RegionsContent() {
             onDelete={handleDelete}
             updateAvailable={staleRegionIds.has(region.id)}
             sourceChoice={devMode ? (packSourcePreferences[region.id] ?? 'auto') : undefined}
+            relayHint={describeRelaySeeds(relaySeeds[region.id])}
             onChangeSource={
               devMode ? (choice) => setPackSourcePreference(region.id, choice) : undefined
             }

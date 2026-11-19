@@ -30,7 +30,12 @@ import { extractTar } from '../../utils/archiveExtract';
 import { downloadRoutingGraphsForRegion, pruneUnusedRoutingGraphs } from '../routing/routingGraphs';
 import { getRegionManifest } from './regionManifestResolver';
 import { useSettingsStore, type PackSourceChoice } from '../../stores/settingsStore';
-import { preferredSources, resolveSourceClass, synthesizeMirrorUrl } from './packSourcePolicy';
+import {
+  isP2pOnly,
+  preferredSources,
+  resolveSourceClass,
+  synthesizeMirrorUrl,
+} from './packSourcePolicy';
 import { resolvePackMirrorBase } from './packMirrorSource';
 import {
   buildSourceList,
@@ -142,6 +147,7 @@ export interface DownloadProgress {
   downloadedBytes: number;
   percent: number;
   stage:
+    | 'peers'
     | 'tiles'
     | 'unpack'
     | 'finalizing'
@@ -233,6 +239,66 @@ export async function downloadRegion(
     // from peers before hitting any origin). Also require the version to match
     // latest, unless we're offline and treating peers as best effort.
     const canonicalKey = region.driveKey ?? getRegionManifest(region.id)?.driveKey ?? null;
+
+    /**
+     * Developer "P2P" source: the pack must come from the mesh.
+     *
+     * This deliberately skips every gate that normally shortens the peer attempt
+     * (`shouldTryPeerDownload` exists to avoid burning 120 s before falling back to
+     * an origin), and it never falls back: a visible failure is the answer the
+     * developer asked for. Without that, "P2P" would just be a slower route to the
+     * same CDN and would prove nothing.
+     */
+    /**
+     * Developer "P2P" source: the pack must come from the mesh.
+     *
+     * Deliberately skips every gate that normally shortens the peer attempt
+     * (`shouldTryPeerDownload` exists to avoid burning 120 s before falling back to an
+     * origin) and never falls back, because a visible failure is the answer the
+     * developer asked for. The result still flows through the shared tail below, so
+     * places, indices, the region status and seeding all behave exactly as a normal
+     * download — only the bytes' origin changes.
+     */
+    if (isP2pOnly(packSourceChoiceFor(region.id))) {
+      if (!canonicalKey) {
+        // No key means no discovery key, which means no swarm topic to search.
+        throw new Error(
+          `No canonical key is published for “${region.name}”, so there is no swarm ` +
+            'topic to search. A relay can publish one (Mac app → Map catalog → Publish & seed).',
+        );
+      }
+
+      const relayCovered = isRegionRelayCovered(region.id);
+      logDiagnostic('regions', 'info', 'P2P-only download started', {
+        regionId: region.id,
+        relayCovered,
+        activePeers: usePeerStore.getState().activePeers,
+      });
+      onProgress?.({
+        regionId: region.id,
+        regionName: region.name,
+        totalBytes: 0,
+        downloadedBytes: 0,
+        percent: 0,
+        stage: 'peers',
+      });
+
+      const served = await tryPeerDownload(region, destDir, onProgress, canonicalKey);
+      if (!served) {
+        logDiagnostic('regions', 'warn', 'P2P-only download found no seeder', {
+          regionId: region.id,
+          relayCovered,
+        });
+        throw new Error(
+          'No peer or relay finished seeding this pack. Nothing was downloaded and no ' +
+            'origin was tried — that is what the P2P source does. Check that a device is ' +
+            'seeding it: the Mac relay lists what it seeds under Desktop relay.',
+        );
+      }
+
+      usedP2P = true;
+    }
+
     // …and only when there is actually a peer to ask — see peerDownloadPolicy.
     const hasHttpFallback = (region.assets?.length ?? 0) > 0 || (region.tilesSizeBytes ?? 0) > 0;
     const peersConnected = usePeerStore.getState().activePeers > 0;
@@ -245,7 +311,7 @@ export async function downloadRegion(
     if (canonicalKey && !peerWorthTrying) {
       logDiagnostic('regions', 'info', `skipping P2P for ${region.id}: no peers connected`);
     }
-    if (peerWorthTrying) {
+    if (peerWorthTrying && !usedP2P) {
       const versionOk =
         !latestVersion || // offline — trust P2P as best effort
         region.tileVersion === latestVersion; // version matches latest

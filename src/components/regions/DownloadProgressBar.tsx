@@ -17,6 +17,8 @@ interface DownloadProgressBarProps {
  */
 export function downloadStageLabel(progress: DownloadProgress): string {
   switch (progress.stage) {
+    case 'peers':
+      return 'Searching the mesh for a seeder…';
     case 'tiles':
       return 'Downloading map tiles…';
     case 'unpack':

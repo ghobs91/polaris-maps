@@ -51,6 +51,7 @@ export interface DownloadLiveActivityController {
 }
 
 const STAGE_LABELS: Record<DownloadProgress['stage'], string> = {
+  peers: 'Searching for a seeder',
   tiles: 'Downloading map tiles',
   unpack: 'Expanding map files',
   finalizing: 'Finishing up',

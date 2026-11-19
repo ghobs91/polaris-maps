@@ -12,6 +12,7 @@ import {
   preferredSources,
   resolveSourceClass,
   synthesizeMirrorUrl,
+  isP2pOnly,
 } from '../../src/services/regions/packSourcePolicy';
 
 describe('resolveSourceClass', () => {
@@ -98,5 +99,32 @@ describe('preferredSources', () => {
   it('still returns the other origin when the pinned class is empty', () => {
     expect(preferredSources(primary, [], 'mirror')).toEqual(primary);
     expect(preferredSources([], mirror, 'primary')).toEqual(mirror);
+  });
+});
+
+describe('p2p source', () => {
+  it('is recognised as its own thing, not an origin class', () => {
+    expect(isP2pOnly('p2p')).toBe(true);
+    for (const choice of ['auto', 'primary', 'mirror'] as const) {
+      expect(isP2pOnly(choice)).toBe(false);
+    }
+  });
+
+  it('yields no origin list at all', () => {
+    // The downloader branches on `isP2pOnly` *before* asking for sources; returning
+    // an empty list here is the backstop that stops "P2P" quietly becoming a CDN
+    // download through the first listed mirror.
+    expect(preferredSources(['https://github/a'], ['https://archive/b'], 'p2p')).toEqual([]);
+  });
+
+  it('does not change how the other choices resolve', () => {
+    expect(preferredSources(['https://github/a'], ['https://archive/b'], 'mirror')).toEqual([
+      'https://archive/b',
+      'https://github/a',
+    ]);
+    expect(preferredSources(['https://github/a'], ['https://archive/b'], 'primary')).toEqual([
+      'https://github/a',
+      'https://archive/b',
+    ]);
   });
 });

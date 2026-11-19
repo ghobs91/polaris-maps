@@ -26,6 +26,11 @@ export type SavedListsSortMode = 'recent' | 'name';
 /**
  * Which origin a pack's assets are fetched from.
  *
+ * `p2p` is the odd one out: it names *no origin*. It asks the mesh for a peer or
+ * relay seeding this pack and, deliberately, does not fall back to GitHub or
+ * Archive — that is what makes it a usable test of whether peer distribution
+ * actually works, instead of a slower way to reach the same CDN.
+ *
  * `auto` is the normal path: every advertised origin, rotated by `mirrorHealth`
  * with failure cooldowns. `primary` and `mirror` pin one class so each origin
  * can be proven independently — both are supposed to serve identical bytes and
@@ -33,7 +38,7 @@ export type SavedListsSortMode = 'recent' | 'name';
  * while `devMode` is on, so a release build cannot end up pinned to an origin
  * that is having a bad day.
  */
-export type PackSourceChoice = 'auto' | 'primary' | 'mirror';
+export type PackSourceChoice = 'auto' | 'primary' | 'mirror' | 'p2p';
 
 /**
  * Whether this device seeds region packs it downloads.

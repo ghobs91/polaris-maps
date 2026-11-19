@@ -102,6 +102,21 @@ export function getRelayCoverage(regionId: string, now: number = Date.now()): Re
   return relayCoverageFor(getAnnouncements(now), regionId, now);
 }
 
+/**
+ * Relays that announce they hold this region and are serving right now.
+ *
+ * Used by the P2P source picker to say *who* is out there before a search starts —
+ * "searching the mesh" with no context is indistinguishable from a hang.
+ */
+export function relaysSeedingRegion(
+  regionId: string,
+  now: number = Date.now(),
+): RelayAnnouncement[] {
+  return getAnnouncements(now).filter(
+    (relay) => !relay.paused && relay.regions.some((region) => region.regionId === regionId),
+  );
+}
+
 /** True when any relay announced this region and is currently serving it. */
 export function isRegionRelayCovered(regionId: string, now: number = Date.now()): boolean {
   return getRelayCoverage(regionId, now).healthy;

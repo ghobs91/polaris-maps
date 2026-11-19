@@ -26,13 +26,23 @@ interface RegionCardProps {
    */
   sourceChoice?: PackSourceChoice;
   onChangeSource?: (choice: PackSourceChoice) => void;
+  /**
+   * Who has announced that they seed this pack, when P2P is selected.
+   *
+   * A "searching…" spinner with no other information is indistinguishable from a
+   * hang, so the card says what the mesh already told us before the search starts.
+   */
+  relayHint?: string;
 }
 
 const SOURCE_LABELS: Record<PackSourceChoice, string> = {
   auto: 'Auto',
   primary: 'GitHub',
   mirror: 'Archive',
+  p2p: 'P2P',
 };
+
+const SOURCE_CHOICES = ['auto', 'primary', 'mirror', 'p2p'] as const;
 
 export const RegionCard = memo(function RegionCard({
   region,
@@ -43,6 +53,7 @@ export const RegionCard = memo(function RegionCard({
   updateAvailable,
   sourceChoice,
   onChangeSource,
+  relayHint,
 }: RegionCardProps) {
   const styles = useThemedStyles(createStyles);
   const toMb = (b?: number | null) =>
@@ -170,7 +181,7 @@ export const RegionCard = memo(function RegionCard({
           <View>
             <View style={styles.sourceRow}>
               <Text style={styles.sourceLabel}>Source</Text>
-              {(['auto', 'primary', 'mirror'] as const).map((choice) => {
+              {SOURCE_CHOICES.map((choice) => {
                 const active = (sourceChoice ?? 'auto') === choice;
                 return (
                   <Pressable
@@ -195,6 +206,12 @@ export const RegionCard = memo(function RegionCard({
             {sourceChoice === 'mirror' && (
               <Text style={styles.sourceHint}>
                 Tries the Internet Archive first, then GitHub if this pack is not mirrored yet.
+              </Text>
+            )}
+            {sourceChoice === 'p2p' && (
+              <Text style={styles.sourceHint}>
+                {relayHint ?? 'Searches the mesh for a peer or relay seeding this pack.'} No
+                fallback to GitHub or Archive — if nothing is seeding, it fails visibly.
               </Text>
             )}
           </View>

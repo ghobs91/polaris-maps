@@ -35,6 +35,17 @@ export function resolveSourceClass(
 }
 
 /**
+ * True when the developer pinned this pack to the mesh.
+ *
+ * Deliberately not a `PackSourceClass`: P2P is not an origin, and treating it as one
+ * would hand the downloader an empty source list to fail on confusingly. Callers
+ * branch on this *before* building an origin list.
+ */
+export function isP2pOnly(choice: PackSourceChoice): boolean {
+  return choice === 'p2p';
+}
+
+/**
  * Build the mirror URL for an asset the catalog does not advertise one for.
  *
  * The developer picker has to be able to exercise the mirror *before* the
@@ -79,6 +90,7 @@ export function preferredSources(
   mirrors: ReadonlyArray<string>,
   choice: PackSourceChoice,
 ): string[] {
+  if (isP2pOnly(choice)) return [];
   const first = choice === 'mirror' ? mirrors : primary;
   const rest = choice === 'mirror' ? primary : mirrors;
   const out: string[] = [];
