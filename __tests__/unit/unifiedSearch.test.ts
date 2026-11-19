@@ -72,6 +72,7 @@ import * as overtureFetcher from '../../src/services/poi/overtureFetcher';
 import * as osmFetcher from '../../src/services/poi/osmFetcher';
 import * as globalGeocoder from '../../src/services/geocoding/globalGeocoderService';
 import * as mapKitPlaceSource from '../../src/services/search/mapKitPlaceSource';
+import type { SearchStageMeta } from '../../src/services/search/unifiedSearch';
 import type { Place } from '../../src/models/poi';
 
 // ---------------------------------------------------------------------------
@@ -322,15 +323,64 @@ describe('unifiedSearch', () => {
     expect(results[0]?.distanceKm).toBeLessThan(2);
   });
 
-  it('passes the viewport zoom to Photon so distant matches do not drown out local ones', async () => {
+  it("biases Photon to the intent's fetch area, not the map zoom", async () => {
     (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue([]);
 
+    // Photon's `zoom` is its location-bias radius, so it follows the area the
+    // query is answered in: a brand lookup spans the metro (~40 km → zoom 10),
+    // while a bare category stays around the user (~30 km → zoom 11). Passing
+    // the raw map zoom (16 ≈ 0.6 km) confined the bias to the street the search
+    // was started from.
     await unifiedSearch('plumbing supply', { lat: 40.749, lng: -73.64, zoom: 16 });
+    expect((photonGeocoder.searchPhoton as jest.Mock).mock.calls[0][3]).toBe(10);
 
-    // Photon's 4th argument is zoom; a widened (min(zoom, 10)) value pulled
-    // distant Manhattan results above nearby Mineola ones.
-    const photonCall = (photonGeocoder.searchPhoton as jest.Mock).mock.calls[0];
-    expect(photonCall[3]).toBe(16);
+    (photonGeocoder.searchPhoton as jest.Mock).mockClear();
+    await unifiedSearch('coffee', { lat: 40.749, lng: -73.64, zoom: 16 });
+    expect((photonGeocoder.searchPhoton as jest.Mock).mock.calls[0][3]).toBe(11);
+  });
+
+  it('sizes the answer area from how many good matches there are', async () => {
+    // "whole foods": three branches spread across the metro. A sparse answer
+    // must reach the far branch instead of framing the nearest one.
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
+      makePlace({ uuid: 'wf-near', name: 'Whole Foods Market', lat: 40.775, lng: -73.985 }),
+      makePlace({ uuid: 'wf-mid', name: 'Whole Foods Market', lat: 40.885, lng: -73.985 }),
+      makePlace({ uuid: 'wf-far', name: 'Whole Foods Market', lat: 41.03, lng: -73.985 }),
+    ]);
+
+    let sparseHorizon: SearchStageMeta['horizon'];
+    const sparse = await unifiedSearch('whole foods', {
+      ...defaultOpts,
+      onStage: (_results, meta) => {
+        if (meta.final) sparseHorizon = meta.horizon;
+      },
+    });
+
+    expect(sparse).toHaveLength(3);
+    expect(sparseHorizon?.radiusKm).toBe(40);
+
+    // "coffee": thirty cafés within a few km. A dense answer stays local even
+    // though the fetch box is far wider.
+    clearSearchCache();
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([]);
+    (categorySearchService.searchByCategory as jest.Mock).mockResolvedValue({
+      pois: Array.from({ length: 30 }, (_, i) =>
+        // 120 m apart so the deduper does not treat them as the same venue.
+        makeOsmPoi(`Cafe ${i}`, 40.748 + (0.2 + i * 0.12) / 111.32, -73.985),
+      ),
+      localPrimary: true,
+    });
+
+    let denseHorizon: SearchStageMeta['horizon'];
+    const dense = await unifiedSearch('coffee', {
+      ...defaultOpts,
+      onStage: (_results, meta) => {
+        if (meta.final) denseHorizon = meta.horizon;
+      },
+    });
+
+    expect(denseHorizon?.radiusKm).toBe(4);
+    expect(dense.length).toBeGreaterThan(20);
   });
 
   it('handles failures in individual sources gracefully', async () => {
@@ -438,15 +488,92 @@ describe('unifiedSearch', () => {
     // for Overture/MapKit) leave nothing to fill: Overpass is not load-bearing
     // for name search, so the query neither waits on nor depends on it.
     (photonGeocoder.searchPhoton as jest.Mock).mockResolvedValue(
-      Array.from({ length: 10 }, (_, i) =>
-        makePhotonResult(`Deli Number ${i}`, true, 40.748 + i * 0.005, -73.985),
-      ),
+      Array.from({ length: 10 }, (_, i) => {
+        const lat = 40.748 + i * 0.005;
+        const name = `Deli Number ${i}`;
+        return {
+          // Tagged as delis: a "Deli" tagged as a café is contradicted by its
+          // own category and no longer counts as a strong match.
+          poi: {
+            id: 900000 + i,
+            lat,
+            lng: -73.985,
+            name,
+            type: 'shop',
+            subtype: 'deli',
+            tags: { name, shop: 'deli' },
+          },
+          isPoi: true,
+          address: { city: 'New York' },
+          displayText: `${name}, New York`,
+        };
+      }),
     );
 
     const results = await unifiedSearch('deli', defaultOpts);
 
     expect(osmFetcher.fetchOsmPoisByName).not.toHaveBeenCalled();
     expect(results.some((r) => r.name === 'Deli Number 4')).toBe(true);
+  });
+
+  it('drops unrelated local businesses from a category query', async () => {
+    // The Overture viewport pass contributes every business around the camera.
+    // For "airport" they are not answers: distance and the viewport bonus alone
+    // were enough to put a law firm and a bowling alley above the airports.
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
+      makePlace({
+        uuid: 'airport-real',
+        name: 'Republic Airport',
+        category: 'airport',
+        lat: 40.78,
+        lng: -73.985,
+      }),
+      makePlace({
+        uuid: 'junk-law',
+        name: 'The Latronica Law Firm',
+        category: 'other',
+        lat: 40.748,
+        lng: -73.985,
+      }),
+      makePlace({
+        uuid: 'junk-lanes',
+        name: 'North Levittown Lanes',
+        category: 'other',
+        lat: 40.7485,
+        lng: -73.9855,
+      }),
+    ]);
+
+    const results = await unifiedSearch('airport', defaultOpts);
+
+    expect(results.some((r) => r.name === 'Republic Airport')).toBe(true);
+    expect(results.some((r) => r.name === 'The Latronica Law Firm')).toBe(false);
+    expect(results.some((r) => r.name === 'North Levittown Lanes')).toBe(false);
+  });
+
+  it('keeps a business named for a category query, ranked below the members', async () => {
+    (poiService.searchPlacesFts as jest.Mock).mockResolvedValue([
+      makePlace({
+        uuid: 'airport-real',
+        name: 'Republic Airport',
+        category: 'airport',
+        lat: 40.79,
+        lng: -73.985,
+      }),
+      makePlace({
+        uuid: 'airport-taxi',
+        name: 'Levittown Airport Taxi',
+        category: 'other',
+        lat: 40.7485,
+        lng: -73.9855,
+      }),
+    ]);
+
+    const results = await unifiedSearch('airport', defaultOpts);
+    const names = results.map((r) => r.name);
+
+    expect(names[0]).toBe('Republic Airport');
+    expect(names).toContain('Levittown Airport Taxi');
   });
 
   it('filters out street results from Photon for category searches', async () => {
@@ -642,8 +769,10 @@ describe('unifiedSearch progressive + cancellation', () => {
     expect(networkCall).toBeDefined();
     const [, south, , north, , limit, opts] = networkCall!;
 
-    // Uncapped, zoom 8 asks for a ~2° box (the next city included).
-    expect(north - south).toBeLessThanOrEqual(0.51);
+    // The box is the widest ring of the `nearby` ladder (30 km → ~0.54°), not
+    // a function of the map zoom: uncapped, zoom 8 asks for a ~2° box that
+    // includes the next city.
+    expect(north - south).toBeLessThanOrEqual(0.54);
     // Deeper candidate pool than the display limit, anchored at the user.
     expect(limit).toBeGreaterThan(20);
     expect(opts.anchor).toEqual(userLocation);

@@ -9,6 +9,7 @@
  */
 
 import type { OsmPoi } from '../poi/osmFetcher';
+import { categoryToOverpassTags } from '../poi/categoryResolver';
 import type { ParsedSearchQuery } from './queryParser';
 import { levenshtein, normalizeSearchText, expandTokenSynonyms } from './queryParser';
 import { parseOpenNow } from './openingHours';
@@ -59,8 +60,29 @@ export function scoreAndRank(
     return { poi, score, distanceKm };
   });
 
-  // Sort by score descending, then by distance ascending for ties
-  scored.sort((a, b) => b.score - a.score || a.distanceKm - b.distanceKm);
+  // Category queries: among candidates that score within the tie window, the
+  // one that *is* the kind of place asked for wins. A taxi dispatcher two
+  // kilometres away and the airport ten kilometres away both contain the word
+  // "airport"; only one of them is an airport.
+  //
+  // This is deliberately an ordering rule, not a score bonus: the 0–100 score
+  // already runs close to its cap, so adding points for membership pushed good
+  // candidates into a tie at 100 and let distance — not relevance — decide.
+  const isCategoryQuery = !!(parsed.categories?.length || parsed.cuisineHint);
+  const memberOfQuery = (poi: OsmPoi) => isCategoryQuery && poiMatchesQueryCategory(poi, parsed);
+  const members = new Map<number, boolean>();
+  for (const result of scored) members.set(result.poi.id, memberOfQuery(result.poi));
+
+  scored.sort((a, b) => {
+    if (isCategoryQuery) {
+      const aMember = members.get(a.poi.id) === true;
+      const bMember = members.get(b.poi.id) === true;
+      if (aMember !== bMember && Math.abs(a.score - b.score) <= MEMBER_TIE_WINDOW) {
+        return aMember ? -1 : 1;
+      }
+    }
+    return b.score - a.score || a.distanceKm - b.distanceKm;
+  });
 
   return scored;
 }
@@ -68,6 +90,12 @@ export function scoreAndRank(
 // ---------------------------------------------------------------------------
 // Score computation
 // ---------------------------------------------------------------------------
+
+/**
+ * Score window inside which "is the kind of place asked for" outranks raw
+ * points. Beyond it, a much better match still wins on its merits.
+ */
+const MEMBER_TIE_WINDOW = 8;
 
 /** Maximum scoring weights (sum to ~100). */
 const W_TEXT = 40; // Text match quality
@@ -154,9 +182,148 @@ export function textMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
   // Full-text bm25 signal from the local index (name ≫ brand ≫ category ≫ city)
   // acts as a floor so strong index matches are never under-scored.
   const ftsSignal = Number.parseFloat(poi.tags['polaris:fts'] ?? '');
-  if (Number.isFinite(ftsSignal) && ftsSignal > base) return Math.min(1, ftsSignal);
-  return base;
+  const signal = Number.isFinite(ftsSignal) && ftsSignal > base ? Math.min(1, ftsSignal) : base;
+  // A name mention is not evidence of entity type (see `entityTypeConfidence`).
+  return signal * entityTypeConfidence(poi, parsed);
 }
+
+/** Subtype values that mean "we don't know what this place is". */
+const UNKNOWN_SUBTYPES = new Set(['', 'place', 'yes', 'unknown', 'other']);
+
+/** True when the POI's own tags say what kind of place it is. */
+export function hasKnownCategory(poi: OsmPoi): boolean {
+  return !UNKNOWN_SUBTYPES.has((poi.subtype ?? '').toLowerCase());
+}
+
+/**
+ * True when the POI *is* a member of the queried category or cuisine.
+ *
+ * This is the authoritative test, and it uses the same tag mapping the sources
+ * are queried with (`categoryToOverpassTags`): "airport" means
+ * `aeroway=aerodrome`, not "the name contains airport". Comparing the category
+ * name against the subtype alone missed every category whose OSM value differs
+ * (airport/aerodrome, gas_station/fuel, theater/theatre, train_station/station).
+ *
+ * Membership is a yes/no answer — the name of the venue never enters into it.
+ * A funeral home is not a hotel because it has "home" in its name.
+ */
+export function poiMatchesQueryCategory(poi: OsmPoi, parsed: ParsedSearchQuery): boolean {
+  const subtypeRaw = (poi.subtype ?? '').toLowerCase();
+  const subtype = subtypeRaw.replace(/_/g, '');
+  const type = (poi.type ?? '').toLowerCase();
+
+  if (parsed.cuisineHint) {
+    const cuisine = parsed.cuisineHint.toLowerCase();
+    if ((poi.tags['cuisine'] ?? '').toLowerCase().includes(cuisine)) return true;
+    if (subtype.includes(cuisine)) return true;
+    if (poi.name.toLowerCase().includes(cuisine)) return true;
+  }
+
+  if (!parsed.categories?.length) return false;
+
+  for (const category of parsed.categories) {
+    // `placeToOsmPoi` and MapKit map a category onto its own subtype, so the
+    // direct comparison still covers rows whose tags are synthetic.
+    if (subtype && subtype === category.toLowerCase().replace(/_/g, '')) return true;
+    for (const [tagKey, tagValue] of categoryToOverpassTags(category)) {
+      if (poi.tags[tagKey] === tagValue) return true;
+      if (type === tagKey && subtypeRaw === tagValue) return true;
+    }
+  }
+  return false;
+}
+
+/** Legal suffixes that say nothing about what a business does. */
+const NAME_LEGAL_SUFFIXES = new Set([
+  'inc',
+  'llc',
+  'ltd',
+  'corp',
+  'co',
+  'gmbh',
+  'pllc',
+  'lp',
+  'llp',
+  'pc',
+]);
+
+/**
+ * True when the query term is the *head* of the place name — its last content
+ * word, ignoring legal suffixes.
+ *
+ * English noun compounds put the head noun last, which is exactly the signal
+ * that separates a real venue from a business named after it: "Republic
+ * Airport" is an airport, "Levittown Taxi and Airport Service" is a service,
+ * and "JFK Airport" only tells us where the hotel is.
+ */
+function nameEndsWithQueryTerm(name: string, coreQuery: string): boolean {
+  const words = normalizeSearchText(name).toLowerCase().split(/\s+/).filter(Boolean);
+  let last = words.length - 1;
+  while (last >= 0 && (NAME_LEGAL_SUFFIXES.has(words[last]) || words[last].length < 2)) last--;
+  if (last < 0) return false;
+  const head = words[last];
+  return normalizeSearchText(coreQuery)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length >= 3)
+    .some((word) => head === word || head.startsWith(word) || word.startsWith(head));
+}
+
+/** A name mention is weaker evidence than the venue's own category. */
+const NAME_MENTION_ONLY = 0.55;
+
+/** The venue's category contradicts the query ("Airport Hotel" for "airport"). */
+const CATEGORY_CONFLICT = 0.45;
+
+/**
+ * How much a name match can be trusted as evidence of *what the place is*.
+ *
+ * "Airport" in "Levittown Taxi and Airport Service" is not the entity type, and
+ * neither is it in "Hyatt Place JFK Airport" — but a plain text score treats
+ * those identically to "Republic Airport". That is how a taxi dispatcher and
+ * six airport hotels outranked the airports themselves.
+ *
+ *  - the venue is in the queried category → the name and the category agree (1)
+ *  - the venue's category is known and different → its name merely mentions the
+ *    word, so the match is heavily discounted
+ *  - the category is unknown → only a head-noun mention ("Republic Airport")
+ *    counts fully; a modifier mention ("Airport Service") does not
+ */
+function entityTypeConfidence(poi: OsmPoi, parsed: ParsedSearchQuery): number {
+  if (!parsed.categories?.length && !parsed.cuisineHint) return 1;
+  if (poiMatchesQueryCategory(poi, parsed)) return 1;
+  if (hasKnownCategory(poi)) return CATEGORY_CONFLICT;
+  return nameEndsWithQueryTerm(poi.name, parsed.coreQuery) ? 1 : NAME_MENTION_ONLY;
+}
+
+/**
+ * How well a candidate answers the query, ignoring how far away it is (0–1).
+ *
+ * Distance is deliberately absent: this answers "is this kind of place the
+ * user asked for?", so it can size a search area without the area then
+ * deciding what counts (see `searchHorizon.ts`).
+ *
+ * Text match covers brands and names. Category/cuisine membership covers the
+ * rest: a café found for "coffee" is exactly what was asked for even though its
+ * name ("Babylon Bean") shares no token with the query.
+ */
+export function queryRelevanceScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
+  const text = textMatchScore(poi, parsed);
+  if (!parsed.categories?.length && !parsed.cuisineHint) return text;
+  return poiMatchesQueryCategory(poi, parsed) ? 1 : text;
+}
+
+/**
+ * Shortest word that can carry a match.
+ *
+ * One- and two-letter name words ("A Plus Jewelry", "P.C.", "&") prefix-match
+ * almost any query starting with that letter, which is how unrelated shops next
+ * door outranked the right answer several kilometres away.
+ */
+const MIN_MATCH_WORD = 3;
+
+/** Shortest word worth a typo budget; shorter words are compared exactly. */
+const MIN_FUZZY_WORD = 4;
 
 function baseTextMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
   const query = normalizeSearchText(parsed.coreQuery).toLowerCase();
@@ -216,10 +383,13 @@ function baseTextMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
     const nameWords = name.split(/\s+/);
     let fuzzyHits = 0;
     for (const qw of queryWords) {
-      if (qw.length < 3) continue;
-      const maxDist = qw.length <= 4 ? 1 : qw.length <= 7 ? 2 : 3;
+      if (qw.length < MIN_FUZZY_WORD) continue;
+      // One edit for ordinary words, two only for long ones. A 2-edit budget on
+      // five letters made "hotel" match "home" — a funeral home then outranked
+      // every hotel in the area.
+      const maxDist = qw.length <= 6 ? 1 : 2;
       for (const nw of nameWords) {
-        if (nw.length < 3) continue;
+        if (nw.length < MIN_FUZZY_WORD) continue;
         if (levenshtein(qw, nw) <= maxDist) {
           fuzzyHits++;
           break;
@@ -247,7 +417,9 @@ function baseTextMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
     let hit = false;
     for (const syn of synonyms) {
       for (const nw of nameWords) {
-        if (syn.length >= 3 && (nw.startsWith(syn) || syn.startsWith(nw))) {
+        // Both words need real length: "airport" must not match the "A" in
+        // "A Plus Jewelry" through `syn.startsWith(nw)`.
+        if (syn.length >= 3 && nw.length >= 3 && (nw.startsWith(syn) || syn.startsWith(nw))) {
           hit = true;
           break;
         }
@@ -299,7 +471,13 @@ function tokenPrefixScore(query: string, name: string): number {
   let hits = 0;
   for (const qw of queryWords) {
     for (const nw of nameWords) {
-      if (qw.length >= 3 && (nw.startsWith(qw) || qw.startsWith(nw))) {
+      // Both words need real length: "airport" must not match the "A" in
+      // "A Plus Jewelry" via `qw.startsWith(nw)`.
+      if (
+        qw.length >= MIN_MATCH_WORD &&
+        nw.length >= MIN_MATCH_WORD &&
+        (nw.startsWith(qw) || qw.startsWith(nw))
+      ) {
         hits++;
         break;
       }
@@ -310,33 +488,9 @@ function tokenPrefixScore(query: string, name: string): number {
 
 function categoryMatchScore(poi: OsmPoi, parsed: ParsedSearchQuery): number {
   if (!parsed.categories && !parsed.cuisineHint) return 0.5; // neutral
-
-  // Cuisine match is the strongest category signal
-  if (parsed.cuisineHint) {
-    const cuisine = parsed.cuisineHint.toLowerCase();
-    const poiCuisine = (poi.tags.cuisine ?? '').toLowerCase();
-    const poiName = poi.name.toLowerCase();
-
-    if (poiCuisine.includes(cuisine)) return 1.0;
-    if (poiName.includes(cuisine)) return 0.8;
-    if (poi.subtype?.includes(cuisine)) return 0.7;
-  }
-
-  // Category match
-  if (parsed.categories) {
-    const poiSubtype = poi.subtype?.toLowerCase() ?? '';
-    const poiType = poi.type?.toLowerCase() ?? '';
-    for (const cat of parsed.categories) {
-      const catLower = cat.toLowerCase().replace(/_/g, '');
-      if (poiSubtype.replace(/_/g, '') === catLower) return 0.9;
-      if (poiSubtype.includes(catLower)) return 0.7;
-      if (poiType.includes(catLower)) return 0.5;
-    }
-    // POI is in a related category but not exact match
-    return 0.2;
-  }
-
-  return 0.5;
+  // Membership is binary and comes from the tags, never from the name: a place
+  // that merely mentions the word scores here like any other non-member.
+  return poiMatchesQueryCategory(poi, parsed) ? 1.0 : 0.2;
 }
 
 function popularityScore(poi: OsmPoi): number {

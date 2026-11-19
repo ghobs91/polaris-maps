@@ -67,7 +67,6 @@ import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
 import { type OsmPoi } from '../../services/poi/osmFetcher';
-import { searchByCategory } from '../../services/poi/categorySearchService';
 import {
   fetchChargingStations,
   type ChargingStation,
@@ -88,15 +87,21 @@ import type { GeocodingEntry } from '../../models/geocoding';
 import type { ParkAndRideResult } from '../../services/routing/parkAndRideService';
 import {
   applySearchView,
-  boundsForPois,
   destinationToGeocodingResult,
   geocodingResultToSearchResult,
+  horizonFrameBounds,
   isSameDestination,
   preferNearbyResults,
   selectSearchPins,
   shouldFrameResults,
 } from './floatingSearchPanelHelpers';
 import { createQueryPlan, type QueryPlan } from '../../services/search/queryPlan';
+import {
+  HORIZON_POLICIES,
+  horizonFetchRadiusDeg,
+  isWithinHorizon,
+} from '../../services/search/searchHorizon';
+import { unifiedSearch } from '../../services/search/unifiedSearch';
 import { resolveSearchCamera } from '../../utils/searchCamera';
 
 /** Cap on POIs a quick-category pill returns (list rows + map pins). */
@@ -731,6 +736,17 @@ export function FloatingSearchPanel({
   const fitAnchorRef = useRef<{ lat: number; lng: number } | null>(null);
   /** The query plan built for the submitted text (camera framing + pin policy). */
   const fitPlanRef = useRef<QueryPlan | null>(null);
+  /**
+   * The area the current answer covers, from the search engine's horizon
+   * decision (`searchHorizon.ts`): the radius that trimmed the result list and
+   * the anchor it was measured from. The camera frames *this* circle instead of
+   * the bounding box of whichever pins happened to arrive — otherwise a
+   * "whole foods" answer with two branches either side of the user frames a
+   * sliver, and a single branch frames a street corner.
+   */
+  const horizonRef = useRef<{ radiusKm: number; anchor: { lat: number; lng: number } } | null>(
+    null,
+  );
   const categorySearchResults = useOsmPoiStore((s) => s.categorySearchResults);
   const isCategorySearching = useOsmPoiStore((s) => s.isCategorySearching);
   const pendingStopSelection = useMapStore((s) => s.pendingStopSelection);
@@ -847,7 +863,14 @@ export function FloatingSearchPanel({
         const fitPois = selectSearchPins(mapPois, pinAnchor, plan);
         useOsmPoiStore.getState().setCategorySearch([], fitPois, false);
 
-        const fitBounds = boundsForPois(fitPois);
+        // Frame the area the query was answered in, not the pins' own box. The
+        // engine already trimmed the list to that radius (`searchHorizon.ts`),
+        // so the camera lands on the same area the rows cover: the
+        // neighbourhood for a dense "coffee" search, the metro for a sparse
+        // "whole foods" one. Falls back to the pins' bounds when the query had
+        // no horizon (nothing was a strong enough match to size an area).
+        const horizon = horizonRef.current;
+        const fitBounds = horizonFrameBounds(fitPois, horizon?.anchor, horizon?.radiusKm);
         // A nearby-intent query (category/cuisine) is answered by the places
         // around the user: if every match is a long way off, keep the camera
         // where it is instead of yanking the map to another city. Place/brand/
@@ -939,6 +962,7 @@ export function FloatingSearchPanel({
         auxQueryRef.current = '';
         mergedRowsRef.current = [];
         viewQueryRef.current = '';
+        horizonRef.current = null;
         setResults([]);
         if (meta.final) applyMergedResults(fitResultsOnEmitRef.current);
         useOsmPoiStore.getState().setIsCategorySearching(false);
@@ -947,6 +971,12 @@ export function FloatingSearchPanel({
 
       unifiedResultsRef.current = emitted;
       viewQueryRef.current = text;
+      // The engine reports the area this answer covers; the camera frames it on
+      // submit. Later emissions may narrow or widen it, so always take the
+      // newest. `undefined` means the query had no strong match to size an area
+      // (or this emission was a local fallback), in which case the framing
+      // falls back to the pins' own bounds.
+      if (meta.horizon) horizonRef.current = meta.horizon;
 
       // First emission for a new query starts the auxiliary transit search so
       // it runs alongside the rest of the unified pipeline.
@@ -1240,6 +1270,9 @@ export function FloatingSearchPanel({
     // engine and this panel); the plan also drives pin selection below.
     const plan = createQueryPlan(text);
     fitPlanRef.current = plan;
+    // A new submit starts with no answer area; the engine reports one as soon
+    // as it has candidates.
+    horizonRef.current = null;
     const live = liveViewportContext();
     // Pins are ordered and framed around the area the user is searching, so a
     // pan away from GPS must not pull the results back to the user's position.
@@ -1271,69 +1304,84 @@ export function FloatingSearchPanel({
     searchAnchorRef.current = null;
     anchorPendingRef.current = false;
     fitPlanRef.current = null;
+    horizonRef.current = null;
     setShowSearchThisArea(false);
     useOsmPoiStore.getState().clearCategorySearch();
   }, [clearSearch]);
 
-  // Runs (or re-runs) a quick-category POI search against the current viewport.
-  // `fit` is false for "Search this area", which must keep the panned camera.
+  // Runs (or re-runs) a quick-category POI search in an adaptive area around the
+  // anchor. `fit` is false for "Search this area", which must keep the panned
+  // camera.
+  //
+  // The pill goes through the unified engine — the same pipeline typing the
+  // phrase would use — instead of querying the category source alone. Two
+  // reasons: the category source only knows the local index and Overpass (six
+  // cafés where the engine finds thirty across Photon/MapKit/Overture), and
+  // only the engine ranks them. A pill is a search, so it must answer the same.
   const runCategorySearch = useCallback((categoryId: string, categoryQuery: string, fit = true) => {
     setActiveCategory(categoryId);
     activeCategoryQueryRef.current = categoryQuery;
     const gen = ++categorySearchGenRef.current;
     // Supersede any in-flight pill search (switching pills, or toggling off):
-    // the Overpass/Nominatim calls are abort-aware, so the old work stops
-    // instead of finishing late and holding the throttle for the next search.
+    // the network calls are abort-aware, so the old work stops instead of
+    // finishing late and holding the throttle for the next search.
     categoryAbortRef.current?.abort();
     const controller = new AbortController();
     categoryAbortRef.current = controller;
 
     setResults([]);
     useOsmPoiStore.getState().clearCategorySearch();
-
-    const vp = useMapStore.getState().viewport;
-    const vb = useOsmPoiStore.getState().viewportBounds;
-    const south = vb?.minLat ?? vp.lat - 0.05;
-    const north = vb?.maxLat ?? vp.lat + 0.05;
-    const west = vb?.minLng ?? vp.lng - 0.05;
-    const east = vb?.maxLng ?? vp.lng + 0.05;
-
     useOsmPoiStore.getState().setIsCategorySearching(true);
 
+    // A pill is a bare category phrase, so it is answered around the anchor —
+    // never inside the rectangle the camera happens to show. The anchor is
+    // where the user is looking now, matching how a submitted search anchors.
+    const live = liveViewportContext();
+    const anchor = { lat: live.lat, lng: live.lng };
     // Resolve up front: the EV pill needs the category list for its Open
-    // Charge Map fan-out (`searchByCategory` re-resolves internally).
+    // Charge Map fan-out.
     const categories = resolveSearchCategories(categoryQuery);
 
     void (async () => {
       try {
-        // Local Overture data first (the same rows the map renders), then
-        // Overpass/Nominatim only when the local index is thin. Querying
-        // Overpass alone made dense areas show a single result.
-        const categoryResult = categories
-          ? await searchByCategory(categoryQuery, south, west, north, east, CATEGORY_RESULT_LIMIT, {
-              signal: controller.signal,
-            })
-          : null;
+        // The engine already ranks, trims to the area it decided on, and reports
+        // that area — so the pill reads its answer instead of re-deriving one.
+        let horizonRadiusKm: number | null = null;
+        const results = await unifiedSearch(categoryQuery, {
+          lat: anchor.lat,
+          lng: anchor.lng,
+          zoom: live.zoom,
+          limit: CATEGORY_RESULT_LIMIT,
+          signal: controller.signal,
+          onStage: (_stageResults, meta) => {
+            if (meta.final) horizonRadiusKm = meta.horizon?.radiusKm ?? null;
+          },
+        });
 
         if (gen !== categorySearchGenRef.current || controller.signal.aborted) return;
 
-        let pois = categoryResult?.pois ?? [];
+        let pois = results
+          .map((result) => result.poi)
+          .filter((poi): poi is NonNullable<typeof poi> => poi != null);
 
         // For EV charging, also query Open Charge Map for richer station data.
         if (categories?.includes('ev_charging')) {
-          const centerLat = (south + north) / 2;
-          const centerLng = (west + east) / 2;
-          // Approximate viewport diagonal in km
-          const dlat = (north - south) * 111;
-          const dlng = (east - west) * 111 * Math.cos((centerLat * Math.PI) / 180);
-          const radiusKm = Math.max(Math.sqrt(dlat * dlat + dlng * dlng) / 2, 3);
-
-          const stations = await fetchChargingStations(centerLat, centerLng, radiusKm, 100).catch(
-            () => [] as ChargingStation[],
-          );
+          const fetchRadiusKm = horizonFetchRadiusDeg(HORIZON_POLICIES.nearby) * 111.32;
+          const stations = await fetchChargingStations(
+            anchor.lat,
+            anchor.lng,
+            fetchRadiusKm,
+            100,
+          ).catch(() => [] as ChargingStation[]);
           if (gen !== categorySearchGenRef.current || controller.signal.aborted) return;
           if (stations.length > 0) {
             pois = mergeChargingPois(pois, stations.map(chargingStationToOsmPoi));
+            // The merged stations are new candidates; keep them only if they
+            // fall inside the area the camera is about to frame.
+            if (horizonRadiusKm) {
+              const radiusKm = horizonRadiusKm;
+              pois = pois.filter((poi) => isWithinHorizon(poi, anchor, radiusKm));
+            }
           }
         }
 
@@ -1344,9 +1392,20 @@ export function FloatingSearchPanel({
           return;
         }
 
-        useOsmPoiStore
-          .getState()
-          .setCategorySearch(categories, pois, categoryResult?.localPrimary ?? false);
+        // Rank order is the engine's (best match first) — the list and the pins
+        // must lead with the best answer, not the closest building. The engine
+        // already trimmed the set to the answer area, and `POILayer` clusters
+        // whatever arrives, so the whole answer can be shown rather than a
+        // nearest-N slice of it.
+        const pins = pois;
+        if (__DEV__) {
+          console.log(
+            `[search] pill "${categoryQuery}" ${horizonRadiusKm ?? 'no'}km ` +
+              `(${pins.length}/${results.length} places, anchor ${anchor.lat.toFixed(4)},${anchor.lng.toFixed(4)})`,
+          );
+        }
+
+        useOsmPoiStore.getState().setCategorySearch(categories, pins, false);
         if (!fit) {
           // "Search this area": the camera stays exactly where the user panned
           // and the anchor moves with it, so a further pan offers the button again.
@@ -1360,12 +1419,13 @@ export function FloatingSearchPanel({
           }
           return;
         }
-        const fitPois = selectSearchPins(pois);
-        const fb = boundsForPois(fitPois);
-        if (fb && fitPois.length >= 2) {
+        // Frame the area the engine answered in (see `searchHorizon.ts`): the
+        // neighbourhood for a dense category, the metro for a sparse one.
+        const bounds = horizonFrameBounds(pins, anchor, horizonRadiusKm);
+        if (bounds) {
           useMapStore
             .getState()
-            .setFitBounds([fb.minLng, fb.minLat, fb.maxLng, fb.maxLat], 'search');
+            .setFitBounds([bounds.minLng, bounds.minLat, bounds.maxLng, bounds.maxLat], 'search');
         }
         anchorPendingRef.current = true;
       } catch {

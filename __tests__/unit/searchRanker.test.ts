@@ -25,6 +25,9 @@ jest.mock('../../src/services/identity/keypair', () => ({
 import {
   scoreAndRank,
   deduplicateResults,
+  poiMatchesQueryCategory,
+  queryRelevanceScore,
+  textMatchScore,
   type ScoredResult,
 } from '../../src/services/search/searchRanker';
 import { parseSearchQuery } from '../../src/services/search/queryParser';
@@ -319,5 +322,174 @@ describe('intent modifiers', () => {
     const parsed = parseSearchQuery('open now cafe');
     const [result] = scoreAndRank([unknown], parsed, 40.748, -73.985);
     expect(result.score).toBeGreaterThan(0);
+  });
+});
+
+describe('queryRelevanceScore', () => {
+  it('scores a brand branch as a match for the brand query', () => {
+    const parsed = parseSearchQuery('whole foods');
+    const branch = makePoi({
+      name: 'Whole Foods Market',
+      tags: { name: 'Whole Foods Market', 'polaris:brand': 'Whole Foods Market' },
+    });
+    expect(queryRelevanceScore(branch, parsed)).toBeGreaterThanOrEqual(0.72);
+  });
+
+  it('counts a category membership as a full match for a category query', () => {
+    // "Babylon Bean" shares no token with "coffee", but it is a café — which is
+    // exactly what was asked for. Graded text match alone would score it 0.52.
+    const parsed = parseSearchQuery('coffee');
+    const cafe = makePoi({ name: 'Babylon Bean', subtype: 'cafe', tags: { name: 'Babylon Bean' } });
+    expect(queryRelevanceScore(cafe, parsed)).toBe(1);
+  });
+
+  it('does not count an unrelated category as a match', () => {
+    const parsed = parseSearchQuery('coffee');
+    const pharmacy = makePoi({ name: 'Rite Aid', subtype: 'pharmacy', tags: { name: 'Rite Aid' } });
+    expect(queryRelevanceScore(pharmacy, parsed)).toBeLessThan(0.72);
+  });
+
+  it('ignores distance entirely', () => {
+    const parsed = parseSearchQuery('whole foods');
+    const branch = makePoi({
+      name: 'Whole Foods Market',
+      tags: { name: 'Whole Foods Market', 'polaris:brand': 'Whole Foods Market' },
+    });
+    expect(queryRelevanceScore(branch, parsed)).toBe(
+      queryRelevanceScore({ ...branch, lat: 10, lng: 10 }, parsed),
+    );
+  });
+});
+
+describe('entity-type aware text matching', () => {
+  it('does not match a one-letter name word', () => {
+    // "airport" used to match the "A" in "A Plus Jewelry" via prefix matching,
+    // putting the shop next door above the airport.
+    const parsed = parseSearchQuery('airport');
+    const jewelry = makePoi({ name: 'A Plus Jewelry', subtype: 'place' });
+    expect(textMatchScore(jewelry, parsed)).toBe(0);
+  });
+
+  it('does not treat a two-edit difference on a short word as a typo', () => {
+    // "hotel" vs "home" (two edits) made every funeral home a hotel match.
+    const parsed = parseSearchQuery('hotel');
+    const funeralHome = makePoi({
+      name: 'Thomas F. Dalton Funeral Home',
+      type: 'amenity',
+      subtype: 'place',
+    });
+    expect(textMatchScore(funeralHome, parsed)).toBe(0);
+  });
+
+  it('still accepts a real typo', () => {
+    const parsed = parseSearchQuery('cofee');
+    const cafe = makePoi({ name: 'Coffee Grind', subtype: 'cafe' });
+    expect(textMatchScore(cafe, parsed)).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('treats a name mention as weaker evidence than a head-noun name', () => {
+    const parsed = parseSearchQuery('airport');
+    // "Republic Airport" — the query word is the head noun.
+    const airportNamed = makePoi({ name: 'Republic Airport', subtype: 'place' });
+    // "Levittown Taxi and Airport Service" — the query word modifies a service.
+    const taxi = makePoi({ name: 'Levittown Taxi and Airport Service', subtype: 'place' });
+
+    expect(textMatchScore(airportNamed, parsed)).toBeGreaterThanOrEqual(0.72);
+    expect(textMatchScore(taxi, parsed)).toBeLessThan(0.72);
+  });
+
+  it('discounts a name mention contradicted by the venue category', () => {
+    const parsed = parseSearchQuery('airport');
+    const airportHotel = makePoi({
+      name: 'Hyatt Place JFK Airport',
+      type: 'tourism',
+      subtype: 'hotel',
+      tags: { name: 'Hyatt Place JFK Airport', tourism: 'hotel' },
+    });
+
+    expect(poiMatchesQueryCategory(airportHotel, parsed)).toBe(false);
+    expect(textMatchScore(airportHotel, parsed)).toBeLessThan(0.5);
+  });
+
+  it('leaves non-category queries alone', () => {
+    // No category intent: a name match is a name match.
+    const parsed = parseSearchQuery('joe pizza palace');
+    const poi = makePoi({ name: 'Joe Pizza Palace', subtype: 'place' });
+    expect(textMatchScore(poi, parsed)).toBeGreaterThan(0.5);
+  });
+});
+
+describe('category membership', () => {
+  it('matches a category whose OSM value differs from its name', () => {
+    // "airport" is aeroway=aerodrome in OSM; comparing the category name to the
+    // subtype alone made every real airport a non-member.
+    const parsed = parseSearchQuery('airport');
+    const aerodrome = makePoi({
+      name: 'Republic Airport',
+      type: 'aeroway',
+      subtype: 'aerodrome',
+      tags: { name: 'Republic Airport', aeroway: 'aerodrome' },
+    });
+
+    expect(poiMatchesQueryCategory(aerodrome, parsed)).toBe(true);
+    expect(queryRelevanceScore(aerodrome, parsed)).toBe(1);
+  });
+
+  it('matches through raw tags as well as type/subtype', () => {
+    const parsed = parseSearchQuery('gas');
+    const station = makePoi({
+      name: 'Sunoco',
+      type: 'amenity',
+      subtype: 'fuel',
+      tags: { name: 'Sunoco', amenity: 'fuel' },
+    });
+    expect(poiMatchesQueryCategory(station, parsed)).toBe(true);
+  });
+
+  it('does not match on the name', () => {
+    const parsed = parseSearchQuery('hotel');
+    const named = makePoi({ name: 'Hotel Furniture Warehouse', subtype: 'furniture' });
+    expect(poiMatchesQueryCategory(named, parsed)).toBe(false);
+  });
+
+  it('prefers the member when scores are close', () => {
+    // The taxi dispatcher is 1 km away, the airport 15 km away. Both mention
+    // "airport"; only one of them is one.
+    const parsed = parseSearchQuery('airport');
+    const taxi = makePoi({
+      name: 'Levittown Taxi and Airport Service',
+      lat: 40.757,
+      lng: -73.985,
+      subtype: 'place',
+    });
+    const airport = makePoi({
+      name: 'Republic Airport',
+      lat: 40.883,
+      lng: -73.985,
+      type: 'aeroway',
+      subtype: 'aerodrome',
+      tags: { name: 'Republic Airport', aeroway: 'aerodrome' },
+    });
+
+    const ranked = scoreAndRank([taxi, airport], parsed, 40.748, -73.985);
+    expect(ranked[0].poi.name).toBe('Republic Airport');
+  });
+
+  it('does not override a much better non-member match', () => {
+    // Beyond the tie window the better match wins: here the exact-name place
+    // (very close) beats a member far away.
+    const parsed = parseSearchQuery('airport');
+    const member = makePoi({
+      name: 'Westchester County Airport',
+      lat: 41.1,
+      lng: -73.7,
+      type: 'aeroway',
+      subtype: 'aerodrome',
+      tags: { name: 'Westchester County Airport', aeroway: 'aerodrome' },
+    });
+    const exact = makePoi({ name: 'Airport', lat: 40.7481, lng: -73.9851, subtype: 'place' });
+
+    const ranked = scoreAndRank([member, exact], parsed, 40.748, -73.985);
+    expect(ranked[0].poi.name).toBe('Airport');
   });
 });

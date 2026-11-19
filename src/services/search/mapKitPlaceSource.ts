@@ -15,8 +15,8 @@
 import { isMapKitAvailable, searchNearby, type NativeMapKitPoi } from '../../native/mapkit';
 import type { OsmPoi } from '../poi/osmFetcher';
 
-/** Radius around the search anchor. Matches the camera-derived search box. */
-const MAPKIT_RADIUS_METERS = 15_000;
+/** Default radius around the search anchor when the caller does not size it. */
+const DEFAULT_MAPKIT_RADIUS_METERS = 15_000;
 
 /** Apple POI categories mapped onto the tags the ranker and row icons read. */
 const CATEGORY_TAGS: Record<string, { type: string; subtype: string }> = {
@@ -91,11 +91,20 @@ export async function searchMapKitPlaces(
   lat: number,
   lng: number,
   limit: number,
-  opts?: { signal?: AbortSignal },
+  opts?: {
+    signal?: AbortSignal;
+    /**
+     * Search radius around the anchor. Callers size it from the intent's search
+     * horizon (see `searchHorizon.ts`) so a sparse brand query can be answered
+     * across the outer rings instead of a fixed 15 km window.
+     */
+    radiusMeters?: number;
+  },
 ): Promise<OsmPoi[]> {
   if (!query.trim() || !isMapKitAvailable() || opts?.signal?.aborted) return [];
 
-  const items = await searchNearby(query, lat, lng, MAPKIT_RADIUS_METERS);
+  const radiusMeters = Math.max(1_000, opts?.radiusMeters ?? DEFAULT_MAPKIT_RADIUS_METERS);
+  const items = await searchNearby(query, lat, lng, radiusMeters);
   if (opts?.signal?.aborted) return [];
 
   const pois: OsmPoi[] = [];

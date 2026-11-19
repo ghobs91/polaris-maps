@@ -26,6 +26,16 @@ export interface SearchStageMeta {
   source: 'local' | 'full';
   /** True when no further emissions will occur for this query. */
   final: boolean;
+  /**
+   * The area the emission was answered in — the radius that trimmed the list.
+   * Consumers frame the map on this instead of deriving one from whichever pins
+   * they happen to see (that is what turned a "whole foods" search into a
+   * street-level zoom on the nearest branch).
+   */
+  horizon?: {
+    radiusKm: number;
+    anchor: { lat: number; lng: number };
+  };
 }
 
 export interface SearchSessionOptions {
@@ -87,7 +97,11 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
   let lastQuery = '';
   let disposed = false;
   /** Most recent results emitted for a generation, used to terminate cleanly. */
-  let lastEmitted: { generation: number; results: UnifiedSearchResult[] } = {
+  let lastEmitted: {
+    generation: number;
+    results: UnifiedSearchResult[];
+    horizon?: SearchStageMeta['horizon'];
+  } = {
     generation: -1,
     results: [],
   };
@@ -126,14 +140,17 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
     if (!localFirst) return;
     const controller = new AbortController();
     localController = controller;
+    let localHorizon: SearchStageMeta['horizon'];
     try {
       const results = await unifiedSearch(query, {
-        ...buildOptions(controller.signal),
+        ...buildOptions(controller.signal, (_results, meta) => {
+          localHorizon = meta.horizon;
+        }),
         localOnly: true,
       });
       if (gen !== generation || disposed) return;
-      lastEmitted = { generation: gen, results };
-      onResults(results, { query, source: 'local', final: false });
+      lastEmitted = { generation: gen, results, horizon: localHorizon };
+      onResults(results, { query, source: 'local', final: false, horizon: localHorizon });
     } catch (err) {
       if (!isAbortError(err) && gen === generation && !disposed) onError?.(err);
     } finally {
@@ -144,22 +161,28 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
   async function runFull(query: string, gen: number): Promise<UnifiedSearchResult[]> {
     const controller = new AbortController();
     networkController = controller;
+    // The final emission carries the radius the answer was trimmed to; it is
+    // reported once the run resolves so the consumer can frame the map on the
+    // same area the list covers.
+    let finalHorizon: SearchStageMeta['horizon'];
     try {
       const results = await unifiedSearch(
         query,
         buildOptions(controller.signal, (partial, meta) => {
+          if (meta.final) finalHorizon = meta.horizon;
           if (gen !== generation || disposed || meta.final) return;
-          lastEmitted = { generation: gen, results: partial };
+          lastEmitted = { generation: gen, results: partial, horizon: meta.horizon };
           onResults(partial, {
             query,
             source: meta.stage === 'local' ? 'local' : 'full',
             final: false,
+            horizon: meta.horizon,
           });
         }),
       );
       if (gen !== generation || disposed) return [];
-      lastEmitted = { generation: gen, results };
-      onResults(results, { query, source: 'full', final: true });
+      lastEmitted = { generation: gen, results, horizon: finalHorizon };
+      onResults(results, { query, source: 'full', final: true, horizon: finalHorizon });
       return results;
     } catch (err) {
       if (gen !== generation || disposed) return [];
@@ -171,7 +194,12 @@ export function createSearchSession(options: SearchSessionOptions): SearchSessio
       // on the *current* generation. Keep the best results already shown for
       // this query instead of blanking the list.
       const fallback = lastEmitted.generation === gen ? lastEmitted.results : [];
-      onResults(fallback, { query, source: 'full', final: true });
+      onResults(fallback, {
+        query,
+        source: 'full',
+        final: true,
+        horizon: lastEmitted.generation === gen ? lastEmitted.horizon : undefined,
+      });
       return [];
     } finally {
       if (networkController === controller) networkController = null;

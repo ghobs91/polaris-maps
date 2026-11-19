@@ -9,18 +9,26 @@
  * panel — and every search regression fixed one copy while breaking another
  * (see the "fix(search)" history). Both layers now read this one object:
  *
- *  - `unifiedSearch.ts` gates result distance by `areaRadiusKm`
+ *  - `unifiedSearch.ts` gates result distance by `areaRadiusKm` and trims the
+ *    answer to the radius `searchHorizon.ts` decides
  *  - panel helpers order/trim results by `tailRadiusKm` / `nearbyRadiusKm`
- *    and pick map pins by `maxPins` / `pinSpreadKm` / `pinClusterKm`
- *  - panel camera fit honours `fitAnchorRadiusKm` and the intent's framing
+ *    and budget map pins by `maxRenderedPins`
+ *  - panel camera fit honours `fitAnchorRadiusKm`, the chosen horizon, and the
+ *    intent's framing permission
  *
  * Policies are static today (the same table answers every intent); the plan
  * exists so a future refinement — e.g. a wider tail for named places — changes
  * one typed field here, once, with one test.
+ *
+ * The answer *radius* is no longer static: it is decided per query from the
+ * candidate distribution by `searchHorizon.ts`, and the resulting `horizon`
+ * policy travels on the plan so the engine (result gate) and the panel (pins,
+ * camera) read one number instead of each deriving their own.
  */
 
 import { normalizeSearchText, isAddressQuery } from './queryParser';
 import { resolveSearchCategories } from '../poi/categoryResolver';
+import { HORIZON_POLICIES, type HorizonPolicy } from './searchHorizon';
 
 export type QueryIntent =
   /** A street address or coordinate — an explicit destination. */
@@ -49,15 +57,12 @@ export interface QueryPlan {
    * ordered above the (kept) distant tail.
    */
   readonly nearbyRadiusKm: number;
-  /** Maximum result pins shown on the map. */
-  readonly maxPins: number;
   /**
-   * Pin clustering: when one of the nearest pins sits more than this far from
-   * the nearest one, only pins within `pinClusterKm` of it stay — the camera
-   * keeps the tighter group the user is likely scanning.
+   * Maximum result pins handed to the map layer. A rendering budget, not an
+   * answer: the area a search is answered in is decided by `searchHorizon.ts`,
+   * and `POILayer` clusters whatever arrives here into count badges.
    */
-  readonly pinSpreadKm: number;
-  readonly pinClusterKm: number;
+  readonly maxRenderedPins: number;
   /**
    * Camera fit (panel): a nearby-intent submit may move the camera only this
    * far from the anchor. Genuinely rural searches (~28 km category radius)
@@ -70,6 +75,12 @@ export interface QueryPlan {
    * "bagels" from Westbury must never fly the map to Manhattan.
    */
   readonly allowsDistantFraming: boolean;
+  /**
+   * Adaptive answer radius for this intent (see `searchHorizon.ts`): the radius
+   * ladder, the strong-match target that picks a ring, and the fetch width that
+   * keeps every ring populated. Replaces the zoom-derived search box.
+   */
+  readonly horizon: HorizonPolicy;
 }
 
 /** Filler words that don't turn a category phrase into a place lookup. */
@@ -138,11 +149,10 @@ export const DEFAULT_QUERY_PLAN = {
   areaRadiusKm: 75,
   tailRadiusKm: 120,
   nearbyRadiusKm: 50,
-  maxPins: 5,
-  pinSpreadKm: 18,
-  pinClusterKm: 12,
+  maxRenderedPins: 24,
   fitAnchorRadiusKm: 30,
   allowsDistantFraming: true,
+  horizon: HORIZON_POLICIES['named-place'],
 } as const satisfies QueryPlan;
 
 /** Build the plan for a user query. */
@@ -153,10 +163,9 @@ export function createQueryPlan(query: string): QueryPlan {
     areaRadiusKm: DEFAULT_QUERY_PLAN.areaRadiusKm,
     tailRadiusKm: DEFAULT_QUERY_PLAN.tailRadiusKm,
     nearbyRadiusKm: DEFAULT_QUERY_PLAN.nearbyRadiusKm,
-    maxPins: DEFAULT_QUERY_PLAN.maxPins,
-    pinSpreadKm: DEFAULT_QUERY_PLAN.pinSpreadKm,
-    pinClusterKm: DEFAULT_QUERY_PLAN.pinClusterKm,
+    maxRenderedPins: DEFAULT_QUERY_PLAN.maxRenderedPins,
     fitAnchorRadiusKm: DEFAULT_QUERY_PLAN.fitAnchorRadiusKm,
     allowsDistantFraming: intent !== 'nearby',
+    horizon: HORIZON_POLICIES[intent],
   };
 }

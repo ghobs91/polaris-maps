@@ -31,10 +31,62 @@ Search is a staged multi-source pipeline:
 
 - A search answers **where the user is looking**. Candidates farther than 75 km from the camera (or the user's GPS fix) are dropped for local-intent queries. Text-first sources (Photon, Nominatim) rank on text and only bias by location, so without this gate a Manhattan search is answered by a Boston café 300 km away.
 - Explicit destinations bypass the area gate: a structured address query, a city result, or a query whose **last token is a known city** ("tatte boston"). That is a request to go there.
-- Category boxes are capped at ~0.25° (~28 km): a zoomed-out map must not turn "bagels" into a continental Overpass query.
+- The fetch box is no longer derived from the map zoom. Each intent has an **adaptive horizon**
+  (`searchHorizon.ts`) and sources are asked for the widest ring it allows (`horizonFetchRadiusDeg`),
+  so one fetch populates every ring: ~30 km for a bare category, ~40 km for a brand/named place,
+  ~10 km for an address. That is what stopped a street-level map from confining "whole foods" to
+  the one branch inside its ±9 km window.
 - Category candidates are anchored (user location, else map centre) and truncated **nearest-first** before ranking — Overpass returns features in arbitrary geographic order, so slicing first would let a dense far-away cluster bury nearby places.
-- On an explicit submit only a place/brand/address lookup may frame a distant match. Nearby-intent queries (category/cuisine/"near me") keep the camera where the user is when every match is > 20 km away; the list stays authoritative.
+- **The answer radius is volume-driven.** `decideSearchHorizon` picks the smallest ladder ring that
+  holds `targetMatches` strong matches (20 for a category, 10 for a brand); when there are fewer it
+  returns the distance to the farthest strong match, so a sparse answer is never trimmed away.
+  Observed on the simulator, anchored in Levittown NY: "coffee" → 8 km (30 places), "starbucks" →
+  8 km, "whole foods" → 40 km (branches 6.7–34.6 km out), "airport" → 40 km (includes JFK at 23 km).
+  Strong = `queryRelevanceScore` (text match **or** membership in the queried category), so a café
+  named "Babylon Bean" still counts as a match for "coffee".
+- The chosen radius travels on `SearchStageMeta.horizon` (`radiusKm` + `anchor`). The panel frames
+  that circle — not the pins' bounding box — so the camera lands on the area the list covers instead
+  of zooming into the nearest branch. A query with no horizon falls back to the pins' bounds.
+- A quick-category **pill runs the same pipeline as typing the phrase** (`unifiedSearch`), then
+  reads `meta.horizon`; it no longer queries the category source alone or frames the visible
+  viewport. Before this, the Coffee pill asked over a ~3 km screen box, got six cafés and zoomed
+  into them; now it gets the engine's ranked answer over 8 km.
+- On an explicit submit only a place/brand/address lookup may frame a distant match. Nearby-intent queries (category/cuisine/"near me") keep the camera where the user is when every match is > 30 km away; the list stays authoritative.
 - The floating panel applies the same rule to its merged rows (stations, ranked hits): distant non-destination rows are dropped, and an empty local list shows "no places nearby" instead of another metro's matches.
+
+## Ranking rules (entity type beats proximity)
+
+Text and category signals are what stop a nearby business from winning on
+distance alone. Three rules, all in `searchRanker.ts`:
+
+- **Category membership comes from tags, not names.** `poiMatchesQueryCategory`
+  resolves the category through `categoryToOverpassTags` — "airport" is
+  `aeroway=aerodrome`, "gas" is `amenity=fuel` — so real airports and stations
+  are recognised even though their OSM value differs from the category name.
+- **A name mention is not evidence of entity type.** `entityTypeConfidence`
+  multiplies the text score down when the venue's own category contradicts the
+  query (an "Airport Hotel" for "airport": ×0.45), and when the category is
+  unknown only a head-noun mention counts fully ("Republic Airport" ✓,
+  "Levittown Taxi and Airport Service" ×0.55), because English compounds put the
+  head noun last.
+- **Text matching requires real words.** Name words under three characters
+  cannot match ("airport" must not match the "A" in "A Plus Jewelry"), and the
+  fuzzy budget is one edit for words of six letters or fewer ("cofee" →
+  "coffee" ✓, "hotel" → "home" ✗).
+
+Consequences in the engine (`unifiedSearch.ts`):
+
+- **A category query keeps only candidates that are that kind of place or are
+  named for it.** The Overture viewport pass returns every business around the
+  camera; without this gate, distance plus the viewport bonus alone filled
+  "airport" with a bowling alley, a law firm and a funeral home.
+- **Membership breaks near-ties in the ordering** (`MEMBER_TIE_WINDOW`, 8 points)
+  rather than in the score. A score bonus saturated the 0–100 cap and inverted
+  the effect: every good candidate tied at 100 and distance decided the order.
+
+Measured on the simulator (Levittown NY) after the change: "airport" →
+Republic Airport, JFK, LaGuardia, then the taxi dispatcher 2 km away;
+"hotel" → ten hotels, no funeral home; "bank" → banks and credit unions.
 
 ## Failure handling (failure ≠ empty)
 
@@ -81,22 +133,24 @@ All UI consumers (search tab, floating search panel, add-stop search, add destin
 
 ### Search (`src/services/search/`)
 
-| File                      | Description                                                                                                                                                                                                                                                                      |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, runs the Overpass name-search **gap-filler** after primaries settle, applies the area-of-interest gate, merges/caches/deduplicates/ranks. Entry point for all search. |
-| `mapKitPlaceSource.ts`    | Apple MapKit (`MKLocalSearch`) nearby POIs adapted to `OsmPoi` — commercial place coverage for iOS, empty elsewhere.                                                                                                                                                             |
-| `queryPlan.ts`            | Shared result-governance policy owned in one place: intent classification (address / nearby / named-place), the 75 km area gate, the panel's tail/pin/fit radii, and distant-framing permission.                                                                                 |
-| `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                                                                                                                               |
-| `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                                                                                                                                |
-| `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                                                                                                                              |
-| `searchRanker.ts`         | Scores results 0–100: bm25 + text match, distance, category, popularity, viewport, intent modifiers (open now / quality / cheap), canonical dedup.                                                                                                                               |
-| `searchFilters.ts`        | Pure filter/sort view layer over ranked results: open-now, min rating, max price, max distance, categories; sorts by relevance/distance/rating/price; intent-seeded defaults with explicit override (unknown data passes through).                                               |
-| `searchSession.ts`        | Keystroke lifecycle (debounce/abort/local-first). Reads `getCategoryFilters` at search time so a category-filter change is folded into the parsed intent and re-gates sources; non-category filters just re-apply locally.                                                       |
-| `openingHours.ts`         | Minimal `parseOpenNow` for common OSM hours syntax; returns null (unknown) when unparseable.                                                                                                                                                                                     |
-| `photonGeocoder.ts`       | Komoot Photon API client — fuzzy, typo-tolerant OSM-based geocoding.                                                                                                                                                                                                             |
-| `requestThrottle.ts`      | Shared abort-aware request throttles (Nominatim 1 req/s across all call sites).                                                                                                                                                                                                  |
-| `searchHistoryService.ts` | MMKV-persisted last 10 selections (query + result); personalization boost lookups.                                                                                                                                                                                               |
-| `abortUtils.ts`           | Abort helpers (`throwIfAborted`, `sleepWithAbort`, `withTimeout`, `withSourceTimeout`).                                                                                                                                                                                          |
+| File                      | Description                                                                                                                                                                                                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unifiedSearch.ts`        | Top-level orchestrator — runs sources in parallel, emits stages, gates named sources on local sufficiency, runs the Overpass name-search **gap-filler** after primaries settle, applies the area-of-interest gate, merges/caches/deduplicates/ranks. Entry point for all search.         |
+| `mapKitPlaceSource.ts`    | Apple MapKit (`MKLocalSearch`) nearby POIs adapted to `OsmPoi` — commercial place coverage for iOS, empty elsewhere.                                                                                                                                                                     |
+| `searchHorizon.ts`        | The adaptive answer radius: a per-intent ladder of rings, a strong-match target, `decideSearchHorizon` (smallest ring holding the target, else the farthest match), `horizonFitBounds` (camera box), and `horizonFetchRadiusDeg` (fetch width). Pure — engine, panel and pills share it. |
+| `devSearchProbe.ts`       | Dev-only runtime probe: publishes `globalThis.__polarisSearchProbe` and, with `EXPO_PUBLIC_SEARCH_PROBE=1`, writes a sweep of real queries (radius, counts, top names) to `Documents/search-probe.json`. The only way to verify search quality against the real index/network.           |
+| `queryPlan.ts`            | Shared result-governance policy owned in one place: intent classification (address / nearby / named-place), the 75 km area gate, the panel's tail/pin/fit radii, and distant-framing permission.                                                                                         |
+| `searchSession.ts`        | Non-React session: debounce, abort lifecycle, local-first pass, generation checks, optional coordinate pre-flight.                                                                                                                                                                       |
+| `searchCache.ts`          | Bounded LRU result cache: per-source TTLs (5 min results / 60 s empty), quantized-bbox keys, in-flight dedupe, bbox invalidation.                                                                                                                                                        |
+| `queryParser.ts`          | Parses natural-language queries into structured intent (brand, cuisine, modifiers, categories, address heuristics).                                                                                                                                                                      |
+| `searchRanker.ts`         | Scores results 0–100: bm25 + text match, distance, category, popularity, viewport, intent modifiers (open now / quality / cheap), canonical dedup.                                                                                                                                       |
+| `searchFilters.ts`        | Pure filter/sort view layer over ranked results: open-now, min rating, max price, max distance, categories; sorts by relevance/distance/rating/price; intent-seeded defaults with explicit override (unknown data passes through).                                                       |
+| `searchSession.ts`        | Keystroke lifecycle (debounce/abort/local-first). Reads `getCategoryFilters` at search time so a category-filter change is folded into the parsed intent and re-gates sources; non-category filters just re-apply locally.                                                               |
+| `openingHours.ts`         | Minimal `parseOpenNow` for common OSM hours syntax; returns null (unknown) when unparseable.                                                                                                                                                                                             |
+| `photonGeocoder.ts`       | Komoot Photon API client — fuzzy, typo-tolerant OSM-based geocoding.                                                                                                                                                                                                                     |
+| `requestThrottle.ts`      | Shared abort-aware request throttles (Nominatim 1 req/s across all call sites).                                                                                                                                                                                                          |
+| `searchHistoryService.ts` | MMKV-persisted last 10 selections (query + result); personalization boost lookups.                                                                                                                                                                                                       |
+| `abortUtils.ts`           | Abort helpers (`throwIfAborted`, `sleepWithAbort`, `withTimeout`, `withSourceTimeout`).                                                                                                                                                                                                  |
 
 ### Geocoding (`src/services/geocoding/`)
 

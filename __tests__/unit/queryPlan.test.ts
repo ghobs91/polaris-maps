@@ -32,9 +32,7 @@ describe('queryPlan', () => {
       expect(DEFAULT_QUERY_PLAN.areaRadiusKm).toBe(75); // engine area gate
       expect(DEFAULT_QUERY_PLAN.tailRadiusKm).toBe(120); // panel distant-tail drop
       expect(DEFAULT_QUERY_PLAN.nearbyRadiusKm).toBe(50); // panel local ordering
-      expect(DEFAULT_QUERY_PLAN.maxPins).toBe(5);
-      expect(DEFAULT_QUERY_PLAN.pinSpreadKm).toBe(18);
-      expect(DEFAULT_QUERY_PLAN.pinClusterKm).toBe(12);
+      expect(DEFAULT_QUERY_PLAN.maxRenderedPins).toBe(24); // pin rendering budget
       expect(DEFAULT_QUERY_PLAN.fitAnchorRadiusKm).toBe(30); // camera fit radius
     });
 
@@ -43,10 +41,16 @@ describe('queryPlan', () => {
       expect(plan.areaRadiusKm).toBe(75);
       expect(plan.tailRadiusKm).toBe(120);
       expect(plan.nearbyRadiusKm).toBe(50);
-      expect(plan.maxPins).toBe(5);
-      expect(plan.pinSpreadKm).toBe(18);
-      expect(plan.pinClusterKm).toBe(12);
+      expect(plan.maxRenderedPins).toBe(24);
       expect(plan.fitAnchorRadiusKm).toBe(30);
+    });
+
+    it('sizes the answer horizon from the intent, not from the map zoom', () => {
+      // A bare category is answered around the user; a brand/named place may
+      // reach across the metro; an address is a single destination.
+      expect(createQueryPlan('coffee').horizon.maxRadiusKm).toBe(30);
+      expect(createQueryPlan('whole foods').horizon.maxRadiusKm).toBe(40);
+      expect(createQueryPlan('350 5th Ave').horizon.maxRadiusKm).toBe(10);
     });
   });
 });

@@ -35,6 +35,8 @@ import { fetchOsmPoisByName } from '../poi/osmFetcher';
 import {
   scoreAndRank,
   deduplicateResults,
+  poiMatchesQueryCategory,
+  queryRelevanceScore,
   textMatchScore,
   type ScoredResult,
 } from './searchRanker';
@@ -51,6 +53,13 @@ import { isBundledCityName, searchCoarseCities } from '../geocoding/coarseGeocod
 import { getPersonalizedPlaceNames, PERSONALIZATION_BOOST } from './searchHistoryService';
 import { searchMapKitPlaces } from './mapKitPlaceSource';
 import { createQueryPlan } from './queryPlan';
+import {
+  HORIZON_POLICIES,
+  decideSearchHorizon,
+  horizonFetchRadiusDeg,
+  isWithinHorizon,
+  type HorizonPolicy,
+} from './searchHorizon';
 
 // ---------------------------------------------------------------------------
 // Source gating
@@ -211,6 +220,15 @@ export interface SearchStageMeta {
   stage: SearchStage;
   /** True for the last emission of the query. */
   final: boolean;
+  /**
+   * The area this emission was answered in, so a consumer frames the map on the
+   * same radius the list was trimmed to instead of re-deriving one from the
+   * pins it happens to see. Absent when the query had no strong matches.
+   */
+  horizon?: {
+    radiusKm: number;
+    anchor: { lat: number; lng: number };
+  };
 }
 
 export interface SearchOptions {
@@ -254,7 +272,11 @@ export async function unifiedSearch(
 ): Promise<UnifiedSearchResult[]> {
   if (query.trim().length < 2) return [];
 
-  const { lat, lng, zoom, limit = 30 } = options;
+  const { lat, lng, limit = 30 } = options;
+
+  // One policy object for the whole run: the answer radius, the fetch box and
+  // the framing decision all read it, so they cannot disagree.
+  const plan = createQueryPlan(query);
 
   // Category → OSM tag mapping for Photon filtering
   const CATEGORY_TO_OSM_TAG: Partial<Record<string, string>> = {
@@ -298,7 +320,18 @@ export async function unifiedSearch(
   const namesDistantPlace = !addressQuery && (await queryNamesDistantPlace(parsed.coreQuery));
   const allowDistantResults = addressQuery || namesDistantPlace;
 
-  const queryContext = deriveQueryContext(parsed, options);
+  // Category/cuisine phrases are answered around the user, so they take the
+  // `nearby` ladder even when they carry a modifier ("coffee near me" is not a
+  // named-place lookup) or arrive from the filter sheet. A brand wins over a
+  // stray category word ("starbucks coffee" is still the branches), which is
+  // why the plan's own intent — not the category list — decides for brands.
+  // Fetch box and answer radius read this one policy, so they cannot disagree.
+  const horizonPolicy: HorizonPolicy =
+    !parsed.brand && (parsed.categories?.length || parsed.cuisineHint)
+      ? HORIZON_POLICIES.nearby
+      : plan.horizon;
+
+  const queryContext = deriveQueryContext(parsed, horizonPolicy);
   const south = lat - queryContext.viewportRadiusDeg;
   const north = lat + queryContext.viewportRadiusDeg;
   const west = lng - queryContext.viewportRadiusDeg;
@@ -407,13 +440,14 @@ export async function unifiedSearch(
   // full category result (local + network) instead, so no dedup is needed.
   const localPois = collectPlacePois(localPlaces);
 
-  const partial = assembleResults({
+  const partial = assembleSearchResults({
     allPois: [...localPois, ...(localCategoryResult?.pois ?? [])],
     photonAddressResults: [],
     geocodingResults: localAddressResults,
     parsed,
     addressQuery,
     allowDistantResults,
+    horizon: horizonPolicy,
     lat,
     lng,
     south,
@@ -424,9 +458,11 @@ export async function unifiedSearch(
     userLocation: options.userLocation,
     limit,
   });
-  if (options.localOnly) return partial;
-  options.onStage?.(partial, { stage: 'local', final: false });
-  options.onPartial?.(partial);
+  // Report the local answer's horizon even on a local-only run: the caller's
+  // fast phase frames the map from it (see `searchSession.runLocal`).
+  options.onStage?.(partial.results, { stage: 'local', final: false, horizon: partial.horizon });
+  if (options.localOnly) return partial.results;
+  options.onPartial?.(partial.results);
   throwIfAborted(signal);
 
   // 3b. Phase 2 — network sources in parallel. Local category/address are
@@ -471,13 +507,14 @@ export async function unifiedSearch(
   let categoryEmitted = false;
 
   const assemble = () =>
-    assembleResults({
+    assembleSearchResults({
       allPois,
       photonAddressResults,
       geocodingResults: addressEntries,
       parsed,
       addressQuery,
       allowDistantResults,
+      horizon: horizonPolicy,
       lat,
       lng,
       south,
@@ -490,10 +527,12 @@ export async function unifiedSearch(
     });
 
   const emitStage = (stage: SearchStage, final: boolean): UnifiedSearchResult[] => {
-    const results = assemble();
-    if (final) finalResults = results;
-    if (!signal?.aborted) options.onStage?.(results, { stage, final });
-    return results;
+    const assembled = assemble();
+    if (final) finalResults = assembled.results;
+    if (!signal?.aborted) {
+      options.onStage?.(assembled.results, { stage, final, horizon: assembled.horizon });
+    }
+    return assembled.results;
   };
 
   const maybeEmitStages = () => {
@@ -655,18 +694,19 @@ export async function unifiedSearch(
           parsed.categories?.length === 1
             ? (CATEGORY_TO_OSM_TAG[parsed.categories[0]] ?? undefined)
             : undefined;
-        // Pass the actual viewport zoom so Photon's location bias stays local.
-        // Photon already ranks globally-unique names ("Times Square") correctly
-        // even at a high zoom, so lowering it is unnecessary — and harmful, since
-        // it floods generic local queries ("plumbing supply") with distant
-        // matches that outrank the nearby ones.
+        // Photon's `zoom` is its location-bias radius, not our map zoom. Derive
+        // it from the horizon fetch box so a wide (40 km) brand query is answered
+        // across that box instead of being re-confined to the neighbourhood the
+        // map happens to show. Photon still ranks globally-unique names
+        // ("Times Square") correctly at a low bias zoom.
+        const biasZoom = photonBiasZoom(queryContext.viewportRadiusDeg);
         const viewportBounds = { south, north, west, east };
         return cachedFetch(
           cacheKey([
             'photon',
             parsed.originalQuery,
             boundsKey(viewportBounds),
-            zoom,
+            biasZoom,
             limit,
             osmTagFilter,
           ]),
@@ -674,9 +714,16 @@ export async function unifiedSearch(
             // Spend only on a cache miss, i.e. when a request actually leaves
             // the device.
             notePhotonFallback();
-            return searchPhoton(parsed.originalQuery, lat, lng, zoom, limit, 'en', osmTagFilter, {
-              signal,
-            });
+            return searchPhoton(
+              parsed.originalQuery,
+              lat,
+              lng,
+              biasZoom,
+              limit,
+              'en',
+              osmTagFilter,
+              { signal },
+            );
           },
           { bounds: viewportBounds, signal },
         );
@@ -831,7 +878,14 @@ export async function unifiedSearch(
               boundsKey({ south, north, west, east }),
               limit,
             ]),
-            () => searchMapKitPlaces(parsed.originalQuery, lat, lng, limit, { signal }),
+            () =>
+              searchMapKitPlaces(parsed.originalQuery, lat, lng, limit, {
+                signal,
+                // MapKit's own 15 km default is narrower than the named-place
+                // ladder, so Apple's data could never answer the outer rings of
+                // a sparse brand query.
+                radiusMeters: Math.round(queryContext.viewportRadiusDeg * 111_320),
+              }),
             { bounds: { south, north, west, east }, signal },
           ),
           SOURCE_TIMEOUT_MS,
@@ -917,6 +971,8 @@ interface AssembleInput {
   addressQuery: boolean;
   /** Keep matches outside {@link SEARCH_AREA_RADIUS_KM} (named destination). */
   allowDistantResults: boolean;
+  /** Adaptive answer radius for this query's intent (see `searchHorizon.ts`). */
+  horizon: HorizonPolicy;
   lat: number;
   lng: number;
   south: number;
@@ -926,6 +982,21 @@ interface AssembleInput {
   viewportBounds?: SearchOptions['viewportBounds'];
   userLocation?: { lat: number; lng: number };
   limit: number;
+}
+
+interface AssembledSearch {
+  results: UnifiedSearchResult[];
+  /** Absent when no candidate was a strong enough match to size an area. */
+  horizon?: { radiusKm: number; anchor: { lat: number; lng: number } };
+}
+
+/**
+ * A candidate the user named outright — a city or a landmark. These are
+ * destinations, not "nearby places": they never size the answer radius and are
+ * never dropped by it, exactly like the area gate above.
+ */
+function isExplicitDestinationPoi(poi: OsmPoi): boolean {
+  return poi.subtype === 'city' || poi.type === 'place';
 }
 
 /** Convert Overture/Place rows to OsmPoi, carrying brand/rating tags for scoring. */
@@ -941,7 +1012,7 @@ function collectPlacePois(places: Place[]): OsmPoi[] {
   });
 }
 
-function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
+function assembleSearchResults(input: AssembleInput): AssembledSearch {
   const {
     allPois,
     photonAddressResults,
@@ -949,6 +1020,7 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     parsed,
     addressQuery,
     allowDistantResults,
+    horizon: horizonPolicy,
     lat,
     lng,
     south,
@@ -984,6 +1056,22 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     inViewportProximityFloor: parsed.isNameSearch && density !== 'sparse' ? 0.92 : 0.82,
   });
   scored = deduplicateResults(scored);
+
+  // A category/cuisine query is a request for *that kind of place*; being
+  // nearby is not an answer. The Overture viewport pass contributes every
+  // business around the camera, and distance + the viewport bonus alone are
+  // enough to put a bowling alley, a law firm and a funeral home in the list
+  // for "airport". Keep only candidates with evidence: members of the queried
+  // category, or places named for it (a hotel called "JFK Airport" stays, just
+  // below the airports). Name/brand/address queries are untouched — there the
+  // candidate *is* the answer, and proximity is a legitimate tie-break.
+  if ((parsed.categories?.length || parsed.cuisineHint) && !addressQuery) {
+    scored = scored.filter(
+      (result) =>
+        poiMatchesQueryCategory(result.poi, parsed) || textMatchScore(result.poi, parsed) > 0,
+    );
+  }
+
   if (userLocation && !addressQuery && proximityAnchor !== 'viewport') {
     scored = promoteNearbyUserMatches(scored, parsed, userLocation);
   }
@@ -1026,6 +1114,43 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     });
   }
 
+  // Adaptive answer area.
+  //
+  // The fetch box (see `deriveQueryContext`) is now the widest ring the intent
+  // allows, so the candidate pool spans the whole ladder. This is the step that
+  // turns that pool into an answer: the smallest radius holding
+  // `horizonPolicy.targetMatches` strong matches, measured from the same anchor
+  // the results were scored against. A dense query ("coffee") settles on a
+  // 4–8 km radius, a sparse brand query ("whole foods") on the widest ring —
+  // the volume-driven behaviour the search used to ignore entirely.
+  //
+  // It is applied to the POI list only. Addresses and named cities are
+  // destinations the user asked for by name; they never size the radius and are
+  // exempt from it.
+  const horizonDecision = decideSearchHorizon({
+    candidates: scored,
+    anchor: { lat, lng },
+    policy: horizonPolicy,
+    anchorOf: (result) => result.poi,
+    strength: (result) =>
+      isExplicitDestinationPoi(result.poi) ? 0 : queryRelevanceScore(result.poi, parsed),
+  });
+  const horizonRadiusKm = horizonDecision.radiusKm;
+  // Observable in the dev console: the area this query was answered in, and the
+  // evidence it was sized from. Without this, "search only found 2 places" has
+  // no visible cause.
+  if (__DEV__) {
+    console.log(
+      `[search] horizon "${parsed.originalQuery}" ${horizonRadiusKm}km ` +
+        `(${horizonDecision.strongMatches} strong, ${horizonDecision.candidateCount} in area, ` +
+        `${horizonDecision.saturated ? 'saturated' : 'dense'}, policy max ${horizonPolicy.maxRadiusKm}km)`,
+    );
+  }
+  const inHorizon = (result: ScoredResult) =>
+    isExplicitDestinationPoi(result.poi) ||
+    isWithinHorizon(result.poi, { lat, lng }, horizonRadiusKm);
+  const considered = horizonRadiusKm > 0 ? scored.filter(inHorizon) : scored;
+
   // 5. Build geocoding (address) results — from Nominatim + Photon house/street
   // Street promotions in a name search follow the same area rule as POIs.
   const addressResults: UnifiedSearchResult[] = photonAddressResults.filter(inArea);
@@ -1050,7 +1175,7 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
 
   // 6. Convert POI results
   const poiLimit = addressQuery ? Math.max(5, limit - addressResults.length) : limit;
-  const poiResults: UnifiedSearchResult[] = scored.slice(0, poiLimit).map((sr) => ({
+  const poiResults: UnifiedSearchResult[] = considered.slice(0, poiLimit).map((sr) => ({
     name: sr.poi.name,
     subtitle: buildSubtitle(sr.poi),
     lat: sr.poi.lat,
@@ -1090,7 +1215,10 @@ function assembleResults(input: AssembleInput): UnifiedSearchResult[] {
     }
   }
 
-  return results;
+  return {
+    results,
+    horizon: horizonRadiusKm > 0 ? { radiusKm: horizonRadiusKm, anchor: { lat, lng } } : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1181,21 +1309,28 @@ function promoteNearbyUserMatches(
 
 function deriveQueryContext(
   parsed: ParsedSearchQuery,
-  options: SearchOptions,
+  horizon: HorizonPolicy,
 ): {
   viewportRadiusDeg: number;
   userRadiusDeg: number;
   viewportFetchLimit: number;
   userFetchLimit: number;
 } {
-  const zoomRadiusDeg = Math.max(0.035, Math.min(1.4, (360 / Math.pow(2, options.zoom)) * 1.5));
+  // The fetch box is the widest ring the intent's horizon allows, NOT a
+  // function of the map zoom.
+  //
+  // Zoom-derived boxes were the reason a street-level search saw the world
+  // through a ±9 km window: at zoom 14 the box clamped to its 0.08° floor, so
+  // "whole foods" returned the one branch that happened to be inside it and
+  // the ranker had nothing else to promote. The radius that answers the query
+  // is decided afterwards, from how many good matches the box actually holds
+  // (`decideSearchHorizon`), so one fetch still serves every ring of the
+  // ladder.
+  const viewportRadiusDeg = horizonFetchRadiusDeg(horizon);
 
   if (parsed.categories || parsed.cuisineHint) {
     return {
-      // Cap the category box. Uncapped, a zoomed-out map turns "bagels" into a
-      // continental Overpass query that pulls every bakery in the next city
-      // and buries the ones around the user. ~0.25° ≈ 28 km.
-      viewportRadiusDeg: Math.min(Math.max(zoomRadiusDeg, 0.09), 0.25),
+      viewportRadiusDeg,
       userRadiusDeg: parsed.wantsNearMe ? 0.1 : 0.08,
       viewportFetchLimit: 420,
       userFetchLimit: 180,
@@ -1204,11 +1339,7 @@ function deriveQueryContext(
 
   if (parsed.brand || parsed.isNameSearch) {
     return {
-      // Allow a wider search radius for name-based queries so that
-      // well-known destinations (e.g. "Times Square" in Manhattan from
-      // Levittown, ~40 km away) are included in the fetch area.
-      // Cap at 0.45° (~50 km) instead of the previous 0.22° (~24 km).
-      viewportRadiusDeg: Math.min(Math.max(zoomRadiusDeg, 0.08), 0.45),
+      viewportRadiusDeg,
       userRadiusDeg: parsed.wantsNearMe ? 0.14 : 0.1,
       viewportFetchLimit: 260,
       userFetchLimit: 120,
@@ -1216,11 +1347,24 @@ function deriveQueryContext(
   }
 
   return {
-    viewportRadiusDeg: zoomRadiusDeg,
+    viewportRadiusDeg,
     userRadiusDeg: 0.09,
     viewportFetchLimit: 320,
     userFetchLimit: 140,
   };
+}
+
+/**
+ * Photon's `zoom` parameter sizes its location bias (~zoom 12 ≈ 10 km, ~11 ≈
+ * 20 km, ~10 ≈ 40 km). Map it from the horizon fetch box so the bias covers the
+ * area the intent is answered in rather than the map's current zoom.
+ */
+function photonBiasZoom(radiusDeg: number): number {
+  const radiusKm = radiusDeg * 111.32;
+  if (radiusKm >= 35) return 10;
+  if (radiusKm >= 18) return 11;
+  if (radiusKm >= 9) return 12;
+  return 13;
 }
 
 function inferQueryDensity(

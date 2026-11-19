@@ -1,6 +1,7 @@
 import type { GeocodingResult } from '../../services/geocoding/geocodingService';
 import type { UnifiedSearchResult } from '../../services/search/unifiedSearch';
 import { DEFAULT_QUERY_PLAN, type QueryPlan } from '../../services/search/queryPlan';
+import { horizonFitBounds } from '../../services/search/searchHorizon';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import {
   applyFilters,
@@ -98,6 +99,57 @@ export function kmBetween(
 export const NEARBY_RESULT_KM = DEFAULT_QUERY_PLAN.nearbyRadiusKm;
 
 /**
+ * Pick the pins shown for a result set.
+ *
+ * This used to be where a search lost its results: the set was cut to the
+ * nearest five and, when those five spread more than 18 km apart, cut again to
+ * the ones inside a 12 km cluster. So a
+ * "whole foods" search rendered the one branch in the same town and the map
+ * zoomed *into* it — the exact opposite of showing the matching branches across
+ * the metro.
+ *
+ * The area decision belongs upstream now (`searchHorizon.ts` trims the result
+ * set to the radius that answers the query), so this only orders the pins
+ * nearest-first and applies a rendering budget. Density is the map layer's job:
+ * `POILayer` clusters these into count badges (`clusterPoisForDisplay`), which
+ * is how a dense answer stays legible instead of being thinned away here.
+ */
+export function selectSearchPins(
+  mapPois: OsmPoi[],
+  anchor?: { lat: number; lng: number } | null,
+  plan: QueryPlan = DEFAULT_QUERY_PLAN,
+): OsmPoi[] {
+  const ordered = anchor
+    ? [...mapPois].sort((a, b) => kmBetween(anchor, a) - kmBetween(anchor, b))
+    : mapPois;
+
+  return ordered.length <= plan.maxRenderedPins ? ordered : ordered.slice(0, plan.maxRenderedPins);
+}
+
+/**
+ * Bounds for the area a search was answered in.
+ *
+ * Framing the pins' own bounding box loses the answer: two branches either side
+ * of the user frame a sliver, and one branch frames a street corner. The area
+ * itself is the answer — the horizon circle around the anchor — so the camera
+ * lands where Apple Maps lands for the same query: a 4–8 km neighbourhood for a
+ * dense "coffee" search, the whole metro for a sparse "whole foods" one.
+ *
+ * Falls back to the pins' bounds when the query had no horizon (nothing was a
+ * strong enough match to size an area).
+ */
+export function horizonFrameBounds(
+  pins: OsmPoi[],
+  anchor: { lat: number; lng: number } | null | undefined,
+  radiusKm: number | null | undefined,
+): { minLat: number; minLng: number; maxLat: number; maxLng: number } | null {
+  if (anchor && radiusKm && radiusKm > 0) {
+    return horizonFitBounds(anchor, radiusKm);
+  }
+  return boundsForPois(pins);
+}
+
+/**
  * Results farther than this are dropped from the merged list. Sources that
  * rank by text alone (Photon, Nominatim) can otherwise answer a New York
  * search with a 300 km Boston cluster, burying the local branches — or, when
@@ -162,41 +214,7 @@ export function preferNearbyResults(
     .map((entry) => entry.result);
 }
 
-/**
- * Pick the pins shown for a result set, and the subset worth framing.
- *
- * With an anchor (the user's location at submit time), places are ordered
- * nearest-first, so a dense far-away cluster matched by the same generic query
- * can't take over the pins the user is scanning.
- */
-export function selectSearchPins(
-  mapPois: OsmPoi[],
-  anchor?: { lat: number; lng: number } | null,
-  plan: QueryPlan = DEFAULT_QUERY_PLAN,
-): OsmPoi[] {
-  const candidates = anchor
-    ? [...mapPois].sort((a, b) => kmBetween(anchor, a) - kmBetween(anchor, b))
-    : mapPois;
-
-  if (candidates.length <= plan.maxPins) return candidates;
-
-  const pins = candidates.slice(0, plan.maxPins);
-  const first = pins[0];
-  let maxDistanceKm = 0;
-
-  for (const poi of pins.slice(1)) {
-    maxDistanceKm = Math.max(maxDistanceKm, kmBetween(first, poi));
-  }
-
-  // If one of the first results is still much farther out than the local cluster,
-  // keep the map centered on the tighter group the user is likely scanning.
-  if (maxDistanceKm > plan.pinSpreadKm) {
-    return pins.filter((poi) => kmBetween(first, poi) <= plan.pinClusterKm);
-  }
-
-  return pins;
-}
-
+/** Bounding box of a pin set, padded 10%, or null when there is nothing to frame. */
 export function boundsForPois(mapPois: OsmPoi[]): {
   minLat: number;
   minLng: number;
