@@ -1,7 +1,7 @@
-import { tilesForViewport } from '../../src/services/traffic/trafficTileMath';
+import { clampTrafficZoom, tilesForViewport } from '../../src/services/traffic/trafficTileMath';
 
 describe('tilesForViewport', () => {
-  it('returns tiles around the map center at the rounded zoom', () => {
+  it('returns tiles around the map center at the floored zoom', () => {
     // NYC-ish coordinates at zoom 10
     const tiles = tilesForViewport(40.7, -74.0, 10, 390, 844);
     expect(tiles.length).toBeGreaterThan(0);
@@ -18,6 +18,18 @@ describe('tilesForViewport', () => {
   it('clamps zoom to the supported range', () => {
     expect(tilesForViewport(40.7, -74.0, 22, 390, 844)[0].z).toBe(14);
     expect(tilesForViewport(40.7, -74.0, 0, 390, 844)[0].z).toBe(4);
+  });
+
+  it('seeds the zoom level MapLibre actually requests', () => {
+    // MapLibre requests the tile at floor(zoom). Rounding 13.6 up to 14 seeded
+    // a level the map never asked for and left the z13 requests unanswered, so
+    // the overlay stayed blank across fractional zoom levels.
+    expect(clampTrafficZoom(13.6)).toBe(13);
+    expect(tilesForViewport(40.7, -74.0, 13.6, 390, 844)[0].z).toBe(13);
+    expect(clampTrafficZoom(12.2)).toBe(12);
+    // 14.x stays at the cap the raster source is told to overzoom from.
+    expect(clampTrafficZoom(14.9)).toBe(14);
+    expect(clampTrafficZoom(Number.NaN)).toBe(14);
   });
 
   it('sorts tiles center-first', () => {

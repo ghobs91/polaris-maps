@@ -12,9 +12,29 @@ export function tileCenter(key: TileKey): { lng: number; lat: number } {
   return { lng, lat: (latRad * 180) / Math.PI };
 }
 
-/** Round a zoom level into the range the traffic tile source supports. */
+/** Lowest zoom the traffic raster source asks for. */
+export const MIN_TRAFFIC_TILE_ZOOM = 4;
+
+/**
+ * Highest zoom we ever hold a traffic tile for.
+ *
+ * Seeding stops here, so the raster source must be told the same limit:
+ * MapLibre overzooms the z14 tiles beyond this instead of asking the local
+ * server for z15+ tiles that were never seeded (which 404 and leave the
+ * layer blank when zoomed in).
+ */
+export const MAX_TRAFFIC_TILE_ZOOM = 14;
+
+/**
+ * Seed zoom for a map zoom.
+ *
+ * `Math.floor`, not `Math.round`: MapLibre requests the tile at
+ * `floor(zoom)`, so rounding 13.6 up to 14 seeds a level the map never asks
+ * for and leaves the z13 requests unanswered.
+ */
 export function clampTrafficZoom(zoom: number): number {
-  return Math.max(4, Math.min(14, Math.round(zoom)));
+  if (!Number.isFinite(zoom)) return MAX_TRAFFIC_TILE_ZOOM;
+  return Math.max(MIN_TRAFFIC_TILE_ZOOM, Math.min(MAX_TRAFFIC_TILE_ZOOM, Math.floor(zoom)));
 }
 
 /**
