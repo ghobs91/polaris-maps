@@ -254,9 +254,21 @@ class PolarisTileServer: NSObject {
       return
     }
 
+    #if DEBUG
+      NSLog("[TileServer] REQ %@", String(parts[1]))
+    #endif
+
+    // The request target carries a query string when MapLibre is told to
+    // cache-bust a tile (the traffic overlay appends `?v=<seedVersion>` so a
+    // freshly seeded PNG is re-requested). The query is part of the HTTP
+    // request, never part of the file path: resolving it on disk looks for
+    // `5678.png?v=3`, which cannot exist, and every cache-busted tile would
+    // 404. Split before percent-decoding so a `%3F` inside a name survives.
+    let target = String(parts[1]).split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)[0]
+
     // Percent-decode so font paths with spaces (e.g. "Noto%20Sans%20Regular")
     // resolve to the real on-disk directory names.
-    let path = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+    let path = String(target).removingPercentEncoding ?? String(target)
     let segments = path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
     // Loopback-only, but reject traversal so a decoded path can't escape root.
     guard !segments.contains("..") else {
@@ -337,6 +349,10 @@ class PolarisTileServer: NSObject {
     body: Data,
     cacheMaxAge: Int? = nil
   ) {
+    #if DEBUG
+      NSLog("[TileServer] RES %@", status)
+    #endif
+
     var headers = [
       "HTTP/1.1 \(status)",
       "Content-Type: \(contentType)",
