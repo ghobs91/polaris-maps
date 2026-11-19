@@ -21,6 +21,11 @@ import {
 } from '@/services/navigation/fixDrivenRefresh';
 import { initDownloadLiveActivity } from '@/services/regions/downloadLiveActivity';
 import { StreetViewContribution } from '@/components/imagery/StreetViewContribution';
+// Dev-only runtime probe for the search pipeline (see the module docstring).
+// Imported for its side effects: it publishes `globalThis.__polarisSearchProbe`.
+if (__DEV__) {
+  void import('@/services/search/devSearchProbe');
+}
 import {
   initTrafficP2P,
   disposeTrafficP2P,
