@@ -19,7 +19,9 @@ export interface GeoBounds {
  * - Country nodes with sub-regions: bounds, children = sub-regions → downloadable + expandable
  * - Sub-region nodes: bounds, no children → leaf/downloadable
  *
- * Download URL: https://download.geofabrik.de/${node.path}-latest.osm.pbf
+ * Download URL: https://download.geofabrik.de/${node.path}/${leaf}-latest.osm.pbf
+ * (Geofabrik serves each extract from a directory named after it; see
+ * `geofabrikUrl` in scripts/generate-pack-catalog.mjs).
  */
 export interface GeoNode {
   name: string;

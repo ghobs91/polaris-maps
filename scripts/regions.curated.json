@@ -13,7 +13,7 @@
     {
       "id": "us-ny-new-york",
       "name": "New York Metro",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/new-york/new-york-latest.osm.pbf",
       "bbox": "-74.3,40.4,-73.2,41.0",
       "bounds": {
         "minLat": 40.4,
@@ -28,7 +28,7 @@
     {
       "id": "us-ca-los-angeles",
       "name": "Los Angeles",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/california/california-latest.osm.pbf",
       "bbox": "-118.7,33.7,-117.9,34.4",
       "bounds": {
         "minLat": 33.7,
@@ -43,7 +43,7 @@
     {
       "id": "us-ca-san-francisco",
       "name": "San Francisco Bay Area",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/california-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/california/california-latest.osm.pbf",
       "bbox": "-122.6,37.2,-121.5,38.0",
       "bounds": {
         "minLat": 37.2,
@@ -58,7 +58,7 @@
     {
       "id": "us-il-chicago",
       "name": "Chicago",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/illinois/illinois-latest.osm.pbf",
       "bbox": "-88.0,41.6,-87.5,42.1",
       "bounds": {
         "minLat": 41.6,
@@ -73,7 +73,7 @@
     {
       "id": "us-tx-houston",
       "name": "Houston",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/texas/texas-latest.osm.pbf",
       "bbox": "-95.6,29.5,-95.0,30.1",
       "bounds": {
         "minLat": 29.5,
@@ -88,7 +88,7 @@
     {
       "id": "us-wa-seattle",
       "name": "Seattle",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/washington/washington-latest.osm.pbf",
       "bbox": "-122.5,47.3,-122.1,47.8",
       "bounds": {
         "minLat": 47.3,
@@ -103,7 +103,7 @@
     {
       "id": "us-fl-miami",
       "name": "Miami",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/florida-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/florida/florida-latest.osm.pbf",
       "bbox": "-80.5,25.5,-80.0,25.9",
       "bounds": {
         "minLat": 25.5,
@@ -118,7 +118,7 @@
     {
       "id": "us-ma-boston",
       "name": "Boston",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/massachusetts-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/massachusetts/massachusetts-latest.osm.pbf",
       "bbox": "-71.2,42.2,-70.9,42.5",
       "bounds": {
         "minLat": 42.2,
@@ -133,7 +133,7 @@
     {
       "id": "us-az-phoenix",
       "name": "Phoenix",
-      "geofabrik": "https://download.geofabrik.de/north-america/us/arizona-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/us/arizona/arizona-latest.osm.pbf",
       "bbox": "-112.5,33.2,-111.7,33.8",
       "bounds": {
         "minLat": 33.2,
@@ -148,7 +148,7 @@
     {
       "id": "ca-on-toronto",
       "name": "Toronto",
-      "geofabrik": "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/ontario/ontario-latest.osm.pbf",
       "bbox": "-79.7,43.5,-79.1,43.9",
       "bounds": {
         "minLat": 43.5,
@@ -163,7 +163,7 @@
     {
       "id": "ca-bc-vancouver",
       "name": "Vancouver",
-      "geofabrik": "https://download.geofabrik.de/north-america/canada/british-columbia-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/canada/british-columbia/british-columbia-latest.osm.pbf",
       "bbox": "-123.3,49.1,-122.9,49.4",
       "bounds": {
         "minLat": 49.1,
@@ -178,7 +178,7 @@
     {
       "id": "mx-mexico-city",
       "name": "Mexico City",
-      "geofabrik": "https://download.geofabrik.de/north-america/mexico-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/north-america/mexico/mexico-latest.osm.pbf",
       "bbox": "-99.4,19.1,-98.8,19.7",
       "bounds": {
         "minLat": 19.1,
@@ -193,7 +193,7 @@
     {
       "id": "br-sao-paulo",
       "name": "São Paulo",
-      "geofabrik": "https://download.geofabrik.de/south-america/brazil-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/south-america/brazil/brazil-latest.osm.pbf",
       "bbox": "-46.8,-24.0,-46.3,-23.4",
       "bounds": {
         "minLat": -24,
@@ -208,7 +208,7 @@
     {
       "id": "ar-buenos-aires",
       "name": "Buenos Aires",
-      "geofabrik": "https://download.geofabrik.de/south-america/argentina-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/south-america/argentina/argentina-latest.osm.pbf",
       "bbox": "-58.6,-34.7,-58.2,-34.5",
       "bounds": {
         "minLat": -34.7,
@@ -223,7 +223,7 @@
     {
       "id": "co-bogota",
       "name": "Bogotá",
-      "geofabrik": "https://download.geofabrik.de/south-america/colombia-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/south-america/colombia/colombia-latest.osm.pbf",
       "bbox": "-74.2,4.5,-73.9,4.8",
       "bounds": {
         "minLat": 4.5,
@@ -238,7 +238,7 @@
     {
       "id": "gb-england-london",
       "name": "London",
-      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/united-kingdom/england/england-latest.osm.pbf",
       "bbox": "-0.5,51.3,0.3,51.7",
       "bounds": {
         "minLat": 51.3,
@@ -253,7 +253,7 @@
     {
       "id": "de-berlin",
       "name": "Berlin",
-      "geofabrik": "https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/germany/berlin/berlin-latest.osm.pbf",
       "bbox": "13.1,52.3,13.7,52.7",
       "bounds": {
         "minLat": 52.3,
@@ -268,7 +268,7 @@
     {
       "id": "fr-paris",
       "name": "Paris",
-      "geofabrik": "https://download.geofabrik.de/europe/france/ile-de-france-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/france/ile-de-france/ile-de-france-latest.osm.pbf",
       "bbox": "2.0,48.5,3.0,49.1",
       "bounds": {
         "minLat": 48.5,
@@ -283,7 +283,7 @@
     {
       "id": "es-madrid",
       "name": "Madrid",
-      "geofabrik": "https://download.geofabrik.de/europe/spain-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/spain/spain-latest.osm.pbf",
       "bbox": "-3.9,40.2,-3.5,40.6",
       "bounds": {
         "minLat": 40.2,
@@ -298,7 +298,7 @@
     {
       "id": "it-rome",
       "name": "Rome",
-      "geofabrik": "https://download.geofabrik.de/europe/italy-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/italy/italy-latest.osm.pbf",
       "bbox": "12.3,41.7,12.6,42.0",
       "bounds": {
         "minLat": 41.7,
@@ -313,7 +313,7 @@
     {
       "id": "nl-amsterdam",
       "name": "Amsterdam",
-      "geofabrik": "https://download.geofabrik.de/europe/netherlands-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/netherlands/netherlands-latest.osm.pbf",
       "bbox": "4.7,52.2,5.1,52.5",
       "bounds": {
         "minLat": 52.2,
@@ -328,7 +328,7 @@
     {
       "id": "tr-istanbul",
       "name": "Istanbul",
-      "geofabrik": "https://download.geofabrik.de/europe/turkey-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/turkey/turkey-latest.osm.pbf",
       "bbox": "28.7,40.8,29.3,41.2",
       "bounds": {
         "minLat": 40.8,
@@ -343,7 +343,7 @@
     {
       "id": "ru-moscow",
       "name": "Moscow",
-      "geofabrik": "https://download.geofabrik.de/russia/central-fed-district-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/russia/central-fed-district/central-fed-district-latest.osm.pbf",
       "bbox": "37.3,55.5,37.9,56.0",
       "bounds": {
         "minLat": 55.5,
@@ -358,7 +358,7 @@
     {
       "id": "pl-warsaw",
       "name": "Warsaw",
-      "geofabrik": "https://download.geofabrik.de/europe/poland-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/europe/poland/poland-latest.osm.pbf",
       "bbox": "20.8,52.0,21.3,52.4",
       "bounds": {
         "minLat": 52,
@@ -373,7 +373,7 @@
     {
       "id": "jp-tokyo",
       "name": "Tokyo",
-      "geofabrik": "https://download.geofabrik.de/asia/japan-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/japan/japan-latest.osm.pbf",
       "bbox": "139.5,35.5,140.0,35.9",
       "bounds": {
         "minLat": 35.5,
@@ -388,7 +388,7 @@
     {
       "id": "in-delhi",
       "name": "Delhi",
-      "geofabrik": "https://download.geofabrik.de/asia/india-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/india/india-latest.osm.pbf",
       "bbox": "76.8,28.4,77.4,28.9",
       "bounds": {
         "minLat": 28.4,
@@ -403,7 +403,7 @@
     {
       "id": "in-mumbai",
       "name": "Mumbai",
-      "geofabrik": "https://download.geofabrik.de/asia/india-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/india/india-latest.osm.pbf",
       "bbox": "72.7,18.9,73.0,19.3",
       "bounds": {
         "minLat": 18.9,
@@ -418,7 +418,7 @@
     {
       "id": "kr-seoul",
       "name": "Seoul",
-      "geofabrik": "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/south-korea/south-korea-latest.osm.pbf",
       "bbox": "126.7,37.4,127.2,37.7",
       "bounds": {
         "minLat": 37.4,
@@ -433,7 +433,7 @@
     {
       "id": "sg-singapore",
       "name": "Singapore",
-      "geofabrik": "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/malaysia-singapore-brunei/malaysia-singapore-brunei-latest.osm.pbf",
       "bbox": "103.6,1.1,104.1,1.5",
       "bounds": {
         "minLat": 1.1,
@@ -448,7 +448,7 @@
     {
       "id": "th-bangkok",
       "name": "Bangkok",
-      "geofabrik": "https://download.geofabrik.de/asia/thailand-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/thailand/thailand-latest.osm.pbf",
       "bbox": "100.3,13.6,101.0,14.0",
       "bounds": {
         "minLat": 13.6,
@@ -463,7 +463,7 @@
     {
       "id": "id-jakarta",
       "name": "Jakarta",
-      "geofabrik": "https://download.geofabrik.de/asia/indonesia-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/indonesia/indonesia-latest.osm.pbf",
       "bbox": "106.6,-6.4,107.1,-6.1",
       "bounds": {
         "minLat": -6.4,
@@ -478,7 +478,7 @@
     {
       "id": "ph-manila",
       "name": "Manila",
-      "geofabrik": "https://download.geofabrik.de/asia/philippines-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/asia/philippines/philippines-latest.osm.pbf",
       "bbox": "120.8,14.4,121.1,14.8",
       "bounds": {
         "minLat": 14.4,
@@ -493,7 +493,7 @@
     {
       "id": "eg-cairo",
       "name": "Cairo",
-      "geofabrik": "https://download.geofabrik.de/africa/egypt-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/africa/egypt/egypt-latest.osm.pbf",
       "bbox": "31.1,29.9,31.5,30.3",
       "bounds": {
         "minLat": 29.9,
@@ -508,7 +508,7 @@
     {
       "id": "ng-lagos",
       "name": "Lagos",
-      "geofabrik": "https://download.geofabrik.de/africa/nigeria-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/africa/nigeria/nigeria-latest.osm.pbf",
       "bbox": "3.1,6.4,3.5,6.7",
       "bounds": {
         "minLat": 6.4,
@@ -523,7 +523,7 @@
     {
       "id": "ke-nairobi",
       "name": "Nairobi",
-      "geofabrik": "https://download.geofabrik.de/africa/kenya-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/africa/kenya/kenya-latest.osm.pbf",
       "bbox": "36.7,-1.4,37.1,-1.1",
       "bounds": {
         "minLat": -1.4,
@@ -538,7 +538,7 @@
     {
       "id": "za-cape-town",
       "name": "Cape Town",
-      "geofabrik": "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/africa/south-africa/south-africa-latest.osm.pbf",
       "bbox": "18.3,-34.2,19.0,-33.8",
       "bounds": {
         "minLat": -34.2,
@@ -553,7 +553,7 @@
     {
       "id": "au-sydney",
       "name": "Sydney",
-      "geofabrik": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/australia/australia-latest.osm.pbf",
       "bbox": "150.9,-34.0,151.3,-33.7",
       "bounds": {
         "minLat": -34,
@@ -568,7 +568,7 @@
     {
       "id": "au-melbourne",
       "name": "Melbourne",
-      "geofabrik": "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/australia/australia-latest.osm.pbf",
       "bbox": "144.8,-38.0,145.2,-37.7",
       "bounds": {
         "minLat": -38,
@@ -583,7 +583,7 @@
     {
       "id": "nz-auckland",
       "name": "Auckland",
-      "geofabrik": "https://download.geofabrik.de/australia-oceania/new-zealand-latest.osm.pbf",
+      "geofabrik": "https://download.geofabrik.de/australia-oceania/new-zealand/new-zealand-latest.osm.pbf",
       "bbox": "174.6,-37.0,175.0,-36.7",
       "bounds": {
         "minLat": -37,

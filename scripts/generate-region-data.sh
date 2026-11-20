@@ -15,7 +15,7 @@
 #
 # Example (New York Metro):
 #   ./scripts/generate-region-data.sh us-ny-new-york \
-#     https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf \
+#     https://download.geofabrik.de/north-america/us/new-york/new-york-latest.osm.pbf \
 #     ./region-data
 #
 # The output directory will contain:

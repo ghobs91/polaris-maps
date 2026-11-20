@@ -77,6 +77,25 @@ function round(n) {
   return Math.round(n * 10000) / 10000;
 }
 
+/** Last segment of a tree path: `europe/france/alsace` → `alsace`. */
+function leafSegment(path) {
+  return path.split('/').pop();
+}
+
+/**
+ * Download URL for a tree path.
+ *
+ * Geofabrik publishes every extract inside a directory named after it:
+ * `.../europe/france/alsace/alsace-latest.osm.pbf`. The flat form
+ * (`.../europe/france/alsace-latest.osm.pbf`) still redirects correctly for
+ * continent-level files, but 404s for every nested one — the redirect drops the
+ * continent (`.../france/alsace/alsace-latest.osm.pbf`). 138 catalog entries
+ * were dead before this was pinned, all of them nested.
+ */
+export function geofabrikUrl(path) {
+  return `https://download.geofabrik.de/${path}/${leafSegment(path)}-latest.osm.pbf`;
+}
+
 /** One catalog entry from a tree leaf, in `regions.json`'s shape. */
 function entryForLeaf(leaf) {
   const { minLat, maxLat, minLng, maxLng } = leaf.bounds;
@@ -90,7 +109,7 @@ function entryForLeaf(leaf) {
     // a region without them cannot be seeded at all. `bbox` alone is only
     // enough for the CI matrix.
     bounds: { minLat, maxLat, minLng, maxLng },
-    geofabrik: `https://download.geofabrik.de/${leaf.path}-latest.osm.pbf`,
+    geofabrik: geofabrikUrl(leaf.path),
   };
 }
 

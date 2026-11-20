@@ -10,8 +10,12 @@
  * saying which of ~200 regions was at fault.
  *
  * `index-v1.json` is Geofabrik's machine-readable catalogue: every feature has
- * an `id`, a `parent`, and the real `urls.pbf`. Walking `parent` gives the path
- * the tree is supposed to use.
+ * an `id`, a `parent`, and the real `urls.pbf`. The download URL is compared
+ * against `urls.pbf` itself, not a path rebuilt from `parent` links: Geofabrik
+ * serves each extract from a directory named after it
+ * (`europe/france/alsace/alsace-latest.osm.pbf`), so a catalogue entry can name
+ * a directory that exists while the file inside it does not. Rebuilding paths
+ * from the tree hid 138 dead catalog entries for exactly that reason.
  *
  *   node scripts/verify-geofabrik-paths.mjs                 # check the catalog
  *   node scripts/verify-geofabrik-paths.mjs --sizes         # also flag >2 GiB
@@ -30,37 +34,40 @@ const RELEASE_ASSET_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 
 const ROOT = resolve(import.meta.dirname, '..');
 
-/** `id` → full path, walking `parent` up to the continent. */
-export function pathsFromIndex(index) {
-  const byId = new Map(index.features.map((f) => [f.properties.id, f.properties]));
-  const pathOf = (props) => {
-    const parts = [];
-    let current = props;
-    while (current) {
-      parts.unshift(current.id);
-      current = current.parent ? byId.get(current.parent) : null;
-    }
-    return parts.join('/');
-  };
-  const byPath = new Map();
+/**
+ * Every extract Geofabrik publishes, as the path of the file it serves.
+ *
+ * `https://download.geofabrik.de/africa/algeria/algeria-latest.osm.pbf`
+ *   → `africa/algeria/algeria`
+ */
+export function publishedPaths(index) {
+  const paths = new Set();
   for (const feature of index.features) {
-    byPath.set(pathOf(feature.properties), feature.properties);
+    const path = pathOfUrl(feature.properties?.urls?.pbf);
+    if (path) paths.add(path);
   }
-  return byPath;
+  return paths;
 }
 
 /** Catalog regions whose Geofabrik extract is not published. */
-export function unpublishedRegions(regions, byPath) {
+export function unpublishedRegions(regions, published) {
   const problems = [];
   for (const region of regions) {
     const path = pathOfUrl(region.geofabrik);
     if (!path) continue; // custom URL, nothing to verify
-    if (!byPath.has(path)) problems.push({ id: region.id, path });
+    if (!published.has(path)) problems.push({ id: region.id, path });
   }
   return problems;
 }
 
-/** `https://download.geofabrik.de/africa/algeria-latest.osm.pbf` → `africa/algeria`. */
+/**
+ * `https://download.geofabrik.de/australia-oceania/australia/australia-latest.osm.pbf`
+ *   → `australia-oceania/australia/australia`
+ *
+ * The legacy flat form (`.../australia-oceania/australia-latest.osm.pbf`)
+ * reduces to `australia-oceania/australia`, which no published extract matches —
+ * that is the point, those URLs 404.
+ */
 export function pathOfUrl(url) {
   const match = /^https:\/\/download\.geofabrik\.de\/(.+)\.osm\.pbf$/.exec(url ?? '');
   if (!match) return null;
@@ -96,10 +103,10 @@ async function main() {
     }
     index = await res.json();
   }
-  const byPath = pathsFromIndex(index);
+  const published = publishedPaths(index);
 
   let failed = false;
-  const unpublished = unpublishedRegions(catalog.include, byPath);
+  const unpublished = unpublishedRegions(catalog.include, published);
   if (unpublished.length > 0) {
     failed = true;
     console.error(`${unpublished.length} catalog regions are not published by Geofabrik:`);

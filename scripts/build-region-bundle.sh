@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # build-region-bundle.sh — Produce geocoding + Overture bundles for a Geofabrik region.
 #
-# Usage: ./scripts/build-region-bundle.sh us/new-york
+# Usage: ./scripts/build-region-bundle.sh north-america/us/new-york
+#        (the region's full Geofabrik path, as in scripts/regions.json's
+#        `geofabrik` field — the extract lives in a directory named after it)
 #
 # Prerequisites: osmium + python3 osmium bindings, duckdb, node (>=22), gzip
 # Output: geocoding-data.sqlite.gz, overture-places.sqlite.gz,
@@ -10,7 +12,7 @@
 
 set -euo pipefail
 
-SLUG="${1:?Usage: $0 <geofabrik-slug>  (e.g. us/new-york)}"
+SLUG="${1:?Usage: $0 <geofabrik-path>  (e.g. north-america/us/new-york)}"
 REGION_ID="${SLUG//\//-}"
 HUMAN_NAME="$(echo "$SLUG" | sed 's|.*/||; s/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')"
 VERSION="$(date +%Y-%m-%d)"
@@ -24,7 +26,9 @@ echo "==> Working in $WORK_DIR"
 echo "==> Region: $SLUG → id=$REGION_ID"
 
 # ── 1. Download Geofabrik extract ────────────────────────────────────────────
-PBF_URL="https://download.geofabrik.de/${SLUG}-latest.osm.pbf"
+# Geofabrik serves each extract from a directory named after it; the legacy
+# flat form 404s for nested regions (see scripts/verify-geofabrik-paths.mjs).
+PBF_URL="https://download.geofabrik.de/${SLUG}/${SLUG##*/}-latest.osm.pbf"
 echo "==> Downloading $PBF_URL …"
 curl -fSL -o "$WORK_DIR/input.osm.pbf" "$PBF_URL"
 

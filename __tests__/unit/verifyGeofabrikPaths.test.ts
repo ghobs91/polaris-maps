@@ -45,15 +45,35 @@ function writeCatalog(regions: Array<[id: string, geofabrikPath: string]>): stri
   return path;
 }
 
-/** A Geofabrik-shaped index with `parent` links, as index-v1.json has. */
+/**
+ * A Geofabrik-shaped index with `parent` links, as index-v1.json has.
+ *
+ * Each feature's `urls.pbf` is the real published form — an extract lives in a
+ * directory named after it (`europe/france/alsace/alsace-latest.osm.pbf`) —
+ * because that URL is what the check compares against.
+ */
 function writeIndex(features: Array<{ id: string; parent?: string; name?: string }>): string {
+  const byId = new Map(features.map((f) => [f.id, f]));
+  const chainOf = (feature: { id: string; parent?: string }): string[] => {
+    const parent = feature.parent ? byId.get(feature.parent) : undefined;
+    return parent ? [...chainOf(parent), feature.id] : [feature.id];
+  };
   const path = join(dir, 'index.json');
   writeFileSync(
     path,
     JSON.stringify({
-      features: features.map((f) => ({
-        properties: { ...f, urls: { pbf: `https://download.geofabrik.de/x/${f.id}.osm.pbf` } },
-      })),
+      features: features.map((f) => {
+        const chain = chainOf(f);
+        const leaf = chain[chain.length - 1];
+        return {
+          properties: {
+            ...f,
+            urls: {
+              pbf: `https://download.geofabrik.de/${[...chain, leaf].join('/')}-latest.osm.pbf`,
+            },
+          },
+        };
+      }),
     }),
   );
   return path;
@@ -77,14 +97,29 @@ describe('verify-geofabrik-paths', () => {
       { id: 'france', parent: 'europe' },
       { id: 'alsace', parent: 'france' },
     ]);
-    // Nested regions need the whole parent chain walked — `alsace`'s parent is
-    // `france`, not `europe`, so a one-level join produces `france/alsace` and
-    // every nested region looks unpublished.
+    // Nested regions need the whole parent chain, not a one-level join: a
+    // catalogue entry for `alsace` whose path said `france/alsace` would omit
+    // the continent.
     const catalog = writeCatalog([
-      ['africa-algeria', 'africa/algeria'],
-      ['europe-france-alsace', 'europe/france/alsace'],
+      ['africa-algeria', 'africa/algeria/algeria'],
+      ['europe-france-alsace', 'europe/france/alsace/alsace'],
     ]);
     expect(run(index, catalog).code).toBe(0);
+  });
+
+  it('flags a flat URL whose directory is published but whose file is not', () => {
+    // Geofabrik moved extracts into a directory named after them. The legacy
+    // flat URL still redirects for continent-level files, but for a nested one
+    // it drops the continent and 404s — 138 catalog entries were dead this way
+    // while a directory-only check kept reporting them as fine.
+    const index = writeIndex([
+      { id: 'europe' },
+      { id: 'france', parent: 'europe' },
+      { id: 'alsace', parent: 'france' },
+    ]);
+    const result = run(index, writeCatalog([['europe-france-alsace', 'europe/france/alsace']]));
+    expect(result.code).toBe(1);
+    expect(result.err).toMatch(/europe-france-alsace → europe\/france\/alsace\n/);
   });
 
   it('fails on the real regressions this was written for', () => {
@@ -94,9 +129,9 @@ describe('verify-geofabrik-paths', () => {
       { id: 'congo-democratic-republic', parent: 'africa' },
     ]);
     const catalog = writeCatalog([
-      ['africa-comoros', 'africa/comoros'],
-      ['africa-congo-kinshasa', 'africa/congo-kinshasa'],
-      ['africa-algeria', 'africa/algeria'],
+      ['africa-comoros', 'africa/comoros/comoros'],
+      ['africa-congo-kinshasa', 'africa/congo-kinshasa/congo-kinshasa'],
+      ['africa-algeria', 'africa/algeria/algeria'],
     ]);
     const result = run(index, catalog);
     expect(result.code).toBe(1);
@@ -109,8 +144,11 @@ describe('verify-geofabrik-paths', () => {
 
   it('names the path it checked, so the fix is obvious', () => {
     const index = writeIndex([{ id: 'africa' }]);
-    const result = run(index, writeCatalog([['africa-congo-kinshasa', 'africa/congo-kinshasa']]));
-    expect(result.err).toMatch(/africa-congo-kinshasa → africa\/congo-kinshasa/);
+    const result = run(
+      index,
+      writeCatalog([['africa-congo-kinshasa', 'africa/congo-kinshasa/congo-kinshasa']]),
+    );
+    expect(result.err).toMatch(/africa-congo-kinshasa → africa\/congo-kinshasa\/congo-kinshasa/);
   });
 });
 

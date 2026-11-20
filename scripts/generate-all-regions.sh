@@ -16,14 +16,14 @@ OUTPUT_DIR="${1:-./region-data}"
 # Geofabrik extract URLs for each catalog region.
 # These are the smallest extracts that fully cover each region's bounds.
 declare -A REGIONS=(
-  ["us-ca-los-angeles"]="https://download.geofabrik.de/north-america/us/california-latest.osm.pbf"
-  ["us-ca-san-francisco"]="https://download.geofabrik.de/north-america/us/california-latest.osm.pbf"
-  ["us-ny-new-york"]="https://download.geofabrik.de/north-america/us/new-york-latest.osm.pbf"
-  ["us-il-chicago"]="https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf"
-  ["us-tx-houston"]="https://download.geofabrik.de/north-america/us/texas-latest.osm.pbf"
-  ["us-wa-seattle"]="https://download.geofabrik.de/north-america/us/washington-latest.osm.pbf"
-  ["gb-england-london"]="https://download.geofabrik.de/europe/united-kingdom/england-latest.osm.pbf"
-  ["de-berlin"]="https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf"
+  ["us-ca-los-angeles"]="https://download.geofabrik.de/north-america/us/california/california-latest.osm.pbf"
+  ["us-ca-san-francisco"]="https://download.geofabrik.de/north-america/us/california/california-latest.osm.pbf"
+  ["us-ny-new-york"]="https://download.geofabrik.de/north-america/us/new-york/new-york-latest.osm.pbf"
+  ["us-il-chicago"]="https://download.geofabrik.de/north-america/us/illinois/illinois-latest.osm.pbf"
+  ["us-tx-houston"]="https://download.geofabrik.de/north-america/us/texas/texas-latest.osm.pbf"
+  ["us-wa-seattle"]="https://download.geofabrik.de/north-america/us/washington/washington-latest.osm.pbf"
+  ["gb-england-london"]="https://download.geofabrik.de/europe/united-kingdom/england/england-latest.osm.pbf"
+  ["de-berlin"]="https://download.geofabrik.de/europe/germany/berlin/berlin-latest.osm.pbf"
 )
 
 echo "=== Polaris Maps: Generate All Regions ==="
