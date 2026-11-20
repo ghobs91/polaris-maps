@@ -34,6 +34,7 @@ import {
   normalizeWebsiteUrl,
 } from '../../services/poi/websitePhotosService';
 import { WebsitePhotosWebView } from './WebsitePhotosWebView';
+import { noteBrowser } from '../../services/poi/externalRatings/devRatingsLagProbe';
 
 interface PlaceMediaCarouselProps {
   lat: number;
@@ -300,7 +301,13 @@ export function PlaceMediaCarousel({
         onSettled={handleWebViewSettled}
       />
     ) : null;
-
+  // Dev-only: this WebView is mounted inside the sheet's subtree (unlike the
+  // ratings browser), so the lag probe needs to see when it starts and stops.
+  useEffect(() => {
+    if (!enabled || !webViewUri) return;
+    noteBrowser(`photos mount ${webViewUri}`);
+    return () => noteBrowser(`photos unmount ${webViewUri}`);
+  }, [enabled, webViewUri]);
   if (items.length === 0) {
     if (!offline) return hiddenWebView;
     return (

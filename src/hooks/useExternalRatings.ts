@@ -43,6 +43,7 @@ import {
   markExternalRatingMiss,
   placeRatingKey,
 } from '../services/places/placeRatingSessionCache';
+import { noteStage } from '../services/poi/externalRatings/devRatingsLagProbe';
 import type {
   ExternalRatingProviderId,
   ExternalRatingQuery,
@@ -105,6 +106,15 @@ function withPhaseTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null>
 /** Dev-only stage tracing so on-device runs reveal exactly which step bails. */
 function log(...args: unknown[]): void {
   if (__DEV__) console.log('[externalRatings]', ...args);
+}
+
+/**
+ * Report a ratings transition to the lag probe so a recorded freeze carries the
+ * stage that was live. A no-op unless the probe was compiled in and started
+ * (see `devRatingsLagProbe`), so it is safe to call unconditionally.
+ */
+function notePass(states: readonly ExternalRatingProviderState[]): void {
+  noteStage(states.map((s) => `${s.provider}=${s.status}`).join(','));
 }
 
 export type ExternalRatingStatus =
@@ -791,6 +801,12 @@ export function useExternalRatings(
       ),
     [states],
   );
+
+  // Dev-only: keep the lag probe's attribution label current, so any stall it
+  // records names the ratings stage that was live.
+  useEffect(() => {
+    notePass(states);
+  }, [states]);
 
   return { states: publicStates, handleMessage, handleError };
 }

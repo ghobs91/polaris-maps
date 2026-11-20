@@ -58,6 +58,7 @@ import { openInAppBrowser } from '../../utils/inAppBrowser';
 import { PlaceMediaCarousel } from '../poi/PlaceMediaCarousel';
 import { ExternalRatingsSection } from './ExternalRatingsSection';
 import { HiddenRatingsBrowserHost } from './HiddenRatingsBrowserHost';
+import { mark as markTap } from '../../services/poi/externalRatings/devRatingsLagProbe';
 import { spacing, typography, borderRadius } from '../../constants/theme';
 import type { OsmPoi } from '../../services/poi/osmFetcher';
 import { SaveToListSheet } from '../places/SaveToListSheet';
@@ -840,6 +841,7 @@ export function POIInfoCard() {
 
   const handleDirections = useCallback(() => {
     if (!poi) return;
+    markTap('get directions tapped');
     setPendingDirectionsTarget({
       lat: poi.lat,
       lng: poi.lng,

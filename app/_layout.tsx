@@ -26,6 +26,13 @@ import { StreetViewContribution } from '@/components/imagery/StreetViewContribut
 if (__DEV__) {
   void import('@/services/search/devSearchProbe');
 }
+// The place-card lag probe compiles into a build only when
+// `EXPO_PUBLIC_RATINGS_LAG_PROBE` is set — which is how a release/TestFlight
+// build gets instrumented. Unset (every shipping build) it installs nothing.
+// Imported for its side effects: publishes `globalThis.__polarisRatingsLag`.
+void import('@/services/poi/externalRatings/devRatingsLagProbe').then((m) =>
+  m.installRatingsLagProbe(),
+);
 import {
   initTrafficP2P,
   disposeTrafficP2P,

@@ -31,6 +31,10 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { View, useWindowDimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
 import {
+  isHiddenBrowserDisabled,
+  noteBrowser,
+} from '../../services/poi/externalRatings/devRatingsLagProbe';
+import {
   EXTERNAL_RATINGS_USER_AGENT,
   isAllowedExternalRatingUrl,
 } from '../../services/poi/externalRatings';
@@ -102,6 +106,18 @@ export function HiddenRatingsBrowserHost() {
 
   useEffect(() => () => setHiddenBrowserSpec(null), []);
 
+  // Mount/unmount of a WKWebView mid-load is expensive native work; the lag
+  // probe records both so a freeze can be tied to one of them.
+  const specKey = spec ? `${spec.provider}|${spec.uri}` : null;
+  useEffect(() => {
+    if (!specKey) return;
+    noteBrowser(`mount ${specKey}`);
+    return () => noteBrowser(`unmount ${specKey}`);
+  }, [specKey]);
+
+  // Dev-only A/B switch: prove whether the hidden browser is the cost by
+  // running the same flow with it never mounted.
+  if (isHiddenBrowserDisabled()) return null;
   if (!spec) return null;
 
   return (
