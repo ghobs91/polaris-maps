@@ -2,7 +2,7 @@
   "expo": {
     "name": "Polaris Maps",
     "slug": "polaris-maps",
-    "version": "0.1.0",
+    "version": "1.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": ["polaris-maps", "app.polarismaps.app"],

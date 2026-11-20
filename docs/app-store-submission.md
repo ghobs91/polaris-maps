@@ -164,7 +164,7 @@ Source and hosting are ready; only the Apple-side steps remain.
 1. Confirm `.env` has `APP_STORE_CONNECT_KEY_ID`, `..._ISSUER_ID`, `..._KEY_PATH`
    (present) and that signing is available (`match` or `SKIP_MATCH=1`).
 2. Optionally confirm the version: `app.json` `version` is the source of truth
-   (`0.1.0`); the shipped `CFBundleShortVersionString` lives in
+   (`1.0`); the shipped `CFBundleShortVersionString` lives in
    `ios/PolarisMaps/Info.plist` and is hard-coded — `fastlane ios release` warns
    on drift.
 3. Run:

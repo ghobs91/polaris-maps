@@ -289,7 +289,7 @@ Releasing to the App Store is **always a manual process** — no automation will
 
 ### Version Numbers
 
-- **Marketing version** (`0.1.0`): Managed in `app.json` → `expo.version`. Bump manually when cutting a release. This is what ships in `CFBundleShortVersionString`; the Xcode `MARKETING_VERSION` build setting is overridden by the embedded Expo config.
+- **Marketing version** (`1.0`): Managed in `app.json` → `expo.version`. Bump manually when cutting a release. This is what ships in `CFBundleShortVersionString`; the Xcode `MARKETING_VERSION` build setting is overridden by the embedded Expo config.
 - **Build number** (`CFBundleVersion`): App Store Connect is the single source of truth. Resolve it before archiving and let export keep it:
   - Serialize deploys: `node scripts/deploy-lock.mjs acquire --label "..."` before archiving and `release` afterwards. Two deployers ran concurrently on this Mac and uploaded builds 388, 390, 392 and 397 as `INTERNAL_ONLY` — never visible in TestFlight, and one of them cost a full archive before ASC rejected the upload as a duplicate.
   - After uploading, confirm the build reached `IN_BETA_TESTING`; `READY_FOR_BETA_TESTING` means testers cannot install it.
@@ -298,7 +298,7 @@ Releasing to the App Store is **always a manual process** — no automation will
   - Do **not** use a bare `xcrun agvtool bump -all`. It counts locally, and this repo runs several worktrees at once: a local counter collides with builds uploaded from another worktree or machine, and with export auto-management it silently produced a different shipped number than the archive carried.
   - The Fastlane `beta` lane resolves the number the same way (`latest_testflight_build_number + 1` in `bump_build`) and passes `manageAppVersionAndBuildNumber: false` to `build_app`, so both paths agree.
   - If ASC cannot be reached, the script exits non-zero rather than guessing: a wrong number only fails at upload, after a full build.
-  - Marketing version `0.1.0` is separate — see above.
+  - Marketing version `1.0` is separate — see above.
 
 ## GitHub Actions (Optional CI)
 
