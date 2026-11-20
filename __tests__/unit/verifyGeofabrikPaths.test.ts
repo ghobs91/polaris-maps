@@ -156,17 +156,36 @@ describe('the committed catalog', () => {
   it('resolves against the live index', () => {
     // Network-dependent on purpose: this is the check that would have caught
     // the bad paths, and a fixture cannot go stale the way Geofabrik's index
-    // does. Skipped automatically when offline.
-    let offline = false;
+    // does (it renamed 53 ids and moved every extract into its own directory).
+    let status: number | null = 0;
+    let stderr = '';
+    let killed = false;
     try {
-      execFileSync(process.execPath, [SCRIPT], { stdio: 'pipe', timeout: 60_000 });
+      execFileSync(process.execPath, [SCRIPT], { stdio: 'pipe', timeout: 180_000 });
     } catch (error) {
-      const e = error as { stdout?: Buffer; stderr?: Buffer; status?: number };
-      offline = /fetch failed|ENOTFOUND|EAI_AGAIN|network/i.test(
-        `${e.stderr?.toString() ?? ''}${e.stdout?.toString() ?? ''}`,
-      );
-      if (!offline) throw error;
+      // Never rethrow the exec error: it carries circular references that
+      // jest-worker cannot serialise, so the run dies as "Test suite failed to
+      // run" and buries whatever Geofabrik actually said.
+      const e = error as { status?: number | null; stderr?: Buffer; signal?: string };
+      status = e.status ?? null;
+      stderr = e.stderr?.toString() ?? '';
+      killed = e.signal != null;
     }
-    if (offline) expect(true).toBe(true);
+
+    if (status === 0) return;
+
+    // Exit 2 is "the index could not be read", and a killed child is the same
+    // situation from the other side: a 3.4 MB CDN fetch that throttles bursts.
+    // Skipping out loud beats reporting a data verdict the check never reached.
+    if (
+      status === 2 ||
+      killed ||
+      /fetch failed|ENOTFOUND|EAI_AGAIN|network|timed out/i.test(stderr)
+    ) {
+      console.warn(`skipped: Geofabrik index unavailable\n${stderr.trim()}`);
+      return;
+    }
+
+    throw new Error(`the committed catalog does not resolve against the live index:\n${stderr}`);
   });
 });

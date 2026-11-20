@@ -22,7 +22,10 @@
  *   node scripts/verify-geofabrik-paths.mjs --index i.json  # offline
  *   node scripts/verify-geofabrik-paths.mjs --catalog c.json # other catalog
  *
- * Exit codes: 0 all good, 1 problems found.
+ * Exit codes: 0 all good, 1 problems found, 2 the index could not be read (the
+ * catalog was not checked, so a caller must not read that as a pass or a fail).
+ * The index is 3.4 MB behind a CDN that throttles bursts, so one retry absorbs
+ * the common transient failure rather than turning a green run red.
  */
 
 import { readFileSync } from 'node:fs';
@@ -80,6 +83,31 @@ async function sizeOf(url) {
   return Number.isFinite(length) ? length : 0;
 }
 
+/**
+ * The published index, or a thrown `IndexUnavailable` after one retry.
+ *
+ * `AbortSignal.timeout` bounds a hung connection: without it the process waits
+ * on the socket until the caller gives up, which surfaces as an unrelated
+ * timeout failure in CI.
+ */
+async function fetchIndex() {
+  let lastError = '';
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const res = await fetch(INDEX_URL, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) {
+        lastError = `HTTP ${res.status}`;
+      } else {
+        return await res.json();
+      }
+    } catch (error) {
+      lastError = error.message;
+    }
+    if (attempt === 1) await new Promise((r) => setTimeout(r, 2_000));
+  }
+  throw new Error(lastError);
+}
+
 async function main() {
   const checkSizes = process.argv.includes('--sizes');
   // `--catalog` lets the check run against a fixture; the default is the
@@ -96,12 +124,12 @@ async function main() {
   if (indexFlag !== -1) {
     index = JSON.parse(readFileSync(process.argv[indexFlag + 1], 'utf8'));
   } else {
-    const res = await fetch(INDEX_URL);
-    if (!res.ok) {
-      console.error(`could not read the Geofabrik index: HTTP ${res.status}`);
-      return 1;
+    try {
+      index = await fetchIndex();
+    } catch (error) {
+      console.error(`could not read the Geofabrik index: ${error.message}`);
+      return 2;
     }
-    index = await res.json();
   }
   const published = publishedPaths(index);
 
