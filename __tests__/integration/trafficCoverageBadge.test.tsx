@@ -28,9 +28,11 @@ function makeBreakdown(overrides: Partial<TrafficSourceBreakdown> = {}): Traffic
     localSeeded: 0,
     p2p: 0,
     openFeed: 0,
+    savedFlow: 0,
     coldStart: 0,
     aged: 0,
     unresolved: 0,
+    providerRequests: 0,
     ...overrides,
   };
 }
@@ -61,24 +63,31 @@ describe('TrafficCoverageBadge', () => {
   });
 
   it('reports stale data when the source resolved outside the freshness window', () => {
-    setCoverage('p2p', NOW - 60 * 60);
+    setCoverage('p2p', NOW - 60 * 60, makeBreakdown({ p2p: 9 }));
 
     const screen = render(<TrafficCoverageBadge />);
 
     expect(screen.getByText('Stale traffic data')).toBeTruthy();
+    // The breakdown still describes where the cells came from, so a stale
+    // overlay cannot hide behind an unqualified headline.
+    expect(screen.getByText('device 0 · tomtom 0 · peers 9 · open 0 · requests 0')).toBeTruthy();
   });
 
   it('breaks the resolution down so TomTom does not hide on-device history', () => {
     setCoverage(
       'tomtom',
       NOW,
-      makeBreakdown({ localProbe: 12, p2p: 3, coldStart: 5, unresolved: 2 }),
+      makeBreakdown({ localProbe: 12, p2p: 3, coldStart: 5, unresolved: 2, providerRequests: 5 }),
     );
 
     const screen = render(<TrafficCoverageBadge />);
 
     expect(screen.getByText('Cold-start feed')).toBeTruthy();
-    expect(screen.getByText('device 12 · tomtom 5 · peers 3 · open 0 · none 2')).toBeTruthy();
+    // `requests N` is the paid cost of the resolution: the cell counts say
+    // which tier answered, only this proves the answer cost a network call.
+    expect(
+      screen.getByText('device 12 · tomtom 5 · peers 3 · open 0 · none 2 · requests 5'),
+    ).toBeTruthy();
   });
 
   it('marks seeded local rows so on-device history stays honest', () => {
@@ -87,15 +96,31 @@ describe('TrafficCoverageBadge', () => {
     const screen = render(<TrafficCoverageBadge />);
 
     expect(screen.getByText('On-device history (seeded)')).toBeTruthy();
-    expect(screen.getByText('device 0 · seeded 4 · tomtom 0 · peers 0 · open 0')).toBeTruthy();
+    expect(
+      screen.getByText('device 0 · seeded 4 · tomtom 0 · peers 0 · open 0 · requests 0'),
+    ).toBeTruthy();
   });
 
-  it('shows an aged fallback as stale traffic, not current', () => {
-    setCoverage('aged', NOW, makeBreakdown({ aged: 6 }));
+  it('shows aged data as stale traffic with its real counts, not as current', () => {
+    // Staleness is the resolution's age, not a source name: the cascade labels
+    // an old fallback `local-fresh` like any other local answer, so the badge
+    // must read the timestamp to avoid presenting it as current.
+    setCoverage('local-fresh', NOW - 6 * 60 * 60, makeBreakdown({ localProbe: 6 }));
 
     const screen = render(<TrafficCoverageBadge />);
 
     expect(screen.getByText('Stale traffic data')).toBeTruthy();
-    expect(screen.getByText('device 0 · tomtom 0 · peers 0 · open 0 · aged 6')).toBeTruthy();
+    expect(screen.getByText('device 6 · tomtom 0 · peers 0 · open 0 · requests 0')).toBeTruthy();
+  });
+
+  it('labels saved weekday flow as its own source, not a cold start', () => {
+    setCoverage('saved-flow', NOW, makeBreakdown({ savedFlow: 14 }));
+
+    const screen = render(<TrafficCoverageBadge />);
+
+    expect(screen.getByText('Saved weekday flow')).toBeTruthy();
+    expect(
+      screen.getByText('device 0 · tomtom 0 · peers 0 · open 0 · saved 14 · requests 0'),
+    ).toBeTruthy();
   });
 });

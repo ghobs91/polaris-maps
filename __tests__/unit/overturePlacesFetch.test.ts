@@ -50,6 +50,20 @@ jest.mock('../../src/native/hypercore', () => ({
   getStatus: jest.fn(),
   listFeeds: jest.fn(),
 }));
+// The storage module pulls expo-crypto for one key derivation; it is a native
+// module and nothing in this path exercises it. Mocking it keeps the download
+// service's import graph testable, the way the other unit suites do.
+jest.mock('expo-crypto', () => ({ randomUUID: jest.fn(() => '0'.repeat(32)) }));
+// The download service asks the connectivity service whether a prefetch is
+// worth starting; netinfo needs a native module, so stub the module itself (the
+// shape other unit suites use).
+jest.mock('@react-native-community/netinfo', () => ({
+  __esModule: true,
+  default: {
+    addEventListener: jest.fn(() => jest.fn()),
+    fetch: jest.fn(async () => ({ isConnected: true, isInternetReachable: true })),
+  },
+}));
 jest.mock('react-native', () => ({
   NativeEventEmitter: jest.fn().mockImplementation(() => ({
     addListener: jest.fn(() => ({ remove: jest.fn() })),
