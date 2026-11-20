@@ -163,7 +163,11 @@ export function __resetTomTomRouteEtaCacheForTests(): void {
  * The panels used to call the Calculate Route API on every directions request.
  * Saved flow covering the route (same weekday + hour, up to a month old) is the
  * answer the API would return anyway, so the request is skipped — and the
- * preview ETA is then filled from the local traffic set by `useTrafficEta`.
+ * preview ETA is then filled from the local traffic set by
+ * `seedRoutePreviewTrafficEta` (`services/traffic/routePreviewEta`), which runs
+ * the same computation the in-navigation refresh uses. Returning null here
+ * without that seed is what made the preview show the router's traffic-free
+ * duration while navigation showed a different number.
  */
 export async function fetchRouteTrafficEtaIfUnsaved(
   geometry: string,

@@ -21,6 +21,7 @@ import { computeRoute } from '../../services/routing/routingService';
 import { ensureOfflineRoutingForPoints } from '../../services/routing/offlineRouting';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEtaIfUnsaved } from '../../services/traffic/tomtomRouteEta';
+import { seedRoutePreviewTrafficEta } from '../../services/traffic/routePreviewEta';
 import { colors, spacing, typography, borderRadius, shadow } from '../../constants/theme';
 import { formatDistance } from '../../utils/units';
 import { decodePolyline } from '../../utils/polyline';
@@ -101,6 +102,10 @@ export function LocationActionPanel() {
         // Store as preview (not active navigation)
         setRoutePreview(routes[0], routes.slice(1), selectedLocation, costing);
 
+        // Seed the header ETA from on-device traffic so the preview and the
+        // navigation HUD it starts share one computation.
+        if (costing === 'auto') seedRoutePreviewTrafficEta(routes[0]);
+
         // Fetch traffic data along the route so the route line shows
         // color-coded congestion segments immediately.
         const routeCoords = decodePolyline(routes[0].geometry);
@@ -119,7 +124,8 @@ export function LocationActionPanel() {
         // Fetch traffic-adjusted ETA in background
         fetchRouteTrafficEtaIfUnsaved(routes[0].geometry).then((result) => {
           if (result) {
-            useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+            // A provider answer is traffic-aware for the whole route.
+            useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds, 1);
           }
         });
       } catch (err: unknown) {

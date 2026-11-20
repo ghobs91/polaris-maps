@@ -63,6 +63,7 @@ import { buildRouteAlternatives } from '../../services/routing/routeAlternatives
 import type { ValhallaRoute } from '../../models/route';
 import { planTransitTrip } from '../../services/transit/transitRoutingService';
 import { fetchRouteTrafficEtaIfUnsaved } from '../../services/traffic/tomtomRouteEta';
+import { seedRoutePreviewTrafficEta } from '../../services/traffic/routePreviewEta';
 import { TransitDirectionsPanel } from './TransitDirectionsPanel';
 import { TransportModeSelector, type TransportMode } from './TransportModeSelector';
 import { CategoryPills } from './CategoryPills';
@@ -1637,6 +1638,12 @@ export function FloatingSearchPanel({
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
         setMode('route-preview');
 
+        // Seed the header ETA from on-device traffic straight away, so the
+        // preview and the navigation HUD it starts share one computation. The
+        // provider request below (when it runs) replaces it with the same
+        // answer, traffic-aware.
+        if (costing === 'auto') seedRoutePreviewTrafficEta(routes[0]);
+
         // Fetch traffic data along the route for color-coded segments
         const routeCoords = decodePolyline(routes[0].geometry);
         fetchRouteTrafficImmediate(routeCoords);
@@ -1651,7 +1658,8 @@ export function FloatingSearchPanel({
         if (costing === 'auto') {
           fetchRouteTrafficEtaIfUnsaved(routes[0].geometry).then((result) => {
             if (result) {
-              useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds);
+              // A provider answer is traffic-aware for the whole route.
+              useNavigationStore.getState().setRoutePreviewTrafficEta(result.travelTimeSeconds, 1);
             }
           });
         }
@@ -1870,6 +1878,10 @@ export function FloatingSearchPanel({
         setRoutePreview(routes[0], routes.slice(1), dest, costing, waypoints);
         if (routes[0].boundingBox) setFitBounds(routes[0].boundingBox);
 
+        // This path never asks the provider, so the seeded local ETA is the
+        // only traffic-aware number the preview will have.
+        if (costing === 'auto') seedRoutePreviewTrafficEta(routes[0]);
+
         // Fetch traffic data along the rerouted path
         const routeCoords = decodePolyline(routes[0].geometry);
         fetchRouteTrafficImmediate(routeCoords);
@@ -2059,6 +2071,9 @@ export function FloatingSearchPanel({
         nav.routePreviewWaypoints,
       );
       if (alt.boundingBox) setFitBounds(alt.boundingBox);
+      // Adopting an alternative used to lose the header ETA entirely, leaving
+      // the router's free-flow duration on screen.
+      if (nav.routePreviewCosting === 'auto') seedRoutePreviewTrafficEta(alt);
       fetchRouteTrafficImmediate(decodePolyline(alt.geometry));
     },
     [setRoutePreview, setFitBounds],

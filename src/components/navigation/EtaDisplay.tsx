@@ -35,6 +35,7 @@ export function EtaDisplay({
 }: EtaDisplayProps) {
   const trafficEtaSeconds = useNavigationStore((s) => s.trafficEtaSeconds);
   const freeFlowEtaSeconds = useNavigationStore((s) => s.freeFlowEtaSeconds);
+  const trafficMatchRatio = useNavigationStore((s) => s.trafficMatchRatio);
   const activeRoute = useNavigationStore((s) => s.activeRoute);
   const normalizedSegments = useTrafficStore((s) => s.normalizedSegments);
 
@@ -85,7 +86,12 @@ export function EtaDisplay({
           minute: '2-digit',
         })
       : null;
-  const isTrafficAdjusted = showingNextStop ? trafficScale != null : scaledTrafficEta != null;
+  // "Live traffic" is a claim about the data, not about the number existing:
+  // with nothing matched the ETA is the router's own free-flow estimate and
+  // must not be presented as traffic-aware.
+  const isTrafficAdjusted =
+    (showingNextStop ? trafficScale != null : scaledTrafficEta != null) &&
+    (trafficMatchRatio ?? 0) > 0;
   const delaySecs =
     !showingNextStop && isTrafficAdjusted && freeFlowEtaSeconds != null
       ? Math.max(0, Math.round(displayEta - freeFlowEtaSeconds))

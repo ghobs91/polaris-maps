@@ -46,6 +46,13 @@ interface NavigationState {
   routePreviewWaypoints: Waypoint[];
   routePreviewCosting: CostingModel;
   routePreviewTrafficEta: number | null;
+  /**
+   * Fraction of the previewed route that matched live traffic. `null` until an
+   * ETA has been seeded, and carried into `trafficMatchRatio` by
+   * `startNavigation` so the HUD never claims "live traffic" for a number that
+   * is actually free flow.
+   */
+  routePreviewTrafficMatchRatio: number | null;
 
   setRoutePreview: (
     route: ValhallaRoute,
@@ -55,7 +62,7 @@ interface NavigationState {
     waypoints?: Waypoint[],
   ) => void;
   setRoutePreviewWaypoints: (waypoints: Waypoint[]) => void;
-  setRoutePreviewTrafficEta: (seconds: number | null) => void;
+  setRoutePreviewTrafficEta: (seconds: number | null, matchRatio?: number | null) => void;
   clearRoutePreview: () => void;
   startNavigation: (
     route: ValhallaRoute,
@@ -115,6 +122,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
   routePreviewWaypoints: [],
   routePreviewCosting: 'auto',
   routePreviewTrafficEta: null,
+  routePreviewTrafficMatchRatio: null,
 
   setRoutePreview: (route, alternates, destination, costing, waypoints) =>
     set({
@@ -124,11 +132,13 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreviewWaypoints: waypoints ?? [],
       routePreviewCosting: costing,
       routePreviewTrafficEta: null,
+      routePreviewTrafficMatchRatio: null,
     }),
 
   setRoutePreviewWaypoints: (waypoints) => set({ routePreviewWaypoints: waypoints }),
 
-  setRoutePreviewTrafficEta: (seconds) => set({ routePreviewTrafficEta: seconds }),
+  setRoutePreviewTrafficEta: (seconds, matchRatio = null) =>
+    set({ routePreviewTrafficEta: seconds, routePreviewTrafficMatchRatio: matchRatio }),
 
   clearRoutePreview: () =>
     set({
@@ -138,11 +148,13 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreviewWaypoints: [],
       routePreviewCosting: 'auto',
       routePreviewTrafficEta: null,
+      routePreviewTrafficMatchRatio: null,
     }),
 
   startNavigation: (route, alternates, destination, costing, waypoints) => {
     const firstManeuver = route.legs[0]?.maneuvers[0] ?? null;
     const previewTrafficEta = get().routePreviewTrafficEta;
+    const previewMatchRatio = get().routePreviewTrafficMatchRatio;
     set({
       activeRoute: route,
       alternateRoutes: alternates,
@@ -162,7 +174,10 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       // Carry over traffic ETA from preview so it's immediately available
       trafficEtaSeconds: previewTrafficEta,
       freeFlowEtaSeconds: previewTrafficEta != null ? route.summary.durationSeconds : null,
-      trafficMatchRatio: previewTrafficEta != null ? 1 : null,
+      // The preview's *measured* match ratio, not an assumed full match: with a
+      // CarPlay-only trip the in-navigation refresh never runs, so this is the
+      // only answer the HUD will ever get.
+      trafficMatchRatio: previewMatchRatio,
       fasterRouteSuggestion: null,
       // Clear preview when starting real navigation
       routePreview: null,
@@ -170,6 +185,7 @@ export const useNavigationStore = create<NavigationState>()((set, get) => ({
       routePreviewDestination: null,
       routePreviewWaypoints: [],
       routePreviewTrafficEta: null,
+      routePreviewTrafficMatchRatio: null,
     });
 
     // Background-session coordination happens in

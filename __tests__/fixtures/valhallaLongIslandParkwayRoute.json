@@ -1,0 +1,143 @@
+{
+  "summary": {
+    "distanceMeters": 19026.3,
+    "durationSeconds": 1149.508,
+    "hasToll": false,
+    "hasFerry": false
+  },
+  "legs": [
+    {
+      "maneuvers": [
+        {
+          "type": "start",
+          "instruction": "Drive east.",
+          "distanceMeters": 4.7,
+          "durationSeconds": 1.56,
+          "beginShapeIndex": 0,
+          "endShapeIndex": 1,
+          "verbalPreTransition": "Drive east. Then Turn left."
+        },
+        {
+          "type": "turn_left",
+          "instruction": "Turn left.",
+          "distanceMeters": 142.9,
+          "durationSeconds": 48.381,
+          "beginShapeIndex": 1,
+          "endShapeIndex": 15,
+          "verbalPreTransition": "Turn left."
+        },
+        {
+          "type": "turn_right",
+          "instruction": "Turn right onto Ring Road West.",
+          "distanceMeters": 251.9,
+          "durationSeconds": 55.209,
+          "beginShapeIndex": 15,
+          "endShapeIndex": 31,
+          "verbalPreTransition": "Turn right onto Ring Road West.",
+          "streetNames": ["Ring Road West"]
+        },
+        {
+          "type": "turn_right",
+          "instruction": "Turn right to stay on Ring Road North.",
+          "distanceMeters": 338.0,
+          "durationSeconds": 71.685,
+          "beginShapeIndex": 31,
+          "endShapeIndex": 52,
+          "verbalPreTransition": "Turn right to stay on Ring Road North.",
+          "streetNames": ["Ring Road North"]
+        },
+        {
+          "type": "merge_left",
+          "instruction": "Keep left at the fork.",
+          "distanceMeters": 76.0,
+          "durationSeconds": 15.222,
+          "beginShapeIndex": 52,
+          "endShapeIndex": 66,
+          "verbalPreTransition": "Keep left at the fork."
+        },
+        {
+          "type": "turn_left",
+          "instruction": "Turn left onto Ring Road East.",
+          "distanceMeters": 29.0,
+          "durationSeconds": 6.382,
+          "beginShapeIndex": 66,
+          "endShapeIndex": 72,
+          "verbalPreTransition": "Turn left onto Ring Road East. Then Turn right to take the M South ramp.",
+          "streetNames": ["Ring Road East"]
+        },
+        {
+          "type": "enter_highway",
+          "instruction": "Turn right to take the M South ramp.",
+          "distanceMeters": 7857.9,
+          "durationSeconds": 379.012,
+          "beginShapeIndex": 72,
+          "endShapeIndex": 322,
+          "verbalPreTransition": "Turn right to take the M South ramp.",
+          "streetNames": ["M", "Meadowbrook State Parkway"]
+        },
+        {
+          "type": "exit_highway",
+          "instruction": "Take exit M6 E onto SO East toward Eastern Long Island.",
+          "distanceMeters": 5244.9,
+          "durationSeconds": 268.18,
+          "beginShapeIndex": 322,
+          "endShapeIndex": 488,
+          "verbalPreTransition": "Take exit M6 E onto SO East toward Eastern Long Island.",
+          "streetNames": ["SO", "Southern State Parkway"]
+        },
+        {
+          "type": "exit_highway",
+          "instruction": "Take exit 27S onto W South toward Jones Beach.",
+          "distanceMeters": 4277.0,
+          "durationSeconds": 203.13,
+          "beginShapeIndex": 488,
+          "endShapeIndex": 580,
+          "verbalPreTransition": "Take exit 27S onto W South toward Jones Beach.",
+          "streetNames": ["W", "Wantagh State Parkway"]
+        },
+        {
+          "type": "exit_highway",
+          "instruction": "Take exit W6E toward East Merrick Road/Seaford.",
+          "distanceMeters": 256.9,
+          "durationSeconds": 19.601,
+          "beginShapeIndex": 580,
+          "endShapeIndex": 594,
+          "verbalPreTransition": "Take exit W6E toward East Merrick Road, Seaford."
+        },
+        {
+          "type": "slight_right",
+          "instruction": "Bear right onto Merrick Road.",
+          "distanceMeters": 244.9,
+          "durationSeconds": 23.167,
+          "beginShapeIndex": 594,
+          "endShapeIndex": 608,
+          "verbalPreTransition": "Bear right onto Merrick Road.",
+          "streetNames": ["Merrick Road"]
+        },
+        {
+          "type": "turn_left",
+          "instruction": "Turn left onto Cypress Street.",
+          "distanceMeters": 301.6,
+          "durationSeconds": 57.975,
+          "beginShapeIndex": 608,
+          "endShapeIndex": 611,
+          "verbalPreTransition": "Turn left onto Cypress Street.",
+          "streetNames": ["Cypress Street"]
+        },
+        {
+          "type": "destination",
+          "instruction": "Your destination is on the right.",
+          "distanceMeters": 0.0,
+          "durationSeconds": 0.0,
+          "beginShapeIndex": 611,
+          "endShapeIndex": 611,
+          "verbalPreTransition": "Your destination is on the right."
+        }
+      ],
+      "distanceMeters": 19026.3,
+      "durationSeconds": 1149.508
+    }
+  ],
+  "geometry": "qlnulAvialkCUmB_IrB_HhBWHQNOVIVK`@Cr@@l@Dh@rAlLGhKtDz\\jApKsCYiCYcCAcGd@eMpCuGdBwJfCqPjE{GfB{HpBuFxAyJhCyDv@wGd@gEa@sDcBeIkLcBgD{B}HgCcMgCcP_Hkk@uDa[s@cGMaAaCwRaCwRq@yG_@oEOuCG}BCuC?_DFsCJuCV}C\\qCz@wPAwAMwAWuAg@qAk@m@{@e@u@U{@Gy@@_AT}@b@{@l@}BtBSpAQfBMfCA|BBpBJvBuU|OqAr@aAX{@Nq@@q@I{@[q@e@e@g@Wk@Su@OgACaABiAHwA\\sDnA_Cf@}@xIkQfJcRjA_CvAkCzAaCzAoB`BmBzBqBtBaBdBeAfBaAdB}@`CaAnBm@zAa@dDs@lQgJ~RoEzEkAnEmAtEuAjEuAvE_BpE_BnEmBfEmBnEuB`EsBpE}B~D_CdEcC~DeC`EoCxDqCbE{CpDyC|D_DnDaDvDkDpDiDnDsDfDuDjDwDbDuDhDkE`DgExCcE`DsEzCwEh@y@tBgDnCsEpC{EjCyEhC{EhBmDlGaN~B{F|BqFzB{FlBmFx@aCr@sBfBuFjBcGbBwFxAeFdB}GtAwFvAoGrAeGtAcHlCyN`CgPvBgPbB{OxAuPhAyP|@qPr@yPd@_QVaQLuP?aQKaQO}Pa@uPo@cQw@oPgAiQoAyP_BwPiBqPoBcP}ByPqVwgBuBoPkBiQaBuPuAyPgAeQcAgQ{@aQ[cIQ_H_@gPYgQMcQEcR@eHBoHL_QNcJNeIb@kPh@aMp@gNl@gKb@sHdAmOhAiNnAuM~AoOpB{PjBaN~B}OlC_PrCaPxCcOrDiQ`EyPfCgJtC}KvDmMbE}MxDkLtDuKlEuLtCmHrAiDvFwMjFmLxFuLrGiMt@sAjFwJ~G{LlHoL~G}KnHmKnIaLlIwK~E}F|GgIxIkJxIeJfJsIpJuIbJ}H~JcI~JkHvJaHbKqGhKkG~KgGjKoFpKmFzKmFnK_FbL{E|KuExr@qWfKoDfOsElQgF|K{CrL}ClLyCpLkChLgC`b@{HbLwBd[qExNo@bH}@`IgAbf@oEpt@}DpaAkCng@HlVb@p\\z@|BHra@Nt`@HbmAtA~d@`AbJTbf@ZlSHxB?`KLlJJfDB~h@Z|IId[Yf_@gA~l@kDn\\wCja@_FvvA{SrCa@pTqDr`Eum@jzBw\\d{BcZhPyBfmAcO`aNi}Avs@{J~_@uGvEy@nYaF|s@mO|O{CvOeDjPaDlNyCvLgC|h@}K`\\cHrUm@xCY`CItCBpCLlC\\rBj@dBp@|AfA|AnArAvAhApBlAjCr@tBj@lC\\jCRhDF`DGfCUzC_@lCw@fC_A~BiApByAvBiBjBwB`BsB`AuBj@sBXkBFqBIqBc@yAe@mBaAcBqAaB}AyAsB_AcBw@qBo@gCc@{C[oDUoDUqEIeEGcEqC_k@DwINsHZwIn@cJx@oJdBoQlMcpAv[s|Cn@aGl@uGj@mGl@yH`@mGb@sHXaHPwGNeH@aH?aGI}HKaJOeNuAygASaPuEezD]wScGoaFIiHG}GAcH?yGD{GD_HHaHTcHV_IlFs`BlBuh@ViINoGAuGCiGMsGWkHe@uHi@{Gw@wG_AeHwAwIeB_IgBcHgBuGoC_IyBoFgC}F}BgEmE}HkF_IqMaRauAwmByTk\\yD_HaCeEeGuMiGePmEwPmDsQqAaHgCeTaBkSaAeZc@qZ}Ass@]uOw@s\\g@qKsAaNmAgJeBsKaBuJeRmhA}AyJaT}oAwHse@yDiUaC_MmCsKcJuX{FiM}G}LgWwb@ejAumBmSe]uPg[oUch@cNm]{P}c@cM}[{HcSsFkOsMg_@iEaO_GaUgCmLcEmT}CeSeDkZaCcY_BoXiAcZ_@{[GyY^cY~@eZpAyX`CcZ|k@kwGtIqaA~I{U`DwHbFkIjFaGjF_EbHaE|HkDlJ_DdJkCtIkBbIuAlJs@vO}@f[}EbV{@lXkAlY_BzSiBpRuB`SkCpSaEbRaGnQuHjRaL~OmLnMaLlLmMfLwNdKaOxPyVn_AcpA`WgYxNwN`PoMfZwRne@sV`K{DbNmFri@iMjn@yHf_@uAnpB~A~|@r@da@wAtW_A|d@oGzb@aG~wBym@bOgEx`@gGpc@wAle@`Adj@hHjwAfa@duAbR|NnBrMlBze@hC~eAnSrZlJtXrIvP~FtLdGlY~PrX`T~NxFlVdJbH|AtFfA|HjAtOL|NEfOYvKkCbMaDtLsFxN{GpL}HpEyCvCkB|EgG|E{FlB_CtG}JjJyPpFqKjDyKvFkOpWut@tFgN`GaQl^yl@pSgTxDuBjD?vCtA|B|C~AnMQzBuCjKyFvOeN|TwJG_E_A}CaDcEgGq@kHsDq`@[{Ck@_GOsBg@qFgBiPm@yHi@}GoAcNoBuS{@kJGq@aCiW{PoAo`C}P}SkB",
+  "boundingBox": [-73.616334, 40.663259, -73.509182, 40.742689]
+}
