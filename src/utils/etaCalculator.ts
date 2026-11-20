@@ -1,6 +1,6 @@
 import type { ETARouteSegment, ETAResult, NormalizedTrafficSegment } from '../models/traffic';
 import { ROAD_CLASS_SPEEDS } from '../models/traffic';
-import type { ValhallaManeuver, ManeuverType, RoadClass } from '../models/route';
+import type { ValhallaManeuver, ValhallaRoute, ManeuverType, RoadClass } from '../models/route';
 import { decodePolyline } from './polyline';
 import { encode as geohashEncode, neighbors as geohashNeighbors } from './geohash';
 
@@ -26,11 +26,40 @@ const MIN_LIVE_SPEED_FRACTION = 0.05;
 const MAX_ETA_INFLATION = 4;
 
 /**
- * Infer the most-likely road class from a Valhalla maneuver type.
- * Uses heuristics: highway entrances/exits → motorway, roundabouts → secondary,
- * ferries → service. All other maneuvers default to secondary (moderate road).
+ * A posted limit outside this range is a bad reading (a 0 sentinel, or km/h
+ * that skipped the mph conversion), not a road.
  */
-function inferRoadClassFromManeuver(type: ManeuverType): RoadClass {
+const MIN_PLAUSIBLE_LIMIT_MPH = 5;
+const MAX_PLAUSIBLE_LIMIT_MPH = 85;
+
+/**
+ * Shortest maneuver whose own `time` is treated as a per-edge speed signal.
+ * Below this the step's turn/intersection penalty dominates whatever distance
+ * it covers, so distance ÷ time would price the road at walking pace.
+ */
+const MIN_SPEED_SIGNAL_SECONDS = 3;
+const MIN_SPEED_SIGNAL_METERS = 20;
+
+/** A derived free-flow speed is capped here; a faster reading is bad data. */
+const MAX_FREE_FLOW_MPH = 80;
+
+/**
+ * Below this, distance ÷ time for a maneuver is the step's turn/intersection
+ * penalty rather than a road speed, so it must not become the free-flow
+ * baseline (it would swamp the posted limit on a 20 m turning step).
+ */
+const MIN_SPEED_SIGNAL_MPH = 8;
+
+/**
+ * Infer the most-likely road class from a Valhalla maneuver type, refined by the
+ * posted limit (or, failing that, the router's own speed for the stretch).
+ *
+ * The old version returned `secondary` for every non-highway maneuver, which
+ * priced a residential street and a 45 mph arterial identically — the road
+ * class table is now only a last resort, but when it is used it should at least
+ * be the right class.
+ */
+function inferRoadClassFromManeuver(type: ManeuverType, referenceMph?: number): RoadClass {
   switch (type) {
     case 'enter_highway':
     case 'exit_highway':
@@ -41,14 +70,77 @@ function inferRoadClassFromManeuver(type: ManeuverType): RoadClass {
     case 'ferry':
       return 'service';
     default:
-      return 'secondary';
+      return referenceMph != null ? roadClassFromSpeed(referenceMph) : 'secondary';
   }
+}
+
+/** Band a speed (posted limit or the router's own) into a road class. */
+function roadClassFromSpeed(mph: number): RoadClass {
+  if (mph >= 55) return 'motorway';
+  if (mph >= 45) return 'trunk';
+  if (mph >= 35) return 'primary';
+  if (mph >= 28) return 'secondary';
+  if (mph >= 22) return 'tertiary';
+  return 'residential';
+}
+
+/**
+ * The router's own uncongested speed for one maneuver, or null when its `time`
+ * is too short — or too slow — to be a speed signal (or is missing).
+ */
+function maneuverSpeedFromRouter(maneuver: ValhallaManeuver): number | null {
+  const seconds = maneuver.durationSeconds;
+  const meters = maneuver.distanceMeters;
+  if (!(seconds >= MIN_SPEED_SIGNAL_SECONDS) || !(meters >= MIN_SPEED_SIGNAL_METERS)) return null;
+  const mph = meters / seconds / 0.44704;
+  if (!Number.isFinite(mph) || mph < MIN_SPEED_SIGNAL_MPH) return null;
+  return Math.min(mph, MAX_FREE_FLOW_MPH);
+}
+
+/** The posted limit Valhalla reports for a maneuver, or null when unusable. */
+function maneuverSpeedLimit(maneuver: ValhallaManeuver): number | null {
+  const limit = maneuver.speedLimitMph;
+  if (typeof limit !== 'number' || !Number.isFinite(limit)) return null;
+  if (limit < MIN_PLAUSIBLE_LIMIT_MPH || limit > MAX_PLAUSIBLE_LIMIT_MPH) return null;
+  return limit;
+}
+
+export interface ManeuverFreeFlow {
+  /** Baseline (uncongested) speed for this maneuver's shape range, mph. */
+  speed: number;
+  roadClass: RoadClass;
+}
+
+/**
+ * Resolve the free-flow baseline for one maneuver, in priority order:
+ *
+ *  1. **The router's own answer** — a self-hosted Valhalla has no live traffic
+ *     feed, so its per-maneuver `time` for this stretch *is* the uncongested
+ *     estimate, and it comes from real per-edge OSM speeds. This is what the
+ *     directions sheet shows, so using it keeps the driving ETA from
+ *     contradicting the preview it was started from.
+ *  2. **The posted limit**, when the maneuver is too short for (1).
+ *  3. **The road-class table**, when there is neither.
+ *
+ * Before this, only (3) existed, which priced every parkway maneuver at the
+ * motorway default of 70 mph: an 11 mi Long Island parkway run at a real 44 mph
+ * came out as 11 min in navigation while the preview (the router's own 14 min)
+ * said 14.
+ */
+export function resolveManeuverFreeFlow(maneuver: ValhallaManeuver): ManeuverFreeFlow {
+  const fromRouter = maneuverSpeedFromRouter(maneuver);
+  const limit = maneuverSpeedLimit(maneuver);
+  const roadClass = inferRoadClassFromManeuver(maneuver.type, limit ?? fromRouter ?? undefined);
+
+  if (fromRouter != null) return { speed: fromRouter, roadClass };
+  if (limit != null) return { speed: limit, roadClass };
+  return { speed: ROAD_CLASS_SPEEDS[roadClass] ?? DEFAULT_FREE_FLOW_MPH, roadClass };
 }
 
 /**
  * Build a lookup from polyline shape index → free-flow speed (mph) and road
  * class using the route's maneuver list. Each maneuver's beginShapeIndex..
- * endShapeIndex range is assigned a speed and road class based on inferred type.
+ * endShapeIndex range is assigned that maneuver's resolved free-flow speed.
  *
  * Returns a sparse array where index `i` holds { speed, roadClass }, or
  * undefined when no maneuver covers that index.
@@ -59,8 +151,7 @@ function buildManeuverSpeedMap(
 ): ({ speed: number; roadClass: string } | undefined)[] {
   const map: ({ speed: number; roadClass: string } | undefined)[] = new Array(coordCount);
   for (const m of maneuvers) {
-    const roadClass = inferRoadClassFromManeuver(m.type);
-    const speed = ROAD_CLASS_SPEEDS[roadClass] ?? DEFAULT_FREE_FLOW_MPH;
+    const { speed, roadClass } = resolveManeuverFreeFlow(m);
     for (let i = m.beginShapeIndex; i < m.endShapeIndex && i < coordCount; i++) {
       map[i] = { speed, roadClass };
     }
@@ -276,4 +367,28 @@ export function calculateTrafficETA(
     formatted: formatETA(totalSeconds),
     freeFlowFormatted: formatETA(freeFlowTotalSeconds),
   };
+}
+
+/**
+ * Fraction of a route's segments that matched live traffic data. 0 means the
+ * ETA is a pure free-flow estimate and must not be presented as traffic-aware.
+ */
+export function trafficMatchRatio(result: ETAResult): number {
+  return result.segmentCount > 0 ? result.matchedSegmentCount / result.segmentCount : 0;
+}
+
+/**
+ * The one way to turn a `ValhallaRoute` + a traffic set into an ETA.
+ *
+ * Both the in-navigation refresh (`useTrafficEta`) and the directions preview
+ * go through this, so the preview header and the driving HUD cannot disagree
+ * about the same route.
+ */
+export function computeRouteTrafficEta(
+  route: ValhallaRoute,
+  trafficSegments: NormalizedTrafficSegment[],
+): ETAResult {
+  const maneuvers = route.legs.flatMap((leg) => leg.maneuvers);
+  const segments = extractRouteSegments(route.geometry, undefined, maneuvers);
+  return calculateTrafficETA(segments, trafficSegments);
 }

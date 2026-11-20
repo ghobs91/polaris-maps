@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useTrafficStore } from '../stores/trafficStore';
-import { extractRouteSegments, calculateTrafficETA } from '../utils/etaCalculator';
+import { computeRouteTrafficEta, trafficMatchRatio } from '../utils/etaCalculator';
 import { fetchRouteTrafficEta } from '../services/traffic/tomtomRouteEta';
 
 const ETA_REFRESH_INTERVAL_MS = 60_000;
@@ -77,13 +77,8 @@ export function useTrafficEta(): void {
       const route = useNavigationStore.getState().activeRoute;
       if (!route) return;
 
-      const maneuvers = route.legs.flatMap((l) => l.maneuvers);
-      const segments = extractRouteSegments(route.geometry, undefined, maneuvers);
-      const trafficData = useTrafficStore.getState().normalizedSegments;
-      const result = calculateTrafficETA(segments, trafficData);
-
-      const matchRatio =
-        result.segmentCount > 0 ? result.matchedSegmentCount / result.segmentCount : 0;
+      const result = computeRouteTrafficEta(route, useTrafficStore.getState().normalizedSegments);
+      const matchRatio = trafficMatchRatio(result);
 
       updateTrafficEta(result.totalSeconds, result.freeFlowTotalSeconds, matchRatio);
 
@@ -132,14 +127,8 @@ export function useTrafficEta(): void {
       const route = useNavigationStore.getState().activeRoute;
       if (!route) return;
 
-      const maneuvers = route.legs.flatMap((l) => l.maneuvers);
-      const segments = extractRouteSegments(route.geometry, undefined, maneuvers);
-      const trafficData = useTrafficStore.getState().normalizedSegments;
-      const result = calculateTrafficETA(segments, trafficData);
-
-      const matchRatio =
-        result.segmentCount > 0 ? result.matchedSegmentCount / result.segmentCount : 0;
-      updateTrafficEta(result.totalSeconds, result.freeFlowTotalSeconds, matchRatio);
+      const result = computeRouteTrafficEta(route, useTrafficStore.getState().normalizedSegments);
+      updateTrafficEta(result.totalSeconds, result.freeFlowTotalSeconds, trafficMatchRatio(result));
     }, 3000); // 3s debounce for traffic data changes
 
     return () => {

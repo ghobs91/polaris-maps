@@ -2,6 +2,8 @@ import {
   calculateTrafficETA,
   extractRouteSegments,
   formatETA,
+  resolveManeuverFreeFlow,
+  trafficMatchRatio,
 } from '../../src/utils/etaCalculator';
 import type { NormalizedTrafficSegment, ETARouteSegment } from '../../src/models/traffic';
 import type { ValhallaManeuver } from '../../src/models/route';
@@ -348,5 +350,102 @@ describe('extractRouteSegments', () => {
 
     const result = extractRouteSegments(geometry, 30, [makeManeuver('continue', 0, 1)]);
     expect(result).toEqual([]);
+  });
+});
+
+describe('resolveManeuverFreeFlow', () => {
+  /** Maneuver with real distance/time, as an actual Valhalla leg reports them. */
+  function timedManeuver(
+    type: ValhallaManeuver['type'],
+    meters: number,
+    seconds: number,
+    speedLimitMph?: number,
+  ): ValhallaManeuver {
+    return {
+      ...makeManeuver(type, 0, 10),
+      distanceMeters: meters,
+      durationSeconds: seconds,
+      speedLimitMph,
+    };
+  }
+
+  it("uses the router's own per-edge speed over the road-class table", () => {
+    // 4.88 mi in 379 s = 46.4 mph on a parkway the table calls motorway (70).
+    const maneuver = timedManeuver('enter_highway', 7853, 379);
+    const { speed, roadClass } = resolveManeuverFreeFlow(maneuver);
+
+    expect(speed).toBeCloseTo(46.4, 1);
+    expect(speed).toBeLessThan(70);
+    expect(roadClass).toBe('motorway');
+  });
+
+  it('prices a slow local stretch at its real speed instead of the 30 mph default', () => {
+    // 0.21 mi in 71.7 s = 10.5 mph — a mall ring road, not a 30 mph arterial.
+    const { speed } = resolveManeuverFreeFlow(timedManeuver('turn_right', 338, 71.7));
+    expect(speed).toBeCloseTo(10.5, 1);
+  });
+
+  it('falls back to the posted limit when the maneuver is too short to be a speed signal', () => {
+    // A 20 m step whose 30 s is almost all intersection penalty.
+    const { speed, roadClass } = resolveManeuverFreeFlow(timedManeuver('turn_left', 20, 30, 45));
+    expect(speed).toBe(45);
+    expect(roadClass).toBe('trunk');
+  });
+
+  it('falls back to the road-class table with neither a usable time nor a limit', () => {
+    expect(resolveManeuverFreeFlow(makeManeuver('enter_highway', 0, 5)).speed).toBe(70);
+    expect(resolveManeuverFreeFlow(makeManeuver('enter_roundabout', 0, 5)).speed).toBe(30);
+    expect(resolveManeuverFreeFlow(makeManeuver('ferry', 0, 5)).speed).toBe(12);
+  });
+
+  it('classifies a non-highway maneuver from its speed instead of calling everything secondary', () => {
+    // The old inference returned `secondary` (30 mph) for every non-highway
+    // maneuver, so a residential street and a 44 mph arterial were identical.
+    const residential = resolveManeuverFreeFlow(timedManeuver('continue', 200, 41)); // ~10.9 mph
+    const arterial = resolveManeuverFreeFlow(timedManeuver('continue', 500, 25)); // ~44.7 mph
+
+    expect(residential.roadClass).toBe('residential');
+    expect(arterial.roadClass).toBe('primary');
+  });
+
+  it('ignores an implausible posted limit', () => {
+    // A 0 sentinel and an unconverted km/h value are readings, not roads.
+    expect(resolveManeuverFreeFlow(timedManeuver('turn_left', 10, 0, 0)).speed).toBe(30);
+    expect(resolveManeuverFreeFlow(timedManeuver('turn_left', 10, 0, 130)).speed).toBe(30);
+  });
+
+  it('clamps a derived speed to a plausible free-flow range', () => {
+    // 1 km in 5 s is 447 mph: a bad duration, not a road.
+    expect(resolveManeuverFreeFlow(timedManeuver('continue', 1000, 5)).speed).toBe(80);
+  });
+
+  it('ignores a zero or negative duration rather than dividing by it', () => {
+    const { speed } = resolveManeuverFreeFlow(timedManeuver('continue', 500, 0));
+    expect(Number.isFinite(speed)).toBe(true);
+    expect(speed).toBe(30);
+  });
+});
+
+describe('trafficMatchRatio', () => {
+  it('is 0 for an empty route rather than NaN', () => {
+    expect(trafficMatchRatio(calculateTrafficETA([], []))).toBe(0);
+  });
+
+  it('reports the matched fraction', () => {
+    const routeSegments: ETARouteSegment[] = [
+      makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60),
+      makeRouteSegment(10.0, 10.0, 10.01, 10.01, 1609, 60),
+    ];
+    const traffic: NormalizedTrafficSegment[] = [
+      makeTrafficSegment('t:1', [[4.845, 52.415]], 30, 60),
+    ];
+    const result = calculateTrafficETA(routeSegments, traffic);
+
+    expect(trafficMatchRatio(result)).toBe(0.5);
+  });
+
+  it('is 0 when no traffic data exists, so the ETA is not traffic-aware', () => {
+    const routeSegments: ETARouteSegment[] = [makeRouteSegment(4.84, 52.41, 4.85, 52.42, 1609, 60)];
+    expect(trafficMatchRatio(calculateTrafficETA(routeSegments, []))).toBe(0);
   });
 });
