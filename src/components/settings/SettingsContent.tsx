@@ -34,6 +34,7 @@ import { DashCamSettings } from './DashCamSettings';
 import { OfflineMapsSection } from './OfflineMapsSection';
 import { SettingsSectionNav, type SettingsSection } from './SettingsSectionNav';
 import { spacing, typography, iosListGroup } from '../../constants/theme';
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../../constants/config';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const THEME_OPTIONS: { label: string; value: ThemeMode }[] = [
@@ -716,14 +717,14 @@ export function SettingsContent({
               rightAdornment={
                 <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
               }
-              onPress={() => Linking.openURL('https://app.polarismaps.app/privacy')}
+              onPress={() => Linking.openURL(PRIVACY_POLICY_URL)}
             />
             <SettingsRow
               title="Terms of Service"
               rightAdornment={
                 <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
               }
-              onPress={() => Linking.openURL('https://app.polarismaps.app/terms')}
+              onPress={() => Linking.openURL(TERMS_OF_SERVICE_URL)}
             />
           </SettingsGroup>
         </View>

@@ -16,6 +16,21 @@
  */
 export const OPENFREEMAP_USER_AGENT = 'PolarisMaps/1.0 (+https://app.polarismaps.app)';
 
+/**
+ * The public site: landing page, privacy policy, terms.
+ *
+ * The apex is the canonical host — every canonical URL, the App Store listing
+ * and the policy pages themselves say `polarismaps.app`. `app.polarismaps.app`
+ * still serves the same Netlify deployment, but it is the *app* host: universal
+ * links (`applinks:app.polarismaps.app`), the AT Protocol OAuth client id and
+ * the Mapillary callback are bound to it and must not move to the apex.
+ */
+export const SITE_BASE_URL = 'https://polarismaps.app';
+
+/** Store-facing legal pages. Trailing slash: Netlify 301s `/privacy` to it. */
+export const PRIVACY_POLICY_URL = `${SITE_BASE_URL}/privacy/`;
+export const TERMS_OF_SERVICE_URL = `${SITE_BASE_URL}/terms/`;
+
 /** OpenFreeMap MapLibre style URL — global vector tiles, no download needed. */
 export const OPENFREEMAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
