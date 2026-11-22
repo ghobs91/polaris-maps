@@ -43,4 +43,4 @@ in Settings → Privacy. Street-level imagery and place contributions are also o
 by default during setup and can be switched off at any time.
 
 Map data © OpenStreetMap contributors (ODbL). Places from Overture Maps. Read
-the full privacy policy at https://app.polarismaps.app/privacy
+the full privacy policy at https://polarismaps.app/privacy/

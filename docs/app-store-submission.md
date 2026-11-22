@@ -11,20 +11,20 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 
 ### Done
 
-| Item                                    | Evidence                                                                     |
-| --------------------------------------- | ---------------------------------------------------------------------------- |
-| Release quality gate (`pnpm check`)     | `tsc`, `eslint`, `prettier` clean; Jest 2,339 pass / 1 skip / 0 fail (Nov 2) |
-| `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added                     |
-| Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false`        |
-| Privacy policy + terms + landing page   | Live: https://app.polarismaps.app/privacy, `/terms`, `/`                     |
-| Support & marketing URLs                | Point at https://app.polarismaps.app (resolve 200)                           |
-| Store listing copy                      | `fastlane/metadata/en-US/`                                                   |
-| Review contact fields                   | `fastlane/metadata/review_information/` (name, email, phone)                 |
-| Policy/terms date + contact + copyright | Live: October 18, 2026 · support@polarismaps.app · © Andrew Ghobrial         |
-| App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                               |
-| Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON          |
-| Screenshots — iPhone 6.9" (7 of 8)      | 01, 02, 05, 06, 07 recaptured on build 350; 03/04 stale; 08 missing          |
-| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752, build 350)                 |
+| Item                                    | Evidence                                                                                                                                                    |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Release quality gate (`pnpm check`)     | `tsc`, `eslint`, `prettier` clean; Jest 2,339 pass / 1 skip / 0 fail (Nov 2)                                                                                |
+| `ios release` lane runs                 | Stale MapKit env gate removed; version-drift guard added                                                                                                    |
+| Privacy manifest                        | `PrivacyInfo.xcprivacy`: 4 collected types, `NSPrivacyTracking=false`                                                                                       |
+| Privacy policy + terms + landing page   | Pages canonical to https://polarismaps.app (privacy + terms still served from `app.polarismaps.app` until the apex is attached in Netlify — see note below) |
+| Support & marketing URLs                | `fastlane/metadata/en-US/` → https://polarismaps.app (needs the apex live)                                                                                  |
+| Store listing copy                      | `fastlane/metadata/en-US/`                                                                                                                                  |
+| Review contact fields                   | `fastlane/metadata/review_information/` (name, email, phone)                                                                                                |
+| Policy/terms date + contact + copyright | Live: October 18, 2026 · support@polarismaps.app · © Andrew Ghobrial                                                                                        |
+| App Privacy questionnaire answers       | Drafted in `docs/app-store-privacy-answers.md`                                                                                                              |
+| Universal links — source + AASA         | `shareService`/plugin → `app.polarismaps.app`; AASA served 200 JSON                                                                                         |
+| Screenshots — iPhone 6.9" (7 of 8)      | 01, 02, 05, 06, 07 recaptured on build 350; 03/04 stale; 08 missing                                                                                         |
+| Screenshots — iPad 13" (1 card)         | `screenshots/out/ipad-01-explore.png` (2064×2752, build 350)                                                                                                |
 
 ### Remaining
 
@@ -37,6 +37,25 @@ still debug-signed with no Play pipeline) and is intentionally omitted below.
 | 5   | Associated Domains capability + profile + entitlement | done             | Verified in exported IPA                                                |
 | 6   | Run `fastlane ios release` → submit                   | you              | Lane unblocked                                                          |
 | 7   | Housekeeping: commit working tree                     | done             | CarPlay add-stop work committed; only lane-owned build artifacts remain |
+| 8   | Attach `polarismaps.app` to the Netlify site          | you              | **Blocked: apex is parked at Porkbun — see below**                      |
+
+> **Site host (checked Nov 22).** The website's canonical URLs, store metadata
+> and policy pages now say `https://polarismaps.app/...`, but nothing serves
+> that host yet: the apex resolves to Porkbun parking (`207.207.210.107/229`,
+> TLS handshake fails) and `www` is a CNAME to `pixie.porkbun.com`. The site is
+> published only at `app.polarismaps.app` (CNAME → `polaris-maps-bsky-auth`
+> Netlify site `b8ffe326-8d35-45ec-b326-fd689a539a2a`).
+>
+> Until `polarismaps.app` + `www.polarismaps.app` are added as custom domains on
+> that Netlify site and the parking A records are replaced, the Privacy Policy /
+> Support / Marketing URLs in the store listing point at a host that does not
+> answer — **do not submit for review before this is done.** Verify with:
+> `curl -sI https://polarismaps.app/privacy/` → `200` (not a TLS error).
+>
+> `app.polarismaps.app` must stay attached: the shipped build's universal links
+> (`applinks:app.polarismaps.app`), the AT Protocol OAuth `client_id`
+> (`https://app.polarismaps.app/.well-known/oauth-client-metadata.json`) and the
+> Mapillary redirect URI (`/mapillary-callback`) are all bound to it.
 
 > Refreshed on build 350 (Oct 29); capture status re-checked Nov 2. Cards 01
 > (live traffic), 02 (transit), 05 (navigation HUD), 06 (place details) and 07
@@ -117,7 +136,7 @@ screenshots (2064×2752 for iPad Pro 13").
    - Collected: **Precise Location** (not linked), **Photos or Videos** (linked),
      **Other User Content** (linked), **User ID** (linked) — all App Functionality.
    - Tracking: **No**.
-3. Point the **Privacy Policy URL** at `https://app.polarismaps.app/privacy`.
+3. Point the **Privacy Policy URL** at `https://polarismaps.app/privacy/`.
 
 ### 4. Legal review of policy + terms
 

@@ -1,9 +1,9 @@
 # Polaris Maps — Privacy Policy
 
-**Status: ready to publish at https://app.polarismaps.app/privacy — pending legal review.**
+**Status: ready to publish at https://polarismaps.app/privacy/ — pending legal review.**
 
 _Last updated: October 18, 2026_
-_Canonical URL: https://app.polarismaps.app/privacy_
+_Canonical URL: https://polarismaps.app/privacy/_
 
 Polaris Maps is a peer-to-peer mapping app. It is built so that your device can
 contribute map and traffic data directly to other devices, without a corporate
