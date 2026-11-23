@@ -1,11 +1,12 @@
 /**
  * The hidden ratings browser is the most expensive native object this app
  * creates: a WKWebView is a whole web-content process. These tests pin the
- * lifecycle rules that keep it from costing the UI anything it does not have to:
+ * mounting policy that is known to *load* on a real device:
  *
- *  - one view per pass, never a fresh WKWebView per stage,
- *  - the view released shortly after the last stage ends, so an idle app holds
- *    no web-content process and no provider page keeps rendering,
+ *  - a FRESH view per stage, keyed by provider+URI (a reused view navigated
+ *    between stages sat silent on device until the stage clock killed it, so
+ *    ratings never loaded),
+ *  - nothing mounted while no stage is live,
  *  - never a host-less navigation (react-native-webview turns `about:blank` into
  *    `-[WKWebView loadFileURL:]`, which aborts the app).
  */
@@ -50,12 +51,10 @@ describe('HiddenRatingsBrowserHost', () => {
     (global as any).__hostProps = null;
     (global as any).__hostMounts = 0;
     setHiddenBrowserSpec(null);
-    jest.useFakeTimers();
   });
 
   afterEach(() => {
     setHiddenBrowserSpec(null);
-    jest.useRealTimers();
   });
 
   it('mounts nothing while no stage is live', () => {
@@ -64,7 +63,7 @@ describe('HiddenRatingsBrowserHost', () => {
     expect((global as any).__hostMounts).toBe(0);
   });
 
-  it('reuses one view across stage URIs instead of remounting', () => {
+  it('mounts a fresh view for each stage', () => {
     render(<HiddenRatingsBrowserHost />);
 
     act(() => setHiddenBrowserSpec(spec('tripadvisor', 'https://www.tripadvisor.com/A')));
@@ -76,46 +75,38 @@ describe('HiddenRatingsBrowserHost', () => {
     act(() => setHiddenBrowserSpec(spec('yelp', 'https://www.yelp.com/biz/c')));
     expect(props()?.source).toEqual({ uri: 'https://www.yelp.com/biz/c' });
 
-    // Four stages would previously have meant four WKWebView creations.
-    expect((global as any).__hostMounts).toBe(1);
+    // Three stages, three fresh WKWebViews. Reusing one was measurably broken on
+    // device: every stage after the first never loaded.
+    expect((global as any).__hostMounts).toBe(3);
   });
 
-  it('never navigates to a host-less URL (that aborts the app)', () => {
+  it('unmounts the view as soon as no stage is live', () => {
     render(<HiddenRatingsBrowserHost />);
 
     act(() => setHiddenBrowserSpec(spec('yelp', 'https://www.yelp.com/biz/c')));
-    act(() => setHiddenBrowserSpec(null));
-
-    // Still the last provider URL: releasing the page is done by unmounting, not
-    // by navigating to `about:blank` — react-native-webview routes a host-less
-    // source to `-[WKWebView loadFileURL:]`, which throws on the main thread.
-    expect(props()?.source).toEqual({ uri: 'https://www.yelp.com/biz/c' });
-  });
-
-  it('releases the view shortly after the last stage ends', () => {
-    render(<HiddenRatingsBrowserHost />);
-
-    act(() => setHiddenBrowserSpec(spec('yelp', 'https://www.yelp.com/biz/c')));
-    act(() => setHiddenBrowserSpec(null));
     expect(props()).not.toBeNull();
 
-    act(() => {
-      jest.advanceTimersByTime(1_500);
-    });
+    act(() => setHiddenBrowserSpec(null));
     expect(props()).toBeNull();
   });
 
-  it('keeps the view alive across a handoff gap and is not remounted for it', () => {
+  it('does not copy the shared cookie jar into the browser on every navigation', () => {
     render(<HiddenRatingsBrowserHost />);
-
-    act(() => setHiddenBrowserSpec(spec('tripadvisor', 'https://www.tripadvisor.com/A')));
-    act(() => setHiddenBrowserSpec(null));
-    act(() => {
-      jest.advanceTimersByTime(500);
-    });
     act(() => setHiddenBrowserSpec(spec('yelp', 'https://www.yelp.com/biz/c')));
 
-    expect(props()?.source).toEqual({ uri: 'https://www.yelp.com/biz/c' });
-    expect((global as any).__hostMounts).toBe(1);
+    // `sharedCookiesEnabled` makes react-native-webview enumerate every cookie
+    // in NSHTTPCookieStorage on the main thread per navigation and hold
+    // `loadRequest` until each write completes. Nothing in this app populates
+    // that jar, so the flag is pure main-thread cost — and it grows with how
+    // long the device has been used, which is why a fresh simulator never shows
+    // the stall a real phone does.
+    expect(props()?.sharedCookiesEnabled).toBe(false);
+  });
+
+  it('keeps the stage’s collector script on the mounted view', () => {
+    render(<HiddenRatingsBrowserHost />);
+
+    act(() => setHiddenBrowserSpec(spec('yelp', 'https://www.yelp.com/biz/c')));
+    expect(props()?.injectedJavaScript).toBe('/* https://www.yelp.com/biz/c */');
   });
 });
