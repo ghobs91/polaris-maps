@@ -64,7 +64,7 @@ const MAX_EVENTS = 4000;
 export interface LagEvent {
   /** ms since `start()`. */
   at: number;
-  kind: 'stall' | 'frame-gap' | 'stage' | 'browser' | 'mark';
+  kind: 'stall' | 'frame-gap' | 'stage' | 'browser' | 'mark' | 'parse';
   /** Human-readable detail; for stalls/frame gaps this is the observed gap. */
   detail: string;
   /** Ratings stage that was live when the event was recorded. */
@@ -258,6 +258,43 @@ export function dump(): LagReport {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Time the synchronous HTML parser against the sliced one on the same document.
+ *
+ * Both numbers are recorded as probe events, so a device run states what the
+ * parser used to cost and what it costs now on the real engine (Hermes, release
+ * build) rather than in a Node benchmark.
+ */
+async function measureParseCost(): Promise<void> {
+  try {
+    const { extractPagePhotos, extractPagePhotosAsync } =
+      await import('@/services/poi/websitePhotosService');
+    const url = 'https://www.squarespace.com/';
+    const res = await fetch(url, { headers: { 'User-Agent': 'PolarisMaps/1.0' } });
+    if (!res.ok) {
+      record('parse', `skipped: ${url} answered ${res.status}`);
+      return;
+    }
+    const html = (await res.text()).slice(0, 300_000);
+
+    const syncStart = Date.now();
+    const syncPhotos = extractPagePhotos(html, url);
+    const syncMs = Date.now() - syncStart;
+
+    const slicedStart = Date.now();
+    const slicedPhotos = await extractPagePhotosAsync(html, url);
+    const slicedMs = Date.now() - slicedStart;
+
+    record(
+      'parse',
+      `${html.length}B: sync ${syncMs}ms (${syncPhotos.length}) vs sliced ${slicedMs}ms ` +
+        `(${slicedPhotos.length})`,
+    );
+  } catch (e) {
+    record('parse', `failed: ${String((e as Error)?.message ?? e)}`);
+  }
+}
+
+/**
  * Measure how long the event loop takes to service a queued callback.
  *
  * This is the closest observable stand-in for tap delivery: a touch is queued
@@ -325,6 +362,11 @@ export async function runScenario(query = 'restaurant'): Promise<LagReport> {
   const { viewport } = useMapStore.getState();
   const { lat, lng, zoom } = viewport;
   record('mark', `scenario start at ${lat.toFixed(4)},${lng.toFixed(4)}`);
+
+  // Quantify the photo parser on this device's JS engine before the card work
+  // starts: the same HTML through the old synchronous parse and the sliced one.
+  // This is the only way to show that the parse no longer occupies the thread.
+  await measureParseCost();
 
   let place: typeof FIXTURE_PLACE | null = null;
   let source = 'fixture';
