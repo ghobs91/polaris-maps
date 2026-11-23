@@ -13,6 +13,7 @@ import {
   normalizeMapillary,
   normalizePanoramax,
   sortPanoramasByRecency,
+  MAPILLARY_TIMEOUT_MS,
   type StreetViewPanorama,
 } from '../../src/services/imagery/streetViewService';
 
@@ -94,6 +95,11 @@ function routeFetch(url: string): Response {
   if (target.includes('SingleImageSearch')) return jsonResponse(googlePayload);
   if (target.includes('mapillary')) return jsonResponse(mapillaryPayload);
   return jsonResponse(panoramaxPayload);
+}
+
+function mapillaryCallUrl(): string {
+  const call = mockFetch.mock.calls.find((c) => String(c[0]).includes('mapillary'));
+  return String(call?.[0] ?? '');
 }
 
 describe('normalizePanoramax', () => {
@@ -198,6 +204,54 @@ describe('findStreetViewPanoramas', () => {
     mockFetch.mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
     const result = await findStreetViewPanoramas(48.8584, 2.2945, { limit: 1 });
     expect(result).toHaveLength(1);
+  });
+
+  it('asks Mapillary for panoramas only, and never for a server-side sort', async () => {
+    mockConfig.MAPILLARY_TOKEN = 'test-token';
+    mockFetch.mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
+
+    await findStreetViewPanoramas(48.8584, 2.2945);
+
+    const url = mapillaryCallUrl();
+    // Non-panoramas are discarded by the lookup, so asking for them only shrinks
+    // the set of panoramas that "newest" is chosen from.
+    expect(url).toContain('is_pano=true');
+    expect(url).toMatch(/limit=[2-9]\d/);
+    // Mapillary accepts a `sort=` parameter and answers with an empty data array
+    // rather than an error, so any sort must stay client-side.
+    expect(url).not.toContain('sort=');
+  });
+
+  it('keeps waiting for Mapillary past the shared 12s fetch budget', async () => {
+    // Live measurement of this exact query: 2.6s, 3.0s, 3.2s, 3.6s, 10.5s. The
+    // 12s budget shared by the other sources was one slow response away from
+    // dropping Mapillary entirely, which is what made the viewer fall through to
+    // Google. A 15s response must still land.
+    jest.useFakeTimers();
+    try {
+      mockConfig.MAPILLARY_TOKEN = 'test-token';
+      mockFetch.mockImplementation((url: string, init?: { signal?: AbortSignal }) => {
+        if (!String(url).includes('mapillary')) return Promise.resolve(routeFetch(String(url)));
+        return new Promise<Response>((resolve, reject) => {
+          const timer = setTimeout(() => resolve(jsonResponse(mapillaryPayload)), 15_000);
+          init?.signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            const abort = new Error('Aborted');
+            abort.name = 'AbortError';
+            reject(abort);
+          });
+        });
+      });
+
+      const pending = findStreetViewPanoramas(48.8584, 2.2945);
+      await jest.advanceTimersByTimeAsync(15_500);
+      const result = await pending;
+
+      expect(MAPILLARY_TIMEOUT_MS).toBeGreaterThan(12_000);
+      expect(result.some((p) => p.source === 'mapillary')).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('puts Google first, then Mapillary, then Panoramax most-recently-captured first', async () => {

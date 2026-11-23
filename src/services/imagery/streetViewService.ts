@@ -67,6 +67,26 @@ export interface StreetViewQuery {
 const DEFAULT_RADIUS_DEG = 0.004; // ~450 m
 const DEFAULT_LIMIT = 20;
 const FETCH_TIMEOUT_MS = 12_000;
+/**
+ * Mapillary gets a longer budget than the other sources.
+ *
+ * Measured against their live API on this repo's token, the exact lookup below
+ * took 2.6s, 3.0s, 3.2s, 3.6s and **10.5s** across five back-to-back calls. The
+ * shared 12s budget was therefore one slow response away from aborting the only
+ * source that had a 2026 capture nearby — which is exactly what made the viewer
+ * fall through to Google.
+ */
+export const MAPILLARY_TIMEOUT_MS = 20_000;
+/**
+ * How many images to ask Mapillary for.
+ *
+ * The endpoint takes no sort parameter (see {@link fetchMapillary}), so the
+ * response is an arbitrary sample of the bbox: asking for 20 mixed images
+ * yielded ~9 panoramas, and "newest panorama" then meant "newest of those
+ * nine". Only panoramas are usable here (`is_pano=true`), so ask for enough of
+ * them to make recency meaningful.
+ */
+const MAPILLARY_RESULT_LIMIT = 50;
 /** Metres per degree of latitude, to translate the bbox radius to a search radius. */
 const METERS_PER_DEGREE = 111_320;
 
@@ -85,8 +105,11 @@ function timeoutSignal(ms: number): { signal: AbortSignal; cancel: () => void } 
   return { signal: controller.signal, cancel: () => clearTimeout(timer) };
 }
 
-async function requestJson(url: string): Promise<unknown | null> {
-  const { signal, cancel } = timeoutSignal(FETCH_TIMEOUT_MS);
+async function requestJson(
+  url: string,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<unknown | null> {
+  const { signal, cancel } = timeoutSignal(timeoutMs);
   try {
     const res = await fetch(url, {
       signal,
@@ -217,10 +240,16 @@ async function fetchMapillary(
   const bbox = [lng - radiusDeg, lat - radiusDeg, lng + radiusDeg, lat + radiusDeg].join(',');
   const fields =
     'id,geometry,thumb_2048_url,thumb_1024_url,captured_at,compass_angle,is_pano,creator';
+  // `is_pano=true` is not an optimisation only: the viewer discards non-panorama
+  // images anyway (see `findStreetViewPanoramas`), and without the filter they
+  // consume most of the response, so the set of panoramas "newest" is chosen
+  // from shrinks. There is no server-side ordering to rely on — `sort=` is
+  // accepted and silently returns an empty `data` array, so recency is applied
+  // on this side in `sortPanoramasByRecency`.
   const url =
     `https://graph.mapillary.com/images?access_token=${encodeURIComponent(MAPILLARY_TOKEN)}` +
-    `&fields=${fields}&bbox=${bbox}&limit=20`;
-  const payload = await requestJson(url);
+    `&fields=${fields}&bbox=${bbox}&limit=${MAPILLARY_RESULT_LIMIT}&is_pano=true`;
+  const payload = await requestJson(url, MAPILLARY_TIMEOUT_MS);
   if (!payload) return [];
   return normalizeMapillary(payload);
 }
