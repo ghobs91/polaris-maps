@@ -14,6 +14,7 @@ import {
   COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
   COLLECTOR_RETRY_INTERVAL_MS,
+  EXTERNAL_RATINGS_USER_AGENT,
   discoverListingFromAnchors,
   extractLdBlocks,
   findAggregateRating,
@@ -386,6 +387,8 @@ export function buildTripadvisorSearchUrl(name: string, _address: string | null)
 export const tripadvisorProvider: ExternalRatingProvider = {
   id: 'tripadvisor',
   allowedHosts: TRIPADVISOR_ALLOWED_HOSTS,
+  // Mobile: TripAdvisor answers a desktop UA with a DataDome 403.
+  userAgent: EXTERNAL_RATINGS_USER_AGENT,
   // TripAdvisor's edge rejects headerless app fetches; the hidden browser is
   // the only transport that can return a listing.
   supportsPlainFetch: false,

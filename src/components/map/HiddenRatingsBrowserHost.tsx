@@ -62,6 +62,7 @@ import {
 import {
   EXTERNAL_RATINGS_USER_AGENT,
   isAllowedExternalRatingUrl,
+  providerById,
 } from '../../services/poi/externalRatings';
 import { GEOLOCATION_GUARD_JS } from '../../constants/webViewScripts';
 import type { ExternalRatingProviderId } from '../../services/poi/externalRatings/types';
@@ -162,7 +163,9 @@ export function HiddenRatingsBrowserHost() {
         key={`${spec.provider}|${spec.uri}`}
         source={{ uri: spec.uri }}
         style={hiddenBrowserStyle}
-        userAgent={EXTERNAL_RATINGS_USER_AGENT}
+        // Per provider: mobile for TripAdvisor (a desktop UA is 403'd),
+        // desktop for Yelp (its mobile site omits listing identity).
+        userAgent={providerById(spec.provider).userAgent || EXTERNAL_RATINGS_USER_AGENT}
         injectedJavaScript={spec.injectedJavaScript ?? undefined}
         injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
@@ -179,13 +182,25 @@ export function HiddenRatingsBrowserHost() {
         allowsLinkPreview={false}
         setSupportMultipleWindows={false}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
+        onLoadStart={(event) => {
+          noteBrowser(`loadStart ${spec.provider} ${event.nativeEvent.url}`);
+        }}
+        onLoadEnd={(event) => {
+          noteBrowser(`loadEnd ${spec.provider} ${event.nativeEvent.url}`);
+        }}
         onMessage={(event) => {
+          noteBrowser(`message ${spec.provider} ${event.nativeEvent.data.slice(0, 700)}`);
           hiddenBrowserHandlers.current?.onMessage(spec.provider, event.nativeEvent.data);
         }}
-        onError={() => {
+        onError={(event) => {
+          const detail = event?.nativeEvent;
+          noteBrowser(`error ${spec.provider} ${detail?.code ?? '?'} ${detail?.description ?? ''}`);
           hiddenBrowserHandlers.current?.onError(spec.provider);
         }}
         onHttpError={(event) => {
+          noteBrowser(
+            `httpError ${spec.provider} ${event.nativeEvent.statusCode} ${event.nativeEvent.url}`,
+          );
           hiddenBrowserHandlers.current?.onHttpError(spec.provider, event.nativeEvent.statusCode);
         }}
       />
@@ -199,5 +214,9 @@ export function HiddenRatingsBrowserHost() {
  * own initial document.
  */
 function handleShouldStartLoad(request: { url: string }): boolean {
-  return request.url === 'about:blank' || isAllowedExternalRatingUrl(request.url);
+  const allowed = request.url === 'about:blank' || isAllowedExternalRatingUrl(request.url);
+  if (!allowed) {
+    noteBrowser(`blockedNav ${request.url}`);
+  }
+  return allowed;
 }

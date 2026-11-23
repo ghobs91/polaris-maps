@@ -39,6 +39,16 @@ export interface RawExternalRating {
   listingAddress: string | null;
   /** Optional listing coordinates, used for identity confirmation. */
   geo?: GeoPoint | null;
+  /**
+   * The provider page's own document title.
+   *
+   * Some provider pages publish a rating but no address or coordinates (Yelp's
+   * mobile listing page is one: only ItemList JSON-LD and the rating). The title
+   * carries the business name and its city, which is a weaker but real location
+   * signal — "BUDDAKAN - New York, NY" cannot confirm a New York place, but it
+   * rules out a same-named business in another city.
+   */
+  pageTitle?: string | null;
   challenge: boolean;
   /** The provider served a hard block page (not merely a challenge). */
   blocked?: boolean;

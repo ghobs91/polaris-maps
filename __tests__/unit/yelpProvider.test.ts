@@ -19,6 +19,9 @@ describe('Yelp host allowlist + URL validation', () => {
   it('accepts only yelp.com hosts', () => {
     expect(isAllowedYelpHost('yelp.com')).toBe(true);
     expect(isAllowedYelpHost('www.yelp.com')).toBe(true);
+    // A mobile user agent is redirected here by Yelp itself; cancelling that
+    // navigation is what made every Yelp stage time out.
+    expect(isAllowedYelpHost('m.yelp.com')).toBe(true);
     expect(isAllowedYelpHost('yelp.ca')).toBe(false);
     expect(isAllowedYelpHost('notyelp.com')).toBe(false);
   });

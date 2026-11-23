@@ -14,6 +14,15 @@ export interface ExternalRatingProvider {
   allowedHosts: readonly string[];
 
   /**
+   * User agent the hidden browser presents for this provider.
+   *
+   * Per provider, not global: the mobile UA is what makes TripAdvisor answer at
+   * all, and the desktop UA is what makes Yelp serve the markup that carries
+   * listing identity (its mobile site strips address and coordinates).
+   */
+  userAgent: string;
+
+  /**
    * Whether a plain `fetch()` of a listing is worth attempting.
    *
    * Both current providers are false: Yelp's DataDome edge and TripAdvisor's

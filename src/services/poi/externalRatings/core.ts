@@ -511,6 +511,7 @@ export function discoverListingFromAnchors(
 
 interface WebViewRatingMessage {
   type?: unknown;
+  pageTitle?: unknown;
   provider?: unknown;
   ldRating?: unknown;
   ldCount?: unknown;
@@ -567,6 +568,7 @@ export function parseRatingMessageFromWebView(
     listingName: typeof msg.ldName === 'string' ? msg.ldName : null,
     listingAddress: typeof msg.ldAddress === 'string' ? msg.ldAddress : null,
     geo: parseWebViewGeo(msg.geo),
+    pageTitle: typeof msg.pageTitle === 'string' ? msg.pageTitle : null,
     challenge: msg.challenge === true,
     blocked: msg.blocked === true,
   };

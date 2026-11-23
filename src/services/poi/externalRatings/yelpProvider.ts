@@ -4,11 +4,13 @@
  * Yelp business ratings are JS-rendered, so the hidden WebView is the primary
  * path; a cheap fetch-path pre-parse reads JSON-LD `aggregateRating` and the
  * embedded `__NEXT_DATA__` script before falling back to the WebView. Only
- * `yelp.com` / `www.yelp.com` are ever loaded — direct listing references only,
- * no search-engine scraping, no CAPTCHA solving, no stealth.
+ * Yelp's own web hosts are ever loaded (`yelp.com`, `www.yelp.com`, and the
+ * `m.yelp.com` mobile host it redirects a mobile UA to) — direct listing
+ * references only, no search-engine scraping, no CAPTCHA solving, no stealth.
  */
 
 import {
+  EXTERNAL_RATINGS_USER_AGENT,
   buildCollectorScript,
   COLLECTOR_INITIAL_DELAY_MS,
   COLLECTOR_MAX_ATTEMPTS,
@@ -27,7 +29,18 @@ import type { GeoPoint, RawExternalRating, RatingSearchCandidate } from './types
 // Host allowlist + URL validation
 // ---------------------------------------------------------------------------
 
-export const YELP_ALLOWED_HOSTS = ['yelp.com', 'www.yelp.com'] as const;
+/**
+ * Yelp's own web hosts.
+ *
+ * `m.yelp.com` is not optional: with the mobile Safari user agent this browser
+ * presents (the same one that makes TripAdvisor answer at all), Yelp answers a
+ * `www.yelp.com` request with a redirect to `m.yelp.com`. Leaving it off the
+ * allowlist made the navigation gate cancel that redirect, so every Yelp stage
+ * loaded nothing and timed out — observed in the lag probe as
+ * `loadStart … www.yelp.com/search` → `blockedNav … m.yelp.com/search`, with the
+ * row settling as "Ratings couldn't load right now".
+ */
+export const YELP_ALLOWED_HOSTS = ['yelp.com', 'www.yelp.com', 'm.yelp.com'] as const;
 
 export function isAllowedYelpHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, '');
@@ -333,52 +346,229 @@ export const YELP_RATING_JS = buildCollectorScript({
     out.ldAddress = null;
     out.geo = null;
     out.automation = [];
-    var fallbackName = null, fallbackAddress = null, fallbackGeo = null;
+    out.nodes = [];
+    function typeOf(node) {
+      var t = node['@type'];
+      if (Object.prototype.toString.call(t) === '[object Array]') t = t.join(' ');
+      return typeof t === 'string' ? t : '';
+    }
+    function addressOf(node) {
+      if (!node.address) return null;
+      if (typeof node.address === 'string') return node.address;
+      var a = node.address;
+      var line = [a.streetAddress, a.addressLocality, a.addressRegion, a.postalCode].filter ? null : null;
+      var parts = [];
+      if (a.streetAddress) parts.push(a.streetAddress);
+      if (a.addressLocality) parts.push(a.addressLocality);
+      if (a.addressRegion) parts.push(a.addressRegion);
+      if (a.postalCode) parts.push(a.postalCode);
+      return parts.length ? parts.join(', ') : null;
+    }
+    function geoOf(node) {
+      if (!node.geo || node.geo.latitude == null || node.geo.longitude == null) return null;
+      return { lat: Number(node.geo.latitude), lng: Number(node.geo.longitude) };
+    }
+    /**
+     * The business name, never the name of whatever block happens to own the
+     * aggregateRating: Yelp's mobile page emits a "Photo Grid" node that carries
+     * a rating, and taking that name made every listing fail identity
+     * ("identity mismatch on listing: Photo Grid"). Prefer a typed business
+     * node, then the page title, and only then the rating node's own name.
+     */
+    function titleName() {
+      var t = String(document.title || '').replace(/\\s*[|–—-]\\s*Yelp.*$/i, '');
+      var first = t.split(/\\s*[|–—-]\\s*/)[0] || '';
+      first = first.replace(/\\s*[-(]?\\s*[0-9][0-9,]*\\s*reviews?.*$/i, '').trim();
+      if (!first || /^yelp/i.test(first)) return null;
+      return first.slice(0, 120);
+    }
+    var BUSINESS_TYPE = /restaurant|localbusiness|foodestablishment|store|cafe|bar|bakery|nightclub|business/i;
+    var business = null;
+    var ratingOwnerName = null;
     var scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (var i = 0; i < scripts.length; i++) {
       try {
         var data = JSON.parse(scripts[i].textContent || 'null');
-        var items = Array.isArray(data) ? data : [data];
+        var items = Object.prototype.toString.call(data) === '[object Array]' ? data : [data];
         for (var k = 0; k < items.length; k++) {
           var it = items[k];
           if (!it || typeof it !== 'object') continue;
-          var ar = it.aggregateRating;
-          var arr = Array.isArray(ar) ? ar : (ar ? [ar] : []);
-          var hasAgg = arr.length > 0;
+          var arr = it.aggregateRating ? (Object.prototype.toString.call(it.aggregateRating) === '[object Array]' ? it.aggregateRating : [it.aggregateRating]) : [];
+          var ownsRating = arr.length > 0;
           for (var a = 0; a < arr.length; a++) {
             if (out.ldRating == null && arr[a].ratingValue != null) out.ldRating = Number(arr[a].ratingValue);
             if (out.ldCount == null && arr[a].reviewCount != null) out.ldCount = Number(arr[a].reviewCount);
           }
-          if (!hasAgg) {
-            if (it.ratingValue != null) { if (out.ldRating == null) out.ldRating = Number(it.ratingValue); hasAgg = true; }
-            if (it.reviewCount != null) { if (out.ldCount == null) out.ldCount = Number(it.reviewCount); hasAgg = true; }
+          if (!arr.length) {
+            if (it.ratingValue != null) { if (out.ldRating == null) out.ldRating = Number(it.ratingValue); ownsRating = true; }
+            if (it.reviewCount != null) { if (out.ldCount == null) out.ldCount = Number(it.reviewCount); ownsRating = true; }
           }
-          // Yelp emits named ItemLists ("Business Photos", "Popular Dishes")
-          // before the Restaurant block. Only the object that owns the rating
-          // may name the listing; other names are a last-resort fallback.
-          if (hasAgg) {
-            if (out.ldName == null && it.name) out.ldName = String(it.name);
-            if (!out.ldAddress && it.address) out.ldAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
-            if (!out.geo && it.geo && it.geo.latitude != null) out.geo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
-          } else if (fallbackName == null && it.name) {
-            fallbackName = String(it.name);
-            if (!fallbackAddress && it.address) fallbackAddress = typeof it.address === 'string' ? it.address : (it.address.streetAddress || null);
-            if (!fallbackGeo && it.geo && it.geo.latitude != null) fallbackGeo = { lat: Number(it.geo.latitude), lng: Number(it.geo.longitude) };
+          if (ownsRating && ratingOwnerName == null && typeof it.name === 'string' && it.name) {
+            ratingOwnerName = it.name;
           }
-          if (out.ldRating != null && out.ldCount != null && out.ldName != null) break;
+          if (!business && typeof it.name === 'string' && it.name && BUSINESS_TYPE.test(typeOf(it))) {
+            business = it;
+          }
+          if (out.nodes.length < 8) {
+            out.nodes.push({
+              type: typeOf(it).slice(0, 40),
+              name: typeof it.name === 'string' ? it.name.slice(0, 60) : null,
+              rating: arr.length > 0 || it.ratingValue != null,
+              address: !!addressOf(it),
+              geo: !!geoOf(it)
+            });
+          }
         }
       } catch (e) { /* malformed JSON-LD — ignore */ }
     }
-    if (out.ldName == null && fallbackName) out.ldName = fallbackName;
-    if (!out.ldAddress && fallbackAddress) out.ldAddress = fallbackAddress;
-    if (!out.geo && fallbackGeo) out.geo = fallbackGeo;
+    if (business) {
+      out.ldName = business.name;
+      out.ldAddress = addressOf(business);
+      out.geo = geoOf(business);
+    }
+
+    /**
+     * Identity from the page's Next.js payload.
+     *
+     * Yelp's MOBILE listing page (m.yelp.com, where a mobile user agent is sent)
+     * carries only ItemList JSON-LD blocks — Photo Grid, Popular Dishes, Menu
+     * Photos, Msite Vibe Check — and no business node, so the rating is
+     * readable but the name/address/coordinates that prove which business it
+     * belongs to are not. They do exist in the __NEXT_DATA__ payload, in the business
+     * object itself, so that is where identity is read from.
+     */
+    var nextEl = document.getElementById('__NEXT_DATA__');
+    var nextData = null;
+    if (nextEl) {
+      try { nextData = JSON.parse(nextEl.textContent || 'null'); } catch (e) { nextData = null; }
+    }
+    function findBusiness(v, depth, seen) {
+      if (!v || typeof v !== 'object' || depth > 14) return null;
+      if (seen.count > 4000) return null;
+      seen.count += 1;
+      if (Object.prototype.toString.call(v) === '[object Array]') {
+        for (var i = 0; i < v.length; i++) {
+          var fromArray = findBusiness(v[i], depth + 1, seen);
+          if (fromArray) return fromArray;
+        }
+        return null;
+      }
+      var hasIdentity = v.coordinates || v.location || v.formattedAddress;
+      if (typeof v.name === 'string' && v.name && hasIdentity) {
+        return {
+          name: v.name,
+          coordinates: v.coordinates || null,
+          location: v.location || null,
+          rating: v.rating != null ? Number(v.rating) : null,
+          count: v.reviewCount != null ? Number(v.reviewCount) : null
+        };
+      }
+      var keys = Object.keys(v);
+      for (var j = 0; j < keys.length; j++) {
+        var found = findBusiness(v[keys[j]], depth + 1, seen);
+        if (found) return found;
+      }
+      return null;
+    }
+    var bizInfo = findBusiness(nextData, 0, { count: 0 });
+    if (bizInfo) {
+      if (out.ldName == null || !out.geo || !out.ldAddress) {
+        out.ldName = bizInfo.name;
+        if (!out.geo && bizInfo.coordinates && bizInfo.coordinates.latitude != null) {
+          out.geo = { lat: Number(bizInfo.coordinates.latitude), lng: Number(bizInfo.coordinates.longitude) };
+        }
+        if (!out.ldAddress) {
+          var loc = bizInfo.location;
+          if (loc && typeof loc === 'object') {
+            if (typeof loc.formattedAddress === 'string') out.ldAddress = loc.formattedAddress;
+            else {
+              var parts = [];
+              if (loc.address1) parts.push(loc.address1);
+              if (loc.city) parts.push(loc.city);
+              if (loc.state) parts.push(loc.state);
+              if (parts.length) out.ldAddress = parts.join(', ');
+            }
+          } else if (typeof loc === 'string') {
+            out.ldAddress = loc;
+          }
+        }
+      }
+      if (out.ldRating == null && bizInfo.rating != null) out.ldRating = bizInfo.rating;
+      if (out.ldCount == null && bizInfo.count != null) out.ldCount = bizInfo.count;
+    }
+    if (out.nodes.length < 12) {
+      out.nodes.push({
+        type: 'next-business',
+        name: bizInfo ? String(bizInfo.name).slice(0, 60) : null,
+        rating: !!(bizInfo && bizInfo.rating != null),
+        address: !!(bizInfo && bizInfo.location),
+        geo: !!(bizInfo && bizInfo.coordinates)
+      });
+    }
+
+    if (out.ldName == null) out.ldName = titleName();
+    if (out.ldName == null) out.ldName = ratingOwnerName;
+
+    /**
+     * Identity from the page itself.
+     *
+     * The mobile listing page omits a business JSON-LD node, so the address and
+     * coordinates that prove which business a rating belongs to are read from
+     * where the page does publish them: the place:location / og meta tags and
+     * the visible address block.
+     */
+    function metaContent(selector) {
+      var el = document.querySelector(selector);
+      return el ? el.getAttribute('content') : null;
+    }
+    if (!out.geo) {
+      var latRaw = metaContent('meta[property="place:location:latitude"]') || metaContent('meta[property="og:latitude"]') || metaContent('meta[name="place:location:latitude"]');
+      var lngRaw = metaContent('meta[property="place:location:longitude"]') || metaContent('meta[property="og:longitude"]') || metaContent('meta[name="place:location:longitude"]');
+      var lat = parseFloat(latRaw || '');
+      var lng = parseFloat(lngRaw || '');
+      if (isFinite(lat) && isFinite(lng)) out.geo = { lat: lat, lng: lng };
+    }
+    var addressText = '';
+    if (!out.ldAddress) {
+      var addrEl = document.querySelector('address');
+      if (!addrEl) addrEl = document.querySelector('[data-testid="business-address"]');
+      addressText = addrEl ? String(addrEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+      if (addressText) out.ldAddress = addressText.slice(0, 200);
+    }
+    if (out.nodes.length < 12) {
+      out.nodes.push({
+        type: 'page-identity',
+        name: out.ldName ? String(out.ldName).slice(0, 40) : null,
+        rating: !!(out.ldRating != null && out.ldCount != null),
+        address: !!addressText,
+        geo: !!out.geo
+      });
+    }
+    out.pageTitle = String(document.title || '').slice(0, 200);
+    /**
+     * Address from the title.
+     *
+     * The mobile listing title ends with the business address
+     * ("BUDDAKAN - Updated November 2026 - 4939 Reviews - 6995 Photos - 75 9th
+     * Ave, New York"). Lifting that street line gives identity a real address to
+     * match against the place, which is the same strict check used for a page
+     * that publishes one in JSON-LD — so the weaker name+city fallback is only a
+     * last resort.
+     */
+    if (!out.ldAddress && out.pageTitle) {
+      var titleAddress = /(?:^|\\s-\\s)([0-9]{1,6} [^-]{2,50},[^-]{2,40})/.exec(out.pageTitle);
+      if (titleAddress && titleAddress[1]) {
+        var cleanedAddress = titleAddress[1].replace(/\\s+/g, ' ').trim();
+        if (cleanedAddress.length >= 6) out.ldAddress = cleanedAddress.slice(0, 200);
+      }
+    }
     if (out.ldRating == null || out.ldCount == null) {
       var next = document.getElementById('__NEXT_DATA__');
       if (next) {
         try {
           var scan = function (v, name) {
             if (!v) return null;
-            if (Array.isArray(v)) {
+            if (Object.prototype.toString.call(v) === '[object Array]') {
               for (var i = 0; i < v.length; i++) { var r = scan(v[i], name); if (r) return r; }
               return null;
             }
@@ -413,10 +603,6 @@ export const YELP_RATING_JS = buildCollectorScript({
       }
     }
     if (out.ldCount == null) {
-      // The listing title carries the exact business count
-      // ("… - 1241 Reviews - …"). The visible page abbreviates it to "1.2k
-      // reviews", and the body also contains dish/photo review counts, so the
-      // title is the only safe fallback.
       var tm = /([0-9][0-9,]*)\\s*reviews?\\b/i.exec(document.title || '');
       if (tm) out.ldCount = parseInt(tm[1].replace(/,/g, ''), 10);
     }`,
@@ -518,6 +704,13 @@ export function extractYelpSearchFromWebViewMessage(data: string): RatingSearchC
 export const yelpProvider: ExternalRatingProvider = {
   id: 'yelp',
   allowedHosts: YELP_ALLOWED_HOSTS,
+  // Mobile, like TripAdvisor — the only UA this browser can load Yelp with.
+  // Yelp redirects a plain www request to its mobile site either way, and a
+  // desktop UA on the mobile site is answered with a DataDome 403 (UA/fingerprint
+  // mismatch inside WebKit). The mobile page publishes the rating but not the
+  // business address/coordinates in JSON-LD, so identity is read from the page
+  // itself (see the collector's meta/`address` fallbacks).
+  userAgent: EXTERNAL_RATINGS_USER_AGENT,
   // Yelp's DataDome edge rejects plain app fetches with a 403; the hidden
   // browser is the only transport that can ever return a listing.
   supportsPlainFetch: false,

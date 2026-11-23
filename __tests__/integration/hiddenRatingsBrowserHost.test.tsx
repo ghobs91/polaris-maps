@@ -37,6 +37,7 @@ import {
   setHiddenBrowserSpec,
   type HiddenBrowserSpec,
 } from '../../src/components/map/HiddenRatingsBrowserHost';
+import { providerById } from '../../src/services/poi/externalRatings';
 
 function props(): Record<string, unknown> | null {
   return (global as any).__hostProps as Record<string, unknown> | null;
@@ -101,6 +102,18 @@ describe('HiddenRatingsBrowserHost', () => {
     // long the device has been used, which is why a fresh simulator never shows
     // the stall a real phone does.
     expect(props()?.sharedCookiesEnabled).toBe(false);
+  });
+
+  it('presents the user agent the provider declares', () => {
+    render(<HiddenRatingsBrowserHost />);
+
+    // The UA is per provider, because what each one serves depends on it: a
+    // desktop UA is 403'd by TripAdvisor, and Yelp's mobile site is the only
+    // variant its DataDome edge answers in this browser.
+    for (const id of ['tripadvisor', 'yelp'] as const) {
+      act(() => setHiddenBrowserSpec(spec(id, `https://example.test/${id}`)));
+      expect(props()?.userAgent).toBe(providerById(id).userAgent);
+    }
   });
 
   it('keeps the stage’s collector script on the mounted view', () => {

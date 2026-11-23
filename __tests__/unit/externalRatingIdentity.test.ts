@@ -2,6 +2,7 @@ import {
   GEO_MATCH_METERS,
   matchIdentity,
   pickBestCandidate,
+  titleConfirmsCity,
 } from '../../src/services/poi/identity';
 import type {
   ExternalRatingQuery,
@@ -66,5 +67,42 @@ describe('pickBestCandidate', () => {
 
   it('exposes a sane geo threshold', () => {
     expect(GEO_MATCH_METERS).toBe(50);
+  });
+});
+
+describe('titleConfirmsCity', () => {
+  const query = {
+    name: 'Buddakan',
+    lat: 40.7422,
+    lng: -74.0047,
+    address: '75 9th Ave, New York NY 10011',
+  };
+
+  it('accepts a page title that names the place and the query city', () => {
+    expect(
+      titleConfirmsCity('BUDDAKAN - New York, NY - 4.1k Reviews - Yelp', query, 'BUDDAKAN'),
+    ).toBe(true);
+  });
+
+  it('rejects a same-named business in another city', () => {
+    expect(
+      titleConfirmsCity(
+        'Your Mother’s House - Willemstad, Curaçao - Yelp',
+        query,
+        'Your Mother’s House',
+      ),
+    ).toBe(false);
+  });
+
+  it('rejects a different business in the right city', () => {
+    expect(titleConfirmsCity('TAO Downtown - New York, NY - Yelp', query, 'TAO Downtown')).toBe(
+      false,
+    );
+  });
+
+  it('cannot confirm without a city in the query address', () => {
+    expect(
+      titleConfirmsCity('BUDDAKAN - New York, NY', { ...query, address: null }, 'BUDDAKAN'),
+    ).toBe(false);
   });
 });

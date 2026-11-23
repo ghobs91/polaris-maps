@@ -37,13 +37,13 @@ import {
   setCachedExternalRating,
   validateExternalRating,
 } from '../services/poi/externalRatings/core';
-import { matchIdentity } from '../services/poi/identity';
+import { matchIdentity, titleConfirmsCity } from '../services/poi/identity';
 import {
   isExternalRatingMiss,
   markExternalRatingMiss,
   placeRatingKey,
 } from '../services/places/placeRatingSessionCache';
-import { noteStage } from '../services/poi/externalRatings/devRatingsLagProbe';
+import { mark, noteStage } from '../services/poi/externalRatings/devRatingsLagProbe';
 import type {
   ExternalRatingProviderId,
   ExternalRatingQuery,
@@ -56,9 +56,11 @@ import type {
  * (~7.2 s after load). The injected collector only starts once the document has
  * finished loading, and DataDome-protected JS apps routinely take 4–7 s to load
  * in the hidden WebView — tighter clocks cut their verdicts off before they
- * were posted, turning every slow page into a silent retryable timeout.
+ * were posted, turning every slow page into a silent retryable timeout. The
+ * mobile site one provider redirects to measured 12.4 s end-to-end, which a 15 s
+ * clock cut off; the per-provider budget below still bounds the pass.
  */
-export const STAGE_TIMEOUT_MS = 15_000;
+export const STAGE_TIMEOUT_MS = 20_000;
 
 /**
  * Whole-pipeline budget for a single provider, armed the first time that
@@ -106,6 +108,12 @@ function withPhaseTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null>
 /** Dev-only stage tracing so on-device runs reveal exactly which step bails. */
 function log(...args: unknown[]): void {
   if (__DEV__) console.log('[externalRatings]', ...args);
+  mark(
+    `ratings: ${args
+      .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+      .join(' ')
+      .slice(0, 240)}`,
+  );
 }
 
 /**
@@ -686,10 +694,11 @@ export function useExternalRatings(
       }
 
       if (current.origin === 'search') {
-        const confirmed = matchIdentity(
-          { name: raw.listingName, address: raw.listingAddress, geo: raw.geo ?? null },
-          q,
-        );
+        const confirmed =
+          matchIdentity(
+            { name: raw.listingName, address: raw.listingAddress, geo: raw.geo ?? null },
+            q,
+          ) || titleConfirmsCity(raw.pageTitle ?? null, q, raw.listingName);
         if (!confirmed) {
           clearTimer(id);
           log(id, 'identity mismatch on listing', {
@@ -724,6 +733,13 @@ export function useExternalRatings(
           }
           fail(id, 'retry');
           return;
+        }
+        if (!raw.listingAddress && !raw.geo) {
+          log(
+            id,
+            'identity confirmed by page-title city',
+            String(raw.pageTitle ?? '').slice(0, 80),
+          );
         }
       }
 
