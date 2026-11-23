@@ -387,6 +387,26 @@ describe('fetchDiscoveryHtml', () => {
     await fetchDiscoveryHtml('https://foo.com/');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('evicts old pages instead of retaining a 50 MB heap of HTML', async () => {
+    const page = 'x'.repeat(400_000);
+    const fetchMock = mockFetch(page);
+
+    // Nine distinct 400 KB pages: the byte budget is 2 MB, so earlier entries
+    // must be gone rather than accumulating one full document per place opened.
+    for (let i = 0; i < 9; i += 1) {
+      await fetchDiscoveryHtml(`https://foo.com/${i}`);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+
+    // The oldest URL was evicted, so asking for it again fetches.
+    await fetchDiscoveryHtml('https://foo.com/0');
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+
+    // A recent URL is still cached.
+    await fetchDiscoveryHtml('https://foo.com/8');
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
 });
 
 describe('isAllowedExternalRatingUrl', () => {

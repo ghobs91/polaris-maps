@@ -6,6 +6,11 @@ const { useEffect: mockUseEffect } = require('react') as typeof import('react');
 
 jest.mock('react-native-webview', () => ({
   WebView: (props: Record<string, unknown>) => {
+    // Count real mounts/unmounts: creating a WKWebView is the expensive native
+    // event this suite has to keep an eye on.
+    mockUseEffect(() => {
+      (global as any).__webViewMounts = ((global as any).__webViewMounts ?? 0) + 1;
+    }, []);
     // Expose the last-mounted WebView props so the test can simulate onMessage,
     // and clear them on unmount so "no hidden browser mounted" is assertable.
     mockUseEffect(() => {
@@ -118,7 +123,7 @@ function onMessage(data: unknown): void {
   });
 }
 
-/** The hidden browser runs in its own modal window; no stage, no window. */
+/** The hidden browser is unmounted; no view, no web-content process. */
 function expectNoMountedBrowser(): void {
   expect((global as any).__lastWebViewProps).toBeNull();
 }
@@ -130,6 +135,7 @@ const YELP_SEARCH_URL = `https://www.yelp.com/search?${new URLSearchParams({ fin
 describe('ExternalRatingsSection', () => {
   beforeEach(() => {
     (global as any).__lastWebViewProps = null;
+    (global as any).__webViewMounts = 0;
     mockResolveKnownListing.mockReset();
     mockFetchAndParseRating.mockReset();
     browseScheduler.reset();
@@ -468,10 +474,48 @@ describe('ExternalRatingsSection', () => {
     });
     await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
 
-    // After the pass settles the hidden browser is torn down entirely: each
-    // stage mounts a fresh WKWebView (cookies persist in the shared
-    // website-data store), so no provider page keeps rendering behind the card.
-    await waitFor(expectNoMountedBrowser);
+    // After the pass settles the hidden browser is released shortly, so no
+    // provider page keeps rendering behind the card.
+    await waitFor(expectNoMountedBrowser, { timeout: 3_000 });
+  });
+
+  it('reuses ONE WKWebView for the whole pass instead of rebuilding it per stage', async () => {
+    mockResolveKnownListing.mockImplementation((provider: { id: string }) =>
+      Promise.resolve(provider.id === 'tripadvisor' ? TA_LISTING_URL : YELP_LISTING_URL),
+    );
+
+    const screen = renderSection({ poi: makePoi('Foo Bar') });
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'tripadvisor',
+      ldRating: 4.5,
+      ldCount: 2345,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+
+    // Second provider stage navigates the SAME view.
+    await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: YELP_LISTING_URL }));
+    onMessage({
+      type: 'external-rating',
+      provider: 'yelp',
+      ldRating: 4.2,
+      ldCount: 321,
+      ldName: 'Foo Bar',
+      ldAddress: null,
+      geo: null,
+      automation: [],
+      challenge: false,
+    });
+    await waitFor(() => expect(screen.getByTestId('external-ratings-combined')).toBeTruthy());
+
+    // Creating and destroying a WKWebView was the most expensive thing this
+    // feature did — a web-content process per stage, up to four per card open.
+    expect((global as any).__webViewMounts).toBe(1);
   });
 
   it('unloads the provider page while the gate is closed for a closing card', async () => {
@@ -483,10 +527,10 @@ describe('ExternalRatingsSection', () => {
     const screen = renderSection({ poi });
     await waitFor(() => expect(webViewProps()?.source).toEqual({ uri: TA_LISTING_URL }));
 
-    // Closing the card tears the modal window (and the hidden browser with it)
-    // down entirely — cookies persist in the shared website-data store.
+    // Closing the card releases the browser (cookies persist in the shared
+    // website-data store).
     rerenderSection(screen, { poi, enabled: false });
-    await waitFor(expectNoMountedBrowser);
+    await waitFor(expectNoMountedBrowser, { timeout: 3_000 });
   });
 
   it('keeps a resolved rating on screen while a closing card stays mounted', async () => {

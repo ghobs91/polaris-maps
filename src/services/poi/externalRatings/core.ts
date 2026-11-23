@@ -392,16 +392,46 @@ export async function fetchPageHtml(url: string, timeoutMs: number): Promise<str
 // the provider browse scheduler.
 
 const DISCOVERY_TTL_MS = 15 * 60 * 1000;
-const DISCOVERY_MAX_ENTRIES = 100;
+/**
+ * Retention budget for discovery pages, in characters.
+ *
+ * This cache used to hold up to 100 raw pages at 500 KB each — a 50 MB JS-heap
+ * ceiling that a single afternoon of browsing place cards could reach, because
+ * every entry is a plain string that never shrinks. A page is only needed for
+ * the moment a listing is discovered from it; a couple of megabytes is plenty
+ * to de-dupe the two providers and back-to-back mounts, and it cannot grow into
+ * a memory problem that ends in a jetsam kill.
+ */
+const DISCOVERY_MAX_BYTES = 2_000_000;
+const DISCOVERY_MAX_ENTRIES = 8;
 const DISCOVERY_TIMEOUT_MS = 4_000;
 
 interface DiscoveryEntry {
   html: string | null;
+  bytes: number;
   expiresAt: number;
 }
 
 const discoveryCache = new Map<string, DiscoveryEntry>();
 const discoveryInflight = new Map<string, Promise<string | null>>();
+
+function discoveryBytes(): number {
+  let total = 0;
+  for (const entry of discoveryCache.values()) total += entry.bytes;
+  return total;
+}
+
+/** Drop the oldest entry until both the entry and byte budgets hold. */
+function trimDiscoveryCache(): void {
+  while (
+    discoveryCache.size > DISCOVERY_MAX_ENTRIES ||
+    (discoveryCache.size > 1 && discoveryBytes() > DISCOVERY_MAX_BYTES)
+  ) {
+    const oldest = discoveryCache.keys().next().value;
+    if (oldest === undefined) return;
+    discoveryCache.delete(oldest);
+  }
+}
 
 /** Clear the discovery page cache (tests / teardown). */
 export function clearDiscoveryCache(): void {
@@ -425,11 +455,13 @@ export function fetchDiscoveryHtml(
   if (inflight) return inflight;
 
   const request = fetchPageHtml(url, timeoutMs).then((html) => {
-    discoveryCache.set(url, { html, expiresAt: Date.now() + DISCOVERY_TTL_MS });
-    if (discoveryCache.size > DISCOVERY_MAX_ENTRIES) {
-      const oldest = discoveryCache.keys().next().value;
-      if (oldest !== undefined) discoveryCache.delete(oldest);
-    }
+    discoveryCache.delete(url);
+    discoveryCache.set(url, {
+      html,
+      bytes: html?.length ?? 0,
+      expiresAt: Date.now() + DISCOVERY_TTL_MS,
+    });
+    trimDiscoveryCache();
     return html;
   });
   discoveryInflight.set(url, request);

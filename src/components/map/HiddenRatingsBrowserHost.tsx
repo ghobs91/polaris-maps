@@ -15,19 +15,30 @@
  * the shared `hiddenBrowserHandlers` ref at event time, so the host renders a
  * structurally stable WebView that never reloads on section re-renders.
  *
- * Mounting policy: the WebView is mounted FRESH per stage (keyed by the stage
- * URI) and unmounted whenever no stage is live. The previous keep-alive scheme
- * — unloading a stage by pointing the kept-alive WebView at a blank `html`
- * document — silently broke every stage that followed: on iOS the `html → uri`
- * source switch never triggered a page load (react-native-webview parks
- * `decidePolicyForNavigationAction` on a JS round-trip with no timeout, and the
- * URI path wraps `loadRequest` in a cookie-sync dispatch group), so the second
- * provider's stage sat silent until the stage clock killed it. Cookies are
- * NOT lost by remounting: they live in the shared, persistent
- * WKWebsiteDataStore, so each stage still starts with a warmed cookie jar.
+ * Mounting policy: ONE WKWebView per pass (see {@link HiddenRatingsBrowserHost}),
+ * created when the first stage opens and driven by `source` afterwards — never
+ * remounted between stages. Creating and destroying a WKWebView is the most
+ * expensive native work this feature can do (a fresh web-content process, a new
+ * configuration, a cookie-store sync), and the previous scheme did it once per
+ * stage: up to four times while a single place card sat open. Navigating an
+ * existing browser between stage URIs takes the always-works `uri → uri` load
+ * path.
+ *
+ * When no stage is live the view is unmounted after a short grace window, so an
+ * idle app holds no web-content process and no provider page keeps rendering
+ * behind the card. The grace window only exists to bridge a stage handoff
+ * between providers without paying for a teardown and a rebuild.
+ *
+ * NEVER park the browser on a URL without a host (`about:blank`, `data:…`):
+ * react-native-webview routes a host-less `source` to
+ * `-[WKWebView loadFileURL:allowingReadAccessToURL:]`, which raises an ObjC
+ * exception on the main thread and aborts the app. This is not hypothetical —
+ * it is how an `about:blank` parking scheme crashed the release build.
+ * Cookies are not lost by unmounting: they live in the shared, persistent
+ * WKWebsiteDataStore.
  */
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { View, useWindowDimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
 import {
@@ -83,13 +94,29 @@ export function subscribeHiddenBrowser(listener: () => void): () => void {
 export const hiddenBrowserHandlers: { current: HiddenBrowserHandlers | null } = { current: null };
 
 /**
+ * How long the browser view stays alive with no stage live.
+ *
+ * A pass can hand off from one provider's stage to the next with a brief gap, and
+ * tearing the view down for that gap would pay the expensive part (web-content
+ * process teardown and re-creation) on every handoff. Short — a provider page
+ * must not keep rendering behind a settled card.
+ */
+const IDLE_RELEASE_MS = 1_500;
+
+/**
  * Renders the hidden browser wherever an ancestor that is never animated or
  * clipped can host it (e.g. beside the place sheet). Renders nothing while no
- * card is resolving ratings.
+ * card is resolving ratings and the idle grace window has expired.
  */
 export function HiddenRatingsBrowserHost() {
   const spec = useSyncExternalStore(subscribeHiddenBrowser, getHiddenBrowserSpec);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
+  /** The URI the single WebView is loaded with; null when the view is unmounted. */
+  const [uri, setUri] = useState<string | null>(null);
+  /** Provider whose stage owns the current document (handlers read it live). */
+  const liveProvider = useRef<ExternalRatingProviderId | null>(null);
+  liveProvider.current = spec?.provider ?? null;
 
   // A real browser viewport, not a 0×0 frame: `innerWidth`/`innerHeight` are
   // part of every bot-detection fingerprint, and a zero-size viewport is an
@@ -106,30 +133,39 @@ export function HiddenRatingsBrowserHost() {
 
   useEffect(() => () => setHiddenBrowserSpec(null), []);
 
-  // Mount/unmount of a WKWebView mid-load is expensive native work; the lag
-  // probe records both so a freeze can be tied to one of them.
-  const specKey = spec ? `${spec.provider}|${spec.uri}` : null;
+  // Drive the ONE browser: a live stage navigates it; no stage releases it after
+  // the grace window. Never remount between stages, and never navigate to a
+  // host-less URL (see the class comment: that aborts the app).
   useEffect(() => {
-    if (!specKey) return;
-    noteBrowser(`mount ${specKey}`);
-    return () => noteBrowser(`unmount ${specKey}`);
-  }, [specKey]);
+    if (spec) {
+      setUri(spec.uri);
+      return;
+    }
+    const timer = setTimeout(() => setUri(null), IDLE_RELEASE_MS);
+    return () => clearTimeout(timer);
+  }, [spec]);
+
+  // Mount/unmount of a WKWebView is expensive native work; the lag probe
+  // records both so a freeze can be tied to one of them.
+  useEffect(() => {
+    if (uri === null) return;
+    noteBrowser(`mount ${uri}`);
+    return () => noteBrowser(`unmount ${uri}`);
+  }, [uri === null]);
 
   // Dev-only A/B switch: prove whether the hidden browser is the cost by
   // running the same flow with it never mounted.
   if (isHiddenBrowserDisabled()) return null;
-  if (!spec) return null;
+  if (uri === null) return null;
 
   return (
     <View style={hiddenBrowserStyle} pointerEvents="none">
       <WebView
-        // A fresh WKWebView per stage: remounting is what makes every stage
-        // take the always-works load path (see the class comment).
-        key={`${spec.provider}|${spec.uri}`}
-        source={{ uri: spec.uri }}
+        // No `key`: this instance survives every stage of a pass.
+        source={{ uri }}
         style={hiddenBrowserStyle}
         userAgent={EXTERNAL_RATINGS_USER_AGENT}
-        injectedJavaScript={spec.injectedJavaScript ?? undefined}
+        injectedJavaScript={spec?.injectedJavaScript ?? undefined}
         injectedJavaScriptBeforeContentLoaded={GEOLOCATION_GUARD_JS}
         injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
         javaScriptEnabled
@@ -143,13 +179,19 @@ export function HiddenRatingsBrowserHost() {
         setSupportMultipleWindows={false}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
         onMessage={(event) => {
-          hiddenBrowserHandlers.current?.onMessage(spec.provider, event.nativeEvent.data);
+          const provider = liveProvider.current;
+          if (!provider) return;
+          hiddenBrowserHandlers.current?.onMessage(provider, event.nativeEvent.data);
         }}
         onError={() => {
-          hiddenBrowserHandlers.current?.onError(spec.provider);
+          const provider = liveProvider.current;
+          if (!provider) return;
+          hiddenBrowserHandlers.current?.onError(provider);
         }}
         onHttpError={(event) => {
-          hiddenBrowserHandlers.current?.onHttpError(spec.provider, event.nativeEvent.statusCode);
+          const provider = liveProvider.current;
+          if (!provider) return;
+          hiddenBrowserHandlers.current?.onHttpError(provider, event.nativeEvent.statusCode);
         }}
       />
     </View>
