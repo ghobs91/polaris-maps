@@ -30,11 +30,8 @@ import {
 import { defaultPlaceMediaSupplements } from '../../services/poi/placeMediaProviders';
 import {
   fetchWebsitePhotosResult,
-  isCrossHostRedirect,
   normalizeWebsiteUrl,
 } from '../../services/poi/websitePhotosService';
-import { WebsitePhotosWebView } from './WebsitePhotosWebView';
-import { noteBrowser } from '../../services/poi/externalRatings/devRatingsLagProbe';
 
 interface PlaceMediaCarouselProps {
   lat: number;
@@ -62,20 +59,13 @@ interface PlaceMediaCarouselProps {
   onWebsiteResolved?: (finalUrl: string | null) => void;
 }
 
-/** Below this many scraped website photos, also try the hidden WebView fallback. */
-const WEBVIEW_FALLBACK_MIN_WEBSITE_PHOTOS = 3;
-
-/** Merge `incoming` ahead of `prev`, de-duplicated by URL. */
-function prependUniquePhotos(prev: PlaceMediaItem[], incoming: PlaceMediaItem[]): PlaceMediaItem[] {
-  const seen = new Set<string>();
-  const out: PlaceMediaItem[] = [];
-  for (const item of [...incoming, ...prev]) {
-    if (!item.url || seen.has(item.url)) continue;
-    seen.add(item.url);
-    out.push(item);
-  }
-  return out;
-}
+/**
+ * How many photos the strip keeps.
+ *
+ * Bounded on purpose: every item is a remote image decode, and the strip used
+ * to grow to whatever the scrape returned. Eight is more than fits on screen.
+ */
+const MAX_STRIP_PHOTOS = 8;
 
 /**
  * Open-licensed place media (Wikimedia Commons, Panoramax) supplementing the
@@ -103,10 +93,6 @@ export function PlaceMediaCarousel({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const [offline, setOffline] = useState(false);
-  /** Venue page to render in the hidden WebView when the plain scrape is thin. */
-  const [webViewUri, setWebViewUri] = useState<string | null>(null);
-  const itemsRef = useRef<PlaceMediaItem[]>([]);
-  itemsRef.current = items;
   // Kept in a ref so an unstable parent callback can't re-run the fetch effect.
   const onWebsiteResolvedRef = useRef(onWebsiteResolved);
   onWebsiteResolvedRef.current = onWebsiteResolved;
@@ -163,11 +149,10 @@ export function PlaceMediaCarousel({
     setItems([]);
     setFailed(new Set());
     setViewerIndex(null);
-    setWebViewUri(null);
 
-    // Hold every scrape (and the fallback WebView) back until the card has
-    // finished opening; the fetch + HTML parsing runs on the JS thread and
-    // visibly froze the sheet's spring animation.
+    // Hold every scrape back until the card has finished opening; the fetch and
+    // HTML parse run on the JS thread and visibly froze the sheet's spring
+    // animation.
     if (!enabled) {
       return () => {
         cancelled = true;
@@ -220,18 +205,6 @@ export function PlaceMediaCarousel({
         setItems(media);
         void persistMedia(media);
         onWebsiteResolvedRef.current?.(resolvedFinalUrl);
-        // If the plain scrape found few website photos, render the page in a
-        // hidden WebView so JavaScript-built galleries can be extracted too.
-        const websitePhotos = media.filter((item) => item.source === 'website').length;
-        if (pageUrl && websitePhotos < WEBVIEW_FALLBACK_MIN_WEBSITE_PHOTOS) {
-          // Follow a cross-host redirect (old domain → venue's new one) so the
-          // allowlisted WebView loads and can scrape the new origin.
-          const redirected =
-            resolvedFinalUrl && isCrossHostRedirect(pageUrl, resolvedFinalUrl)
-              ? resolvedFinalUrl
-              : null;
-          setWebViewUri(redirected ?? pageUrl);
-        }
       })
       .catch(() => {
         if (!cancelled) setItems([]);
@@ -254,7 +227,10 @@ export function PlaceMediaCarousel({
     persistMedia,
   ]);
 
-  const visible = useMemo(() => items.filter((item) => !failed.has(item.url)), [items, failed]);
+  const visible = useMemo(
+    () => items.filter((item) => !failed.has(item.url)).slice(0, MAX_STRIP_PHOTOS),
+    [items, failed],
+  );
   const current = viewerIndex !== null ? visible[viewerIndex] : undefined;
 
   const handleError = useCallback((url: string) => {
@@ -272,47 +248,10 @@ export function PlaceMediaCarousel({
 
   const closeViewer = useCallback(() => setViewerIndex(null), []);
 
-  const handleWebViewPhotos = useCallback(
-    (urls: string[]) => {
-      if (urls.length === 0) return;
-      const websiteItems: PlaceMediaItem[] = urls.map((url) => ({
-        url,
-        source: 'website',
-        thumbnailUrl: url,
-        attribution: webAttribution,
-      }));
-      setItems((prev) => prependUniquePhotos(prev, websiteItems));
-    },
-    [webAttribution],
-  );
-
-  const handleWebViewSettled = useCallback(() => {
-    setWebViewUri(null);
-    // Fold any WebView-discovered photos into the offline cache too.
-    void persistMedia(itemsRef.current);
-  }, [persistMedia]);
-
-  const hiddenWebView =
-    enabled && webViewUri ? (
-      <WebsitePhotosWebView
-        key={`webview:${resetKey}:${webViewUri}`}
-        uri={webViewUri}
-        onPhotos={handleWebViewPhotos}
-        onSettled={handleWebViewSettled}
-      />
-    ) : null;
-  // Dev-only: this WebView is mounted inside the sheet's subtree (unlike the
-  // ratings browser), so the lag probe needs to see when it starts and stops.
-  useEffect(() => {
-    if (!enabled || !webViewUri) return;
-    noteBrowser(`photos mount ${webViewUri}`);
-    return () => noteBrowser(`photos unmount ${webViewUri}`);
-  }, [enabled, webViewUri]);
   if (items.length === 0) {
-    if (!offline) return hiddenWebView;
+    if (!offline) return null;
     return (
       <>
-        {hiddenWebView}
         <GlassView
           material="regular"
           style={[styles.section, { borderColor: colors.border }]}
@@ -337,7 +276,6 @@ export function PlaceMediaCarousel({
       style={[styles.section, { borderColor: colors.border }]}
       testID="place-media-section"
     >
-      {hiddenWebView}
       <View style={styles.titleRow}>
         <Ionicons name="images-outline" size={16} color={colors.textSecondary} />
         <Text style={styles.title}>Photos</Text>
@@ -349,6 +287,8 @@ export function PlaceMediaCarousel({
         keyExtractor={(item) => item.url}
         contentContainerStyle={styles.strip}
         testID="place-media-strip"
+        removeClippedSubviews
+        windowSize={3}
         renderItem={({ item, index }) => {
           const caption = item.attribution ?? item.source;
           return (
@@ -365,6 +305,8 @@ export function PlaceMediaCarousel({
                   style={[styles.thumb, { borderColor: colors.border }]}
                   contentFit="cover"
                   cachePolicy="memory-disk"
+                  recyclingKey={item.url}
+                  transition={120}
                   onError={() => handleError(item.url)}
                   accessibilityIgnoresInvertColors
                 />

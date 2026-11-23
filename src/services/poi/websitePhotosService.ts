@@ -13,12 +13,25 @@
  */
 
 const MAX_PHOTOS = 10;
-/** Homepage yields fewer real photos than this → crawl photo subpages. */
-const MIN_REAL_PHOTOS = 3;
-/** Max same-origin photo subpages (gallery/photos/…) to fetch. */
-const MAX_SUBPAGES = 3;
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 100;
+
+/**
+ * Hard cap on the HTML handed to the parser.
+ *
+ * This is the only byte budget that matters for the JS thread: the parser runs
+ * on Hermes (no JIT on iOS) and every KB is scanned several times. 300 KB keeps
+ * a worst-case page under a few hundred ms of *total* work, which the sliced
+ * parser below then spreads across frames.
+ */
+const MAX_PARSE_BYTES = 300_000;
+
+/** How much HTML one parse slice sees. */
+const PARSE_SLICE_BYTES = 48 * 1024;
+/** Overlap, so a tag straddling a slice boundary is still matched whole. */
+const PARSE_SLICE_OVERLAP = 4 * 1024;
+/** Longest stretch of parsing before the parser yields to the event loop. */
+const PARSE_SLICE_BUDGET_MS = 6;
 
 /**
  * Identifying User-Agent for scrapes. React Native supplies a default
@@ -239,7 +252,6 @@ export function extractImgSrcsFromHtml(html: string): string[] {
 }
 
 const GALLERY_SECTION_MARKER = /galler|photo|picture|album/i;
-const GALLERY_PAGE_MARKER = /galler|photo|picture|album|image/i;
 
 function findContainerEnd(html: string, contentStart: number, tagName: string): number {
   const tagRe = new RegExp(`<\\/?${tagName}\\b[^>]*>`, 'gi');
@@ -260,7 +272,11 @@ function findContainerEnd(html: string, contentStart: number, tagName: string): 
  * photo section. These candidates are intentionally kept ahead of generic
  * page images and social metadata, which often point at a brand logo.
  */
-export function extractGalleryPhotosFromHtml(html: string, baseUrl: string): string[] {
+export function extractGalleryPhotosFromHtml(
+  html: string,
+  baseUrl: string,
+  limit: number = MAX_PHOTOS,
+): string[] {
   const candidates: string[] = [];
   const containerRe = /<(section|div|ul|ol|main|article)\b[^>]*>/gi;
   let match: RegExpExecArray | null;
@@ -275,62 +291,10 @@ export function extractGalleryPhotosFromHtml(html: string, baseUrl: string): str
         .map((src) => resolvePhotoUrl(src, baseUrl))
         .filter((url): url is string => !!url),
     );
+    if (candidates.length >= limit) break;
   }
 
-  return dedupePhotoUrls(candidates);
-}
-
-const PHOTO_PAGE_KEYWORDS =
-  /galler|photo|picture|image|menu|food|dish|interior|ambian|about|visit|tour/i;
-
-function isDedicatedGalleryPageUrl(url: string): boolean {
-  try {
-    return GALLERY_PAGE_MARKER.test(new URL(url).pathname);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Discover likely photo subpages (gallery/photos/menu/…) from same-origin
- * `<a href>` links, matching on URL path or link text. Returns absolute
- * http(s) URLs, capped at MAX_SUBPAGES, excluding the page itself.
- */
-export function discoverPhotoPageUrls(html: string, baseUrl: string): string[] {
-  let base: URL;
-  try {
-    base = new URL(baseUrl);
-  } catch {
-    return [];
-  }
-  const found: string[] = [];
-  const seen = new Set<string>([`${base.origin}${base.pathname}`]);
-  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]{0,120}?)<\/a>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = anchorRe.exec(html)) !== null) {
-    const href = (m[1] ?? '').trim();
-    if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) {
-      continue;
-    }
-    const text = (m[2] ?? '').replace(/<[^>]*>/g, ' ');
-    let abs: URL;
-    try {
-      abs = new URL(href, baseUrl);
-    } catch {
-      continue;
-    }
-    if (abs.origin !== base.origin) continue;
-    if (abs.protocol !== 'https:' && abs.protocol !== 'http:') continue;
-    const key = `${abs.origin}${abs.pathname}`;
-    if (seen.has(key)) continue;
-    if (!PHOTO_PAGE_KEYWORDS.test(abs.pathname) && !PHOTO_PAGE_KEYWORDS.test(text)) continue;
-    seen.add(key);
-    found.push(abs.toString());
-  }
-  return [
-    ...found.filter(isDedicatedGalleryPageUrl),
-    ...found.filter((url) => !isDedicatedGalleryPageUrl(url)),
-  ].slice(0, MAX_SUBPAGES);
+  return dedupePhotoUrls(candidates, limit);
 }
 
 /**
@@ -387,6 +351,69 @@ export function extractPagePhotos(html: string, baseUrl: string): string[] {
   );
 }
 
+/**
+ * Let the event loop service pending work (renders, touches, timers).
+ *
+ * `setTimeout(0)` is deliberately used over a microtask: a microtask resolves
+ * before React Native's task queue drains, so a chain of microtasks would block
+ * exactly like a synchronous loop.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Same result as {@link extractPagePhotos}, but never occupies the JS thread
+ * for longer than {@link PARSE_SLICE_BUDGET_MS} at a time.
+ *
+ * Parsing HTML was the one part of the place card that genuinely blocked the
+ * UI: the whole document was scanned several times in one synchronous call on
+ * Hermes, so touches, renders and animations queued behind it for hundreds of
+ * milliseconds. Here the document is walked in slices with a small overlap (so
+ * a tag split across a boundary is still matched), and control returns to the
+ * event loop between slices.
+ */
+export async function extractPagePhotosAsync(
+  html: string,
+  baseUrl: string,
+  options: { sliceBytes?: number; budgetMs?: number } = {},
+): Promise<string[]> {
+  const sliceBytes = options.sliceBytes ?? PARSE_SLICE_BYTES;
+  const budgetMs = options.budgetMs ?? PARSE_SLICE_BUDGET_MS;
+  const document = html.length > MAX_PARSE_BYTES ? html.slice(0, MAX_PARSE_BYTES) : html;
+
+  const gallery: string[] = [];
+  const imgs: string[] = [];
+  const meta: string[] = [];
+  let start = 0;
+  let lastYield = Date.now();
+
+  while (start < document.length) {
+    const sliceEnd = Math.min(document.length, start + sliceBytes);
+    const windowEnd = Math.min(document.length, sliceEnd + PARSE_SLICE_OVERLAP);
+    const slice = document.slice(start, windowEnd);
+
+    gallery.push(...extractGalleryPhotosFromHtml(slice, baseUrl, Number.MAX_SAFE_INTEGER));
+    imgs.push(
+      ...extractImgSrcsFromHtml(slice)
+        .map((src) => resolvePhotoUrl(src, baseUrl))
+        .filter((url): url is string => !!url),
+    );
+    meta.push(...parseOpenGraphFromHtml(slice, baseUrl));
+
+    start = sliceEnd;
+    if (start < document.length && Date.now() - lastYield >= budgetMs) {
+      await yieldToEventLoop();
+      lastYield = Date.now();
+    }
+  }
+
+  const galleryUrls = dedupePhotoUrls(gallery);
+  if (galleryUrls.length > 0) return rankPhotoUrls(galleryUrls);
+
+  return dedupePhotoUrls([...rankPhotoUrls(imgs), ...rankPhotoUrls(meta)]);
+}
+
 interface FetchedPage {
   html: string;
   /**
@@ -410,8 +437,8 @@ async function fetchPageHtmlResult(url: string, timeoutMs: number): Promise<Fetc
     if (!res.ok) return null;
     const contentType = res.headers.get('content-type') ?? '';
     if (contentType && !/html/i.test(contentType)) return null;
-    // Cap parse work on huge pages.
-    const html = (await res.text()).slice(0, 500_000);
+    // Cap parse work on huge pages. The same budget bounds the sliced parser.
+    const html = (await res.text()).slice(0, MAX_PARSE_BYTES);
     const finalUrl = normalizeWebsiteUrl((res as { url?: string }).url ?? url) ?? url;
     return { html, finalUrl };
   } catch {
@@ -426,36 +453,28 @@ export function countRealPhotos(urls: string[]): number {
 }
 
 /**
- * Fetch + parse one candidate page (homepage, then dedicated gallery subpages).
- * Returns the discovered photo URLs, or `null` when the page itself could not be
- * fetched (network/TLS/DNS refusal) so the caller can try a sibling host.
+ * Fetch + parse ONE page into photo candidates.
+ *
+ * This used to fan out: the homepage, then up to three gallery subpages, for up
+ * to four host candidates — up to sixteen requests, each parsed on the JS
+ * thread, all of it triggered by opening a place card. The fan-out bought very
+ * little (the homepage itself carries the gallery on the sites this runs into)
+ * and cost seconds of CPU and network. One bounded request is the whole
+ * contract now; recall beyond it is not worth blocking the card for.
+ *
+ * Returns `null` when the page could not be fetched (network/TLS/DNS refusal)
+ * so the caller can try a sibling host.
  */
 async function fetchSitePhotos(
   pageUrl: string,
   timeoutMs: number,
 ): Promise<{ urls: string[]; finalUrl: string } | null> {
-  const home = await fetchPageHtmlResult(pageUrl, timeoutMs);
-  if (!home) return null;
+  const page = await fetchPageHtmlResult(pageUrl, timeoutMs);
+  if (!page) return null;
   // Resolve against the post-redirect URL so a site that moved to a new host
-  // still contributes its own (relative) images and gallery subpages.
-  const base = home.finalUrl;
-  const homePhotos = extractPagePhotos(home.html, base);
-  const subpages = discoverPhotoPageUrls(home.html, base);
-  const hasDedicatedGalleryPage = subpages.some(isDedicatedGalleryPageUrl);
-  if (countRealPhotos(homePhotos) >= MIN_REAL_PHOTOS && !hasDedicatedGalleryPage) {
-    return { urls: homePhotos, finalUrl: base };
-  }
-  if (subpages.length === 0) return { urls: homePhotos, finalUrl: base };
-
-  const subPages = await Promise.all(subpages.map((url) => fetchPageHtmlResult(url, 6000)));
-  // Dedicated gallery pages are the strongest signal for actual place photos;
-  // keep them ahead of homepage metadata such as og:image logos.
-  const galleryPhotos: string[] = [];
-  subPages.forEach((page) => {
-    if (!page) return;
-    galleryPhotos.push(...extractPagePhotos(page.html, page.finalUrl));
-  });
-  return { urls: [...galleryPhotos, ...homePhotos], finalUrl: base };
+  // still contributes its own (relative) images.
+  const urls = await extractPagePhotosAsync(page.html, page.finalUrl);
+  return { urls, finalUrl: page.finalUrl };
 }
 
 export interface WebsitePhotosResult {
@@ -512,11 +531,21 @@ export function isSiteRoot(url: string): boolean {
 }
 
 /**
- * Fetch path: try the website tag and its `www.`/apex siblings in turn, parsing
- * gallery sections, `<img>` tags, and metadata from the homepage plus dedicated
- * gallery subpages. Returns on the first candidate that yields a real photo; a
- * candidate that fetches HTML but has no photos is remembered and the next
- * sibling is tried. `ok` is false only when every candidate failed to fetch.
+ * How many host candidates one scrape may try.
+ *
+ * `photoPageCandidates` lists the tagged URL plus its `www.`/apex siblings over
+ * https and http, which is what rescues a venue whose tag points at a broken
+ * apex certificate. Trying all of them made a single place open capable of
+ * four sequential 8 s fetches. Two is enough for the common `www.`/apex split;
+ * the rest is not worth holding the card's data hostage for.
+ */
+const MAX_SCRAPE_CANDIDATES = 2;
+
+/**
+ * Fetch path: try the website tag and one `www.`/apex sibling, parsing gallery
+ * sections, `<img>` tags and metadata from that ONE page. Returns on the first
+ * candidate that yields a real photo. `ok` is false only when every candidate
+ * failed to fetch.
  */
 export async function fetchWebsitePhotosResult(
   pageUrl: string,
@@ -525,7 +554,7 @@ export async function fetchWebsitePhotosResult(
   const cached = getCached(pageUrl);
   if (cached) return { urls: cached, ok: true, finalUrl: null };
 
-  const candidates = photoPageCandidates(pageUrl);
+  const candidates = photoPageCandidates(pageUrl).slice(0, MAX_SCRAPE_CANDIDATES);
   if (candidates.length === 0) return { urls: [], ok: false, finalUrl: null };
 
   let best: string[] | null = null;
@@ -554,118 +583,11 @@ export async function fetchWebsitePhotosResult(
 }
 
 /**
- * Fetch path: GET the homepage HTML (gallery sections, metadata, and `<img>`
- * tags); follow dedicated gallery/photo subpages when available or when the
- * homepage yields fewer than MIN_REAL_PHOTOS real photos. Returns [] on any
- * failure.
+ * Fetch path: GET the venue page HTML and parse gallery sections, metadata and
+ * `<img>` tags from it, in slices that yield to the event loop. Returns [] on
+ * any failure.
  */
 export async function fetchWebsitePhotos(pageUrl: string, timeoutMs = 8000): Promise<string[]> {
   const { urls } = await fetchWebsitePhotosResult(pageUrl, timeoutMs);
   return urls;
-}
-
-/**
- * Injected JS for the hidden-WebView fallback. Runs on-device after page
- * load, collects og/twitter/link/JSON-LD images, large `<img>` (preferring
- * `data-image` full-resolution originals), `<video poster>` targets, and
- * large CSS background images — then postMessages them back. Re-collects
- * after a delay so lazy-loaded galleries are captured.
- *
- * NOTE: keep this ES5-compatible (no optional chaining) — it runs inside
- * arbitrary third-party pages.
- */
-export const WEBSITE_PHOTOS_JS = `(function () {
-  var SENT = false;
-  function pushInto(urls, v) { if (v && urls.length < 30) urls.push(v); }
-  function collect() {
-    var urls = [];
-    var galleryNodes = document.querySelectorAll('[id*="gallery" i], [class*="gallery" i], [aria-label*="gallery" i], [id*="photo" i], [class*="photo" i], [aria-label*="photo" i]');
-    for (var g = 0; g < galleryNodes.length && urls.length < 30; g++) {
-      var galleryImgs = galleryNodes[g].querySelectorAll ? galleryNodes[g].querySelectorAll('img') : [];
-      for (var gi = 0; gi < galleryImgs.length && urls.length < 30; gi++) {
-        var galleryImg = galleryImgs[gi];
-        var gw = galleryImg.naturalWidth || galleryImg.width || 0;
-        var gh = galleryImg.naturalHeight || galleryImg.height || 0;
-        if (gw >= 200 && gh >= 200) pushInto(urls, galleryImg.getAttribute('data-image') || galleryImg.currentSrc || galleryImg.src);
-      }
-    }
-    // If the page has a usable gallery, don't dilute it with branding or
-    // social-preview images from the rest of the page.
-    if (urls.length) {
-      SENT = true;
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'website-photos', urls: urls }));
-      return;
-    }
-    var metas = document.querySelectorAll('meta[property="og:image"], meta[property="og:image:secure_url"], meta[property="og:image:url"], meta[name="twitter:image"], meta[name="twitter:image:src"], meta[property="twitter:image"]');
-    for (var i = 0; i < metas.length; i++) pushInto(urls, metas[i].getAttribute('content'));
-    var link = document.querySelector('link[rel="image_src"]');
-    if (link) pushInto(urls, link.getAttribute('href'));
-    var scripts = document.querySelectorAll('script[type="application/ld+json"]');
-    for (var s = 0; s < scripts.length; s++) {
-      try {
-        var data = JSON.parse(scripts[s].textContent || 'null');
-        var items = Array.isArray(data) ? data : [data];
-        for (var k = 0; k < items.length; k++) {
-          var img = items[k] && items[k].image;
-          if (typeof img === 'string') pushInto(urls, img);
-          else if (img && typeof img.url === 'string') pushInto(urls, img.url);
-          else if (Array.isArray(img)) {
-            for (var m = 0; m < img.length; m++) {
-              if (typeof img[m] === 'string') pushInto(urls, img[m]);
-              else if (img[m] && typeof img[m].url === 'string') pushInto(urls, img[m].url);
-            }
-          }
-        }
-      } catch (e) { /* malformed JSON-LD — ignore */ }
-    }
-    var imgs = document.querySelectorAll('img');
-    for (var j = 0; j < imgs.length; j++) {
-      var el = imgs[j];
-      var w = el.naturalWidth || el.width || (el.getBoundingClientRect ? el.getBoundingClientRect().width : 0);
-      var h = el.naturalHeight || el.height || (el.getBoundingClientRect ? el.getBoundingClientRect().height : 0);
-      if (w >= 200 && h >= 200) {
-        pushInto(urls, el.getAttribute('data-image') || el.currentSrc || el.src);
-      }
-    }
-    var all = document.querySelectorAll('div, section, figure, a, span');
-    for (var b = 0; b < all.length && urls.length < 30; b++) {
-      var node = all[b];
-      var rect = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
-      if (!rect || rect.width < 200 || rect.height < 200) continue;
-      try {
-        var bg = window.getComputedStyle(node).backgroundImage || '';
-        var bgMatch = /url\\(["']?([^"')]+)["']?\\)/.exec(bg);
-        if (bgMatch && bgMatch[1]) pushInto(urls, bgMatch[1]);
-      } catch (e2) { /* cross-origin style — ignore */ }
-    }
-    var videos = document.querySelectorAll('video[poster]');
-    for (var v = 0; v < videos.length; v++) pushInto(urls, videos[v].getAttribute('poster'));
-    if (!SENT || urls.length) {
-      SENT = true;
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'website-photos', urls: urls }));
-    }
-  }
-  collect();
-  setTimeout(collect, 2500);
-  return true;
-})();`;
-
-/** Parse a WebView onMessage payload for website-photos results. */
-export function extractPhotosFromWebViewMessage(data: string): string[] | null {
-  try {
-    const msg = JSON.parse(data) as { type?: string; urls?: unknown };
-    if (msg.type !== 'website-photos' || !Array.isArray(msg.urls)) return null;
-    return dedupePhotoUrls(msg.urls.filter((u): u is string => typeof u === 'string'));
-  } catch {
-    return null;
-  }
-}
-
-/** Resolve + rank + dedupe raw WebView URLs against the page URL. */
-export function resolveWebViewPhotoUrls(rawUrls: string[], baseUrl: string): string[] {
-  return dedupePhotoUrls(
-    rankPhotoUrls(
-      rawUrls.map((src) => resolvePhotoUrl(src, baseUrl)).filter((u): u is string => !!u),
-    ),
-  );
 }

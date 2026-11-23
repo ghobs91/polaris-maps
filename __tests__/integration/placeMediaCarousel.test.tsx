@@ -80,21 +80,7 @@ jest.mock('../../src/services/poi/websitePhotosService', () => {
   };
 });
 
-// The hidden photo WebView renders as a bare host component; the last-mounted
-// props are exposed so tests can drive its onMessage payload by hand.
-jest.mock('react-native-webview', () => {
-  const mockReact = jest.requireActual('react') as typeof React;
-  return {
-    WebView: (props: Record<string, unknown>) => {
-      (global as { __lastPhotosWebViewProps?: Record<string, unknown> }).__lastPhotosWebViewProps =
-        props;
-      return mockReact.createElement('WebView', props);
-    },
-  };
-});
-
 import { PlaceMediaCarousel } from '../../src/components/poi/PlaceMediaCarousel';
-import { GEOLOCATION_GUARD_JS } from '../../src/constants/webViewScripts';
 
 function renderCarousel() {
   return render(
@@ -204,7 +190,7 @@ describe('PlaceMediaCarousel', () => {
     expect(screen.queryByTestId('place-media-empty')).toBeNull();
   });
 
-  it('holds the scrape and hidden WebView until enabled', async () => {
+  it('holds the scrape until the card has finished opening', async () => {
     mockFetchWebsitePhotos.mockResolvedValue([]);
     mockDefaultSupplements.mockReturnValue([]);
 
@@ -221,12 +207,12 @@ describe('PlaceMediaCarousel', () => {
 
     await act(async () => {});
     expect(mockFetchWebsitePhotos).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('place-media-webview')).toBeNull();
 
     screen.rerender(<PlaceMediaCarousel {...props} enabled />);
 
-    await waitFor(() => expect(screen.getByTestId('place-media-webview')).toBeTruthy());
-    expect(mockFetchWebsitePhotos).toHaveBeenCalledWith('https://mongoscoffee.com');
+    await waitFor(() =>
+      expect(mockFetchWebsitePhotos).toHaveBeenCalledWith('https://mongoscoffee.com'),
+    );
   });
 
   it('merges website photos with open-licensed media into one carousel', async () => {
@@ -256,7 +242,7 @@ describe('PlaceMediaCarousel', () => {
     expect(screen.queryByText('Wikimedia Commons')).toBeNull();
   });
 
-  it('falls back to the hidden WebView for JS-rendered sites and merges its photos', async () => {
+  it('never mounts a browser inside the sheet when the scrape comes back empty', async () => {
     mockFetchWebsitePhotos.mockResolvedValue([]);
     mockDefaultSupplements.mockReturnValue([]);
 
@@ -272,40 +258,13 @@ describe('PlaceMediaCarousel', () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('place-media-webview')).toBeTruthy());
-
-    const props = (
-      global as {
-        __lastPhotosWebViewProps?: {
-          onMessage?: (e: unknown) => void;
-          injectedJavaScriptBeforeContentLoaded?: string;
-          injectedJavaScriptBeforeContentLoadedForMainFrameOnly?: boolean;
-        };
-      }
-    ).__lastPhotosWebViewProps;
-
-    // The hidden WebView neutralizes web geolocation before the venue page's own
-    // scripts run, so no per-origin location prompt is shown on iOS.
-    expect(props?.injectedJavaScriptBeforeContentLoaded).toBe(GEOLOCATION_GUARD_JS);
-    expect(props?.injectedJavaScriptBeforeContentLoadedForMainFrameOnly).toBe(false);
-
-    act(() => {
-      props?.onMessage?.({
-        nativeEvent: {
-          data: JSON.stringify({
-            type: 'website-photos',
-            urls: [
-              'https://cdn.example/a.jpg',
-              'https://cdn.example/b.jpg',
-              'https://cdn.example/c.jpg',
-            ],
-          }),
-        },
-      });
-    });
-
-    await waitFor(() => expect(screen.getByTestId('place-media-thumb-0')).toBeTruthy());
-    expect(screen.getAllByTestId(/^place-media-thumb-\d+$/)).toHaveLength(3);
+    await waitFor(() => expect(mockFetchWebsitePhotos).toHaveBeenCalled());
+    // A thin scrape used to mount a hidden WKWebView *inside* the card's
+    // scroll view. That browser was a second web-content process loading an
+    // arbitrary venue page while the sheet was on screen; it is gone.
+    expect(screen.queryByTestId('place-media-webview')).toBeNull();
+    expect(screen.queryByTestId('place-media-section')).toBeNull();
+    expect(mockFetchWebsitePhotos).toHaveBeenCalledTimes(1);
   });
 
   it('pages horizontally between photos in the expanded viewer', async () => {

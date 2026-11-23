@@ -2,13 +2,12 @@ import {
   clearWebsitePhotosCache,
   countRealPhotos,
   dedupePhotoUrls,
-  discoverPhotoPageUrls,
   extractImgSrcsFromHtml,
-  extractPhotosFromWebViewMessage,
   fetchWebsitePhotos,
   fetchWebsitePhotosResult,
   extractGalleryPhotosFromHtml,
   extractPagePhotos,
+  extractPagePhotosAsync,
   isCrossHostRedirect,
   isHttpUrl,
   isLogoLikeUrl,
@@ -19,7 +18,6 @@ import {
   photoPageCandidates,
   rankPhotoUrls,
   resolvePhotoUrl,
-  resolveWebViewPhotoUrls,
   siteHost,
 } from '../../src/services/poi/websitePhotosService';
 
@@ -175,22 +173,6 @@ describe('extractGalleryPhotosFromHtml', () => {
   });
 });
 
-describe('discoverPhotoPageUrls', () => {
-  it('finds gallery links by path or link text, same-origin only', () => {
-    const html = [
-      '<a href="/gallery">Gallery</a>',
-      '<a href="https://a.com/menu">Our Menu</a>',
-      '<a href="https://other.com/photos">Photos</a>',
-      '<a href="/contact">Contact</a>',
-      '<a href="/">Home</a>',
-    ].join('\n');
-    expect(discoverPhotoPageUrls(html, 'https://a.com/')).toEqual([
-      'https://a.com/gallery',
-      'https://a.com/menu',
-    ]);
-  });
-});
-
 describe('parseOpenGraphFromHtml', () => {
   it('extracts og:image with either attribute order', () => {
     const html = [
@@ -231,37 +213,10 @@ describe('fetchWebsitePhotos', () => {
     await expect(fetchWebsitePhotos('https://a.com/')).resolves.toEqual(['https://a.com/og.jpg']);
   });
 
-  it('crawls the gallery subpage when the homepage yields only a logo', async () => {
-    const pages: Record<string, string> = {
-      'https://a.com/':
-        '<img src="https://a.com/logo.png" width="800" height="600">' +
-        '<a href="/gallery">Gallery</a>',
-      'https://a.com/gallery':
-        '<img src="https://a.com/food-01.jpg" width="2048" height="1365">' +
-        '<img src="https://a.com/food-02.jpg" width="2048" height="1365">' +
-        '<img src="https://a.com/food-03.jpg" width="2048" height="1365">',
-    };
-    global.fetch = jest.fn().mockImplementation((url: string) =>
-      Promise.resolve({
-        ok: true,
-        headers: { get: () => 'text/html' },
-        text: () => Promise.resolve(pages[url] ?? ''),
-      }),
-    ) as unknown as typeof fetch;
-    const result = await fetchWebsitePhotos('https://a.com/');
-    expect(result.slice(0, 3)).toEqual([
-      'https://a.com/food-01.jpg',
-      'https://a.com/food-02.jpg',
-      'https://a.com/food-03.jpg',
-    ]);
-    expect(result[result.length - 1]).toBe('https://a.com/logo.png');
-  });
-
-  it('crawls a linked gallery even when the homepage already has enough photos', async () => {
+  it('makes exactly ONE request per place, even when the page links a gallery', async () => {
     const home =
       '<img src="https://a.com/1.jpg" width="800" height="600">' +
       '<img src="https://a.com/2.jpg" width="800" height="600">' +
-      '<img src="https://a.com/3.jpg" width="800" height="600">' +
       '<a href="/gallery">Gallery</a>';
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -269,8 +224,35 @@ describe('fetchWebsitePhotos', () => {
       text: () => Promise.resolve(home),
     }) as unknown as typeof fetch;
     const result = await fetchWebsitePhotos('https://a.com/');
-    expect(result).toHaveLength(3);
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(['https://a.com/1.jpg', 'https://a.com/2.jpg']);
+    // The subpage crawl is gone: opening a card used to fan out to up to
+    // sixteen requests, each parsed on the JS thread.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries at most two host candidates before giving up', async () => {
+    const fetched: string[] = [];
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      fetched.push(url);
+      return Promise.reject(new Error('unreachable'));
+    }) as unknown as typeof fetch;
+
+    await fetchWebsitePhotosResult('https://a.com/');
+    expect(fetched).toHaveLength(2);
+  });
+
+  it('caps the strip at ten photos', async () => {
+    const imgs = Array.from(
+      { length: 25 },
+      (_, i) => `<img src="https://a.com/${i}.jpg" width="800" height="600">`,
+    ).join('');
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'text/html' },
+      text: () => Promise.resolve(imgs),
+    }) as unknown as typeof fetch;
+    const result = await fetchWebsitePhotos('https://a.com/');
+    expect(result).toHaveLength(10);
   });
 
   it('returns [] on network failure', async () => {
@@ -376,22 +358,54 @@ describe('redirect handling', () => {
   });
 });
 
-describe('WebView message helpers', () => {
-  it('parses website-photos messages and ignores others', () => {
-    expect(
-      extractPhotosFromWebViewMessage(JSON.stringify({ type: 'height', height: 5 })),
-    ).toBeNull();
-    expect(
-      extractPhotosFromWebViewMessage(
-        JSON.stringify({ type: 'website-photos', urls: ['a', 1, 'a'] }),
-      ),
-    ).toEqual(['a']);
-    expect(extractPhotosFromWebViewMessage('not json')).toBeNull();
+/**
+ * The sliced parser exists for one reason: parsing HTML used to run as a single
+ * synchronous pass over the whole document on the JS thread, and a heavy venue
+ * page blocked renders, gestures and timers for hundreds of milliseconds. These
+ * tests pin the two properties that matter — same answer as the synchronous
+ * parser, and no single unbroken stretch of work.
+ */
+describe('extractPagePhotosAsync', () => {
+  /** A page large enough to span several parse slices. */
+  const buildPage = (count: number): string =>
+    Array.from(
+      { length: count },
+      (_, i) =>
+        `<div class="gallery-item"><img data-image="https://a.com/photo-${i}.jpg" width="1200" height="800"></div>`,
+    ).join('\n');
+
+  it('returns the same photos as the synchronous parser across many slices', async () => {
+    const html = buildPage(1200);
+    expect(html.length).toBeGreaterThan(48 * 1024);
+    const sync = extractPagePhotos(html, 'https://a.com/');
+    const sliced = await extractPagePhotosAsync(html, 'https://a.com/', { sliceBytes: 4 * 1024 });
+    expect(sliced).toEqual(sync);
   });
 
-  it('resolves relative WebView URLs against the page', () => {
-    expect(resolveWebViewPhotoUrls(['/x.jpg', 'data:y'], 'https://a.com/p')).toEqual([
-      'https://a.com/x.jpg',
-    ]);
+  it('yields to the event loop instead of blocking for the whole parse', async () => {
+    const html = buildPage(4000);
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+    }, 1);
+    try {
+      const photos = await extractPagePhotosAsync(html, 'https://a.com/', {
+        sliceBytes: 8 * 1024,
+        budgetMs: 1,
+      });
+      expect(photos.length).toBeGreaterThan(0);
+      // A synchronous parse of this document takes far longer than one tick;
+      // the sliced parser must let the interval run while it works.
+      expect(ticks).toBeGreaterThan(0);
+    } finally {
+      clearInterval(timer);
+    }
+  });
+
+  it('caps the parsed document so a pathological page cannot dominate the thread', async () => {
+    const html = buildPage(20_000);
+    expect(html.length).toBeGreaterThan(1_000_000);
+    const photos = await extractPagePhotosAsync(html, 'https://a.com/');
+    expect(photos).toHaveLength(10);
   });
 });
