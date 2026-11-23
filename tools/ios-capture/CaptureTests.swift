@@ -151,6 +151,60 @@ final class CaptureTests: XCTestCase {
         hold(3)
     }
 
+    /// Reproduces the reported "card locks up while ratings/photos load" flow and
+    /// keeps tapping through it, so the app's lag probe records what a finger
+    /// would feel: open a place card from a real search result, then send a tap
+    /// every 250 ms for 25 s while ratings resolve, and leave the card on screen.
+    ///
+    /// Read the probe report afterwards (`Documents/external-ratings-lag-probe.json`
+    /// in the app container): `stallsByStage`, the `browser create →` mark and the
+    /// `browser` mount events attribute any stall, and the `stage` events say
+    /// whether the ratings pass actually resolved.
+    func testMeasureCardLockup() {
+        walkOnboardingIfNeeded()
+        tap("Quick category search")
+        sleep(2)
+        let field = app.textFields.firstMatch
+        guard field.waitForExistence(timeout: 10) else {
+            print("MISSING: search field")
+            return
+        }
+        field.tap()
+        field.typeText("Buddakan New York")
+        sleep(5)
+        let searchKey = app.keyboards.buttons["search"]
+        if searchKey.exists { searchKey.tap() } else { field.typeText("\n") }
+        sleep(6)
+
+        // The distance suffix depends on the map viewport, so match on the name.
+        let rows = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Buddakan,"))
+            .allElementsBoundByIndex
+        print("ROWS \(rows.count): \(rows.map(\.label))")
+        guard let row = rows.last else {
+            print("MISSING: Buddakan result row")
+            return
+        }
+        let frame = row.frame
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.midY))
+            .tap()
+        print("TAPPED card at \(Date())")
+
+        // Keep touching the card while the ratings/photos pipeline runs: a stall
+        // that swallows these taps is exactly what the report is for.
+        let cardTop = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
+        for i in 0..<100 {
+            cardTop.tap()
+            if i % 10 == 0 { print("TAP \(i) at \(Date())") }
+            usleep(250_000)
+        }
+
+        dump("locked-card")
+        save("12-card-lockup")
+        hold(2)
+    }
+
     /// Explore the search → place-card path so its labels can be captured.
     func testExploreSearch() {
         walkOnboardingIfNeeded()
