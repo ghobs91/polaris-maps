@@ -89,10 +89,12 @@ competing for GPU/CPU, and memory pressure ending in a jetsam kill.
 After the changes below, the same scripted run (release build, real network)
 shows:
 
-- **One** browser mount and one unmount per pass (was four lifecycle events),
-  and the rating still resolves through the reused view: TripAdvisor reported
-  4.4 / 5,515 reviews for the live search hit, and the photo strip rendered the
-  venue's own photos with no browser in the sheet.
+- The rating resolves again after the per-stage mount was restored: TripAdvisor
+  reported 4.4 / 5,515 reviews for a real search result, and the photo strip
+  rendered the venue's own photos with **no browser in the sheet**. Tapping the
+  card 100 times over 25 s while the pass ran added no stall above 310 ms.
+- Browser lifecycle per card: two mounts (one per provider stage). Reusing one
+  view would remove one creation, and it is not worth it: see rule 4.
 - **A crash that this change introduced was found and fixed here**: parking the
   browser on `about:blank` aborted the app on the main thread
   (`-[WKWebView loadFileURL:]` via `-[RNCWebViewImpl visitSource]`). See the rule
@@ -119,22 +121,35 @@ Two stalls remain in that run and are **not** explained by this change:
 3. **HTML parsing no longer blocks the JS thread.**
    `extractPagePhotosAsync` walks the document in 48 KB slices with a 4 KB
    overlap and yields to the event loop after ~6 ms of work. The parsed document
-   is capped at 300 KB. (The inserted `about:blank` / idle-park behaviour of the
-   ratings browser and the parse timing are measured by the probe: look for
-   `parse` events in the report.)
-4. **One WKWebView per ratings pass, not per stage.**
-   `HiddenRatingsBrowserHost` keeps a single view and navigates it between stage
-   URIs (`uri → uri`, the load path that works). When no stage is live the view
-   is unmounted after a 1.5 s grace window (which only exists to bridge a stage
-   handoff between providers), so an idle app holds no web-content process.
+   is capped at 300 KB. The probe records the sync-vs-sliced timing as a `parse`
+   event, so a device run states both numbers on the real engine.
+4. **One WKWebView per _stage_ — and never a shared cookie jar.**
+   The browser is unmounted as soon as no stage is live, so an idle app holds no
+   web-content process and no provider page keeps rendering behind the card.
+
+   **A fresh view per stage is not optional.** Reusing one view by navigating it
+   between stage URIs (`uri → uri`) shipped and broke ratings completely: every
+   stage on a real device sat silent until its 15 s clock expired, so the row
+   said "couldn't load right now" for places that had loaded before. This is the
+   second time a kept-alive browser has failed this way, so it is written down
+   twice: mount fresh, never reuse.
+
+   **`sharedCookiesEnabled` is off.** Nothing in the app writes to
+   `NSHTTPCookieStorage` (the in-app browser is a Safari view controller), so the
+   flag only makes react-native-webview enumerate every cookie in the shared jar
+   on the **main thread** and write them into the view one by one on every
+   navigation, holding `loadRequest` until each completes. Its cost grows with
+   how long the device has been used — the fresh simulator jar is empty, a
+   phone's is not — which is the shape of "the card locks up until the ratings
+   finish". Provider cookies still persist in the WKWebsiteDataStore across the
+   per-stage remounts.
 
    **Never navigate this (or any) WebView to a URL without a host.**
    react-native-webview routes a host-less `source` to
    `-[WKWebView loadFileURL:allowingReadAccessToURL:]`, which raises an ObjC
-   exception on the main thread and aborts the process (SIGABRT). This was
-   observed in a release build: an `about:blank` parking scheme crashed the app,
-   with the crash log pointing at `-[RNCWebViewImpl visitSource]_block_invoke`.
-   Release a page by unmounting the view, not by blanking it.
+   exception on the main thread and aborts the process (SIGABRT). Observed in a
+   release build, with the crash log pointing at
+   `-[RNCWebViewImpl visitSource]_block_invoke`.
 
 5. **Discovery cache bounded by bytes.** The ratings listing-discovery cache held
    up to 100 raw pages (≈50 MB of JS heap retained forever). It is now an 8-entry,
@@ -165,7 +180,11 @@ re-introduces the freeze.
 
 ## Still open (needs a device run)
 
-- **The freeze itself.** Not reproduced here. The measurement protocol is:
+- **The freeze itself.** Not reproduced here, including with the real-tap
+  harness (`tools/ios-capture`, `testMeasureCardLockup`). Every candidate that is
+  device-only has a documented mechanism in this file (cookie-jar size, web
+  content process cost, GPU contention); the first two are now removed or
+  bracketed by probe marks, so a device report can say which remains. The measurement protocol is:
   build with `EXPO_PUBLIC_RATINGS_LAG_PROBE=scenario`, open a heavy place card,
   then read `Documents/external-ratings-lag-probe.json`: `stallsByStage`,
   `worstStallMs`, the `browser` events (should now be at most one `mount` per
