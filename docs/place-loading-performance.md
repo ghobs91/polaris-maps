@@ -157,6 +157,28 @@ Two stalls remain in that run and are **not** explained by this change:
 6. **Photo strip bounded** to eight decoded images, with recycling keys and
    clipped subviews.
 
+### Why ratings stopped resolving (and the rule it leaves behind)
+
+The lockup fix removed the shared cookie jar — and ratings then failed
+everywhere. The lag probe (stage transitions, browser navigations, collector
+messages) found two faults on one provider, both caused by the mobile user agent
+that the other provider requires:
+
+1. Yelp answers a mobile UA with a redirect from `www.yelp.com` to `m.yelp.com`.
+   That host was not on the allowlist, so the navigation gate cancelled the
+   redirect and every stage loaded nothing until its clock expired.
+2. `m.yelp.com`'s listing page carries only `ItemList` JSON-LD blocks and no
+   business node: the rating is there, the identity is not. The listing was
+   therefore rejected as "a same-named business elsewhere".
+
+Identity now comes from the page's own title, which ends with the street address
+(`… - 75 9th Ave, New York, NY 10011`), matched with the existing strict address
+check; a name+city fallback covers pages that publish only a city, and it still
+rejects a same-named business in another city. The rule: **before rejecting a
+provider page on identity, check whether the page publishes the address anywhere
+(the title, `place:location` meta, an `address` element) — only then is a
+name-only verdict honest.**
+
 ## Rules for future changes in this area
 
 These are the invariants the fixes above establish. Breaking one is what
