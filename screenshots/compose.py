@@ -19,6 +19,16 @@ OUT = os.path.join(BASE, "out")
 os.makedirs(OUT, exist_ok=True)
 
 W, H = 1320, 2868
+
+# App Store Connect validates screenshot dimensions against the display slot you
+# are filling, and rejects anything else with "File dimensions are invalid".
+# 1320×2868 is the 6.9" slot; the 6.3" slot only accepts the last two, and
+# 6.5"/6.1" slots their own. Composition stays at the design size above and each
+# extra set is a downscale, so no card is ever upsampled.
+OUT_SIZES = [
+    (1206, 2622),  # iPhone 16/17 Pro (6.3") slot
+    (1179, 2556),  # iPhone 15/16 Pro (6.1"/6.3") slot
+]
 PURPLE = (108, 92, 231)  # #6C5CE7
 PURPLE_DARK = (92, 76, 214)
 WHITE = (255, 255, 255)
@@ -193,6 +203,7 @@ def compose_ipad(card):
     img.paste(raw, (x, y), rounded_mask((sw, sh), 74))
     img.save(os.path.join(OUT, card["out"]))
     print("wrote", card["out"])
+    return os.path.join(OUT, card["out"])
 
 
 IPAD_CARDS = [
@@ -256,9 +267,10 @@ CARDS = [
 ]
 
 if __name__ == "__main__":
+    rendered = []
     for c in CARDS:
         if os.path.exists(c["raw"]):
-            compose(c)
+            rendered.append(compose(c))
         else:
             print("MISSING", c["raw"])
     for c in IPAD_CARDS:
@@ -266,3 +278,13 @@ if __name__ == "__main__":
             compose_ipad(c)
         else:
             print("MISSING", c["raw"])
+
+    # Size-specific sets, one folder per display slot, so the upload folder that
+    # matches the slot can be dragged in whole.
+    for size_w, size_h in OUT_SIZES:
+        folder = os.path.join(OUT, f"iphone-{size_w}x{size_h}")
+        os.makedirs(folder, exist_ok=True)
+        for path in rendered:
+            card = Image.open(path).convert("RGB").resize((size_w, size_h), Image.LANCZOS)
+            card.save(os.path.join(folder, os.path.basename(path)))
+        print(f"wrote {len(rendered)} cards to {folder}")
