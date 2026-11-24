@@ -6,12 +6,20 @@ bezel, callout bubble).
 
 ## Layout
 
-| Path               | What                                                                   |
-| ------------------ | ---------------------------------------------------------------------- |
-| `raw/`             | Full-resolution 1320×2868 simulator captures (gitignored)              |
-| `out/`             | Composed 1320×2868 App Store cards + `_contact-sheet.png` (gitignored) |
-| `compose.py`       | Renders each card from a raw capture                                   |
-| `contact_sheet.py` | Builds the dark multi-card preview sheet                               |
+| Path                    | What                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `raw/`                  | Full-resolution 1320×2868 simulator captures (gitignored)                    |
+| `out/`                  | Composed 1320×2868 cards + `_contact-sheet.png` (gitignored) — the 6.9" slot |
+| `out/iphone-1206x2622/` | Same 7 cards downscaled for the 6.3" (iPhone 16/17 Pro) slot                 |
+| `out/iphone-1179x2556/` | Same 7 cards downscaled for the 6.1"/6.3" (iPhone 15/16 Pro) slot            |
+| `compose.py`            | Renders each card from a raw capture, then writes the extra size sets        |
+| `contact_sheet.py`      | Builds the dark multi-card preview sheet                                     |
+
+App Store Connect rejects a card whose pixel size does not match the display
+slot you drop it into ("File dimensions are invalid"). 1320×2868 is only valid
+for the 6.9" slot; `compose.py` therefore also writes 1206×2622 and 1179×2556
+set folders, downscaled from the same composition (never upsampled). Drag the
+folder that matches the slot ASC is showing you.
 
 ## Regenerate
 

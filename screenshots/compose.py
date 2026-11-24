@@ -156,6 +156,7 @@ def compose(card):
 
     img.save(os.path.join(OUT, card["out"]))
     print("wrote", card["out"])
+    return os.path.join(OUT, card["out"])
 
 
 def compose_ipad(card):
