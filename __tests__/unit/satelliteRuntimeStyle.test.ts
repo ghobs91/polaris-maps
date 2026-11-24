@@ -90,6 +90,112 @@ describe('buildViewportSatelliteStyle', () => {
     expect(style.sources['satellite-global']).toBeDefined();
   });
 
+  it('layers the fast New York state ortho above the slow USGS hires at z17+', () => {
+    // The USGS NAIP ImageServer renders a novel z17+ tile in 20–90 s and the
+    // map shows the overzoomed z16 cache until it lands. The NY state service
+    // answers in ~0.3 s, so it must be mounted and drawn on top in NY.
+    const levittown: BBox = [-73.55, 40.7, -73.48, 40.74];
+    const ids = selectViewportRegionalSources(levittown, 18).map((s) => s.id);
+    expect(ids).toContain('ortho-us-ny');
+
+    const style = JSON.parse(buildViewportSatelliteStyle(levittown, 18));
+    const ny = style.layers.findIndex((l: any) => l.id === 'ortho-us-ny-tiles');
+    const hires = style.layers.findIndex((l: any) => l.id === 'satellite-naip-hires-tiles');
+    expect(ny).toBeGreaterThan(hires);
+
+    // `transparentBlank` must rewrite the JPEG URL: the state service answers
+    // with opaque white outside its coverage, which would otherwise paint white
+    // blocks over NJ/PA/CT wherever the state bbox is on screen.
+    const url: string = style.sources['ortho-us-ny'].tiles[0];
+    expect(url).toContain('format=png32');
+    expect(url).toContain('transparent=true');
+  });
+
+  it('covers New York counties from the flight that actually flew there', () => {
+    // NYS mosaics one flight per year, and each county lands in the year it was
+    // flown: measured at z17 the 2023 flight is blank over Queens/Syracuse/
+    // Albany/Buffalo while 2022 has Queens/Syracuse and 2021 has Buffalo/Albany.
+    // All four entries share the state bounds, so every county must be served
+    // without depending on a single year.
+    const nyIds = (bbox: BBox) => viewportRegionalSourceIds(bbox, 18);
+    const queens: BBox = [-73.83, 40.71, -73.76, 40.75];
+    const buffalo: BBox = [-78.91, 42.87, -78.84, 42.91];
+
+    for (const bbox of [queens, buffalo]) {
+      const ids = nyIds(bbox);
+      expect(ids).toEqual(expect.arrayContaining(['ortho-us-ny-2021', 'ortho-us-ny-2022']));
+      expect(ids).toEqual(expect.arrayContaining(['ortho-us-ny', 'ortho-us-ny-latest']));
+    }
+
+    // The cached per-year services must use the global tile ladder; the
+    // uncached `Latest` composite uses export, and the 2023 service keeps its
+    // transparent PNG rewrite.
+    const style = JSON.parse(buildViewportSatelliteStyle(queens, 18));
+    expect(style.sources['ortho-us-ny-2022'].tiles[0]).toContain(
+      'wms/2022/MapServer/tile/{z}/{y}/{x}',
+    );
+    expect(style.sources['ortho-us-ny-latest'].tiles[0]).toContain('bbox={bbox-epsg-3857}');
+
+    // Freshest first on top: the 0.5 m composite must sit below the 0.3 m
+    // flights, and among the equal-resolution flights the newer one draws last.
+    const index = (id: string) => style.layers.findIndex((l: any) => l.id === `${id}-tiles`);
+    expect(index('ortho-us-ny-latest')).toBeLessThan(index('ortho-us-ny-2021'));
+    expect(index('ortho-us-ny-2021')).toBeLessThan(index('ortho-us-ny-2022'));
+    expect(index('ortho-us-ny-2022')).toBeLessThan(index('ortho-us-ny'));
+    expect(index('ortho-us-ny-latest')).toBeGreaterThan(
+      style.layers.findIndex((l: any) => l.id === 'satellite-naip-hires-tiles'),
+    );
+  });
+
+  it('mounts the state ortho for its own state and never for a state without one', () => {
+    // Boston at z18: Massachusetts' statewide layer must mount and draw above
+    // the USGS hires layer, exactly like the NY case.
+    const boston: BBox = [-71.1, 42.34, -71.03, 42.38];
+    expect(viewportRegionalSourceIds(boston, 18)).toContain('ortho-us-ma');
+    const bostonStyle = JSON.parse(buildViewportSatelliteStyle(boston, 18));
+    expect(bostonStyle.sources['ortho-us-ma'].tiles[0]).toContain(
+      'Massachusetts_Aerial_Imagery_2025',
+    );
+    expect(bostonStyle.layers.findIndex((l: any) => l.id === 'ortho-us-ma-tiles')).toBeGreaterThan(
+      bostonStyle.layers.findIndex((l: any) => l.id === 'satellite-naip-hires-tiles'),
+    );
+
+    // Houston has no verified statewide service, so nothing US-state is mounted
+    // there — the map falls back to the USGS layers instead of a neighbour's
+    // rectangle.
+    const houston: BBox = [-95.4, 29.75, -95.35, 29.78];
+    const texasIds = viewportRegionalSourceIds(houston, 18);
+    expect(texasIds.filter((id) => id.startsWith('ortho-us-'))).toEqual([]);
+  });
+
+  it('keeps every US state ortho entry usable at z17+ and transparent outside coverage', () => {
+    const states = REGIONAL_ORTHOPHOTO_SOURCES.filter((s) => s.id.startsWith('ortho-us-'));
+    expect(states.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(states.map((s) => s.id)).size).toBe(states.length);
+
+    for (const source of states) {
+      // z17+ is the zoom the state layers exist for; anything shallower would
+      // leave the common "zoom in" case on the slow USGS path.
+      expect(source.maxzoom).toBeGreaterThanOrEqual(17);
+      expect(source.minzoom ?? 0).toBeLessThanOrEqual(14);
+      // Opaque no-data tiles would paint blocks over neighbouring providers.
+      expect(source.transparentBlank).toBe(true);
+      expect(source.tiles[0].startsWith('https://')).toBe(true);
+      expect(source.tiles[0]).toMatch(/\{z\}\/\{y\}\/\{x\}|bbox=\{bbox-epsg-3857\}/);
+
+      const [west, south, east, north] = source.bounds as [number, number, number, number];
+      expect(west).toBeLessThan(east);
+      expect(south).toBeLessThan(north);
+      // CONUS, so a bad sign or swapped axis cannot mount a US layer in Europe.
+      expect(west).toBeGreaterThanOrEqual(-126);
+      expect(east).toBeLessThanOrEqual(-66);
+      expect(south).toBeGreaterThanOrEqual(24);
+      expect(north).toBeLessThanOrEqual(50);
+      expect(source.resolutionM).toBeGreaterThan(0);
+      expect(Date.parse(source.acquiredAt)).not.toBeNaN();
+    }
+  });
+
   it('layers OpenAerialMap above the regional providers when coverage exists', () => {
     const coverage: BBox = [12.4, 41.85, 12.5, 41.9];
     const style = JSON.parse(buildViewportSatelliteStyle(ROME, 16, { coverage }));

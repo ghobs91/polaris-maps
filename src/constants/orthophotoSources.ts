@@ -1,11 +1,16 @@
 /**
- * Open European orthophoto tile sources.
+ * Open national/regional orthophoto tile sources.
  *
  * Each entry is a national/regional aerial orthophoto service that is
  * published as open data (or free-to-use government data) and is layered
  * above the global EOx Sentinel-2 base in the satellite map style. Every
  * entry is bounded to its coverage, so tiles are only fetched where the
  * provider actually has imagery.
+ *
+ * The bulk of the registry is European, plus US state ortho services (which
+ * exist because the only nationwide z17+ layer, the USGS NAIP on-demand
+ * ImageServer, renders a novel tile in 20–90 s — see `satellite-naip-hires` in
+ * `satelliteStyle.ts`).
  *
  * Sources are either tiled (XYZ/WMTS with `{z}/{x}/{y}`) or WMS/ArcGIS Map
  * endpoints expressed with MapLibre's `{bbox-epsg-3857}` placeholder.
@@ -597,6 +602,475 @@ export const REGIONAL_ORTHOPHOTO_SOURCES: RegionalOrthophotoSource[] = [
     bounds: [52.0, 16.6, 60.0, 26.5],
     // Transparent no-data, but skip continent-scale dynamic requests.
     minzoom: 9,
+  },
+  // ── United States ────────────────────────────────────────────────────
+  // Nationwide z17+ detail comes from the USGS NAIP ImageServer, which renders
+  // each novel tile on demand (measured 20–90 s cold, including 504s under
+  // load; an already-rendered bbox answers in ~70 ms). Until it lands, the map
+  // shows the z16 cache overzoomed at 2.4 m/px — the blurry squares. State
+  // ortho services render an order of magnitude faster, so they take over
+  // inside their bounds.
+  // NYS publishes one flight per year and each county is mosaicked into the
+  // year it was flown, so no single service covers the state: measured at z17,
+  // the 2023 flight has no data over Queens/Syracuse/Albany/Buffalo, the 2022
+  // flight covers Queens and Syracuse, the 2021 flight covers Buffalo and
+  // Albany, and `wms/Latest` (0.5 m) covers everything but is slower. Stacking
+  // them means each county is answered by whichever flight was flown there,
+  // all of them cached and in the 80–300 ms range instead of the USGS 20–90 s.
+  {
+    id: 'ortho-us-ny-latest',
+    label: 'New York State — latest statewide orthoimagery by county (0.5 m)',
+    // Uncached export: the fallback for counties whose newest flight is not one
+    // of the 2021/2022/2023 services below.
+    tiles: [
+      'https://orthos.its.ny.gov/arcgis/rest/services/wms/Latest/MapServer/export' +
+        '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256' +
+        '&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    maxzoom: 17,
+    minzoom: 12,
+    resolutionM: 0.5,
+    acquiredAt: '2023-01-01',
+    attribution: 'NYS ITS Geospatial Services',
+    bounds: [-79.77, 40.48, -71.75, 45.02],
+  },
+  {
+    id: 'ortho-us-ny-2021',
+    label: 'New York State — NYS 2021 orthoimagery (1 ft, tiled)',
+    // Cached MapServer, standard global LOD ladder 0–19 (0.2986 m at z19).
+    // Measured z17/z18/z19 over Buffalo and Albany: 79–119 ms, 9–20 kB.
+    tiles: ['https://orthos.its.ny.gov/arcgis/rest/services/wms/2021/MapServer/tile/{z}/{y}/{x}'],
+    tileSize: 256,
+    transparentBlank: true,
+    maxzoom: 19,
+    minzoom: 12,
+    resolutionM: 0.3,
+    acquiredAt: '2021-06-01',
+    attribution: 'NYS ITS Geospatial Services',
+    bounds: [-79.77, 40.48, -71.75, 45.02],
+  },
+  {
+    id: 'ortho-us-ny-2022',
+    label: 'New York State — NYS 2022 orthoimagery (1 ft, tiled)',
+    // Measured z17/z18/z19 over Queens and Syracuse: 85–132 ms, 12–19 kB.
+    tiles: ['https://orthos.its.ny.gov/arcgis/rest/services/wms/2022/MapServer/tile/{z}/{y}/{x}'],
+    tileSize: 256,
+    transparentBlank: true,
+    maxzoom: 19,
+    minzoom: 12,
+    resolutionM: 0.3,
+    acquiredAt: '2022-06-01',
+    attribution: 'NYS ITS Geospatial Services',
+    bounds: [-79.77, 40.48, -71.75, 45.02],
+  },
+  {
+    id: 'ortho-us-ny',
+    label: 'New York State — NYS 2023 orthoimagery (12 in)',
+    // ArcGIS MapServer export renders a 256 px tile in ~0.2–0.3 s (verified),
+    // vs 20–90 s for the USGS ImageServer tile at the same zoom.
+    tiles: [
+      'https://orthos.its.ny.gov/arcgis/rest/services/wms/2023/MapServer/export' +
+        '?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256' +
+        '&format=jpg&f=image',
+    ],
+    tileSize: 256,
+    // The state bbox also covers parts of NJ/PA/CT/MA/VT. Outside NY coverage
+    // the service answers with an opaque white JPEG but a fully transparent
+    // PNG (verified), so ask for transparency and let the layers beneath show.
+    transparentBlank: true,
+    // 12 in natural colour; LOD 19 is the deepest real level (0.298 m/px).
+    maxzoom: 19,
+    minzoom: 12,
+    resolutionM: 0.3,
+    acquiredAt: '2023-06-01',
+    attribution: 'NYS ITS Geospatial Services / Westchester County GIS',
+    bounds: [-79.77, 40.48, -71.75, 45.02],
+  },
+  // ── United States: state-run orthoimagery, generated ─────────────────
+  // Produced by `scripts/probe-state-orthos.mjs` (AGOL sweep → extent/state
+  // attribution → real 256 px tile probes, 3 sample points, ≤3 s each), then
+  // visually verified on a contact sheet of live tiles. Regenerate with:
+  //
+  //   node scripts/probe-state-orthos.mjs --json /tmp/sweep.json
+  //   node scripts/probe-state-orthos.mjs --finalize /tmp/sweep.json --emit /tmp/entries.ts
+  //
+  // Every service here answered a novel 256 px tile in well under a second, so
+  // z17–19 imagery arrives instead of the 20–90 s USGS NAIP render. Cached
+  // ArcGIS services use `{z}/{y}/{x}`; services whose cache uses a non-global
+  // LOD ladder (no 256 px Web Mercator ladder, e.g. West Virginia) are asked
+  // through `export` instead, so MapLibre never fetches the wrong place.
+  //
+  // 24 of 51 states had a usable statewide service at the time of the sweep.
+  // The rest publish county mosaics only, require a token, or have no current
+  // statewide layer (AL AK CO DC FL GA HI IL LA MN MO MS NE NH NM NV OK SD TN
+  // TX UT VT WA WI WY) — those keep the USGS NAIP fallback.
+  {
+    id: 'ortho-us-ar',
+    label: 'Arkansas — 2023 statewide imagery (9 in)',
+    tiles: [
+      'https://gis.arkansas.gov/arcgis/rest/services/ImageServices/IMAGERY_9IN_2023/ImageServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.2,
+    acquiredAt: '2023-01-01',
+    attribution: 'Arkansas Imagery 2023 — gis.arkansas.gov',
+    bounds: [-94.6, 33, -89.6, 36.5],
+  },
+  {
+    id: 'ortho-us-az',
+    label: 'Arizona — 2023 statewide imagery (NAIP)',
+    tiles: [
+      'https://azgeo.az.gov/arcgis/rest/services/imagery/NAIP2023/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 18,
+    resolutionM: 0.3,
+    acquiredAt: '2023-01-01',
+    attribution: 'Arizona Imagery 2023 (NAIP) — azgeo.az.gov',
+    bounds: [-114.8, 31.3088, -109, 37],
+  },
+  {
+    id: 'ortho-us-ct',
+    label: 'Connecticut — 2023 spring aerial imagery (3 in, tiled)',
+    tiles: [
+      'https://cteco.uconn.edu/ctraster/rest/services/images/Ortho_2023_tiled/ImageServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.08,
+    acquiredAt: '2023-01-01',
+    attribution: 'CT 2023 Spring Aerial Imagery (4-band, 3inch, tiled) — cteco.uconn.edu',
+    bounds: [-73.7, 41, -71.8, 42.0598],
+  },
+  {
+    id: 'ortho-us-de',
+    label: 'Delaware — 2024 orthoimagery',
+    tiles: [
+      'https://imagery.firstmap.delaware.gov/imagery/rest/services/DE_Imagery/DE_Imagery_2024/ImageServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.15,
+    acquiredAt: '2024-01-01',
+    attribution: 'State of Delaware, Sanborn Map Company, Inc.',
+    bounds: [-75.8, 38.4498, -75.04, 39.8439],
+  },
+  {
+    id: 'ortho-us-ia',
+    label: 'Iowa — 2016–2018 spring orthophotos',
+    tiles: [
+      'https://ortho.gis.iastate.edu/arcgis/rest/services/ortho/ortho_2016_2018_nc/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 18,
+    resolutionM: 0.3,
+    acquiredAt: '2018-01-01',
+    attribution: 'Iowa - 2016- 2018 Spring Orthophotos — ortho.gis.iastate.edu',
+    bounds: [-96.6, 40.4, -90.1289, 43.5],
+  },
+  {
+    id: 'ortho-us-id',
+    label: 'Idaho — Idaho aerial imagery collections (2018)',
+    tiles: [
+      'https://insideidaho.org/arcgis/rest/services/imagery/imagery/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.2,
+    acquiredAt: '2018-01-01',
+    attribution: 'University of Idaho Library',
+    bounds: [-117.2, 42, -111, 49],
+  },
+  {
+    id: 'ortho-us-in',
+    label: 'Indiana — current orthoimagery',
+    tiles: [
+      'https://di-ingov.img.arcgis.com/arcgis/rest/services/DynamicWebMercator/Indiana_Current_Imagery/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.08,
+    acquiredAt: '2023-01-01',
+    attribution:
+      'Access to Indiana Geographic Information Office Orthoimagery is governed by Creative Commons 0 (CC0)',
+    bounds: [-88.1, 37.8, -84.8, 41.8],
+  },
+  {
+    id: 'ortho-us-ks',
+    label: 'Kansas — 2024 NG911 1ft Natural Color',
+    tiles: [
+      'https://dascservices.kansasgis.org/arcgis/rest/services/IMAGERY_STATEWIDE/NG911_2024_1ft_Natural_Color/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 18,
+    resolutionM: 0.3,
+    acquiredAt: '2024-01-01',
+    attribution: '2024 NG911 1ft Natural Color — dascservices.kansasgis.org',
+    bounds: [-102.0687, 37, -94.6, 40],
+  },
+  {
+    id: 'ortho-us-ky',
+    label: 'Kentucky — KyFromAbove Phase 3 statewide imagery (3 in)',
+    tiles: [
+      'https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/Ky_Imagery_Phase3_3IN_WGS84WM/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2025-01-01',
+    attribution: 'KyFromAbove Phase3 Statewide Imagery (Tile Layer) — kygisserver.ky.gov',
+    bounds: [-89.6, 36.5, -81.9, 39.1596],
+  },
+  {
+    id: 'ortho-us-ma',
+    label: 'Massachusetts — 2025 aerial imagery',
+    tiles: [
+      'https://tiles.arcgis.com/tiles/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Aerial_Imagery_2025/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2025-01-01',
+    attribution: 'Massachusetts 2025 Aerial Imagery (Tile Service) — tiles.arcgis.com',
+    bounds: [-73.5, 41.2244, -69.9231, 42.8964],
+  },
+  {
+    id: 'ortho-us-md',
+    label: 'Maryland — six-inch imagery',
+    tiles: [
+      'https://mdgeodata.md.gov/imagery/rest/services/SixInch/SixInchImagery/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.15,
+    acquiredAt: '2018-01-01',
+    attribution: 'MD iMAP',
+    bounds: [-79.5, 37.9, -75.0314, 39.7],
+  },
+  {
+    id: 'ortho-us-me',
+    label: 'Maine — 2025 statewide orthoimagery (15–20 cm)',
+    tiles: [
+      'https://utility.arcgis.com/usrsvcs/servers/b3fb68fcd44e4a31b30f4758a6f00067/rest/services/vexcel_bluesky_wide_ov_rgb_maine/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.15,
+    acquiredAt: '2025-01-01',
+    attribution: 'Vexcel Imaging',
+    bounds: [-71.094, 43, -66.9, 47.4734],
+  },
+  {
+    id: 'ortho-us-mi',
+    label: 'Michigan — MiSAIL statewide imagery',
+    tiles: [
+      'https://imagery.michigan.gov/server/rest/services/Michigan_imagery_public/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2024-01-01',
+    attribution: 'MiSAIL: Michigan Imagery Public Service — imagery.michigan.gov',
+    bounds: [-90.5, 41.7, -82.4, 48.3],
+  },
+  {
+    id: 'ortho-us-mt',
+    label: 'Montana — NAIP 2025 (Provisional)',
+    tiles: [
+      'https://gisservice.mt.gov/arcgis/rest/services/MSDI_Framework/msdi_naip2025_provisional_image_v1/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 18,
+    resolutionM: 0.3,
+    acquiredAt: '2025-01-01',
+    attribution: 'Montana NAIP 2025 (Provisional) — gisservice.mt.gov',
+    bounds: [-116.0844, 44.4, -104, 49],
+  },
+  {
+    id: 'ortho-us-nc',
+    label: 'North Carolina — latest orthoimagery (2023)',
+    tiles: [
+      'https://services.nconemap.gov/secure/rest/services/Imagery/Orthoimagery_Latest_cached/ImageServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2023-01-01',
+    attribution: 'NC Center for Geographic Information and Analysis',
+    bounds: [-84.3, 33.814, -75.5, 36.6],
+  },
+  {
+    id: 'ortho-us-nd',
+    label: 'North Dakota — NDGISHUB basemap imagery',
+    tiles: [
+      'https://ndgishub.nd.gov/arcgis/rest/services/Basemap_Imagery/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2022-01-01',
+    attribution:
+      'U.S. Department of Agriculture, Farm Production and Conservation Business Center, Geospatial Enterprise Operations',
+    bounds: [-104.0489, 45.935, -96.6, 49],
+  },
+  {
+    id: 'ortho-us-nj',
+    label: 'New Jersey — 2020 natural colour orthoimagery',
+    tiles: [
+      'https://maps.nj.gov/arcgis/rest/services/Basemap/Orthos_Natural_2020_NJ_WM/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2020-01-01',
+    attribution:
+      'Project definition, funding requests, and data distribution by NJ Office of Information Technology, Office of GIS.Funding provided by: -NJ Department of Environ',
+    bounds: [-75.5998, 38.9, -73.9, 41.3866],
+  },
+  {
+    id: 'ortho-us-oh',
+    label: 'Ohio — most current statewide aerial imagery (OSIP)',
+    tiles: [
+      'https://maps.ohio.gov/image/rest/services/osip_most_current_cache/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2025-01-01',
+    attribution:
+      "Ohio's Most Current Statewide Aerial Imagery - Optimized Performance (Cached) — maps.ohio.gov",
+    bounds: [-84.8, 38.4, -80.5, 42],
+  },
+  {
+    id: 'ortho-us-or',
+    label: 'Oregon — OSIP 2024 orthoimagery',
+    tiles: [
+      'https://imagery.oregonexplorer.info/arcgis/rest/services/OSIP_2024/OSIP_2024_WM/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 18,
+    resolutionM: 0.3,
+    acquiredAt: '2024-01-01',
+    attribution:
+      'Oregon Statewide Imagery Program (OSIP) - Oregon Imagery FrameworkImplementation Team',
+    bounds: [-124.6, 42, -116.5, 46.3],
+  },
+  {
+    id: 'ortho-us-pa',
+    label: 'Pennsylvania — 2021–2023 statewide imagery (PEMA)',
+    tiles: [
+      'https://imagery.pasda.psu.edu/arcgis/rest/services/PEMAImagery2021_2023cache/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2023-01-01',
+    attribution: 'PEMA Imagery 2021-2023 — imagery.pasda.psu.edu',
+    bounds: [-80.5, 39.7, -74.7, 42.2904],
+  },
+  {
+    id: 'ortho-us-ri',
+    label: 'Rhode Island — 2026 spring digital aerial photograph (3 in)',
+    tiles: [
+      'https://maps.edc.uri.edu/rigis/rest/services/IMG/RI_202603_RGB_3in_web/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.08,
+    acquiredAt: '2026-01-01',
+    attribution: '2026 Spring_Rhode Island Digital Aerial Photograph — maps.edc.uri.edu',
+    bounds: [-71.8994, 41.1468, -71.1194, 42],
+  },
+  {
+    id: 'ortho-us-sc',
+    label: 'South Carolina — 2023 aerial imagery (true colour)',
+    tiles: [
+      'https://tiles.arcgis.com/tiles/RvqSyw3diI7dTKo5/arcgis/rest/services/SC_2023_RGB/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2023-01-01',
+    attribution:
+      'Imagery collected in 2023 by Kucera International. Imagery is managed by Adam DeMars, South Carolina State GIS Coordinator and hosted by Esri.',
+    bounds: [-83.3717, 32.0294, -78.5206, 35.2],
+  },
+  {
+    id: 'ortho-us-va',
+    label: 'Virginia — VBMP 2026 true colour imagery',
+    tiles: [
+      'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VBMP_Imagery/VBMP2026_WGS/MapServer/tile/{z}/{y}/{x}',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 19,
+    resolutionM: 0.5,
+    acquiredAt: '2026-01-01',
+    attribution: 'Virginia Geographic Information Network (VGIN)',
+    bounds: [-83.7, 36.5, -75.2, 39.5],
+  },
+  {
+    id: 'ortho-us-wv',
+    label: 'West Virginia — statewide aerial imagery',
+    tiles: [
+      'https://services.wvgis.wvu.edu/arcgis/rest/services/Imagery_BaseMaps_EarthCover/wv_imagery_WVGISTC_leaf_off_mosaic/MapServer/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&f=image',
+    ],
+    tileSize: 256,
+    transparentBlank: true,
+    minzoom: 13,
+    maxzoom: 17,
+    resolutionM: 0.5,
+    acquiredAt: '2019-01-01',
+    attribution: 'WV Aerial Imagery — services.wvgis.wvu.edu',
+    bounds: [-82.6, 37.2, -77.7, 40.6],
   },
 ];
 
