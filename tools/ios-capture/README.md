@@ -56,6 +56,28 @@ the path is printed (`SAVED …`), so there is no race with `xcrun simctl io`.
   `Open photo 1 … From the web · buddakannyc.com`, `Open Tripadvisor listing`,
   `Open street view`, `Directions`.
 - Full-resolution PNG capture from inside the simulator.
+- Map type switching: tap `Map layers and type`, then the chip by label suffix
+  (the chips expose `", Satellite"` — the SF Symbol is glued into the label), and
+  zoom-in with double-taps on a map coordinate.
+
+## Imagery latency scenario (`testCaptureSatelliteZoomLatency`)
+
+Reproduces the reported "blurry squares until the sharp imagery lands" flow:
+satellite on → search `Levittown New York` → open the result → close
+`Close place details` → five double-taps at 62%/40% of the screen, saving PNGs at
++1 s/+3 s/+9 s per level from the third tap on.
+
+Read `sat-z3-1s` first. Blocky, upscaled pixels there (and still blocky in
+`sat-z3-9s`) is the old behaviour: at z17+ the only nationwide layer is the
+overzoomed z16 USGS cache while the NAIP ImageServer renders the real tile in
+20–90 s. Crisp detail at +1 s is the NYS 2023 ortho provider (`ortho-us-ny` in
+`src/constants/orthophotoSources.ts`) answering in ~0.3 s.
+
+The app under test is whatever is installed. A Metro-connected debug build picks
+up JS changes on relaunch; a release build runs the embedded `main.jsbundle`, so
+to test a JS change against one, rebuild it with
+`npx expo export:embed --entry-file index.js --platform ios --dev false --bytecode --bundle-output /tmp/after.hbc`
+and swap the file inside the installed `.app`, then relaunch.
 
 ## Known gaps (why 02/05/06/07 are still not shot)
 

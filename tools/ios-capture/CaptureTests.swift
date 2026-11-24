@@ -27,6 +27,25 @@ final class CaptureTests: XCTestCase {
     }
 
     @discardableResult
+    /// Tap the first element whose label ends with `suffix`. Map-type chips and
+    /// other icon+text rows glue the SF Symbol into the label ("  , Satellite"),
+    /// so an exact match on the visible text misses them.
+    private func tapSuffix(_ suffix: String, wait: TimeInterval = 10) -> Bool {
+        let target = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label ENDSWITH %@", suffix))
+            .firstMatch
+        guard target.waitForExistence(timeout: wait) else {
+            print("MISSING(suffix): \(suffix)")
+            return false
+        }
+        let frame = target.frame
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: frame.midX, dy: frame.midY))
+            .tap()
+        sleep(2)
+        return true
+    }
+
     private func tap(_ label: String, wait: TimeInterval = 15) -> Bool {
         let target = element(label)
         guard target.waitForExistence(timeout: wait) else {
@@ -233,5 +252,151 @@ final class CaptureTests: XCTestCase {
         } else {
             print("MISSING: result row")
         }
+    }
+
+    /// End-to-end check for the z17+ imagery latency fix: switch to satellite,
+    /// move to Levittown NY (inside the NYS 2023 ortho coverage, which is the
+    /// provider added for this), zoom to ~z19 with five double-taps and sample
+    /// the imagery at +1 s / +3 s / +9 s per level.
+    ///
+    /// Sharp detail in `<prefix>-z3-1s` means the fast provider answered; the
+    /// blocky overzoomed z16 cache there (and at +9 s) means the change had no
+    /// effect for that viewport.
+    func testCaptureSatelliteZoomLatency() {
+        runSatelliteZoomScenario(query: "Levittown New York", rowPrefix: "Levittown", prefix: "sat")
+    }
+
+    /// Massachusetts serves `{z}/{y}/{x}` straight out of a cached MapServer.
+    /// The search box only looks near the camera, so the scenario recentres the
+    /// map on the simulated location instead of searching for a distant city.
+    func testCaptureMassachusettsOrtho() {
+        runLocateZoomScenario(prefix: "ma")
+    }
+
+    /// Indiana renders per request through an ImageServer `exportImage`.
+    func testCaptureIndianaOrtho() {
+        runLocateZoomScenario(prefix: "in")
+    }
+
+    /// Connecticut is a 3-inch cached ImageServer cache.
+    func testCaptureConnecticutOrtho() {
+        runLocateZoomScenario(prefix: "ct")
+    }
+
+    /// The remote search can take tens of seconds for a city that is not in the
+    /// viewport yet ("Searching nearby..."), so poll instead of sleeping once.
+    private func waitForRows(prefix: String, timeout: TimeInterval) -> [XCUIElement] {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let rows = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
+                .allElementsBoundByIndex
+            if !rows.isEmpty { return rows }
+            sleep(2)
+        } while Date() < deadline
+        return []
+    }
+
+    /// Recentre on the simulated location, then zoom to z18+ and capture the
+    /// sharp-arrival sequence. Used for states that are not in view at launch.
+    private func runLocateZoomScenario(prefix: String) {
+        walkOnboardingIfNeeded()
+        if element("Close").exists { tap("Close", wait: 3) }
+        if element("Close place details").exists { tap("Close place details", wait: 3) }
+
+        tap("Map layers and type")
+        tapSuffix("Satellite")
+        tap("Map layers and type")
+        sleep(2)
+        save("\(prefix)-00-satellite-on")
+
+        if !tap("Locate me", wait: 10) { XCTFail("no locate button"); return }
+        sleep(8)
+        save("\(prefix)-01-located")
+
+        // Keep the taps high on the map: a double-tap that lands on a POI marker
+        // opens its card, which dims the imagery being measured.
+        let spot = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.22))
+        for _ in 1...4 {
+            spot.doubleTap()
+            sleep(1)
+        }
+        if element("Close place details").exists { tap("Close place details", wait: 3) }
+        save("\(prefix)-02-z1s")
+        sleep(2)
+        save("\(prefix)-03-z3s")
+        sleep(6)
+        save("\(prefix)-04-z9s")
+        dump("\(prefix)-final")
+
+        // Which imagery sources does the app believe it is drawing? The sheet is
+        // fed by the same viewport eligibility as the mounted layers, so it is
+        // the observable proof that a state service is actually in the style.
+        if element("Close place details").exists { tap("Close place details", wait: 3) }
+        // The search sheet sits over the attribution pill; collapse it first or
+        // the tap lands on a Recents row instead.
+        tap("Sheet handle", wait: 3)
+        sleep(2)
+        if tap("Map imagery attribution", wait: 8) {
+            sleep(1)
+            dump("\(prefix)-05-attribution")
+            save("\(prefix)-05-attribution")
+        }
+    }
+
+    private func runSatelliteZoomScenario(query: String, rowPrefix: String, prefix: String) {
+        walkOnboardingIfNeeded()
+        if element("Close").exists { tap("Close", wait: 3) }
+
+        tap("Map layers and type")
+        tapSuffix("Satellite")
+        tap("Map layers and type")
+        sleep(2)
+        save("\(prefix)-00-satellite-on")
+
+        // The panel's search box is a TextField with only a placeholder.
+        let field = app.textFields.firstMatch
+        guard field.waitForExistence(timeout: 10) else {
+            XCTFail("no search field")
+            return
+        }
+        field.tap()
+        sleep(1)
+        field.typeText(query)
+        sleep(5)
+        let searchKey = app.keyboards.buttons["search"]
+        if searchKey.exists { searchKey.tap() } else { field.typeText("\n") }
+        let rows = waitForRows(prefix: rowPrefix, timeout: 45)
+        dump("\(prefix)-02-results")
+        print("ROWS \(rows.count): \(rows.map(\.label))")
+        guard let row = rows.last else {
+            XCTFail("no \(rowPrefix) result row")
+            return
+        }
+        let rowFrame = row.frame
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: rowFrame.midX, dy: rowFrame.midY))
+            .tap()
+        sleep(6)
+        if tap("Close place details", wait: 10) { sleep(2) }
+        save("\(prefix)-01-after-search")
+
+        // Zoom with double-taps (MapLibre's default zoom-in gesture) at a point
+        // clear of the search panel, the controls and the bottom cards. Each
+        // double-tap is one zoom level; z17+ is where the overzoomed z16 cache
+        // used to be all that was on screen.
+        let spot = app.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.4))
+        for step in 1...5 {
+            spot.doubleTap()
+            sleep(1)
+            if step >= 3 {
+                save("\(prefix)-z\(step)-1s")
+                sleep(2)
+                save("\(prefix)-z\(step)-3s")
+                sleep(6)
+                save("\(prefix)-z\(step)-9s")
+            }
+        }
+        dump("\(prefix)-final")
     }
 }
